@@ -1142,6 +1142,9 @@
     row.append(later, save);
     bar.replaceChildren(title, text, row);
     show(bar);
+    // Still here after a moment (not a page that redirects on): the offer is
+    // made, and not shown again on a reload or another page.
+    setTimeout(() => !document.hidden && void send({ type: "offerSettled", nonce: pending.nonce }), 2000);
   }
 
   // The offer shows once, in the page itself, not in its frames.
@@ -1177,30 +1180,91 @@
     return plain;
   }
 
-  /** A picture shaped like a QR code: square, 90–600 px, and drawn (a
-   *  canvas or svg) or named so (data: image, "qr" in its name). */
-  function qrLike(el) {
+  /** Pictures read already, and whether each was a QR code. */
+  const readPictures = new WeakMap();
+
+  /** A picture shaped like a QR code: square, 90–600 px, not rounded (an
+   *  avatar) and not named as something else; one read and found not to be
+   *  a QR code is not. */
+  function qrShaped(el) {
+    if (readPictures.get(el) === false) return false;
     const r = el.getBoundingClientRect();
     if (r.width < 90 || r.width > 600 || Math.abs(r.width - r.height) > r.width * 0.12 || !visible(el)) return false;
-    if (!(el instanceof HTMLImageElement)) return true;
-    const names = `${getAttr(el, "src") ?? ""} ${el.alt} ${el.className} ${el.id}`.slice(0, 400);
-    return /^data:image\//i.test(getAttr(el, "src") ?? "") || /qr|totp|2fa|authenticator|otp/i.test(names);
+    const names = `${el.getAttribute?.("alt") ?? ""} ${el.getAttribute?.("class") ?? ""} ${el.id}`.slice(0, 300);
+    if (/avatar|logo|profile|icon|photo|banner/i.test(names)) return false;
+    return (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0) < r.width * 0.15;
   }
 
-  /** A 2FA setup is a QR code and its key in one part of the page, with
+  /** The grey levels of a picture on the page, when the page lets them be
+   *  read (not an image from another site), at most 480 px wide. */
+  async function greyOf(el) {
+    const r = el.getBoundingClientRect();
+    const scale = Math.min(1, 480 / Math.max(r.width, r.height));
+    const width = Math.max(1, Math.round(r.width * scale));
+    const height = Math.max(1, Math.round(r.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+    try {
+      if (el instanceof SVGSVGElement) {
+        const source = new XMLSerializer().serializeToString(el);
+        const image = new Image();
+        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+        await image.decode();
+        ctx.drawImage(image, 0, 0, width, height);
+      } else {
+        if (el instanceof HTMLImageElement && !el.complete) return null;
+        ctx.drawImage(el, 0, 0, width, height);
+      }
+      const rgba = ctx.getImageData(0, 0, width, height).data;
+      const grey = new Uint8Array(width * height);
+      for (let i = 0; i < grey.length; i++) {
+        grey[i] = (rgba[i * 4] * 299 + rgba[i * 4 + 1] * 587 + rgba[i * 4 + 2] * 114) / 1000;
+      }
+      let text = "";
+      for (let i = 0; i < grey.length; i += 0x8000) text += String.fromCharCode(...grey.subarray(i, i + 0x8000));
+      return { width, height, pixels: btoa(text) };
+    } catch {
+      // A picture from another site: it cannot be read.
+      return null;
+    }
+  }
+
+  /** A QR code on the page that holds a 2FA link: read by MYLE. */
+  async function linkInQr() {
+    for (const el of queryAll(document, "img, canvas, svg").slice(0, 60)) {
+      if (readPictures.has(el) || !qrShaped(el)) continue;
+      const grey = await greyOf(el);
+      if (!grey) continue;
+      const answer = await send({ type: "qrPixels", ...grey });
+      const link = answer?.ok && typeof answer.link === "string" ? answer.link : null;
+      readPictures.set(el, !!link);
+      if (link) return link;
+    }
+    return null;
+  }
+
+  /** A 2FA setup is a QR code with its key written right beside it, and
    *  words about scanning it; a key alone in a page about 2FA is not. */
   function besideQr(el) {
     let scope = el.parentElement;
-    for (let depth = 0; scope && scope !== document.documentElement && depth < 6; depth++, scope = scope.parentElement) {
+    for (let depth = 0; scope && depth < 3; depth++, scope = scope.parentElement) {
+      if (scope === document.body || scope === document.documentElement || /^(MAIN|ARTICLE)$/.test(scope.tagName)) break;
       const pictures = queryAll(scope, "img, canvas, svg");
-      if (pictures.length > 40) return false;
-      if (pictures.some(qrLike)) return SCAN_WORDS.test((scope.textContent ?? "").slice(0, 6000));
+      if (pictures.length > 12) return false;
+      if (pictures.some(qrShaped)) return SCAN_WORDS.test((scope.textContent ?? "").slice(0, 4000));
     }
     return false;
   }
 
-  function findSetupKey() {
+  async function findSetupKey() {
     if (!SETUP_WORDS.test((document.body?.textContent ?? "").slice(0, 200_000))) return null;
+    // The QR code itself, where the page lets it be read.
+    const fromQr = await linkInQr();
+    if (fromQr) return fromQr;
     // A QR code's own link, given as a link: nothing else needed.
     for (const link of queryAll(document, 'a[href^="otpauth:" i]')) {
       const key = keyIn(getAttr(link, "href") ?? "");
@@ -1307,15 +1371,22 @@
     }
   }
 
+  let scanning = false;
+
   function scanForKey() {
     clearTimeout(keyTimer);
-    keyTimer = setTimeout(() => {
+    keyTimer = setTimeout(async () => {
       // A page that keeps changing is looked at a limited number of times.
-      if (++keyScans > 80 || prompted || !bar.hidden) return;
-      const key = findSetupKey();
-      if (!key || offeredKeys.has(key)) return;
-      offeredKeys.add(key);
-      void offerKey(key);
+      if (scanning || ++keyScans > 80 || prompted || !bar.hidden) return;
+      scanning = true;
+      try {
+        const key = await findSetupKey();
+        if (!key || offeredKeys.has(key)) return;
+        offeredKeys.add(key);
+        await offerKey(key);
+      } finally {
+        scanning = false;
+      }
     }, 1000);
   }
 

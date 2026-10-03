@@ -18,8 +18,8 @@ const OWN_PAGES = ext.runtime.getURL("");
 /** A sent login waits this long for the next page, and then for a click. */
 const WAIT_FOR_PAGE = 60_000;
 const WAIT_FOR_CLICK = 3 * 60_000;
-/** An offer shows on one page: again only within this (a sign-in that
- *  redirects once more), never on a reload or a later page. */
+/** An offer shows on one page: again only on a page right after it (a
+ *  sign-in that redirects once more), never on a reload or a later page. */
 const SHOWN_GRACE = 5_000;
 /** A password suggested in a sign-up form, until that form is sent. */
 const KEEP_SUGGESTED = 30 * 60_000;
@@ -310,7 +310,8 @@ async function offer(sender) {
   // An identity provider can redirect through another site before returning
   // to the sign-in site: the offer waits for a page of that site.
   if (!found || !sameSite(found.url, sender.url)) return null;
-  if (found.shownAt && Date.now() - found.shownAt > SHOWN_GRACE) return null;
+  // Seen on a page that stayed (not a redirect), or long ago: said once.
+  if (found.settled || (found.shownAt && Date.now() - found.shownAt > SHOWN_GRACE)) return null;
   if (!found.shownAt) {
     found.shownAt = Date.now();
     await ext.storage.session.set({ [pendingKey(sender.tab.id)]: found });
@@ -322,6 +323,16 @@ async function offer(sender) {
     locked: found.locked === true,
     site: hostOf(found.url),
   };
+}
+
+/** The page showing the offer stayed: it is not shown on another page. */
+async function offerSettled(message, sender) {
+  const found = await readPending(sender.tab.id);
+  if (found?.nonce === message.nonce && !found.settled) {
+    found.settled = true;
+    await ext.storage.session.set({ [pendingKey(sender.tab.id)]: found });
+  }
+  return { ok: true };
 }
 
 async function answerOffer(message, sender, save) {
@@ -513,6 +524,14 @@ async function handle(message, sender) {
       }
     case "pending":
       return sender.frameId === 0 ? offer(sender) : null;
+    case "offerSettled":
+      return sender.frameId === 0 && text(message.nonce, 64) ? offerSettled(message, sender) : refused;
+    case "qrPixels":
+      // A picture of the page, read as grey levels, for its 2FA QR code.
+      if (!Number.isInteger(message.width) || !Number.isInteger(message.height) || !text(message.pixels, 2_000_000)) {
+        return refused;
+      }
+      return ask({ type: "totpFromPixels", width: message.width, height: message.height, pixels: message.pixels });
     case "save":
     case "dismiss":
       return sender.frameId === 0 ? answerOffer(message, sender, message.type === "save") : refused;

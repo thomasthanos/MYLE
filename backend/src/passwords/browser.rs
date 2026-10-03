@@ -613,6 +613,8 @@ enum Request {
     /// Whether a login of the site already has this 2FA key (so a setup page
     /// showing it again is not offered).
     TotpKnown { url: String, secret: String },
+    /// A picture on a page (grey levels, base64), read for a 2FA QR code.
+    TotpFromPixels { width: usize, height: usize, pixels: String },
     Known { url: String, username: String, password: String },
     Save { url: String, username: String, password: String },
     /// A strong new password, for a sign-up or password-change form.
@@ -727,11 +729,19 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         return json!({ "ok": false, "error": "disabled" });
     }
     let within_limit = match request {
-        Request::Logins { .. } | Request::TotpKnown { .. } => allow(&LOOKUPS, LOOKUPS_PER_MINUTE),
+        Request::Logins { .. } | Request::TotpKnown { .. } | Request::TotpFromPixels { .. } => {
+            allow(&LOOKUPS, LOOKUPS_PER_MINUTE)
+        }
         _ => allow(&SENSITIVE, SENSITIVE_PER_MINUTE),
     };
     if !within_limit {
         return json!({ "ok": false, "error": "busy" });
+    }
+    if let Request::TotpFromPixels { width, height, pixels } = &request {
+        return match qr_in_pixels(*width, *height, pixels) {
+            Some(link) => json!({ "ok": true, "link": link }),
+            None => json!({ "ok": false, "error": "noQr" }),
+        };
     }
     if let Request::TotpFromImage { image } = &request {
         // Decoded here and given back for the popup to show; kept only when
@@ -934,9 +944,11 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
             vault.touch();
             Ok(json!({ "ok": true, "updated": existing.is_some() }))
         }
-        Request::Status | Request::Open | Request::Generate | Request::TotpFromImage { .. } => {
-            unreachable!("answered above")
-        }
+        Request::Status
+        | Request::Open
+        | Request::Generate
+        | Request::TotpFromImage { .. }
+        | Request::TotpFromPixels { .. } => unreachable!("answered above"),
         Request::PasskeyList { .. } | Request::PasskeyCreate { .. } | Request::PasskeyGet { .. } => {
             unreachable!("answered by passkey_reply")
         }
@@ -1067,6 +1079,19 @@ async fn verify_user(app: &AppHandle, wanted: &str, site: &str) -> Result<bool, 
         }
         Consent::Unavailable => Ok(false),
     }
+}
+
+/// The otpauth:// link in a picture's grey levels, if it is a 2FA QR code.
+fn qr_in_pixels(width: usize, height: usize, pixels: &str) -> Option<String> {
+    use base64::Engine;
+    if width == 0 || height == 0 || width > 2000 || height > 2000 {
+        return None;
+    }
+    let pixels = base64::engine::general_purpose::STANDARD.decode(pixels).ok()?;
+    if pixels.len() != width * height {
+        return None;
+    }
+    super::qr::otpauth_in(&super::qr::Grey { width, height, pixels }).ok()
 }
 
 /// The otpauth:// link in a tab's screenshot (base64, or a data: URL).
@@ -1289,6 +1314,17 @@ mod tests {
         assert_eq!(which_copy(&args(&["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"])), None);
         let old: Envelope = serde_json::from_value(json!({ "browser": "Edge", "request": { "type": "status" } })).unwrap();
         assert_eq!(old.copy, "", "a host without the copy still works");
+    }
+
+    #[test]
+    fn a_page_picture_must_be_whole_and_a_2fa_qr_code() {
+        use base64::Engine;
+        let b64 = |bytes: Vec<u8>| base64::engine::general_purpose::STANDARD.encode(bytes);
+        assert_eq!(qr_in_pixels(0, 0, ""), None);
+        assert_eq!(qr_in_pixels(10, 10, &b64(vec![0; 99])), None, "not the size it says");
+        assert_eq!(qr_in_pixels(4000, 10, &b64(vec![0; 40_000])), None, "too large");
+        assert_eq!(qr_in_pixels(100, 100, &b64(vec![255; 10_000])), None, "a blank picture");
+        assert_eq!(qr_in_pixels(10, 10, "not base64!"), None);
     }
 
     #[test]
