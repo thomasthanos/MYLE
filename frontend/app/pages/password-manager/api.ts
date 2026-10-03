@@ -140,6 +140,8 @@ export interface BrowserContact {
   browser: string;
   /** Seconds since 1970. */
   at: number;
+  /** Which copy of the extension: the store's, one loaded from a folder, or Firefox's. */
+  copy: "store" | "folder" | "firefox" | "";
 }
 
 export interface BrowserSetup {
@@ -462,7 +464,9 @@ function previewApi(): PasswordsApi {
         enabled: browserFilling,
         extensionDir: "C:\\Users\\You\\AppData\\Local\\ThomasThanos\\MakeYourLifeEasier\\extension",
         registrationError: null,
-        lastContact: connected ? { browser: "Edge", at: seconds - 95 } : null,
+        lastContact: connected
+          ? { browser: "Edge", at: seconds - 95, copy: new URLSearchParams(location.search).has("folder-copy") ? "folder" : "store" }
+          : null,
         lastRefusal: null,
         vault: status,
         now: seconds,

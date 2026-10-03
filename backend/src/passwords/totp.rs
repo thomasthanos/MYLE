@@ -164,6 +164,11 @@ impl Totp {
         Zeroizing::new(url.to_string())
     }
 
+    /// The same key, whatever the label or settings it came with.
+    pub fn same_key(&self, other: &Totp) -> bool {
+        self.secret == other.secret
+    }
+
     pub fn info(&self) -> Info {
         Info {
             issuer: self.issuer.clone(),
@@ -324,6 +329,14 @@ mod tests {
         assert!(Totp::parse("otpauth://totp/x?issuer=y").is_err(), "no key");
         assert!(Totp::parse("otpauth://totp/x?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&digits=4").is_err());
         assert!(Totp::parse("otpauth://totp/x?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&algorithm=MD5").is_err());
+    }
+
+    #[test]
+    fn the_same_key_is_known_however_it_is_written() {
+        let link = Totp::parse("otpauth://totp/Site:me?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=Site").unwrap();
+        let plain = Totp::parse("hxdm vjec jjws rb3h wizr 4ifu gftm xboz").unwrap();
+        assert!(link.same_key(&plain));
+        assert!(!link.same_key(&Totp::parse("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP").unwrap()));
     }
 
     #[test]

@@ -18,6 +18,9 @@ const OWN_PAGES = ext.runtime.getURL("");
 /** A sent login waits this long for the next page, and then for a click. */
 const WAIT_FOR_PAGE = 60_000;
 const WAIT_FOR_CLICK = 3 * 60_000;
+/** An offer shows on one page: again only within this (a sign-in that
+ *  redirects once more), never on a reload or a later page. */
+const SHOWN_GRACE = 5_000;
 /** A password suggested in a sign-up form, until that form is sent. */
 const KEEP_SUGGESTED = 30 * 60_000;
 
@@ -307,6 +310,7 @@ async function offer(sender) {
   // An identity provider can redirect through another site before returning
   // to the sign-in site: the offer waits for a page of that site.
   if (!found || !sameSite(found.url, sender.url)) return null;
+  if (found.shownAt && Date.now() - found.shownAt > SHOWN_GRACE) return null;
   if (!found.shownAt) {
     found.shownAt = Date.now();
     await ext.storage.session.set({ [pendingKey(sender.tab.id)]: found });
@@ -363,6 +367,35 @@ async function scanTab(tabId) {
     return { ok: false, error: "noCapture" };
   }
   return ask({ type: "totpFromImage", image });
+}
+
+/** A 2FA key's short fingerprint, for remembering "Not now" without the key. */
+async function keyPrint(secret) {
+  const bare = secret.replace(/[\s-]/g, "").toUpperCase();
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bare)));
+  return Array.from(hash.slice(0, 12), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const DISMISSED_KEYS = "dismissedKeys";
+
+/** Whether to offer a 2FA key a page shows: not when turned down for this
+ *  site this session, nor when a login of the site has it already. */
+async function keyWorth(message, sender) {
+  if (!text(message.secret, 2048) || !message.secret) return refused;
+  const site = siteOf(hostOf(sender.url));
+  const print = await keyPrint(message.secret);
+  const dismissed = (await ext.storage.session.get(DISMISSED_KEYS))[DISMISSED_KEYS] ?? [];
+  if (dismissed.includes(`${site}|${print}`)) return { ok: true, offer: false };
+  const known = await ask({ type: "totpKnown", url: sender.url, secret: message.secret });
+  return { ok: true, offer: !(known?.ok && known.known) };
+}
+
+async function keyDismiss(message, sender) {
+  if (!text(message.secret, 2048)) return refused;
+  const entry = `${siteOf(hostOf(sender.url))}|${await keyPrint(message.secret)}`;
+  const dismissed = (await ext.storage.session.get(DISMISSED_KEYS))[DISMISSED_KEYS] ?? [];
+  if (!dismissed.includes(entry)) await ext.storage.session.set({ [DISMISSED_KEYS]: [...dismissed, entry].slice(-200) });
+  return { ok: true };
 }
 
 /** Keeps a 2FA key for the tab's site: with login `id`, or as a new one. */
@@ -490,6 +523,10 @@ async function handle(message, sender) {
     case "saveTotp":
       // A key the page shows, kept at the user's click in MYLE's bar.
       return (await embeddedIn(sender)) ? refused : saveTotpFor(sender.url, message.id ?? null, message.secret);
+    case "keyWorth":
+      return sender.frameId === 0 ? keyWorth(message, sender) : refused;
+    case "keyDismiss":
+      return sender.frameId === 0 ? keyDismiss(message, sender) : refused;
     default:
       return { ok: false, error: "unknown" };
   }

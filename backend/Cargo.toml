@@ -69,7 +69,7 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 # Windows Hello (KeyCredentialManager) for opening the password vault.
-windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell"] }
+windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell"] }
 psl = "2"
 hmac = "0.13"
 sha1 = "0.11"

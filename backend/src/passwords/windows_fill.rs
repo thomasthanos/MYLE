@@ -22,7 +22,7 @@ use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_Q
 use windows_sys::Win32::System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOD_ALT, MOD_CONTROL,
-    MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, SendInput, UnregisterHotKey, VK_L, VK_TAB,
+    MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, SendInput, UnregisterHotKey, VK_A, VK_CONTROL, VK_L, VK_SHIFT, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId,
@@ -395,14 +395,42 @@ pub fn passwords_windows_fill(
     if focus.is_some() && focused_control(selected.thread) != focus {
         return Err(format!("The focused field changed. Click the intended field and press {hotkey} again."));
     }
-    let typing = |text: &str, focus: Option<usize>| type_text(text, window, selected.thread, focus, hotkey);
+    // Each value takes the place of what the field holds (Steam keeps the
+    // last account name in its field: typing after it made a wrong one).
+    let typing = |text: &str, focus: Option<usize>| {
+        select_all()?;
+        type_text(text, window, selected.thread, focus, hotkey)
+    };
+    // Where Windows can tell what the focused field is (UI Automation), it
+    // is used: never a password typed where it shows, and "both" from the
+    // user name field even when the password field was clicked.
+    let password_field = focused_field_is_password();
     match field.as_str() {
-        "username" => typing(&username, focus)?,
-        "password" => typing(&password, focus)?,
-        _ => {
+        "username" => {
+            if password_field == Some(true) {
+                return Err("The field you clicked is a password field. Click the user name field, or choose Password.".into());
+            }
             typing(&username, focus)?;
+        }
+        "password" => {
+            if password_field == Some(false) {
+                return Err(format!(
+                    "The field you clicked shows what is typed in it. Click the password field and press {hotkey} again, or copy the password."
+                ));
+            }
+            typing(&password, focus)?;
+        }
+        _ => {
+            if password_field == Some(true) {
+                press_with(VK_SHIFT, VK_TAB)?;
+                std::thread::sleep(Duration::from_millis(120));
+                if focused_field_is_password() == Some(true) {
+                    return Err(format!("Click the user name field, then press {hotkey} again."));
+                }
+            }
+            typing(&username, focused_control(selected.thread).or(focus))?;
             press(VK_TAB)?;
-            std::thread::sleep(Duration::from_millis(80));
+            std::thread::sleep(Duration::from_millis(120));
             typing(&password, focused_control(selected.thread))?;
         }
     }
@@ -419,8 +447,9 @@ fn bring_forward(window: HWND) -> bool {
         SetForegroundWindow(window);
         for _ in 0..15 {
             if GetForegroundWindow() == window {
-                // Let the program give its field the focus back.
-                std::thread::sleep(Duration::from_millis(40));
+                // Let the program give its field the focus back (web-based
+                // programs like Steam take a moment).
+                std::thread::sleep(Duration::from_millis(150));
                 return true;
             }
             std::thread::sleep(Duration::from_millis(40));
@@ -436,12 +465,47 @@ fn key(virtual_key: u16, scan: u16, flags: u32) -> INPUT {
     }
 }
 
-fn press(virtual_key: u16) -> Result<(), String> {
-    let inputs = [key(virtual_key, 0, 0), key(virtual_key, 0, KEYEVENTF_KEYUP)];
-    if unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) } != 2 {
+fn send(inputs: &[INPUT]) -> Result<(), String> {
+    if unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) } != inputs.len() as u32 {
         return Err("Windows blocked typing into that program. Copy the field instead.".into());
     }
     Ok(())
+}
+
+fn press(virtual_key: u16) -> Result<(), String> {
+    send(&[key(virtual_key, 0, 0), key(virtual_key, 0, KEYEVENTF_KEYUP)])
+}
+
+/// A key with a modifier held (Shift+Tab, Ctrl+A).
+fn press_with(modifier: u16, virtual_key: u16) -> Result<(), String> {
+    send(&[
+        key(modifier, 0, 0),
+        key(virtual_key, 0, 0),
+        key(virtual_key, 0, KEYEVENTF_KEYUP),
+        key(modifier, 0, KEYEVENTF_KEYUP),
+    ])
+}
+
+/// Selects what the focused field holds, so the typing replaces it.
+fn select_all() -> Result<(), String> {
+    press_with(VK_CONTROL, VK_A)
+}
+
+/// What UI Automation says the focused field is: `Some(true)` a password
+/// field, `Some(false)` a text field that shows what is typed, `None` when
+/// the program does not say (many draw their own fields).
+fn focused_field_is_password() -> Option<bool> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
+    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation, UIA_EditControlTypeId};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        let element = automation.GetFocusedElement().ok()?;
+        if element.CurrentControlType().ok()? != UIA_EditControlTypeId {
+            return None;
+        }
+        Some(element.CurrentIsPassword().ok()?.as_bool())
+    }
 }
 
 fn type_text(text: &str, window: *mut c_void, thread: u32, focus: Option<usize>, hotkey: &str) -> Result<(), String> {

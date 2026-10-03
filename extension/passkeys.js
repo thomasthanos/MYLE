@@ -12,6 +12,9 @@
   if (window !== window.top || typeof CredentialsContainer !== "function" || typeof PublicKeyCredential !== "function") {
     return;
   }
+  // Two copies installed (the store's, and one from a folder): one wraps.
+  if (Object.prototype.hasOwnProperty.call(window, "__mylePasskeys")) return;
+  Object.defineProperty(window, "__mylePasskeys", { value: true });
   const PAGE = "myle-passkeys/page";
   const EXTENSION = "myle-passkeys/extension";
   const proto = CredentialsContainer.prototype;

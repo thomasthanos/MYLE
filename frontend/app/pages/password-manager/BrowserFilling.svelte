@@ -26,6 +26,12 @@
   let loadError = $state<string | null>(null);
   /** The steps to add the extension, shown until a browser has connected. */
   let showSteps = $state<boolean | null>(null);
+  /** Loading it from a folder (for testing), shown on request. */
+  let showFolder = $state(false);
+  /** The extensions page of the browser that connected. */
+  const extensionsPage = $derived(
+    { Edge: "edge://extensions", Brave: "brave://extensions" }[setup?.lastContact?.browser ?? ""] ?? "chrome://extensions",
+  );
   /** Ticks every half minute, so "2 minutes ago" stays true. */
   let clock = $state(Date.now());
   /** When `setup.now` was the app's time, on this page's clock. */
@@ -185,6 +191,17 @@
         </ul>
       {/if}
 
+      {#if setup?.lastContact?.copy === "folder" && storeUrl.startsWith("https://")}
+        <div class="folder-copy">
+          <CircleAlert size={14} />
+          <span>
+            {setup.lastContact.browser} uses the copy loaded from a folder, which never updates. Install the one from the store, then
+            remove the folder copy in <button type="button" class="link" onclick={() => copy(extensionsPage)}><code>{extensionsPage}</code></button>.
+          </span>
+          <button type="button" class="btn small primary" onclick={() => void openUrl(storeUrl).catch(() => {})}><Download size={13} /> Store</button>
+        </div>
+      {/if}
+
       {#if refusal}
         <p class="refusal">
           <CircleAlert size={13} />
@@ -199,11 +216,21 @@
         </button>
         {#if showSteps}
           {#if storeUrl.startsWith("https://")}
-            <button type="button" class="btn primary small store" onclick={() => void openUrl(storeUrl).catch(() => {})}>
-              <Download size={13} /> Get the extension
+            <div class="store-row">
+              <button type="button" class="btn primary store" onclick={() => void openUrl(storeUrl).catch(() => {})}>
+                <Download size={14} /> Get MYLE Passwords
+              </button>
+              <p class="or">
+                From the Chrome Web Store, for Chrome, Edge and Brave; it updates itself. In Edge, allow extensions from
+                other stores when it asks.
+              </p>
+            </div>
+            <button type="button" class="more" aria-expanded={showFolder} onclick={() => (showFolder = !showFolder)}>
+              <span class="chevron" class:open={showFolder}><ChevronDown size={12} /></span>
+              Firefox, or a copy from MYLE's folder (for testing)
             </button>
-            <p class="or">Or load it from its folder:</p>
           {/if}
+          {#if showFolder || !storeUrl.startsWith("https://")}
           <div class="path">
             <code class="selectable" title={setup?.extensionDir ?? undefined}>{setup?.extensionDir ?? "The extension's folder was not found."}</code>
             {#if setup?.extensionDir}
@@ -239,6 +266,7 @@
               <p class="hint">Firefox keeps it until it restarts; a signed version that stays comes later.</p>
             </div>
           </div>
+          {/if}
         {/if}
       </section>
 
@@ -448,8 +476,50 @@
     transform: rotate(180deg);
   }
 
+  .store-row {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+  }
+
   .store {
+    height: 36px;
+  }
+
+  .more {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     justify-self: start;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .more:hover {
+    color: var(--text-1);
+  }
+
+  .folder-copy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border: 1px solid rgb(255 196 102 / 0.3);
+    border-radius: 10px;
+    background: rgb(255 196 102 / 0.08);
+    color: #ffd18f;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .folder-copy span {
+    flex: 1;
+    color: var(--text-2);
+  }
+
+  .folder-copy :global(svg),
+  .folder-copy .btn {
+    flex: none;
   }
 
   .or {

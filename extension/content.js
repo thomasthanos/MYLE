@@ -19,6 +19,11 @@
   const ext = globalThis.browser ?? globalThis.chrome;
   if (window.__myleFill || !(document.documentElement instanceof HTMLHtmlElement)) return;
   window.__myleFill = true;
+  // Two copies installed (the store's, and one loaded from a folder): the
+  // first one in a page serves it, so nothing shows twice.
+  const COPY = "data-myle-passwords";
+  if (document.documentElement.hasAttribute(COPY)) return;
+  document.documentElement.setAttribute(COPY, "");
 
   const send = (message) => ext.runtime.sendMessage(message).catch(() => ({ ok: false, error: "noHost" }));
   const LOCAL = ["localhost", "127.0.0.1", "[::1]"];
@@ -1150,6 +1155,8 @@
   // toolbar popup.
 
   const SETUP_WORDS = /authenticator|two.?factor|two.?step|2fa|mfa|setup key|secret key|can.?t scan|scan (?:the|this) (?:qr|code)|enter (?:this|the) (?:key|code)|one.?time|totp/i;
+  /** Words that go with a QR code to scan, in the key's own part of the page. */
+  const SCAN_WORDS = /scan|authenticator|setup key|secret key|can.?t scan|manual|2fa|two.?factor|totp/i;
   const offeredKeys = new Set();
   let keyTimer = 0;
   let keyScans = 0;
@@ -1170,8 +1177,31 @@
     return plain;
   }
 
+  /** A picture shaped like a QR code: square, 90–600 px, and drawn (a
+   *  canvas or svg) or named so (data: image, "qr" in its name). */
+  function qrLike(el) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 90 || r.width > 600 || Math.abs(r.width - r.height) > r.width * 0.12 || !visible(el)) return false;
+    if (!(el instanceof HTMLImageElement)) return true;
+    const names = `${getAttr(el, "src") ?? ""} ${el.alt} ${el.className} ${el.id}`.slice(0, 400);
+    return /^data:image\//i.test(getAttr(el, "src") ?? "") || /qr|totp|2fa|authenticator|otp/i.test(names);
+  }
+
+  /** A 2FA setup is a QR code and its key in one part of the page, with
+   *  words about scanning it; a key alone in a page about 2FA is not. */
+  function besideQr(el) {
+    let scope = el.parentElement;
+    for (let depth = 0; scope && scope !== document.documentElement && depth < 6; depth++, scope = scope.parentElement) {
+      const pictures = queryAll(scope, "img, canvas, svg");
+      if (pictures.length > 40) return false;
+      if (pictures.some(qrLike)) return SCAN_WORDS.test((scope.textContent ?? "").slice(0, 6000));
+    }
+    return false;
+  }
+
   function findSetupKey() {
     if (!SETUP_WORDS.test((document.body?.textContent ?? "").slice(0, 200_000))) return null;
+    // A QR code's own link, given as a link: nothing else needed.
     for (const link of queryAll(document, 'a[href^="otpauth:" i]')) {
       const key = keyIn(getAttr(link, "href") ?? "");
       if (key) return key;
@@ -1179,7 +1209,7 @@
     for (const input of queryAll(document, "input, textarea")) {
       if ((input.readOnly || input.disabled) && visible(input)) {
         const key = keyIn(input.value);
-        if (key) return key;
+        if (key && besideQr(input)) return key;
       }
     }
     // Written out, maybe a span per group of four.
@@ -1189,10 +1219,16 @@
       const text = el.textContent ?? "";
       if (text.length < 16 || text.length > 160) continue;
       const key = keyIn(text);
-      if (key && visible(el)) return key;
+      if (key && visible(el) && (key.startsWith("otpauth:") || besideQr(el))) return key;
     }
     return null;
   }
+
+  /** "Not now": this key is not offered again on this site. */
+  const notNow = (secret) => () => {
+    closePrompt();
+    void send({ type: "keyDismiss", secret });
+  };
 
   /** Says how it went, then closes. */
   function settleKey(text, words) {
@@ -1202,12 +1238,15 @@
 
   async function offerKey(secret) {
     const id = `totp-${++keyOffers}`;
+    // Turned down before, or kept already: not asked again.
+    const worth = await send({ type: "keyWorth", secret });
+    if (worth?.offer === false) return;
     const answer = await send({ type: "logins" });
     if (prompted) return;
     if (!answer?.ok) {
       if (answer?.error === "locked") {
         prompt(id, "Keep this 2FA key in MYLE?", "Your vault is locked. Unlock it in MYLE, then press Try again.", [
-          ["Not now", false, closePrompt],
+          ["Not now", false, notNow(secret)],
           ["Open MYLE", false, () => send({ type: "open" })],
           ["Try again", true, () => {
             closePrompt();
@@ -1237,7 +1276,7 @@
       prompt(id, "Use MYLE for the 2FA codes?",
         `${why} It goes with ${login.title || siteName} (${login.username || "no user name"})` +
           (login.totp ? ", in place of the key it has now." : "."), [
-          ["Not now", false, closePrompt],
+          ["Not now", false, notNow(secret)],
           ["Save", true, (button, text) => {
             button.disabled = true;
             return save(login, text);
@@ -1246,7 +1285,7 @@
     } else if (choices.length > 1) {
       const list = document.createElement("div");
       list.className = "keys";
-      const text = prompt(id, "Use MYLE for the 2FA codes?", `${why} Which login is it for?`, [["Not now", false, closePrompt]], [list]);
+      const text = prompt(id, "Use MYLE for the 2FA codes?", `${why} Which login is it for?`, [["Not now", false, notNow(secret)]], [list]);
       for (const login of choices) {
         const title = login.title || login.site || "Login";
         const button = item(title, login.username || "No user name", avatarFor(login, title), login.totp ? "has a key" : "");
@@ -1259,7 +1298,7 @@
       }
     } else {
       prompt(id, "Use MYLE for the 2FA codes?", `${why} No login for ${siteName} is in MYLE yet: the key is kept as a new one.`, [
-        ["Not now", false, closePrompt],
+        ["Not now", false, notNow(secret)],
         ["Save", true, (button, text) => {
           button.disabled = true;
           return save(null, text);

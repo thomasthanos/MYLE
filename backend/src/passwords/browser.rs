@@ -58,7 +58,11 @@ pub const HOST_NAME: &str = "com.thomasthanos.myle";
 /// The extension's ids in Chrome, Edge and Brave: the Chrome Web Store's,
 /// and the one the `key` in its manifest fixes when it is loaded unpacked
 /// (the Store's zip leaves the `key` out, so the Store gives its own).
-pub const CHROME_EXTENSION_IDS: [&str; 2] = ["mifjffbnaeeljjfboiglbcoaokgdilca", "gaelkhdpkgnffkfmaaklknijinjmmopo"];
+pub const CHROME_EXTENSION_IDS: [&str; 2] = [CHROME_STORE_ID, CHROME_FOLDER_ID];
+/// The Chrome Web Store's copy (Chrome, Edge, Brave): it updates itself.
+const CHROME_STORE_ID: &str = "mifjffbnaeeljjfboiglbcoaokgdilca";
+/// The copy loaded from MYLE's folder ("Load unpacked"), for testing.
+const CHROME_FOLDER_ID: &str = "gaelkhdpkgnffkfmaaklknijinjmmopo";
 /// Its id in Firefox (`browser_specific_settings.gecko.id`).
 pub const FIREFOX_EXTENSION_ID: &str = "myle-passwords@thomast.uk";
 /// Browsers the host may be started by: program file name, and what to call it.
@@ -241,6 +245,9 @@ pub struct Contact {
     pub browser: String,
     /// Seconds since 1970.
     pub at: u64,
+    /// Which copy of the extension: "store", "folder" or "firefox".
+    #[serde(default)]
+    pub copy: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -258,13 +265,13 @@ static LAST_CONTACT: Mutex<Option<Contact>> = Mutex::new(None);
 
 /// Notes a request from `browser`; true for the first in a minute (kept on
 /// disk too, so the setup still knows after a restart).
-fn note_contact(browser: &str) -> bool {
+fn note_contact(browser: &str, copy: &str) -> bool {
     let now = super::vault::now();
     let mut last = LAST_CONTACT.lock().unwrap_or_else(|p| p.into_inner());
     let recent = last
         .as_ref()
-        .is_some_and(|c| c.browser == browser && now.saturating_sub(c.at) < 60);
-    let contact = Contact { browser: browser.to_string(), at: now };
+        .is_some_and(|c| c.browser == browser && c.copy == copy && now.saturating_sub(c.at) < 60);
+    let contact = Contact { browser: browser.to_string(), at: now, copy: copy.to_string() };
     *last = Some(contact.clone());
     if !recent && let Ok(dir) = manifest_dir() {
         let _ = std::fs::write(dir.join("contact.json"), serde_json::to_vec(&contact).unwrap_or_default());
@@ -394,15 +401,15 @@ pub fn run_native_host() -> Option<i32> {
     let chain = ancestors();
     let browser = chain.iter().find_map(|name| browser_name(name));
     let starter = chain.iter().find(|name| *name != "cmd.exe").map_or("unknown", String::as_str);
-    if !started_by_our_extension(&args) {
+    let Some(copy) = which_copy(&args) else {
         note_refusal(starter, "another extension");
         return Some(3);
-    }
+    };
     let Some(browser) = browser else {
         note_refusal(starter, "not a supported browser");
         return Some(3);
     };
-    Some(match host_loop(browser) {
+    Some(match host_loop(browser, copy) {
         Ok(()) => 0,
         Err(_) => 2,
     })
@@ -417,16 +424,26 @@ fn browser_name(program: &str) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// Chrome and Edge pass the extension's origin, sometimes without the
-/// trailing slash; Firefox the path of the manifest and the extension's id.
-fn started_by_our_extension(args: &[String]) -> bool {
-    args.iter().any(|arg| {
-        let origin = arg.strip_suffix('/').unwrap_or(arg);
-        arg == FIREFOX_EXTENSION_ID
-            || origin
-                .strip_prefix("chrome-extension://")
-                .is_some_and(|id| CHROME_EXTENSION_IDS.contains(&id))
+/// Which copy of our extension started the host, if one did. Chrome and
+/// Edge pass the extension's origin, sometimes without the trailing slash;
+/// Firefox the path of the manifest and the extension's id.
+fn which_copy(args: &[String]) -> Option<&'static str> {
+    args.iter().find_map(|arg| {
+        if arg == FIREFOX_EXTENSION_ID {
+            return Some("firefox");
+        }
+        let id = arg.strip_suffix('/').unwrap_or(arg).strip_prefix("chrome-extension://")?;
+        match id {
+            CHROME_STORE_ID => Some("store"),
+            CHROME_FOLDER_ID => Some("folder"),
+            _ => None,
+        }
     })
+}
+
+#[cfg(test)]
+fn started_by_our_extension(args: &[String]) -> bool {
+    which_copy(args).is_some()
 }
 
 fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
@@ -454,7 +471,7 @@ fn write_message(output: &mut impl Write, value: &Value) -> std::io::Result<()> 
 
 /// Passes each message from the browser to the app and back, saying which
 /// browser it came from.
-fn host_loop(browser: &str) -> std::io::Result<()> {
+fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
     while let Some(message) = read_message(&mut input)? {
@@ -465,7 +482,7 @@ fn host_loop(browser: &str) -> std::io::Result<()> {
                 .is_ok();
             json!({ "ok": started })
         } else {
-            ask_app(&json!({ "browser": browser, "request": message }))
+            ask_app(&json!({ "browser": browser, "copy": copy, "request": message }))
                 .unwrap_or_else(|| json!({ "ok": false, "error": "notRunning" }))
         };
         write_message(&mut output, &reply)?;
@@ -546,8 +563,8 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
                     return;
                 }
                 let reply = match serde_json::from_str::<Envelope>(line.trim()) {
-                    Ok(Envelope { browser, request }) => {
-                        if note_contact(&browser) {
+                    Ok(Envelope { browser, copy, request }) => {
+                        if note_contact(&browser, &copy) {
                             let _ = app.emit(CONTACT_EVENT, last_contact());
                         }
                         if request.is_passkey() {
@@ -573,6 +590,8 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
 #[derive(Deserialize)]
 struct Envelope {
     browser: String,
+    #[serde(default)]
+    copy: String,
     request: Request,
 }
 
@@ -591,6 +610,9 @@ enum Request {
     /// The 2FA QR code in a screenshot of the tab (a PNG, base64), from the
     /// toolbar popup.
     TotpFromImage { image: String },
+    /// Whether a login of the site already has this 2FA key (so a setup page
+    /// showing it again is not offered).
+    TotpKnown { url: String, secret: String },
     Known { url: String, username: String, password: String },
     Save { url: String, username: String, password: String },
     /// A strong new password, for a sign-up or password-change form.
@@ -705,7 +727,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         return json!({ "ok": false, "error": "disabled" });
     }
     let within_limit = match request {
-        Request::Logins { .. } => allow(&LOOKUPS, LOOKUPS_PER_MINUTE),
+        Request::Logins { .. } | Request::TotpKnown { .. } => allow(&LOOKUPS, LOOKUPS_PER_MINUTE),
         _ => allow(&SENSITIVE, SENSITIVE_PER_MINUTE),
     };
     if !within_limit {
@@ -800,6 +822,23 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
             let password = vault.password(id)?;
             vault.touch();
             Ok(json!({ "ok": true, "username": entry.username, "password": password.as_str() }))
+        }
+        Request::TotpKnown { url, secret } => {
+            let host = page_host(url).ok_or("insecure")?;
+            let Ok(key) = super::totp::Totp::parse(secret) else {
+                return Ok(json!({ "ok": true, "known": false }));
+            };
+            let mut known = false;
+            for entry in vault.summaries()? {
+                if entry.has_totp
+                    && entry.urls.iter().any(|u| fits(u, &host).is_some())
+                    && vault.totp(&entry.id).is_ok_and(|saved| saved.same_key(&key))
+                {
+                    known = true;
+                    break;
+                }
+            }
+            Ok(json!({ "ok": true, "known": known }))
         }
         Request::SaveTotp { url, id, secret } => {
             let host = page_host(url).ok_or("insecure")?;
@@ -1239,6 +1278,17 @@ mod tests {
         assert!(matches!(get, Request::PasskeyGet { rp_id: None, ref credential_id, .. } if credential_id == "abc"));
         let fill: Request = serde_json::from_value(json!({ "type": "fill", "id": "1", "url": "https://x.com" })).unwrap();
         assert!(!fill.is_passkey());
+    }
+
+    #[test]
+    fn the_host_tells_the_stores_copy_from_a_folders() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(which_copy(&args(&["chrome-extension://mifjffbnaeeljjfboiglbcoaokgdilca/"])), Some("store"));
+        assert_eq!(which_copy(&args(&["chrome-extension://gaelkhdpkgnffkfmaaklknijinjmmopo", "--parent-window=0"])), Some("folder"));
+        assert_eq!(which_copy(&args(&[r"C:\x\firefox.json", FIREFOX_EXTENSION_ID])), Some("firefox"));
+        assert_eq!(which_copy(&args(&["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"])), None);
+        let old: Envelope = serde_json::from_value(json!({ "browser": "Edge", "request": { "type": "status" } })).unwrap();
+        assert_eq!(old.copy, "", "a host without the copy still works");
     }
 
     #[test]
