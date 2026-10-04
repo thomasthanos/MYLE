@@ -1,7 +1,7 @@
 [package]
 name = "myle-passwords"
 # The version users see is tauri.conf.json's; keep the two the same.
-version = "1.0.0"
+version = "9.2.2"
 description = "MYLE Passwords: the Password Manager on phones"
 authors = ["ThomasThanos"]
 edition = "2024"
