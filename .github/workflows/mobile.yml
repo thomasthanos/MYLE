@@ -103,6 +103,9 @@ jobs:
           manifest=backend/mobile/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
           grep -n 'allowBackup\|android:scheme' "$manifest" || true
+          # Add FileProvider and native installer plugin for automatic in-app updates.
+          node scripts/patch-android.mjs
+          grep -n 'REQUEST_INSTALL_PACKAGES\|FileProvider' "$manifest" || { echo "::error::Installer patch failed"; exit 1; }
 
       - name: Build the APK
         run: npx tauri android build --apk --ci --target aarch64 --target armv7

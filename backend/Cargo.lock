@@ -2840,13 +2840,15 @@ dependencies = [
 
 [[package]]
 name = "myle-passwords"
-version = "9.2.3"
+version = "9.2.4"
 dependencies = [
+ "futures-util",
  "myle-vault",
  "reqwest",
  "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",

@@ -164,8 +164,15 @@ export interface MobileUpdate {
   version: string;
   /** The release's page. */
   notes: string;
-  /** The APK, for the browser to download. */
+  /** The APK URL. */
   url: string;
+  size?: number;
+  sha256?: string;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number;
 }
 
 export interface ImportPreview {
@@ -239,6 +246,12 @@ export interface PasswordsApi {
   appHidden(hidden: boolean): Promise<boolean>;
   /** Phones (Android): a newer version, if there is one. */
   updateCheck(): Promise<MobileUpdate | null>;
+  /** Phones (Android): download update directly to app cache, cleaning old APKs. */
+  updateDownload(url: string, sha256?: string): Promise<string>;
+  /** Phones (Android): launch package installer for downloaded APK. */
+  updateInstall(path: string): Promise<void>;
+  /** Phones (Android): download progress listener. */
+  onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<() => void>;
 }
 
 const tauriApi: PasswordsApi = {
@@ -293,6 +306,9 @@ const tauriApi: PasswordsApi = {
   onSynced: (handler) => listen<SyncResult>("passwords-synced", (event) => handler(event.payload)),
   appHidden: (hidden) => invoke("passwords_app_hidden", { hidden }),
   updateCheck: () => invoke("mobile_update_check"),
+  updateDownload: (url, sha256) => invoke("mobile_update_download", { url, sha256 }),
+  updateInstall: (path) => invoke("mobile_update_install", { path }),
+  onUpdateProgress: (handler) => listen<UpdateProgress>("mobile://update-progress", (event) => handler(event.payload)),
 };
 
 /** In a plain browser (`npx vite`): a vault in memory, to work on the page. */
@@ -525,6 +541,13 @@ function previewApi(): PasswordsApi {
       return new URLSearchParams(location.search).has("update")
         ? { version: "1.1.0", notes: "https://github.com/thomasthanos/MYLE/releases", url: "https://downloads.thomast.uk/MYLE-Passwords.apk" }
         : null;
+    },
+    async updateDownload() {
+      return "/cache/updates/MYLE-Passwords-latest.apk";
+    },
+    async updateInstall() {},
+    async onUpdateProgress() {
+      return () => {};
     },
   };
 }

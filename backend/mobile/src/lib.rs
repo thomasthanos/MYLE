@@ -11,6 +11,9 @@ mod update;
 
 use tauri::Manager;
 
+#[cfg(target_os = "android")]
+pub(crate) struct InstallerPlugin<R: tauri::Runtime>(pub tauri::plugin::PluginHandle<R>);
+
 /// Android's back button on the first screen: the app closes, and the vault
 /// with it.
 #[tauri::command]
@@ -28,6 +31,16 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_barcode_scanner::init())
         .plugin(tauri_plugin_biometry::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(
+        tauri::plugin::Builder::new("installer")
+            .setup(|app, api| {
+                let handle = api.register_android_plugin("uk.thomast.myle.passwords", "InstallerPlugin")?;
+                app.manage(InstallerPlugin(handle));
+                Ok(())
+            })
+            .build(),
+    );
     builder
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
@@ -36,6 +49,7 @@ pub fn run() {
             app.manage(passwords.clone());
             account::listen(app.handle());
             passwords::watch(app.handle().clone(), passwords);
+            update::cleanup_old_updates(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +86,8 @@ pub fn run() {
             unlock::passwords_hello_disable,
             unlock::passwords_hello_unlock,
             update::mobile_update_check,
+            update::mobile_update_download,
+            update::mobile_update_install,
             mobile_leave,
         ])
         .run(tauri::generate_context!())
