@@ -48,3 +48,10 @@ test("the app's version is the same in its two files", async () => {
   const cargo = await readFile(new URL("../../backend/mobile/Cargo.toml", import.meta.url), "utf8");
   assert.equal(cargo.match(/^version = "(.+)"$/m)?.[1], conf.version);
 });
+
+test("iOS Info.plist template registers the deep link scheme", async () => {
+  const plist = await readFile(new URL("../../backend/mobile/Info.ios.plist", import.meta.url), "utf8");
+  assert.match(plist, /<key>CFBundleURLTypes<\/key>/);
+  assert.match(plist, /<string>uk\.thomast\.myle\.passwords<\/string>/);
+});
+
