@@ -94,6 +94,11 @@ jobs:
         run: |
           npx tauri android init --ci
           npx tauri icon backend/icons/app-icon.svg
+          # Tauri's template has Kotlin 1.9; the biometrics plugin's libraries
+          # (kotlinx-coroutines 1.10) need 2.1.
+          root=backend/mobile/gen/android/build.gradle.kts
+          sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9]*/kotlin-gradle-plugin:2.1.21/' "$root"
+          grep -q 'kotlin-gradle-plugin:2.1.21' "$root" || { echo "::error::Kotlin was not raised in $root"; cat "$root"; exit 1; }
           # A backup to Google Drive would carry the account's session along.
           manifest=backend/mobile/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
