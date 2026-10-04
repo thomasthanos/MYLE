@@ -1,36 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Source for all app icons: `npm run tauri icon backend/icons/app-icon.svg`.
-       A hooded hacker operator in front of a glowing cyber terminal.
-       The in-app mark (frontend/lib/components/Logo.svelte) draws the same scene. -->
+       Full-bleed 1024x1024 edge-to-edge for flawless mobile (iOS & Android) icon generation. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#141c33" />
       <stop offset=".55" stop-color="#0b101e" />
       <stop offset="1" stop-color="#05070d" />
     </linearGradient>
-    <radialGradient id="spill" cx=".5" cy=".38" r=".6">
-      <stop offset="0" stop-color="#22d3ee" stop-opacity=".48" />
-      <stop offset=".42" stop-color="#6366f1" stop-opacity=".28" />
-      <stop offset=".78" stop-color="#10b981" stop-opacity=".08" />
+    <radialGradient id="spill" cx=".5" cy=".38" r=".65">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".52" />
+      <stop offset=".42" stop-color="#6366f1" stop-opacity=".3" />
+      <stop offset=".78" stop-color="#10b981" stop-opacity=".1" />
       <stop offset="1" stop-color="#05070d" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#67e8f9" stop-opacity=".65" />
-      <stop offset=".4" stop-color="#818cf8" stop-opacity=".2" />
-      <stop offset="1" stop-color="#34d399" stop-opacity=".35" />
-    </linearGradient>
     <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#09192b" />
       <stop offset="1" stop-color="#071020" />
     </linearGradient>
-    <radialGradient id="screen-glow" cx=".5" cy=".95" r=".8">
-      <stop offset="0" stop-color="#22d3ee" stop-opacity=".55" />
-      <stop offset=".5" stop-color="#6366f1" stop-opacity=".2" />
+    <radialGradient id="screen-glow" cx=".5" cy=".95" r=".85">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".6" />
+      <stop offset=".5" stop-color="#6366f1" stop-opacity=".22" />
       <stop offset="1" stop-color="#34d399" stop-opacity="0" />
     </radialGradient>
     <linearGradient id="desk" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#22d3ee" stop-opacity="0" />
-      <stop offset=".5" stop-color="#38bdf8" stop-opacity=".75" />
+      <stop offset=".5" stop-color="#38bdf8" stop-opacity=".85" />
       <stop offset="1" stop-color="#22d3ee" stop-opacity="0" />
     </linearGradient>
     <linearGradient id="hood" x1="0" y1="0" x2="0" y2="1">
@@ -43,83 +37,77 @@
       <stop offset=".5" stop-color="#090d18" />
       <stop offset="1" stop-color="#04060b" />
     </linearGradient>
-    <!-- Screen light catching the edges of the silhouette. -->
     <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#67e8f9" />
-      <stop offset=".32" stop-color="#34d399" stop-opacity=".85" />
-      <stop offset=".68" stop-color="#818cf8" stop-opacity=".45" />
+      <stop offset=".32" stop-color="#34d399" stop-opacity=".9" />
+      <stop offset=".68" stop-color="#818cf8" stop-opacity=".5" />
       <stop offset="1" stop-color="#6366f1" stop-opacity="0" />
     </linearGradient>
     <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur stdDeviation="6" />
     </filter>
-    <clipPath id="tile">
-      <rect x="64" y="64" width="896" height="896" rx="220" />
-    </clipPath>
     <path id="hood-shape" d="M512 330C470 344 420 384 400 456C386 508 380 584 364 646C426 708 598 708 660 646C644 584 638 508 624 456C604 384 554 344 512 330Z" />
-    <path id="torso-shape" d="M432 610C336 626 258 666 224 724C194 776 186 866 184 1000H840C838 866 830 776 800 724C766 666 688 626 592 610Z" />
+    <path id="torso-shape" d="M432 610C336 626 258 666 224 724C194 776 186 866 184 1024H840C838 866 830 776 800 724C766 666 688 626 592 610Z" />
     <clipPath id="hood-clip"><use href="#hood-shape" /></clipPath>
     <clipPath id="torso-clip"><use href="#torso-shape" /></clipPath>
   </defs>
 
-  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#bg)" />
-  <g clip-path="url(#tile)">
-    <rect x="64" y="64" width="896" height="896" fill="url(#spill)" />
+  <!-- Full-bleed background: edge to edge 0 0 1024 1024 -->
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <rect width="1024" height="1024" fill="url(#spill)" />
 
-    <!-- Ambient background cyber data columns -->
-    <g stroke="#22d3ee" stroke-linecap="round" stroke-width="8" opacity=".16">
-      <path d="M136 210v70M136 310v110M136 450v50M176 180v95M176 305v65M176 400v85" />
-      <path d="M848 190v85M848 305v70M848 405v80M888 220v60M888 310v105M888 445v45" />
-    </g>
-
-    <!-- Desk -->
-    <rect x="64" y="652" width="896" height="308" fill="#05070e" opacity=".78" />
-    <rect x="64" y="646" width="896" height="8" fill="url(#desk)" />
-
-    <!-- Cyber Terminal -->
-    <rect x="222" y="168" width="580" height="424" rx="42" fill="#060912" />
-    <rect x="224" y="170" width="576" height="420" rx="40" fill="none" stroke="#38bdf8" stroke-opacity=".32" stroke-width="4" />
-    <circle cx="264" cy="191" r="7" fill="#fb7185" opacity=".85" />
-    <circle cx="288" cy="191" r="7" fill="#fbbf24" opacity=".85" />
-    <circle cx="312" cy="191" r="7" fill="#34d399" opacity=".9" />
-    <path d="M348 191h120" stroke="#38bdf8" stroke-opacity=".28" stroke-width="8" stroke-linecap="round" />
-    <rect x="248" y="212" width="528" height="354" rx="22" fill="url(#screen)" />
-    <rect x="248" y="212" width="528" height="354" rx="22" fill="url(#screen-glow)" />
-
-    <!-- Root `>` prompt, terminal commands, cursor and cyber sparkle -->
-    <path d="M280 246L302 262L280 278" fill="none" stroke="#34d399" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
-    <g stroke-linecap="round" stroke-width="20">
-      <path d="M326 262h92" stroke="#34d399" />
-      <path d="M440 262h164" stroke="#22d3ee" />
-      <path d="M334 310h76" stroke="#c084fc" />
-      <path d="M432 310h196" stroke="#e2e8f0" stroke-opacity=".78" />
-      <path d="M334 358h132" stroke="#38bdf8" />
-      <path d="M488 358h108" stroke="#fbbf24" />
-      <path d="M618 358h68" stroke="#34d399" stroke-opacity=".65" />
-      <path d="M374 406h142" stroke="#818cf8" />
-      <path d="M538 406h84" stroke="#22d3ee" stroke-opacity=".75" />
-      <path d="M334 454h88" stroke="#c084fc" />
-      <path d="M298 502h64" stroke="#34d399" />
-    </g>
-    <rect x="382" y="488" width="18" height="28" rx="4" fill="#34d399" />
-    <path d="M732 234c2.6 17.6 10 25 27.6 27.6-17.6 2.6-25 10-27.6 27.6-2.6-17.6-10-25-27.6-27.6 17.6-2.6 25-10 27.6-27.6z" fill="#67e8f9" opacity=".92" />
-
-    <!-- The hooded hacker, lit from the front by the terminal screen -->
-    <use href="#torso-shape" fill="url(#torso)" />
-    <g clip-path="url(#torso-clip)">
-      <use href="#torso-shape" fill="none" stroke="url(#edge)" stroke-width="18" filter="url(#soft)" />
-      <use href="#torso-shape" fill="none" stroke="url(#edge)" stroke-width="6" opacity=".85" />
-      <path d="M372 634L256 748M652 634L768 748" fill="none" stroke="#38bdf8" stroke-opacity=".22" stroke-width="6" stroke-linecap="round" />
-      <ellipse cx="512" cy="684" rx="156" ry="46" fill="#03050a" opacity=".82" filter="url(#soft)" />
-    </g>
-    <use href="#hood-shape" fill="url(#hood)" />
-    <g clip-path="url(#hood-clip)">
-      <use href="#hood-shape" fill="none" stroke="url(#edge)" stroke-width="20" filter="url(#soft)" />
-      <use href="#hood-shape" fill="none" stroke="url(#edge)" stroke-width="6.5" />
-      <path d="M512 336V690" stroke="#03050a" stroke-opacity=".65" stroke-width="7" />
-      <path d="M448 402C430 486 420 572 406 654M576 402C594 486 604 572 618 654" fill="none" stroke="#38bdf8" stroke-opacity=".22" stroke-width="6" stroke-linecap="round" />
-      <path d="M364 646C426 708 598 708 660 646" fill="none" stroke="#67e8f9" stroke-opacity=".4" stroke-width="6.5" />
-    </g>
+  <!-- Ambient background cyber data columns -->
+  <g stroke="#22d3ee" stroke-linecap="round" stroke-width="8" opacity=".18">
+    <path d="M136 210v70M136 310v110M136 450v50M176 180v95M176 305v65M176 400v85" />
+    <path d="M848 190v85M848 305v70M848 405v80M888 220v60M888 310v105M888 445v45" />
   </g>
-  <rect x="70" y="70" width="884" height="884" rx="214" fill="none" stroke="url(#rim)" stroke-width="12" />
+
+  <!-- Full-bleed Desk -->
+  <rect x="0" y="652" width="1024" height="372" fill="#05070e" opacity=".85" />
+  <rect x="0" y="646" width="1024" height="8" fill="url(#desk)" />
+
+  <!-- Cyber Terminal -->
+  <rect x="222" y="168" width="580" height="424" rx="42" fill="#060912" />
+  <rect x="224" y="170" width="576" height="420" rx="40" fill="none" stroke="#38bdf8" stroke-opacity=".35" stroke-width="4" />
+  <circle cx="264" cy="191" r="7" fill="#fb7185" opacity=".85" />
+  <circle cx="288" cy="191" r="7" fill="#fbbf24" opacity=".85" />
+  <circle cx="312" cy="191" r="7" fill="#34d399" opacity=".9" />
+  <path d="M348 191h120" stroke="#38bdf8" stroke-opacity=".3" stroke-width="8" stroke-linecap="round" />
+  <rect x="248" y="212" width="528" height="354" rx="22" fill="url(#screen)" />
+  <rect x="248" y="212" width="528" height="354" rx="22" fill="url(#screen-glow)" />
+
+  <!-- Root > prompt, terminal commands, cursor and cyber sparkle -->
+  <path d="M280 246L302 262L280 278" fill="none" stroke="#34d399" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+  <g stroke-linecap="round" stroke-width="20">
+    <path d="M326 262h92" stroke="#34d399" />
+    <path d="M440 262h164" stroke="#22d3ee" />
+    <path d="M334 310h76" stroke="#c084fc" />
+    <path d="M432 310h196" stroke="#e2e8f0" stroke-opacity=".85" />
+    <path d="M334 358h132" stroke="#38bdf8" />
+    <path d="M488 358h108" stroke="#fbbf24" />
+    <path d="M618 358h68" stroke="#34d399" stroke-opacity=".7" />
+    <path d="M374 406h142" stroke="#818cf8" />
+    <path d="M538 406h84" stroke="#22d3ee" stroke-opacity=".8" />
+    <path d="M334 454h88" stroke="#c084fc" />
+    <path d="M298 502h64" stroke="#34d399" />
+  </g>
+  <rect x="382" y="488" width="18" height="28" rx="4" fill="#34d399" />
+  <path d="M732 234c2.6 17.6 10 25 27.6 27.6-17.6 2.6-25 10-27.6 27.6-2.6-17.6-10-25-27.6-27.6 17.6-2.6 25-10 27.6-27.6z" fill="#67e8f9" opacity=".95" />
+
+  <!-- The hooded hacker silhouette -->
+  <use href="#torso-shape" fill="url(#torso)" />
+  <g clip-path="url(#torso-clip)">
+    <use href="#torso-shape" fill="none" stroke="url(#edge)" stroke-width="20" filter="url(#soft)" />
+    <use href="#torso-shape" fill="none" stroke="url(#edge)" stroke-width="6.5" opacity=".9" />
+    <path d="M372 634L256 748M652 634L768 748" fill="none" stroke="#38bdf8" stroke-opacity=".25" stroke-width="6" stroke-linecap="round" />
+    <ellipse cx="512" cy="684" rx="156" ry="46" fill="#03050a" opacity=".85" filter="url(#soft)" />
+  </g>
+  <use href="#hood-shape" fill="url(#hood)" />
+  <g clip-path="url(#hood-clip)">
+    <use href="#hood-shape" fill="none" stroke="url(#edge)" stroke-width="22" filter="url(#soft)" />
+    <use href="#hood-shape" fill="none" stroke="url(#edge)" stroke-width="7" />
+    <path d="M512 336V690" stroke="#03050a" stroke-opacity=".7" stroke-width="7" />
+    <path d="M448 402C430 486 420 572 406 654M576 402C594 486 604 572 618 654" fill="none" stroke="#38bdf8" stroke-opacity=".25" stroke-width="6" stroke-linecap="round" />
+    <path d="M364 646C426 708 598 708 660 646" fill="none" stroke="#67e8f9" stroke-opacity=".45" stroke-width="7" />
+  </g>
 </svg>
