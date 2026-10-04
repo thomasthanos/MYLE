@@ -41,10 +41,13 @@ jobs:
       - run: npm run check
 
       # tauri::generate_context! embeds the built frontends (backend/target/web/
-      # for the app, backend/target/web-setup/ for the setup).
+      # for the app, backend/target/web-setup/ for the setup, web-mobile/ for
+      # MYLE Passwords, whose phone builds are mobile.yml's).
       - run: node scripts/prepare-extension.mjs && npx vite build
 
       - run: npx vite build --mode setup
+
+      - run: npx vite build --mode mobile
 
       # The bundle lists the pinned Ludusavi files, and the build checks
       # that they exist; they are downloaded and verified, never committed.

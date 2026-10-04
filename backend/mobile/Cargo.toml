@@ -29,7 +29,8 @@ zeroize = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-tauri-plugin-barcode-scanner = "2"
+# The same minor version as @tauri-apps/plugin-barcode-scanner in package.json.
+tauri-plugin-barcode-scanner = "~2.4"
 # A key in the Keychain (iOS) or Keystore (Android) that opens only with the
 # user's face, fingerprint or device code. Pinned: the plugin is young.
 tauri-plugin-biometry = "=0.2.8"

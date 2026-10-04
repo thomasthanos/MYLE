@@ -29,6 +29,8 @@ The rest runs directly:
 | <code>npx tauri build --no-bundle</code> | Release exe of the app, without the setup |
 | <code>npx vite</code> / <code>npx vite build</code> | Vite for the app; <code>npx vite</code> also serves the pages to a browser |
 | <code>npx vite build --mode setup</code> | Builds the setup/uninstaller UI |
+| <code>npm run web:mobile</code> | Builds MYLE Passwords' page (<code>vite build --mode mobile</code>); <code>npx vite --mode mobile</code> serves it at <code>/mobile.html</code> |
+| <code>cargo run -p myle-passwords</code> | MYLE Passwords on Windows, to try it (no Face ID, sign-in or camera there) |
 | <code>scripts/verify-install.ps1</code> | Checks an install, or with <code>-Removed</code>, an uninstall |
 | <code>scripts/bootstrap-game-saves.ps1</code> | Downloads and verifies the pinned Game Saves resources |
 | <code>node scripts/prepare-extension.mjs</code> | Copies the extension's shared files into the Firefox folder and packs the store zips |
@@ -44,7 +46,7 @@ The main icon lives at `backend/icons/app-icon.svg`. The app logo and splash sha
 ## Structure
 
 ```
-.github/workflows/            ci.yml (every push/PR), release.yml (tag v*), keepalive.yml
+.github/workflows/            ci.yml (every push/PR), release.yml (tag v*), mobile.yml (tag mobile-v*), keepalive.yml
 scripts/
   build-setup.ps1             the whole setup (npm run build)
   bootstrap-game-saves.ps1    download and SHA-256 verification of the pinned resources
@@ -59,6 +61,7 @@ frontend/                     frontend (Svelte 5 + TS), Vite root
   index.html                  main window → main.ts → app/
   splash.html                 updater window → splash.ts → splash/
   installer.html              setup/uninstaller window → installer/
+  mobile.html                 MYLE Passwords for phones → mobile/ (the Password Manager page in its own shell)
   app/App.svelte              layout: titlebar + sidebar + content
   app/shell/                  Titlebar, Sidebar, ContentArea
   app/pages/registry.ts       ← add pages here
@@ -74,10 +77,12 @@ backend/                      backend (Rust + Tauri)
   src/<feature>/               apps, game_saves, cleaner, spotify_hub, account, …
   src/updater.rs               updater (feed on R2, GitHub Releases as a fallback)
   installer/                  setup.exe + uninstall.exe (Rust, its own Tauri window)
+  vault/                      myle-vault: the Password Manager's vault, sync and account, shared with mobile/
+  mobile/                     MYLE Passwords for Android and iPhone (Tauri; gen/ is made by CI)
   icons/                      app-icon.svg (the source) and the PNG/ICO built from it
   resources/                  what ships next to the exe (Ludusavi, Spicetify)
   tauri.conf.json             name, version, windows, resources (and for the setup)
-vite.config.ts                one config for everything: `vite build` → backend/target/web/, `--mode setup` → backend/target/web-setup/
+vite.config.ts                one config for everything: `vite build` → backend/target/web/, `--mode setup` → backend/target/web-setup/, `--mode mobile` → backend/target/web-mobile/
 ```
 
 Not in git: `node_modules/` (npm) and `backend/target/`, where **every** build goes: Rust, Vite (`web/`, `web-setup/`) and the setup (`release/bundle/setup/`).
@@ -203,6 +208,16 @@ An end-to-end encrypted vault (`backend/src/passwords/`, page in `frontend/app/p
 - **Windows programs.** A login links to a program by its full path (`AppLink.exe`; Browse… in the editor); a program that updates into a new version folder (`app-1.0.9172`, `2.4.1`, `v2.5`) stays linked (`same_program` in `windows_fill.rs`). The hotkey (Ctrl+Shift+L, or Ctrl+Alt+Shift+L when another program holds that) remembers the program in front and its focused field (Store apps are found inside `ApplicationFrameHost.exe`); MYLE then shows its linked logins: Fill both (user name, Tab, password), or one of them, typed as Unicode keystrokes after checking the window and, where Windows can tell, the field again. A program that runs as administrator gets Copy buttons, since Windows drops keys typed into it. A program with no login gets "New login for it" and "Link a login…"; a login linked by file name only (older links) is linked in one click.
 - **Website icons.** The list shows each website's icon (`backend/vault/src/icons.rs`, `Favicon.svelte`; on by default, off from ⋯, which deletes them). The app asks each website itself, so no icon service learns the vault's sites: only public names over https, never an IP address, `localhost` or a local, `.arpa` or `.onion` name, following redirects itself and turning `http://` ones into `https://`. It reads the home page up to `</head>` for `<link rel="icon">` and Apple touch icons (or a `<meta http-equiv="refresh">` page), then `/favicon.ico`, and keeps an answer only if its first bytes are an image's (PNG, ICO, GIF, JPEG, WebP or SVG, 200 KB at most, drawn by `<img>` where an SVG's scripts never run). The icons are kept in `passwords-icons.bin` next to the vault, sealed with the vault key, read when the vault opens and fetched again after a month (a site without one after a week). The extension gets the icons of a site's logins from that cache with its answer; the browser never fetches them.
 - **Tray.** With a vault on the PC and "Keep running in the tray" on (Settings, `KeepInTray` in `HKCU\Software\ThomasThanos\MakeYourLifeEasier`, on when unset), closing the window hides the app next to the clock (`backend/src/tray.rs`), so Ctrl+Shift+L and browser filling keep working; the icon's menu opens the app or the vault, locks the vault, or quits. Started by Windows with "Start minimized", the app starts there. Because a closed window only hides, the setup first sets the event `Local\MakeYourLifeEasier-Quit`, on which the app exits cleanly, before it asks the windows to close (`processes.rs`).
+
+## MYLE Passwords (Android and iPhone)
+
+The Password Manager on phones: see, copy and edit the logins, with their 2FA codes, in sync with MYLE on the PC. It does not fill other apps. It is distributed outside the stores: an APK for Android, and an IPA that [SideStore](https://sidestore.io) installs with the user's own (free) Apple ID.
+
+- **Code.** `backend/vault` (`myle-vault`) is the vault itself, used by both apps: encryption, entries, 2FA codes, passkeys, imports, website icons, the sync and the account's Supabase sign-in (`account.rs`, `Cloud`). It knows nothing of Tauri or Windows; TLS is native-tls on Windows and rustls on phones (Mozilla's root certificates on Android, `http.rs`). `backend/mobile` answers the page with the same command names as the Windows app (`passwords_*`, `account_*`), so `frontend/app/pages/password-manager/` serves both; `frontend/lib/platform.ts` (`MOBILE`, from `vite build --mode mobile`) leaves out what only Windows does (browser filling, Windows programs, import and export, passkey prompts) and words things for a phone. `frontend/mobile/` is the phone's shell: the bar, the welcome screen, the account sheet, the camera's QR frame, the back button.
+- **Account.** Sign-in opens Discord's or Google's page in the browser, which comes back to `uk.thomast.myle.passwords://auth-callback` (a Redirect URL of the Supabase project, Authentication → URL Configuration). The PKCE verifier waits in `sign-in.json` for 10 minutes, so a return that starts the app again (iOS may end it meanwhile) still finishes. The session is kept in `account.json` in the app's own folder, which no other app can read.
+- **Unlocking.** Face ID / Touch ID / fingerprint (`unlock.rs`, behind the `passwords_hello_*` commands): a random key in the Keychain or Keystore (`tauri-plugin-biometry`, pinned), which the phone hands back only after the user's face or finger, wraps the vault key; only the wrapped copy is kept, in `passwords-biometry.json`. The vault locks after the chosen idle time, and when the user comes back after a minute away (`passwords_app_hidden`); the page is blurred while the app is out of sight. Copied passwords leave the clipboard after 30 seconds.
+- **Builds.** `.github/workflows/mobile.yml` makes everything on GitHub's runners: `tauri android init/build` (aarch64 + armv7, then `zipalign` and `apksigner` with the key in the `ANDROID_KEYSTORE_*` secrets) and `tauri ios init/build --no-sign` on macOS with Xcode 26. A push to a `mobile/…` branch, or a run by hand, keeps the APK and IPA as artifacts; a `mobile-v*` tag (matching `backend/mobile/tauri.conf.json` and `Cargo.toml`) publishes them to R2 with `sidestore.json` and `mobile-latest.json` (`scripts/mobile-feeds.mjs`), and to a GitHub release that never becomes "latest". The Android app checks `mobile-latest.json` (`update.rs`) and offers the new APK; Android installs it over the old one only because it is signed with the same key, so that key (backed up outside the repo) must never be lost.
+- **Installing.** Android: open `https://downloads.thomast.uk/MYLE-Passwords.apk` on the phone and allow installing from the browser. iPhone: in SideStore, add the source `https://downloads.thomast.uk/sidestore.json` and install MYLE Passwords; a free Apple ID re-signs it every 7 days (SideStore does it in the background) and allows 3 such apps, SideStore included.
 
 ## The "Windows Optimization" page
 
