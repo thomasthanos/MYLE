@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- MYLE Passwords iOS Icon: GLASS Edition (Frosted Glassmorphism & Cyber Aura) -->
+  <defs>
+    <linearGradient id="g-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1035" />
+      <stop offset=".35" stop-color="#0f172a" />
+      <stop offset=".7" stop-color="#082f49" />
+      <stop offset="1" stop-color="#020617" />
+    </linearGradient>
+    <radialGradient id="g-aura" cx=".3" cy=".2" r=".7">
+      <stop offset="0" stop-color="#a855f7" stop-opacity=".45" />
+      <stop offset=".45" stop-color="#06b6d4" stop-opacity=".3" />
+      <stop offset="1" stop-color="#020617" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="g-aura2" cx=".8" cy=".8" r=".6">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity=".35" />
+      <stop offset=".5" stop-color="#ec4899" stop-opacity=".2" />
+      <stop offset="1" stop-color="#020617" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="g-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".85" />
+      <stop offset=".3" stop-color="#38bdf8" stop-opacity=".5" />
+      <stop offset=".7" stop-color="#c084fc" stop-opacity=".4" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".65" />
+    </linearGradient>
+    <linearGradient id="g-glass-pane" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".14" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".03" />
+    </linearGradient>
+    <linearGradient id="g-glass-sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".4" />
+      <stop offset=".45" stop-color="#ffffff" stop-opacity=".06" />
+      <stop offset="1" stop-color="#38bdf8" stop-opacity=".15" />
+    </linearGradient>
+    <linearGradient id="g-hood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e1b4b" stop-opacity=".95" />
+      <stop offset=".6" stop-color="#090d16" stop-opacity=".92" />
+      <stop offset="1" stop-color="#020617" stop-opacity=".95" />
+    </linearGradient>
+    <linearGradient id="g-edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e0e7ff" />
+      <stop offset=".3" stop-color="#38bdf8" stop-opacity=".9" />
+      <stop offset=".7" stop-color="#c084fc" stop-opacity=".7" />
+      <stop offset="1" stop-color="#020617" stop-opacity="0" />
+    </linearGradient>
+    <filter id="g-blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" />
+    </filter>
+    <clipPath id="g-tile">
+      <rect x="64" y="64" width="896" height="896" rx="220" />
+    </clipPath>
+    <path id="g-hood-shape" d="M512 330C470 344 420 384 400 456C386 508 380 584 364 646C426 708 598 708 660 646C644 584 638 508 624 456C604 384 554 344 512 330Z" />
+    <path id="g-torso-shape" d="M432 610C336 626 258 666 224 724C194 776 186 866 184 1000H840C838 866 830 776 800 724C766 666 688 626 592 610Z" />
+    <clipPath id="g-hood-clip"><use href="#g-hood-shape" /></clipPath>
+    <clipPath id="g-torso-clip"><use href="#g-torso-shape" /></clipPath>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#g-bg)" />
+  <g clip-path="url(#g-tile)">
+    <rect x="64" y="64" width="896" height="896" fill="url(#g-aura)" />
+    <rect x="64" y="64" width="896" height="896" fill="url(#g-aura2)" />
+
+    <!-- Ambient glowing streams -->
+    <g stroke="#38bdf8" stroke-linecap="round" stroke-width="6" opacity=".22">
+      <path d="M136 210v70M136 310v110M176 180v95M176 305v65M848 190v85M848 305v70M888 220v60M888 310v105" />
+    </g>
+
+    <!-- Frosted Glass Terminal -->
+    <rect x="222" y="168" width="580" height="424" rx="42" fill="url(#g-glass-pane)" />
+    <rect x="224" y="170" width="576" height="420" rx="40" fill="none" stroke="url(#g-glass-sheen)" stroke-width="4" />
+    <circle cx="264" cy="191" r="7" fill="#f43f5e" opacity=".9" />
+    <circle cx="288" cy="191" r="7" fill="#fbbf24" opacity=".9" />
+    <circle cx="312" cy="191" r="7" fill="#34d399" opacity=".95" />
+    <path d="M348 191h120" stroke="#ffffff" stroke-opacity=".35" stroke-width="8" stroke-linecap="round" />
+    
+    <!-- Screen Glass Inset -->
+    <rect x="248" y="212" width="528" height="354" rx="22" fill="#030712" fill-opacity=".65" />
+    <rect x="248" y="212" width="528" height="354" rx="22" fill="none" stroke="#ffffff" stroke-opacity=".18" stroke-width="2" />
+
+    <!-- Terminal code lines -->
+    <path d="M280 246L302 262L280 278" fill="none" stroke="#34d399" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+    <g stroke-linecap="round" stroke-width="20">
+      <path d="M326 262h92" stroke="#34d399" />
+      <path d="M440 262h164" stroke="#38bdf8" />
+      <path d="M334 310h76" stroke="#c084fc" />
+      <path d="M432 310h196" stroke="#ffffff" stroke-opacity=".9" />
+      <path d="M334 358h132" stroke="#67e8f9" />
+      <path d="M488 358h108" stroke="#fbcfe8" />
+      <path d="M618 358h68" stroke="#34d399" stroke-opacity=".8" />
+      <path d="M374 406h142" stroke="#818cf8" />
+      <path d="M538 406h84" stroke="#38bdf8" stroke-opacity=".9" />
+      <path d="M334 454h88" stroke="#c084fc" />
+      <path d="M298 502h64" stroke="#34d399" />
+    </g>
+    <rect x="382" y="488" width="18" height="28" rx="4" fill="#34d399" />
+    <path d="M732 234c2.6 17.6 10 25 27.6 27.6-17.6 2.6-25 10-27.6 27.6-2.6-17.6-10-25-27.6-27.6 17.6-2.6 25-10 27.6-27.6z" fill="#ffffff" opacity=".95" />
+
+    <!-- Hooded silhouette with frosted glass rim -->
+    <use href="#g-torso-shape" fill="url(#g-hood)" />
+    <g clip-path="url(#g-torso-clip)">
+      <use href="#g-torso-shape" fill="none" stroke="url(#g-edge)" stroke-width="16" filter="url(#g-blur)" />
+      <use href="#g-torso-shape" fill="none" stroke="url(#g-edge)" stroke-width="5" opacity=".95" />
+    </g>
+    <use href="#g-hood-shape" fill="url(#g-hood)" />
+    <g clip-path="url(#g-hood-clip)">
+      <use href="#g-hood-shape" fill="none" stroke="url(#g-edge)" stroke-width="18" filter="url(#g-blur)" />
+      <use href="#g-hood-shape" fill="none" stroke="url(#g-edge)" stroke-width="5.5" />
+      <path d="M512 336V690" stroke="#ffffff" stroke-opacity=".2" stroke-width="6" />
+    </g>
+  </g>
+  <rect x="70" y="70" width="884" height="884" rx="214" fill="none" stroke="url(#g-rim)" stroke-width="12" />
+</svg>

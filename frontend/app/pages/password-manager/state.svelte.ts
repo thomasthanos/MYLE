@@ -1,7 +1,7 @@
 // The Password Manager page's state. It lives outside the page component so
 // switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
-import { DEVICE, QUICK_UNLOCK } from "../../../lib/platform";
+import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
 
@@ -159,6 +159,9 @@ class PasswordsState {
   /** Whether the lock screen should ask Windows Hello by itself: once, just
    *  after the page was opened, with the window in front. */
   takeHelloOnOpen() {
+    if (MOBILE) {
+      return this.hello.enabled && document.visibilityState === "visible";
+    }
     const due = Date.now() < this.#helloOnOpenUntil;
     this.#helloOnOpenUntil = 0;
     return due && this.hello.enabled && document.visibilityState === "visible" && document.hasFocus();
@@ -339,6 +342,15 @@ class PasswordsState {
       await this.refresh();
       // Merges what changed elsewhere while this PC was locked.
       this.#syncSoon();
+      if (MOBILE && this.hello.available && !this.hello.enabled) {
+        void confirm({
+          title: `Enable ${QUICK_UNLOCK}?`,
+          message: `Open your vault with ${QUICK_UNLOCK} next time instead of typing your master password.`,
+          confirmLabel: `Enable ${QUICK_UNLOCK}`,
+        }).then((enable) => {
+          if (enable) void this.setHello(true);
+        });
+      }
     }
     return !!ok;
   }

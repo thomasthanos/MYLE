@@ -36,7 +36,10 @@
     void account.init();
     void api
       .status()
-      .then((info) => (hasVault = info.status !== "new"))
+      .then((info) => {
+        hasVault = info.status !== "new";
+        p.pageOpened();
+      })
       .catch(() => (hasVault = true));
     void api.updateCheck().then((found) => (update = found)).catch(() => {});
 
