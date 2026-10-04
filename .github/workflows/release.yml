@@ -174,6 +174,29 @@ jobs:
           Publish $feedFile "latest.json" @('--content-type', 'application/json', '--cache-control', 'no-cache')
           Assert-Served "latest.json" (Get-FileHash $feedFile -Algorithm SHA256).Hash.ToLowerInvariant()
 
+      - name: Include mobile builds if available
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          try {
+            $runs = gh run list --workflow mobile.yml --status success --limit 1 --json databaseId | ConvertFrom-Json
+            if ($runs -and $runs.Count -gt 0) {
+              $runId = $runs[0].databaseId
+              Write-Host "Downloading mobile artifacts from run $runId..."
+              gh run download $runId --dir out
+              Get-ChildItem out -Recurse -File | Where-Object { $_.DirectoryName -ne (Resolve-Path out).Path } | ForEach-Object {
+                Move-Item $_.FullName out/ -Force
+              }
+              Get-ChildItem out -Directory | Remove-Item -Recurse -Force
+              Write-Host "Files in out for release:"
+              Get-ChildItem out | Select-Object Name, Length
+            }
+          } catch {
+            Write-Warning "Could not fetch mobile artifacts: $_"
+          }
+
       - name: Publish the GitHub release
         if: github.ref_type == 'tag'
         shell: pwsh
