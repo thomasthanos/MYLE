@@ -39,7 +39,7 @@
   let startup = $state({ enabled: false, minimized: true, canChange: false });
   let startupBusy = $state(false);
   /** Closing the window keeps the app running next to the clock. */
-  let keepInTray = $state(true);
+  let keepInTray = $state(false);
 
   onMount(() => {
     if (!isTauri()) return;
@@ -191,8 +191,8 @@
         <span class="text">
           <strong>Keep running in the tray</strong>
           <small>
-            With a password vault, closing the window leaves the app next to the clock, so Ctrl+Shift+L and browser
-            filling keep working. Quit from the tray icon.
+            Off: closing the window quits MYLE. On: it stays next to the clock, so Ctrl+Shift+L and browser filling
+            keep working; quit from the tray icon.
           </small>
         </span>
         <input

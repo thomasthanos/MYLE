@@ -1,7 +1,10 @@
 # Builds, signs and publishes a release of the Windows app.
 #
-# Release: bump "version" in package.json and backend/Cargo.toml, commit,
-# then push a matching tag:   git tag v7.0.2 && git push origin main v7.0.2
+# Release: bump "version" in package.json and backend/Cargo.toml, and MYLE
+# Passwords' in backend/mobile/tauri.conf.json and backend/mobile/Cargo.toml,
+# commit, then push a matching tag:   git tag v7.0.2 && git push origin main v7.0.2
+# This workflow builds the Windows app and mobile.yml the phone apps, into
+# one GitHub release.
 #
 # Where updates come from (backend/src/updater.rs):
 #   1. latest.json on Cloudflare R2 (downloads.thomast.uk), uploaded here
@@ -174,29 +177,6 @@ jobs:
           Publish $feedFile "latest.json" @('--content-type', 'application/json', '--cache-control', 'no-cache')
           Assert-Served "latest.json" (Get-FileHash $feedFile -Algorithm SHA256).Hash.ToLowerInvariant()
 
-      - name: Include mobile builds if available
-        if: github.ref_type == 'tag'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          try {
-            $runs = gh run list --workflow mobile.yml --status success --limit 1 --json databaseId | ConvertFrom-Json
-            if ($runs -and $runs.Count -gt 0) {
-              $runId = $runs[0].databaseId
-              Write-Host "Downloading mobile artifacts from run $runId..."
-              gh run download $runId --dir out
-              Get-ChildItem out -Recurse -File | Where-Object { $_.DirectoryName -ne (Resolve-Path out).Path } | ForEach-Object {
-                Move-Item $_.FullName out/ -Force
-              }
-              Get-ChildItem out -Directory | Remove-Item -Recurse -Force
-              Write-Host "Files in out for release:"
-              Get-ChildItem out | Select-Object Name, Length
-            }
-          } catch {
-            Write-Warning "Could not fetch mobile artifacts: $_"
-          }
-
       - name: Publish the GitHub release
         if: github.ref_type == 'tag'
         shell: pwsh
@@ -207,14 +187,23 @@ jobs:
           # GitHub's generated list of changes otherwise.
           $notes = "docs/release-notes/${env:VERSION}.md"
           $body = if (Test-Path $notes) { @("--notes-file", $notes) } else { @("--generate-notes") }
+          # One release for everything: mobile.yml builds MYLE Passwords for
+          # the same tag and adds its APK and IPA here, whichever finishes first
+          # makes the release.
+          $tag = "${{ github.ref_name }}"
           $files = (Get-ChildItem out).FullName
-          gh release view "${{ github.ref_name }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload "${{ github.ref_name }}" $files --clobber
-          } else {
-            gh release create "${{ github.ref_name }}" $files `
-              --title "MYLE ${{ github.ref_name }}" `
-              @body `
-              --latest
+          $created = $false
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag $files --title "MYLE $tag" @body --latest
+            $created = $LASTEXITCODE -eq 0
           }
+          if (-not $created) {
+            gh release upload $tag $files --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          # The Windows app's release is GitHub's "latest" (the app's own
+          # fallback when R2 is unreachable reads the releases).
+          $edit = if (Test-Path $notes) { @("--notes-file", $notes) } else { @() }
+          gh release edit $tag --title "MYLE $tag" @edit --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

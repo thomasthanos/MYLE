@@ -2,12 +2,14 @@
 # APK for Android, signed with the project's key, and an unsigned IPA for
 # iPhones, which SideStore signs with the user's own Apple ID.
 #
-# Release: bump "version" in backend/mobile/tauri.conf.json and
-# backend/mobile/Cargo.toml, commit, then push a matching tag:
-#   git tag mobile-v1.0.1 && git push origin main mobile-v1.0.1
-# It publishes to Cloudflare R2 (downloads.thomast.uk) MYLE-Passwords.apk,
-# MYLE-Passwords.ipa, sidestore.json (the SideStore source) and, last,
-# mobile-latest.json (Android's update check), and a GitHub release.
+# Release, together with the Windows app: the tag v1.2.3 (release.yml) also
+# builds these, with the same version in backend/mobile/tauri.conf.json and
+# backend/mobile/Cargo.toml, into the same GitHub release. On its own: the tag
+# mobile-v1.2.3, a release of its own that is never GitHub's "latest".
+# Either way it publishes to Cloudflare R2 (downloads.thomast.uk)
+# MYLE-Passwords-<version>.apk and .ipa (and the same files without the
+# version, for links), sidestore.json (the SideStore source) and, last,
+# mobile-latest.json (Android's update check).
 #
 # Run by hand (Actions > MYLE Passwords > Run workflow), or push a branch
 # named mobile/..., for a dry run: the same builds, kept as artifacts.
@@ -19,7 +21,7 @@ name: MYLE Passwords
 
 on:
   push:
-    tags: ["mobile-v*"]
+    tags: ["mobile-v*", "v*"]
     branches: ["mobile/**"]
   workflow_dispatch:
 
@@ -40,6 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.read.outputs.version }}
+      build: ${{ steps.read.outputs.build }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,14 +55,26 @@ jobs:
             echo "::error::tauri.conf.json is $version but backend/mobile/Cargo.toml is $cargo"
             exit 1
           fi
-          if [ "${{ github.ref_type }}" = "tag" ] && [ "mobile-v$version" != "${{ github.ref_name }}" ]; then
-            echo "::error::Tag ${{ github.ref_name }} does not match the app version $version"
-            exit 1
+          tag="${{ github.ref_name }}"
+          build=true
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [[ "$tag" == mobile-v* ]] && [ "mobile-v$version" != "$tag" ]; then
+              echo "::error::Tag $tag does not match MYLE Passwords' version $version"
+              exit 1
+            fi
+            # A Windows release whose version the phone app does not have:
+            # nothing to build for phones this time.
+            if [[ "$tag" == v* ]] && [ "v$version" != "$tag" ]; then
+              echo "::notice::MYLE Passwords is $version, not ${tag#v}: no phone builds for $tag"
+              build=false
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
 
   android:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +165,7 @@ jobs:
 
   ios:
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -314,14 +330,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Hand-written notes when docs/release-notes/mobile-<version>.md
-          # exists. Never "latest": that stays the Windows app's.
-          notes="docs/release-notes/mobile-$VERSION.md"
-          if [ -f "$notes" ]; then body=(--notes-file "$notes"); else body=(--generate-notes); fi
+          tag="${{ github.ref_name }}"
           files=(out/MYLE-Passwords.apk out/MYLE-Passwords.ipa)
-          if gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
-            gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber
+          if [[ "$tag" == mobile-v* ]]; then
+            # A phone release of its own: never "latest", that stays the
+            # Windows app's.
+            notes="docs/release-notes/mobile-$VERSION.md"
+            title="MYLE Passwords $VERSION"
+            latest=(--latest=false)
           else
-            gh release create "${{ github.ref_name }}" "${files[@]}" \
-              --title "MYLE Passwords $VERSION" "${body[@]}" --latest=false
+            # The Windows app's release (release.yml makes the same one, with
+            # the same title and notes): whichever finishes first creates it.
+            notes="docs/release-notes/$VERSION.md"
+            title="MYLE $tag"
+            latest=(--latest)
+          fi
+          if [ -f "$notes" ]; then body=(--notes-file "$notes"); else body=(--generate-notes); fi
+          if gh release view "$tag" > /dev/null 2>&1 || \
+             ! gh release create "$tag" "${files[@]}" --title "$title" "${body[@]}" "${latest[@]}"; then
+            gh release upload "$tag" "${files[@]}" --clobber
           fi

@@ -1,27 +1,27 @@
-//! The icon next to the clock. Once there is a password vault, closing the
-//! window keeps the app running there, so Ctrl+Shift+L and the browser
-//! extension keep working; the icon's menu opens the app, locks the vault
-//! or quits. Without a vault, or with "Keep running in the tray" off,
-//! closing the window quits as before.
+//! The icon next to the clock, only when the user asked for it ("Keep
+//! running in the tray" in Settings, off unless switched on): closing the
+//! window then keeps the app running there, so Ctrl+Shift+L and the browser
+//! extension keep working, and the icon's menu opens the app, locks the
+//! vault or quits. Otherwise closing the window quits the app.
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::passwords::PasswordsState;
 use crate::startup;
 
 const TRAY_ID: &str = "main";
-/// The Settings switch, in the app's registry key. Unset means on.
+/// The Settings switch, in the app's registry key. Unset means off: the app
+/// never stays behind unless the user chose it.
 const KEEP_IN_TRAY: &str = "KeepInTray";
 
 fn enabled() -> bool {
-    startup::flag(KEEP_IN_TRAY, true)
+    startup::flag(KEEP_IN_TRAY, false)
 }
 
 /// Whether closing the window should hide it to the tray instead of quitting.
-pub fn keep_running(app: &AppHandle) -> bool {
-    enabled() && app.state::<PasswordsState>().has_vault()
+pub fn keep_running() -> bool {
+    enabled()
 }
 
 /// Brings the main window back, from the tray or from hiding.
@@ -105,7 +105,7 @@ pub fn remove(app: &AppHandle) {
 
 /// On start: the icon is there whenever closing would keep the app running.
 pub fn init(app: &AppHandle) {
-    if keep_running(app) {
+    if keep_running() {
         let _ = ensure(app);
     }
 }
@@ -118,7 +118,7 @@ pub fn tray_get() -> bool {
 #[tauri::command]
 pub fn tray_set(app: AppHandle, enabled: bool) -> Result<(), String> {
     startup::set_flag(KEEP_IN_TRAY, enabled)?;
-    if keep_running(&app) {
+    if keep_running() {
         ensure(&app).map_err(|e| e.to_string())
     } else {
         remove(&app);

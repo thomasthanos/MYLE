@@ -34,6 +34,29 @@ pub fn launched_at_sign_in() -> bool {
     std::env::args().any(|arg| arg == "--autostart")
 }
 
+/// What the user chose for starting with Windows, as Settings and the setup
+/// remember it; `None` on an install from before it was remembered.
+fn chosen_state() -> Option<u32> {
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(key())
+        .and_then(|key| key.get_value::<u32, _>(STARTUP_STATE))
+        .ok()
+}
+
+/// Keeps the Startup folder to the user's choice: with starting with Windows
+/// switched off, a shortcut of ours found there (put back by an older setup,
+/// or copied in) goes. `true` when this very start came from such a shortcut:
+/// it ends here, unseen.
+pub fn respect_choice() -> bool {
+    if chosen_state() != Some(STATE_OFF) {
+        return false;
+    }
+    for link in startup_links() {
+        let _ = std::fs::remove_file(link);
+    }
+    launched_at_sign_in()
+}
+
 /// A yes/no setting in the app's registry key; `default` when unset.
 pub(crate) fn flag(name: &str, default: bool) -> bool {
     RegKey::predef(HKEY_CURRENT_USER)

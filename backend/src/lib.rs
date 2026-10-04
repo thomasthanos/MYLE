@@ -151,7 +151,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
         // user chose to have it open at sign-in. With the tray icon, out of
         // the way means there; otherwise minimized in the taskbar.
         let quietly = startup::launched_at_sign_in() && startup::start_minimized();
-        if quietly && tray::keep_running(app) {
+        if quietly && tray::keep_running() {
             let _ = tray::ensure(app);
         } else {
             main.show()?;
@@ -170,6 +170,10 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // Started at sign-in although starting with Windows is switched off.
+    if startup::respect_choice() {
+        return;
+    }
     if let Err(error) = storage::prepare() {
         eprintln!("Application-data migration failed: {error}");
     }
@@ -263,9 +267,9 @@ pub fn run() {
                 // Closing the splash (Alt+F4) before the main window is shown
                 // would leave a hidden, running app behind, so quit instead.
                 "splash" => window.app_handle().exit(0),
-                // With a password vault, the app keeps running in the tray so
-                // Ctrl+Shift+L and browser filling keep working.
-                "main" if tray::keep_running(window.app_handle()) => {
+                // "Keep running in the tray" on: the app stays next to the
+                // clock, so Ctrl+Shift+L and browser filling keep working.
+                "main" if tray::keep_running() => {
                     api.prevent_close();
                     let _ = tray::ensure(window.app_handle());
                     let _ = window.hide();
