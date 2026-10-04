@@ -1,4 +1,4 @@
-//! Keeps the vault the same on every PC signed in to the account.
+//! Keeps the vault the same on every device signed in to the account.
 //!
 //! The account (Supabase) holds the vault's header in `password_vault` and
 //! one row per entry in `password_items`, only ever as ciphertext
@@ -11,12 +11,11 @@
 use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde_json::json;
-use tauri::AppHandle;
 
-use super::PasswordsState;
-use super::vault::{Record, RemoteHeader, RemoteItem};
-use crate::account::{self, Cloud};
-use crate::download::err;
+use crate::VaultCell;
+use crate::account::Cloud;
+use crate::http::err;
+use crate::vault::{Record, RemoteHeader, RemoteItem};
 
 const PAGE: usize = 1000;
 
@@ -170,8 +169,9 @@ async fn push_item(cloud: &Cloud, record: &Record) -> Result<bool, String> {
 
 /// One full pass. Safe to run at any time; while locked it still sends and
 /// receives, and merges what needs the key once unlocked.
-pub async fn run(app: &AppHandle, state: &PasswordsState) -> Result<SyncResult, String> {
-    let Some(cloud) = account::cloud(app).await? else {
+/// `cloud`: `None` when nobody is signed in.
+pub async fn run(cloud: Option<Cloud>, state: &VaultCell) -> Result<SyncResult, String> {
+    let Some(cloud) = cloud else {
         return Ok(SyncResult::SignedOut);
     };
     let remote = get_header(&cloud).await?;
@@ -227,8 +227,8 @@ pub async fn run(app: &AppHandle, state: &PasswordsState) -> Result<SyncResult, 
 }
 
 /// The user chose the account's vault over the one on this PC.
-pub async fn use_account_vault(app: &AppHandle, state: &PasswordsState) -> Result<(), String> {
-    let cloud = account::cloud(app).await?.ok_or("You are not signed in.")?;
+pub async fn use_account_vault(cloud: Option<Cloud>, state: &VaultCell) -> Result<(), String> {
+    let cloud = cloud.ok_or("You are not signed in.")?;
     let header = get_header(&cloud).await?.ok_or("Your account has no password vault.")?;
     let items = get_items(&cloud).await?;
     state.with_quiet(|vault| vault.adopt(header, items))

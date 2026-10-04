@@ -1,0 +1,40 @@
+[package]
+name = "myle-vault"
+version = "1.0.0"
+description = "MYLE's password vault: shared by the Windows app and MYLE Passwords for phones"
+authors = ["ThomasThanos"]
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+hmac = "0.13"
+sha1 = "0.11"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+psl = "2"
+rqrr = { version = "0.11", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["net", "time", "sync"] }
+# TLS comes from the app: Windows' own (native-tls) in the Windows app, and
+# rustls on phones (below).
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "http2"] }
+
+# Android's own certificate check needs Java set up first: Mozilla's root
+# certificates instead.
+[target.'cfg(target_os = "android")'.dependencies]
+webpki-root-certs = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+png = "0.18"
+qrcode = { version = "0.14.1", default-features = false }

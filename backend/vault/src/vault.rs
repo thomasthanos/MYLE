@@ -327,7 +327,7 @@ impl Vault {
     /// is shown once and never stored.
     pub fn create(&mut self, master: &str, kdf: KdfParams) -> Result<Zeroizing<String>, String> {
         if self.file.is_some() {
-            return Err("There is already a vault on this PC.".into());
+            return Err("There is already a vault on this device.".into());
         }
         let vault_key = Key::random();
         let master_key = crypto::derive(master, &kdf)?;

@@ -1,30 +1,17 @@
-//! Sign-in in the user's own browser (RFC 8252): PKCE plus a one-shot
-//! loopback server that receives Supabase's redirect.
+//! Sign-in in the user's own browser (RFC 8252): a one-shot loopback
+//! server that receives Supabase's redirect (PKCE: `myle_vault::account`).
 //!
 //! The browser, not a webview, shows the provider's page: Google refuses
 //! embedded browsers, and the user is usually signed in there already.
 
-use base64::Engine;
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use uuid::Uuid;
 
 /// What came back from the provider on the redirect.
 #[derive(Debug, PartialEq)]
 pub enum Callback {
     Code(String),
     Error(String),
-}
-
-/// A random PKCE verifier and its S256 challenge.
-pub fn pkce_pair() -> (String, String) {
-    // Two v4 UUIDs: 64 characters and 244 random bits, within the 43-128
-    // characters RFC 7636 allows.
-    let verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(Sha256::digest(verifier.as_bytes()));
-    (verifier, challenge)
 }
 
 /// Listens on `localhost:<port>`, both IPv4 and IPv6: browsers try either.
@@ -195,17 +182,6 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_challenge_is_the_s256_of_the_verifier() {
-        let (verifier, challenge) = pkce_pair();
-        assert_eq!(verifier.len(), 64);
-        assert!(verifier.chars().all(|c| c.is_ascii_hexdigit()));
-        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(Sha256::digest(verifier.as_bytes()));
-        assert_eq!(challenge, expected);
-        assert_ne!(pkce_pair().0, verifier);
-    }
 
     #[test]
     fn redirects_are_read_for_a_code_or_an_error() {

@@ -52,6 +52,7 @@ use super::PasswordsState;
 use super::hello::Consent;
 use super::passkeys;
 use super::vault::{EntryInput, Status};
+use myle_vault::sites::saved_host;
 
 /// The native messaging host's name, as the extension asks for it.
 pub const HOST_NAME: &str = "com.thomasthanos.myle";
@@ -684,15 +685,6 @@ fn page_host(url: &str) -> Option<String> {
     let host = parsed.host_str()?.trim_end_matches('.').to_lowercase();
     let local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]");
     (parsed.scheme() == "https" || parsed.scheme() == "http" && local).then_some(host)
-}
-
-pub(super) fn saved_host(value: &str) -> Option<String> {
-    let address = if value.contains("://") { value.to_string() } else { format!("https://{value}") };
-    let parsed = reqwest::Url::parse(&address).ok()?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return None;
-    }
-    Some(parsed.host_str()?.trim_end_matches('.').trim_start_matches("www.").to_lowercase())
 }
 
 /// The part of a host that one owner controls (`accounts.google.com` →

@@ -58,6 +58,7 @@ pub struct KdfParams {
 impl KdfParams {
     /// 64 MiB and 3 passes: about half a second on a typical PC, and costly
     /// to guess at scale.
+    #[allow(clippy::new_without_default, reason = "each call makes a new random salt")]
     pub fn new() -> Self {
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);

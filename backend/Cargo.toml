@@ -9,10 +9,12 @@ publish = false
 [lib]
 name = "myle_lib"
 
-# The setup and uninstaller (installer/) build with the app: one lock file,
-# one target folder. Commands run in this folder still act on the app alone.
+# The setup and uninstaller (installer/) and the Password Manager's vault
+# (vault/, shared with MYLE Passwords for phones) build with the app: one lock
+# file, one target folder. Commands run in this folder still act on the app
+# alone.
 [workspace]
-members = ["installer"]
+members = ["installer", "vault"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -22,6 +24,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+myle-vault = { path = "vault" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
@@ -63,18 +66,13 @@ windows-sys = { version = "0.61", features = [
 ] }
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
-# Password Manager: Argon2id for the master key, XChaCha20-Poly1305 for the
-# vault, and key material that is wiped from memory when dropped.
-argon2 = "0.5"
+# Password Manager (the vault itself is vault/): XChaCha20-Poly1305 for the
+# Windows Hello key, and key material that is wiped from memory when dropped.
 chacha20poly1305 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 # Windows Hello (KeyCredentialManager) for opening the password vault.
 windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell"] }
 psl = "2"
-hmac = "0.13"
-sha1 = "0.11"
-rqrr = { version = "0.11", default-features = false }
-p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 windows-future = "0.2"
 
 # Dev builds optimize the dependencies (not our crate, so rebuilds stay fast):

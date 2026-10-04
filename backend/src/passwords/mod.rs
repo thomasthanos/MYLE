@@ -5,18 +5,14 @@
 
 pub mod browser;
 mod clipboard;
-mod crypto;
-mod generator;
 mod hello;
 pub mod icons;
-mod import;
-mod passkeys;
 mod qr;
 mod session;
-mod sync;
-mod totp;
-mod vault;
 pub mod windows_fill;
+
+// The vault itself, shared with MYLE Passwords for phones.
+use myle_vault::{VaultCell, crypto, generator, import, passkeys, sync, totp, vault};
 
 pub use windows_fill::WindowsFillState;
 
@@ -52,49 +48,49 @@ static SYNCING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn sync_once(app: &AppHandle, state: &PasswordsState) -> Result<sync::SyncResult, String> {
     let _one = SYNCING.lock().await;
-    sync::run(app, state).await
+    sync::run(crate::account::cloud(app).await?, &state.cell).await
 }
 /// Larger than any real export; a guard against picking the wrong file.
 const MAX_IMPORT_BYTES: u64 = 20 * 1024 * 1024;
 const MIN_MASTER_LENGTH: usize = 10;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PasswordsState {
-    vault: Arc<Mutex<Option<Vault>>>,
+    cell: VaultCell,
     /// The file picked in "Import passwords": the only one an import reads.
     picked_import: Arc<Mutex<Option<String>>>,
 }
 
+impl Default for PasswordsState {
+    fn default() -> Self {
+        Self {
+            cell: VaultCell::new(vault_path),
+            picked_import: Arc::default(),
+        }
+    }
+}
+
 impl PasswordsState {
     fn lock(&self) -> MutexGuard<'_, Option<Vault>> {
-        self.vault.lock().unwrap_or_else(|p| p.into_inner())
+        self.cell.lock()
     }
 
     /// Runs `f` on the vault for something the user did on the vault page:
     /// the vault counts as in use and stays open longer.
     fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, String>) -> Result<T, String> {
-        self.with_quiet(|vault| {
-            let result = f(vault);
-            vault.touch();
-            result
-        })
+        self.cell.with(f)
     }
 
     /// Runs `f` on the vault, opening its file the first time. For the
     /// browser extension, the sync and other background work, which must
     /// never keep an unattended vault from locking itself.
     fn with_quiet<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, String>) -> Result<T, String> {
-        let mut slot = self.lock();
-        if slot.is_none() {
-            *slot = Some(Vault::open(vault_path()?)?);
-        }
-        f(slot.as_mut().expect("opened above"))
+        self.cell.with_quiet(f)
     }
 
     /// Whether this PC has a vault (made here or taken from the account).
     pub fn has_vault(&self) -> bool {
-        self.with_quiet(|vault| Ok(vault.status() != Status::New))
-            .unwrap_or(false)
+        self.cell.has_vault()
     }
 
     /// The same, off the async runtime: deriving a key takes a moment.
@@ -278,7 +274,7 @@ pub async fn passwords_sync(app: AppHandle, state: State<'_, PasswordsState>) ->
 #[tauri::command]
 pub async fn passwords_use_account_vault(app: AppHandle, state: State<'_, PasswordsState>) -> Result<(), String> {
     let _one = SYNCING.lock().await;
-    sync::use_account_vault(&app, &state).await
+    sync::use_account_vault(crate::account::cloud(&app).await?, &state.cell).await
 }
 
 #[derive(Serialize)]

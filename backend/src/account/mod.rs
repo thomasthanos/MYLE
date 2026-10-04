@@ -5,6 +5,8 @@
 //!   server on `localhost:5252`, the redirect that project already allows,
 //!   receives the code, which is exchanged for a session here.
 //! - The session is kept encrypted with DPAPI (`vault`) and refreshed on use.
+//!   Supabase itself (sign-in, refresh, signed-in requests) is
+//!   `myle_vault::account`, shared with MYLE Passwords for phones.
 //! - Settings live in `user_settings.data` under their own key (`DATA_KEY`),
 //!   next to whatever the old app stored there, which is left untouched.
 
@@ -13,19 +15,16 @@ pub(crate) mod vault;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Notify;
 
 use crate::download::err;
+pub use myle_vault::account::{Cloud, Profile, Provider};
+use myle_vault::account::{SUPABASE_ANON_KEY, SUPABASE_URL, Session, now, renew};
 
-const SUPABASE_URL: &str = "https://oofcywdbmhmqpowmwykz.supabase.co";
-/// The project's public anon key. It is meant to ship inside apps: row-level
-/// security limits every request to the signed-in user's own rows.
-const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vZmN5d2RibWhtcXBvd213eWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMDU5NTIsImV4cCI6MjA5ODU4MTk1Mn0.lu8JE-CfgcfPc3TaeDBFFu1nuwbihwtEgCr9wK0P9ps";
 /// Allowed as a redirect URL in the Supabase project (used by the old app).
 const REDIRECT_PORT: u16 = 5252;
 const REDIRECT_URL: &str = "http://localhost:5252";
@@ -35,44 +34,6 @@ const DATA_KEY: &str = "v7";
 const VAULT_FILE: &str = "account.bin";
 const USER_AGENT: &str = "MakeYourLifeEasier-Account";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-/// Refresh the access token when it has less than this left.
-const REFRESH_MARGIN_SECS: u64 = 60;
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum Provider {
-    Discord,
-    Google,
-}
-
-impl Provider {
-    fn id(self) -> &'static str {
-        match self {
-            Self::Discord => "discord",
-            Self::Google => "google",
-        }
-    }
-}
-
-/// Who is signed in, as the Settings page shows it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Profile {
-    pub id: String,
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub avatar_url: Option<String>,
-    pub provider: Option<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct Session {
-    access_token: String,
-    refresh_token: String,
-    /// Unix seconds.
-    expires_at: u64,
-    profile: Profile,
-}
 
 #[derive(Default)]
 struct Inner {
@@ -121,38 +82,8 @@ fn vault_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(crate::storage::roaming_dir()?.join(VAULT_FILE))
 }
 
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn client() -> Result<reqwest::Client, String> {
     crate::download::http_client(USER_AGENT)
-}
-
-/// A signed-in connection to the app's other tables (the Password
-/// Manager's), with the same token and row security as the settings.
-pub(crate) struct Cloud {
-    pub user_id: String,
-    token: String,
-    client: reqwest::Client,
-}
-
-impl Cloud {
-    /// `rest/v1/<path>` with `query` parameters.
-    pub fn url(&self, path: &str, query: &[(&str, String)]) -> Result<reqwest::Url, String> {
-        reqwest::Url::parse_with_params(&format!("{SUPABASE_URL}/rest/v1/{path}"), query).map_err(err)
-    }
-
-    pub fn request(&self, method: reqwest::Method, url: reqwest::Url) -> reqwest::RequestBuilder {
-        self.client
-            .request(method, url)
-            .header("apikey", SUPABASE_ANON_KEY)
-            .bearer_auth(&self.token)
-            .timeout(Duration::from_secs(20))
-    }
 }
 
 /// `None` when nobody is signed in.
@@ -162,11 +93,7 @@ pub(crate) async fn cloud(app: &AppHandle) -> Result<Option<Cloud>, String> {
         return Ok(None);
     }
     let session = fresh_session(app, &state).await?;
-    Ok(Some(Cloud {
-        user_id: session.profile.id,
-        token: session.access_token,
-        client: client()?,
-    }))
+    Ok(Some(Cloud::new(&session, client()?)))
 }
 
 // ---------------------------------------------------------------------------
@@ -218,13 +145,7 @@ pub fn account_cancel_sign_in(state: State<'_, AccountState>) {
 pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>) -> Result<(), String> {
     if let Some(session) = state.session(&app) {
         // Revokes the refresh token; the local sign-out happens regardless.
-        let _ = client()?
-            .post(format!("{SUPABASE_URL}/auth/v1/logout"))
-            .header("apikey", SUPABASE_ANON_KEY)
-            .bearer_auth(&session.access_token)
-            .timeout(Duration::from_secs(8))
-            .send()
-            .await;
+        myle_vault::account::logout(&client()?, &session).await;
     }
     state.store(&app, None)
 }
@@ -282,17 +203,8 @@ pub async fn account_push(
 async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String> {
     // Listen before the browser opens, so the redirect cannot arrive first.
     let loopback = oauth::Loopback::bind(REDIRECT_PORT).await?;
-    let (verifier, challenge) = oauth::pkce_pair();
-    let authorize = reqwest::Url::parse_with_params(
-        &format!("{SUPABASE_URL}/auth/v1/authorize"),
-        &[
-            ("provider", provider.id()),
-            ("redirect_to", REDIRECT_URL),
-            ("code_challenge", challenge.as_str()),
-            ("code_challenge_method", "s256"),
-        ],
-    )
-    .map_err(err)?;
+    let (verifier, challenge) = myle_vault::account::pkce_pair();
+    let authorize = myle_vault::account::authorize_url(provider, REDIRECT_URL, &challenge)?;
     tauri_plugin_opener::open_url(authorize.as_str(), None::<&str>).map_err(err)?;
 
     let callback = tokio::select! {
@@ -306,12 +218,7 @@ async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String>
         oauth::Callback::Code(code) => code,
         oauth::Callback::Error(message) => return Err(message),
     };
-    token_request(
-        "pkce",
-        serde_json::json!({ "auth_code": code, "code_verifier": verifier }),
-    )
-    .await
-    .map_err(String::from)
+    myle_vault::account::exchange_code(&client()?, &code, &verifier).await
 }
 
 /// A session with at least a minute left, refreshed (and saved) if needed.
@@ -320,129 +227,12 @@ async fn fresh_session(app: &AppHandle, state: &AccountState) -> Result<Session,
         &state.1,
         || state.session(app),
         |session| state.store(app, session),
-        |token| token_request("refresh_token", serde_json::json!({ "refresh_token": token })),
+        |token| async move {
+            let client = client().map_err(myle_vault::account::TokenError::Network)?;
+            myle_vault::account::refresh(&client, token).await
+        },
     )
     .await
-}
-
-/// `fresh_session` without the app: one refresh at a time (two at once would
-/// send the same refresh token twice), and a refusal signs out only the
-/// session it was about, never one renewed or signed in meanwhile.
-async fn renew<Refresh, Refreshing>(
-    gate: &tokio::sync::Mutex<()>,
-    current: impl Fn() -> Option<Session>,
-    store: impl Fn(Option<Session>) -> Result<(), String>,
-    refresh: Refresh,
-) -> Result<Session, String>
-where
-    Refresh: FnOnce(String) -> Refreshing,
-    Refreshing: std::future::Future<Output = Result<Session, TokenError>>,
-{
-    let fresh_enough = |session: &Session| session.expires_at > now() + REFRESH_MARGIN_SECS;
-    let session = current().ok_or("You are not signed in.")?;
-    if fresh_enough(&session) {
-        return Ok(session);
-    }
-    let _one_at_a_time = gate.lock().await;
-    // Another request may have refreshed it while this one waited.
-    let session = current().ok_or("You are not signed in.")?;
-    if fresh_enough(&session) {
-        return Ok(session);
-    }
-    let sent = session.refresh_token;
-    match refresh(sent.clone()).await {
-        Ok(fresh) => {
-            store(Some(fresh.clone()))?;
-            Ok(fresh)
-        }
-        Err(TokenError::Rejected(_)) => {
-            // Revoked, or expired after long disuse: sign out cleanly.
-            if current().is_some_and(|now| now.refresh_token == sent) {
-                store(None)?;
-            }
-            Err("Your session has expired. Sign in again.".into())
-        }
-        Err(TokenError::Network(e)) => Err(e),
-    }
-}
-
-enum TokenError {
-    /// Supabase answered and refused (4xx): the token is no good.
-    Rejected(String),
-    Network(String),
-}
-
-impl From<TokenError> for String {
-    fn from(error: TokenError) -> Self {
-        match error {
-            TokenError::Rejected(e) | TokenError::Network(e) => e,
-        }
-    }
-}
-
-async fn token_request(grant: &str, body: Value) -> Result<Session, TokenError> {
-    let response = client()
-        .map_err(TokenError::Network)?
-        .post(format!("{SUPABASE_URL}/auth/v1/token?grant_type={grant}"))
-        .header("apikey", SUPABASE_ANON_KEY)
-        .json(&body)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| TokenError::Network(e.to_string()))?;
-    let status = response.status();
-    // Busy or slow, not a verdict on the token: signing out over it would
-    // throw away a perfectly good session.
-    if matches!(
-        status,
-        reqwest::StatusCode::TOO_MANY_REQUESTS | reqwest::StatusCode::REQUEST_TIMEOUT
-    ) {
-        return Err(TokenError::Network(format!(
-            "Supabase is busy ({status}). Try again in a moment."
-        )));
-    }
-    let json: Value = response
-        .json()
-        .await
-        .map_err(|e| TokenError::Network(e.to_string()))?;
-    if status.is_client_error() {
-        let message = json
-            .get("error_description")
-            .or_else(|| json.get("msg"))
-            .or_else(|| json.get("message"))
-            .and_then(Value::as_str)
-            .unwrap_or("Supabase refused the sign-in.");
-        return Err(TokenError::Rejected(message.to_string()));
-    }
-    if !status.is_success() {
-        return Err(TokenError::Network(format!("Supabase answered {status}")));
-    }
-    session_from(&json).ok_or_else(|| TokenError::Network("Supabase sent an incomplete session.".into()))
-}
-
-fn session_from(json: &Value) -> Option<Session> {
-    let text = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_string);
-    let user = json.get("user")?;
-    let meta = user.get("user_metadata");
-    let meta_text = |key: &str| text(meta.and_then(|m| m.get(key)));
-    let expires_at = json
-        .get("expires_at")
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| now() + json.get("expires_in").and_then(Value::as_u64).unwrap_or(3600));
-    Some(Session {
-        access_token: text(json.get("access_token"))?,
-        refresh_token: text(json.get("refresh_token"))?,
-        expires_at,
-        profile: Profile {
-            id: text(user.get("id"))?,
-            name: meta_text("full_name")
-                .or_else(|| meta_text("name"))
-                .or_else(|| meta_text("user_name")),
-            email: text(user.get("email")).filter(|e| !e.is_empty()),
-            avatar_url: meta_text("avatar_url").or_else(|| meta_text("picture")),
-            provider: text(user.get("app_metadata").and_then(|m| m.get("provider"))),
-        },
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -508,97 +298,5 @@ mod tests {
         assert_eq!(iso8601(0), "1970-01-01T00:00:00Z");
         assert_eq!(iso8601(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(iso8601(1_790_462_096), "2026-09-26T22:34:56Z");
-    }
-
-    #[test]
-    fn a_discord_session_becomes_a_profile() {
-        let json = serde_json::json!({
-            "access_token": "a", "refresh_token": "r", "expires_in": 3600, "expires_at": 2_000_000_000u64,
-            "user": {
-                "id": "uuid-1", "email": "me@example.com",
-                "app_metadata": { "provider": "discord" },
-                "user_metadata": { "full_name": "Thomas", "avatar_url": "https://cdn.discordapp.com/a.png" }
-            }
-        });
-        let session = session_from(&json).unwrap();
-        assert_eq!(session.expires_at, 2_000_000_000);
-        assert_eq!(session.profile.name.as_deref(), Some("Thomas"));
-        assert_eq!(session.profile.provider.as_deref(), Some("discord"));
-        assert!(session_from(&serde_json::json!({ "access_token": "a" })).is_none());
-    }
-
-    fn session(refresh_token: &str, expires_at: u64) -> Session {
-        Session {
-            access_token: format!("access-{refresh_token}"),
-            refresh_token: refresh_token.into(),
-            expires_at,
-            profile: Profile {
-                id: "uuid-1".into(),
-                name: None,
-                email: None,
-                avatar_url: None,
-                provider: None,
-            },
-        }
-    }
-
-    #[tokio::test]
-    async fn requests_at_once_share_one_refresh() {
-        let stored = &Mutex::new(Some(session("old", 0)));
-        let gate = tokio::sync::Mutex::new(());
-        let calls = &std::sync::atomic::AtomicUsize::new(0);
-        let current = || stored.lock().unwrap().clone();
-        let store = |value| {
-            *stored.lock().unwrap() = value;
-            Ok(())
-        };
-        let refresh = |token: String| async move {
-            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert_eq!(token, "old");
-            Ok(session("new", now() + 3600))
-        };
-        let (a, b) = tokio::join!(
-            renew(&gate, current, store, refresh),
-            renew(&gate, current, store, refresh)
-        );
-        assert_eq!(a.unwrap().refresh_token, "new");
-        assert_eq!(b.unwrap().refresh_token, "new");
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn a_late_refusal_keeps_a_session_signed_in_meanwhile() {
-        let stored = &Mutex::new(Some(session("old", 0)));
-        let gate = tokio::sync::Mutex::new(());
-        let current = || stored.lock().unwrap().clone();
-        let store = |value| {
-            *stored.lock().unwrap() = value;
-            Ok(())
-        };
-        let refused = renew(&gate, current, store, |_| async move {
-            // The user signs in again while the old token is being refused.
-            *stored.lock().unwrap() = Some(session("signed-in-again", now() + 3600));
-            Err(TokenError::Rejected("invalid refresh token".into()))
-        })
-        .await;
-        assert!(refused.is_err());
-        assert_eq!(current().unwrap().refresh_token, "signed-in-again");
-
-        // Refused with nothing newer: signed out.
-        *stored.lock().unwrap() = Some(session("old", 0));
-        let refused = renew(&gate, current, store, |_| async move {
-            Err(TokenError::Rejected("invalid refresh token".into()))
-        })
-        .await;
-        assert!(refused.is_err());
-        assert!(current().is_none());
-    }
-
-    #[test]
-    fn providers_come_from_the_page_as_camel_case() {
-        let provider: Provider = serde_json::from_str("\"google\"").unwrap();
-        assert_eq!(provider.id(), "google");
-        assert!(serde_json::from_str::<Provider>("\"github\"").is_err());
     }
 }
