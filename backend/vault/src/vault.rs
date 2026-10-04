@@ -35,6 +35,23 @@ fn tombstone_aad(id: &str, revision: u64) -> String {
 /// longest wait.
 const FREE_TRIES: u32 = 3;
 const LONGEST_WAIT: Duration = Duration::from_secs(60);
+pub const MIN_MASTER_LENGTH: usize = 10;
+
+/// Whether `master` may become a master password (or a backup's password).
+pub fn check_master(master: &str) -> Result<(), String> {
+    if master.chars().count() < MIN_MASTER_LENGTH {
+        return Err(format!(
+            "Use at least {MIN_MASTER_LENGTH} characters for the master password."
+        ));
+    }
+    if crate::generator::strength(master) == crate::generator::Strength::Weak {
+        return Err(
+            "That master password is too easy to guess. Make it longer or mix in other characters."
+                .into(),
+        );
+    }
+    Ok(())
+}
 
 pub fn now() -> u64 {
     SystemTime::now()
@@ -251,13 +268,33 @@ pub struct Vault {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
-    /// No vault on this PC yet.
+    /// No vault on this device yet.
     New,
     Locked,
     Unlocked,
 }
 
+/// The vault as the page shows it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusInfo {
+    status: Status,
+    auto_lock_minutes: u32,
+    website_icons: bool,
+    /// Entries that did not open with the key; shown as a warning.
+    damaged: usize,
+}
+
 impl Vault {
+    pub fn status_info(&self) -> StatusInfo {
+        StatusInfo {
+            status: self.status(),
+            auto_lock_minutes: self.prefs().auto_lock_minutes,
+            website_icons: self.prefs().website_icons,
+            damaged: self.damaged(),
+        }
+    }
+
     pub fn open(path: PathBuf) -> Result<Self, String> {
         let file = match std::fs::read(&path) {
             Ok(bytes) => Some(

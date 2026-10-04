@@ -1,5 +1,6 @@
-// Typed bridge to the Rust vault (backend/src/passwords). The vault key never
-// comes here; a password does only when the user reveals it.
+// Typed bridge to the Rust vault (backend/src/passwords in MYLE, backend/mobile
+// in MYLE Passwords for phones: the same commands). The vault key never comes
+// here; a password does only when the user reveals it.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -158,6 +159,15 @@ export interface BrowserSetup {
   now: number;
 }
 
+/** A newer MYLE Passwords for Android. */
+export interface MobileUpdate {
+  version: string;
+  /** The release's page. */
+  notes: string;
+  /** The APK, for the browser to download. */
+  url: string;
+}
+
 export interface ImportPreview {
   path: string;
   /** The app's own backup: needs its password first. */
@@ -224,6 +234,11 @@ export interface PasswordsApi {
   useAccountVault(): Promise<void>;
   onLocked(handler: () => void): Promise<() => void>;
   onSynced(handler: (result: SyncResult) => void): Promise<() => void>;
+  /** Phones: the app went out of sight, or came back; true when the vault
+   *  was locked on the way back (away a while). */
+  appHidden(hidden: boolean): Promise<boolean>;
+  /** Phones (Android): a newer version, if there is one. */
+  updateCheck(): Promise<MobileUpdate | null>;
 }
 
 const tauriApi: PasswordsApi = {
@@ -276,6 +291,8 @@ const tauriApi: PasswordsApi = {
   useAccountVault: () => invoke("passwords_use_account_vault"),
   onLocked: (handler) => listen("passwords-locked", handler),
   onSynced: (handler) => listen<SyncResult>("passwords-synced", (event) => handler(event.payload)),
+  appHidden: (hidden) => invoke("passwords_app_hidden", { hidden }),
+  updateCheck: () => invoke("mobile_update_check"),
 };
 
 /** In a plain browser (`npx vite`): a vault in memory, to work on the page. */
@@ -500,6 +517,14 @@ function previewApi(): PasswordsApi {
     },
     async onSynced() {
       return () => {};
+    },
+    async appHidden() {
+      return false;
+    },
+    async updateCheck() {
+      return new URLSearchParams(location.search).has("update")
+        ? { version: "1.1.0", notes: "https://github.com/thomasthanos/MYLE/releases", url: "https://downloads.thomast.uk/MYLE-Passwords.apk" }
+        : null;
     },
   };
 }

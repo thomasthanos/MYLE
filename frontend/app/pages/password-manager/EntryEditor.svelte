@@ -5,11 +5,14 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import ImageUp from "@lucide/svelte/icons/image-up";
   import Plus from "@lucide/svelte/icons/plus";
+  import ScanQrCode from "@lucide/svelte/icons/scan-qr-code";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Star from "@lucide/svelte/icons/star";
   import X from "@lucide/svelte/icons/x";
   import Popover from "../../../lib/components/Popover.svelte";
+  import { MOBILE } from "../../../lib/platform";
+  import { scanner } from "../../../mobile/camera.svelte";
   import { passwordsApi as api, type AppLink, type Strength, type TotpInfo } from "./api";
   import Generator from "./Generator.svelte";
   import { passwords as p } from "./state.svelte";
@@ -48,7 +51,8 @@
   let checkTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(async () => {
-    titleInput?.focus();
+    // A phone's keyboard would cover the entry being edited.
+    if (!MOBILE || !id) titleInput?.focus();
     if (id && existing?.hasPassword) password = await api.reveal(id).catch(() => null);
   });
 
@@ -95,10 +99,11 @@
     );
   }
 
-  async function scan(from: "clipboard" | "file") {
+  async function scan(from: "clipboard" | "file" | "camera") {
     scanning = true;
     try {
-      const link = from === "clipboard" ? await api.totpScanClipboard() : await api.totpScanFile();
+      const link =
+        from === "camera" ? await scanner.readTotp() : from === "clipboard" ? await api.totpScanClipboard() : await api.totpScanFile();
       if (link) {
         totpText = link;
         totpRemoved = false;
@@ -192,7 +197,7 @@
       </button>
       <Popover align="end" bind:open={generatorOpen}>
         {#snippet trigger({ toggle })}
-          <button type="button" class="btn small" onclick={toggle}><Sparkles size={13} /> Generate</button>
+          <button type="button" class="btn small generate" title="Generate a password" onclick={toggle}><Sparkles size={13} /> <span class="label">Generate</span></button>
         {/snippet}
         {#snippet children({ close })}
           <div class="menu">
@@ -234,8 +239,12 @@
           autocomplete="off"
           spellcheck="false"
         />
-        <button type="button" class="icon-btn" title="Read a QR code you snipped or copied (Win+Shift+S)" aria-label="Paste a QR code" disabled={scanning} onclick={() => scan("clipboard")}><ClipboardPaste size={15} /></button>
-        <button type="button" class="icon-btn" title="Read a QR code from a picture" aria-label="Open a QR code picture" disabled={scanning} onclick={() => scan("file")}><ImageUp size={15} /></button>
+        {#if MOBILE}
+          <button type="button" class="icon-btn" title="Scan the QR code with the camera" aria-label="Scan a QR code" disabled={scanning} onclick={() => scan("camera")}><ScanQrCode size={17} /></button>
+        {:else}
+          <button type="button" class="icon-btn" title="Read a QR code you snipped or copied (Win+Shift+S)" aria-label="Paste a QR code" disabled={scanning} onclick={() => scan("clipboard")}><ClipboardPaste size={15} /></button>
+          <button type="button" class="icon-btn" title="Read a QR code from a picture" aria-label="Open a QR code picture" disabled={scanning} onclick={() => scan("file")}><ImageUp size={15} /></button>
+        {/if}
         {#if existing?.hasTotp}
           <button type="button" class="link-btn" onclick={() => ((totpEditing = false), (totpText = ""), checkTotp(""))}>Keep</button>
         {/if}
@@ -249,7 +258,11 @@
           {totpInfo.digits} digits every {totpInfo.period} s
         </p>
       {:else if !totpText}
-        <p class="totp-note">Paste the key, or snip the QR code (Win+Shift+S) and press <ClipboardPaste size={11} />.</p>
+        {#if MOBILE}
+          <p class="totp-note">Paste the key, or press <ScanQrCode size={11} /> and point the camera at the site's QR code.</p>
+        {:else}
+          <p class="totp-note">Paste the key, or snip the QR code (Win+Shift+S) and press <ClipboardPaste size={11} />.</p>
+        {/if}
       {/if}
     {/if}
   </div>
@@ -267,6 +280,8 @@
     <button type="button" class="add" onclick={() => (urls = [...urls, ""])}><Plus size={13} /> Another website</button>
   </div>
 
+  <!-- Filling Windows programs is MYLE's on the PC; a phone keeps the links as they are. -->
+  {#if !MOBILE}
   <div class="field apps-field">
     <span>Windows programs <small>Its full .exe path: then Ctrl+Shift+L in it fills this login</small></span>
     {#if apps.length}
@@ -294,6 +309,7 @@
       {/if}
     </div>
   </div>
+  {/if}
 
   <label class="field folder">
     <span>Folder</span>
@@ -401,6 +417,18 @@
 
   .mono {
     font-family: var(--font-mono);
+  }
+
+  /* A phone's narrow row: the generator by its icon only. */
+  :global(html.mobile) .generate {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  :global(html.mobile) .generate .label {
+    display: none;
   }
 
   .menu {

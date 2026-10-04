@@ -1,6 +1,7 @@
 // The Password Manager page's state. It lives outside the page component so
 // switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
+import { DEVICE, QUICK_UNLOCK } from "../../../lib/platform";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
 
@@ -183,7 +184,7 @@ class PasswordsState {
     try {
       if (enabled) await api.helloEnable();
       else await api.helloDisable();
-      toast.success(enabled ? "Windows Hello opens your vault on this PC now." : "Windows Hello no longer opens your vault.");
+      toast.success(enabled ? `${QUICK_UNLOCK} opens your vault on this ${DEVICE} now.` : `${QUICK_UNLOCK} no longer opens your vault.`);
     } catch (error) {
       toast.error(message(error));
     }
@@ -222,7 +223,7 @@ class PasswordsState {
       case "adopted":
         this.sync = { kind: "synced", at: Date.now(), pending: 0 };
         await this.#readStatus();
-        toast.info("Your vault from your account is on this PC now. Open it with its master password.");
+        toast.info(`Your vault from your account is on this ${DEVICE} now. Open it with its master password.`);
         return;
       case "synced":
         this.sync = { kind: "synced", at: Date.now(), pending: result.pending };
@@ -240,9 +241,10 @@ class PasswordsState {
     const ok = await confirm({
       title: "Use the vault from your account?",
       message:
-        "This PC's vault is replaced by the one in your account, which opens with its own master password. " +
-        "Entries only on this PC are lost: export a backup first if you want to keep them.",
-      confirmLabel: "Replace this PC's vault",
+        `This ${DEVICE}'s vault is replaced by the one in your account, which opens with its own master password. ` +
+        `Entries only on this ${DEVICE} are lost` +
+        (DEVICE === "PC" ? ": export a backup first if you want to keep them." : "."),
+      confirmLabel: `Replace this ${DEVICE}'s vault`,
       danger: true,
     });
     if (!ok) return;
@@ -458,7 +460,7 @@ class PasswordsState {
     if (!key) return;
     const ok = await confirm({
       title: `Delete the passkey for ${key.rpId}?`,
-      message: `${key.userName || "This account"} can no longer sign in to ${key.rpId} with it, on this PC or any PC your account syncs with. Remove it on the site too.`,
+      message: `${key.userName || "This account"} can no longer sign in to ${key.rpId} with it, on any device your account syncs with. Remove it on the site too.`,
       confirmLabel: "Delete passkey",
       danger: true,
     });
@@ -477,7 +479,7 @@ class PasswordsState {
     if (!e) return;
     const ok = await confirm({
       title: `Delete “${e.title}”?`,
-      message: "It is removed from this PC and from every PC your account syncs with.",
+      message: `It is removed from this ${DEVICE} and from every device your account syncs with.`,
       confirmLabel: "Delete",
       danger: true,
     });

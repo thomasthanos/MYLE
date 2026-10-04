@@ -14,7 +14,7 @@ name = "myle_lib"
 # file, one target folder. Commands run in this folder still act on the app
 # alone.
 [workspace]
-members = ["installer", "vault"]
+members = ["installer", "vault", "mobile"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -6,6 +6,8 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { passwordsApi as api, type Strength } from "./api";
+  import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
+  import { shell } from "../../../mobile/shell.svelte";
   import { passwords as p } from "./state.svelte";
   import StrengthMeter from "./StrengthMeter.svelte";
 
@@ -14,7 +16,7 @@
   let strength = $state<Strength>("none");
   let code = $state<string | null>(null);
   let saved = $state(false);
-  /** Also open the vault with Windows Hello on this PC. */
+  /** Also open the vault with Windows Hello (or the phone's biometrics) here. */
   let useHello = $state(true);
 
   const mismatch = $derived(confirmation.length > 0 && confirmation !== master);
@@ -44,7 +46,7 @@
       <span class="badge"><ShieldCheck size={22} /></span>
       <h2>Create your password vault</h2>
       <p>
-        Everything is encrypted on this PC with your master password before it is saved or synced. Nobody else can
+        Everything is encrypted on this {DEVICE} with your master password before it is saved or synced. Nobody else can
         read it: not the sync server, and not us.
       </p>
     </div>
@@ -65,7 +67,14 @@
       {#if mismatch}<p class="error">The two passwords are not the same.</p>{/if}
       {#if p.error}<p class="error">{p.error}</p>{/if}
       {#if p.sync.kind === "signedOut"}
-        <p class="note">Sign in on the Settings page to keep this vault on all your PCs. You can do it later too.</p>
+        {#if MOBILE}
+          <p class="note">
+            <button type="button" class="link" onclick={() => (shell.accountOpen = true)}>Sign in</button> to keep this vault
+            the same here and on your PC. You can do it later too.
+          </p>
+        {:else}
+          <p class="note">Sign in on the Settings page to keep this vault on all your PCs. You can do it later too.</p>
+        {/if}
       {/if}
       <button class="btn primary" type="submit" disabled={!ready || p.busy}>
         {#if p.busy}<LoaderCircle size={15} class="spin" /> Creating…{:else}<KeyRound size={15} /> Create vault{/if}
@@ -77,7 +86,7 @@
       <h2>Save your recovery code</h2>
       <p>
         If you ever forget your master password, this code is the <strong>only</strong> way back in. Print it or keep
-        it somewhere safe, away from this PC. It is shown only now.
+        it somewhere safe, away from this {DEVICE}. It is shown only now.
       </p>
     </div>
     <div class="code selectable" data-sensitive>{code}</div>
@@ -91,7 +100,7 @@
     {#if p.hello.available}
       <label class="saved">
         <input type="checkbox" class="check" bind:checked={useHello} />
-        Also open it with Windows Hello (PIN, fingerprint or face) on this PC.
+        {#if MOBILE}Also open it with {QUICK_UNLOCK} on this phone.{:else}Also open it with Windows Hello (PIN, fingerprint or face) on this PC.{/if}
       </label>
     {/if}
     <button class="btn primary" disabled={!saved} onclick={() => p.finishSetup(p.hello.available && useHello)}>
@@ -217,5 +226,12 @@
     gap: 10px;
     color: var(--text-2);
     font-size: 12.5px;
+  }
+
+  .note .link {
+    color: #b7bef5;
+    font-size: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 </style>

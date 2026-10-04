@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
+  import { DEVICE, MOBILE } from "../../../lib/platform";
   import SetupVault from "./SetupVault.svelte";
   import { passwords as p } from "./state.svelte";
   import UnlockVault from "./UnlockVault.svelte";
@@ -15,7 +16,9 @@
   });
 </script>
 
-<PageHeader title="Password Manager" subtitle="Your logins, encrypted on this PC before they are saved or synced." />
+{#if !MOBILE}
+  <PageHeader title="Password Manager" subtitle="Your logins, encrypted on this {DEVICE} before they are saved or synced." />
+{/if}
 
 {#if p.status === null || (p.status === "new" && !p.checkedAccount)}
   <div class="loading">
@@ -30,7 +33,8 @@
   <VaultView />
 {/if}
 
-<VerifyPasskey />
+<!-- Passkeys sign in through the browser extension, on Windows only. -->
+{#if !MOBILE}<VerifyPasskey />{/if}
 
 <style>
   .loading {

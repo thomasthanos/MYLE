@@ -30,7 +30,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::storage;
 use crypto::KdfParams;
-use vault::{EntryInput, OldPassword, Status, Summary, Vault};
+use vault::{EntryInput, OldPassword, Status, StatusInfo, Summary, Vault, check_master};
 
 /// Sent to the page when the vault locks itself.
 const LOCKED_EVENT: &str = "passwords-locked";
@@ -52,7 +52,6 @@ async fn sync_once(app: &AppHandle, state: &PasswordsState) -> Result<sync::Sync
 }
 /// Larger than any real export; a guard against picking the wrong file.
 const MAX_IMPORT_BYTES: u64 = 20 * 1024 * 1024;
-const MIN_MASTER_LENGTH: usize = 10;
 
 #[derive(Clone)]
 pub struct PasswordsState {
@@ -171,41 +170,9 @@ pub fn lock_now(app: &AppHandle) {
     }
 }
 
-fn check_master(master: &str) -> Result<(), String> {
-    if master.chars().count() < MIN_MASTER_LENGTH {
-        return Err(format!(
-            "Use at least {MIN_MASTER_LENGTH} characters for the master password."
-        ));
-    }
-    if generator::strength(master) == generator::Strength::Weak {
-        return Err(
-            "That master password is too easy to guess. Make it longer or mix in other characters."
-                .into(),
-        );
-    }
-    Ok(())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusInfo {
-    status: Status,
-    auto_lock_minutes: u32,
-    website_icons: bool,
-    /// Entries that did not open with the key; shown as a warning.
-    damaged: usize,
-}
-
 #[tauri::command(async)]
 pub fn passwords_status(state: State<'_, PasswordsState>) -> Result<StatusInfo, String> {
-    state.with(|vault| {
-        Ok(StatusInfo {
-            status: vault.status(),
-            auto_lock_minutes: vault.prefs().auto_lock_minutes,
-            website_icons: vault.prefs().website_icons,
-            damaged: vault.damaged(),
-        })
-    })
+    state.with(|vault| Ok(vault.status_info()))
 }
 
 /// A new vault. Returns the recovery code, shown to the user once.

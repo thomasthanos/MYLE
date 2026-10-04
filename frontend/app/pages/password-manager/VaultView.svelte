@@ -20,6 +20,7 @@
   import Timer from "@lucide/svelte/icons/timer";
   import Upload from "@lucide/svelte/icons/upload";
   import Popover from "../../../lib/components/Popover.svelte";
+  import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
   import { toast } from "../../../lib/toast.svelte";
   import { passwordsApi as api } from "./api";
   import EntryEditor from "./EntryEditor.svelte";
@@ -39,6 +40,7 @@
   let windowsHotkey = $state<string | null | undefined>(undefined);
 
   onMount(() => {
+    if (MOBILE) return;
     void api.windowsHotkey().then((label) => (windowsHotkey = label)).catch(() => (windowsHotkey = null));
   });
 
@@ -91,9 +93,11 @@
       {/snippet}
       {#snippet children({ close })}
         <div class="menu">
-          <button class="menu-item" onclick={() => (close(), startImport())}><Download size={15} /> Import passwords…</button>
-          <button class="menu-item" onclick={() => (close(), (dialog = { kind: "export" }))}><Upload size={15} /> Export encrypted backup…</button>
-          <button class="menu-item" onclick={() => (close(), (browserOpen = true))}><Globe size={15} /> Browser filling…</button>
+          {#if !MOBILE}
+            <button class="menu-item" onclick={() => (close(), startImport())}><Download size={15} /> Import passwords…</button>
+            <button class="menu-item" onclick={() => (close(), (dialog = { kind: "export" }))}><Upload size={15} /> Export encrypted backup…</button>
+            <button class="menu-item" onclick={() => (close(), (browserOpen = true))}><Globe size={15} /> Browser filling…</button>
+          {/if}
           <button class="menu-item" onclick={() => (close(), p.setWebsiteIcons(!p.websiteIcons))}>
             <Image size={15} /> {p.websiteIcons ? "Hide website icons" : "Show website icons"}
           </button>
@@ -101,7 +105,7 @@
           {#if p.hello.available}
             <button class="menu-item" onclick={() => (close(), p.setHello(!p.hello.enabled))}>
               <Fingerprint size={15} />
-              {p.hello.enabled ? "Stop using Windows Hello" : "Open with Windows Hello…"}
+              {p.hello.enabled ? `Stop using ${QUICK_UNLOCK}` : `Open with ${QUICK_UNLOCK}…`}
             </button>
           {/if}
           <div class="menu-label"><Timer size={11} /> Lock after</div>
@@ -115,7 +119,10 @@
         </div>
       {/snippet}
     </Popover>
-    <button class="icon-btn" title="Lock now" aria-label="Lock the vault" onclick={() => p.lock()}><Lock size={16} /></button>
+    <!-- On a phone the bar at the top has it. -->
+    {#if !MOBILE}
+      <button class="icon-btn" title="Lock now" aria-label="Lock the vault" onclick={() => p.lock()}><Lock size={16} /></button>
+    {/if}
   </div>
 
   {#if p.sync.kind === "otherVault"}
@@ -123,7 +130,7 @@
       <CloudAlert size={16} />
       <span>
         <strong>Your account holds a different password vault.</strong>
-        This PC's vault is not synced. Use the account's vault here, or keep this one only on this PC.
+        This {DEVICE}'s vault is not synced. Use the account's vault here, or keep this one only on this {DEVICE}.
       </span>
       <button class="btn small" onclick={() => p.useAccountVault()}>Use the account's vault</button>
     </div>
@@ -139,10 +146,12 @@
     </div>
   {/if}
 
-  <WindowsFill hotkey={windowsHotkey} />
+  {#if !MOBILE}
+    <WindowsFill hotkey={windowsHotkey} />
 
-  {#if windowsHotkey === null}
-    <p class="windows-hotkey-error">Filling Windows programs is off: other programs hold both Ctrl+Shift+L and Ctrl+Alt+Shift+L.</p>
+    {#if windowsHotkey === null}
+      <p class="windows-hotkey-error">Filling Windows programs is off: other programs hold both Ctrl+Shift+L and Ctrl+Alt+Shift+L.</p>
+    {/if}
   {/if}
 
   <div class="filters">
@@ -195,8 +204,13 @@
             {:else}
               <KeyRound size={24} aria-hidden="true" />
               <strong>Your vault is empty</strong>
-              <span>Add a login, or import them from your browser or another password manager.</span>
-              <button class="btn small" onclick={startImport}><Download size={13} /> Import passwords</button>
+              {#if MOBILE}
+                <span>Add a login here, or import your passwords in MYLE on your PC: they sync here.</span>
+                <button class="btn small" onclick={() => (p.panel = { kind: "edit", id: null })}><Plus size={13} /> Add login</button>
+              {:else}
+                <span>Add a login, or import them from your browser or another password manager.</span>
+                <button class="btn small" onclick={startImport}><Download size={13} /> Import passwords</button>
+              {/if}
             {/if}
           </div>
         {/each}
@@ -221,7 +235,9 @@
                 <p>{p.entries.length ? "Choose a login from the list to see its details, copy a password, or open its website." : "Add your first login, or bring existing passwords into your vault."}</p>
                 <div class="overview-actions">
                   <button class="btn primary" onclick={() => (p.panel = { kind: "edit", id: null })}><Plus size={15} /> Add login</button>
-                  {#if p.entries.length}
+                  {#if MOBILE}
+                    <!-- Import and browser filling are MYLE's on the PC. -->
+                  {:else if p.entries.length}
                     <button class="btn" onclick={() => (browserOpen = true)}><Globe size={15} /> Browser filling</button>
                   {:else}
                     <button class="btn" onclick={startImport}><Download size={15} /> Import passwords</button>
@@ -758,6 +774,44 @@
     .overview-health-items {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* A phone: rows and bars a finger can hit, whatever the screen's height. */
+  :global(html.mobile) .search,
+  :global(html.mobile) .toolbar > :global(.btn) {
+    height: 44px;
+  }
+
+  :global(html.mobile) .more {
+    width: 44px;
+    height: 44px;
+  }
+
+  :global(html.mobile) .search input {
+    font-size: 15px;
+  }
+
+  :global(html.mobile) .item {
+    min-height: 62px;
+    padding: 9px 12px;
+  }
+
+  :global(html.mobile) .text strong {
+    font-size: 15px;
+  }
+
+  :global(html.mobile) .text small {
+    font-size: 13px;
+  }
+
+  :global(html.mobile) .list-head {
+    display: none;
+  }
+
+  /* An open entry has the whole screen; "All logins" goes back. */
+  :global(html.mobile) .vault:has(.split.has-selection) > .toolbar,
+  :global(html.mobile) .vault:has(.split.has-selection) > .filters {
+    display: none;
   }
 
   /* Last, so it wins over the rules above: a big screen gets roomier rows. */

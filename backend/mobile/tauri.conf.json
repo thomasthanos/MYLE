@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MYLE Passwords",
+  "version": "1.0.0",
+  "identifier": "uk.thomast.myle.passwords",
+  "build": {
+    "frontendDist": "../target/web-mobile"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MYLE Passwords",
+        "url": "mobile.html",
+        "backgroundColor": "#0a0c12"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost",
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "mobile": [{ "scheme": ["uk.thomast.myle.passwords"], "appLink": false }]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "ThomasThanos",
+    "copyright": "© 2026 ThomasThanos",
+    "category": "Utility",
+    "shortDescription": "MYLE Passwords",
+    "icon": ["../icons/32x32.png", "../icons/128x128.png", "../icons/128x128@2x.png", "../icons/icon.ico"],
+    "iOS": {
+      "minimumSystemVersion": "15.0"
+    }
+  }
+}

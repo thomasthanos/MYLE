@@ -31,6 +31,17 @@ impl Key {
         Self(bytes)
     }
 
+    /// The key as text, for a store that keeps it safe itself (the phone's
+    /// Keychain or Keystore, behind its biometrics).
+    pub fn to_text(&self) -> Zeroizing<String> {
+        Zeroizing::new(B64.encode(self.0))
+    }
+
+    pub fn from_text(text: &str) -> Result<Self, String> {
+        let bytes = Zeroizing::new(B64.decode(text.trim()).map_err(|_| "A key is damaged.".to_string())?);
+        Self::from_slice(&bytes)
+    }
+
     fn from_slice(bytes: &[u8]) -> Result<Self, String> {
         let bytes: [u8; 32] = bytes
             .try_into()

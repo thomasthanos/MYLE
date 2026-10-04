@@ -11,6 +11,7 @@
   import LockKeyholeOpen from "@lucide/svelte/icons/lock-keyhole-open";
   import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import { passwordsApi as api, type Strength } from "./api";
+  import { QUICK_UNLOCK } from "../../../lib/platform";
   import { passwords as p } from "./state.svelte";
   import StrengthMeter from "./StrengthMeter.svelte";
 
@@ -88,9 +89,9 @@
     </span>
     <h2>Your vault is locked</h2>
     {#if p.hello.enabled}
-      <p>Open it with Windows Hello, or with your master password.</p>
+      <p>Open it with {QUICK_UNLOCK}, or with your master password.</p>
       <button class="btn primary hello" bind:this={helloButton} disabled={p.busy} onclick={unlockWithHello}>
-        {#if p.busy}<LoaderCircle size={16} class="spin" /> Waiting for Windows Hello…{:else}<Fingerprint size={16} /> Unlock with Windows Hello{/if}
+        {#if p.busy}<LoaderCircle size={16} class="spin" /> Waiting for {QUICK_UNLOCK}…{:else}<Fingerprint size={16} /> Unlock with {QUICK_UNLOCK}{/if}
       </button>
       <div class="or"><span>or</span></div>
     {:else}

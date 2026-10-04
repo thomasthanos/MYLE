@@ -4,6 +4,8 @@
   import CloudOff from "@lucide/svelte/icons/cloud-off";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { nav } from "../../../lib/nav.svelte";
+  import { DEVICE, MOBILE } from "../../../lib/platform";
+  import { shell } from "../../../mobile/shell.svelte";
   import { passwords as p } from "./state.svelte";
 
   let now = $state(Date.now());
@@ -19,8 +21,12 @@
 </script>
 
 {#if p.sync.kind === "signedOut"}
-  <button class="sync off" title="Sign in on the Settings page to keep your passwords on all your PCs." onclick={() => nav.go("settings")}>
-    <CloudOff size={14} /> Only on this PC
+  <button
+    class="sync off"
+    title={MOBILE ? "Sign in to keep your passwords the same here and on your PC." : "Sign in on the Settings page to keep your passwords on all your PCs."}
+    onclick={() => (MOBILE ? (shell.accountOpen = true) : nav.go("settings"))}
+  >
+    <CloudOff size={14} /> Only on this {DEVICE}
   </button>
 {:else if p.sync.kind === "syncing"}
   <span class="sync"><LoaderCircle size={14} class="spin" /> Syncing…</span>

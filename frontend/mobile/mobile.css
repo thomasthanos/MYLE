@@ -1,0 +1,61 @@
+/* MYLE Passwords on a phone: the same controls as MYLE on Windows, sized for
+   a finger, and nothing a desktop webview would do on a touch. */
+
+html.mobile {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* No double-tap zoom: taps answer at once. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+html.mobile body {
+  font-size: 15px;
+}
+
+/* The screen's height exactly: only the list and the entry scroll, never the
+   page under the bar at the top. */
+html.mobile #app {
+  height: 100%;
+}
+
+/* Fingers, not a pointer: at least 40-44 px to hit. */
+html.mobile .btn {
+  height: 42px;
+  padding-inline: 14px;
+}
+
+html.mobile .btn.small {
+  height: 36px;
+}
+
+html.mobile .icon-btn {
+  width: 40px;
+  height: 40px;
+}
+
+html.mobile .chip {
+  height: 36px;
+  padding-inline: 13px;
+}
+
+html.mobile .input {
+  height: 44px;
+  font-size: 15px;
+}
+
+html.mobile .menu-item {
+  min-height: 46px;
+  font-size: 14.5px;
+}
+
+/* While the camera reads a QR code it shows behind the page: everything
+   but the scanner's frame goes see-through. */
+html.mobile.scanning,
+html.mobile.scanning body {
+  background: transparent !important;
+}
+
+html.mobile.scanning #app > :not(.scanner) {
+  visibility: hidden;
+}
