@@ -7,6 +7,7 @@
     "extensionUrl": "https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca"
   },
   "scripts": {
+    "tauri": "tauri",
     "dev": "tauri dev",
     "web:mobile": "vite build --mode mobile",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-setup.ps1",

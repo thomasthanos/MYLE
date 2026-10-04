@@ -126,6 +126,12 @@ jobs:
           rm -f "$key"
           "$tools/apksigner" verify --print-certs out/MYLE-Passwords.apk
           unzip -l out/MYLE-Passwords.apk | grep 'lib/.*\.so'
+          # The sign-in comes back through this link.
+          manifest=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml out/MYLE-Passwords.apk)
+          echo "$manifest" | grep -E 'package=|versionCode|versionName|allowBackup|scheme' || true
+          if ! echo "$manifest" | grep -q ':scheme([^)]*)="uk.thomast.myle.passwords"'; then
+            echo "::warning::The APK's manifest shows no uk.thomast.myle.passwords scheme"
+          fi
           if ! unzip -l out/MYLE-Passwords.apk | grep -q 'lib/arm64-v8a/libmyle_passwords_lib.so'; then
             echo "::error::The APK has no arm64 library"
             exit 1
