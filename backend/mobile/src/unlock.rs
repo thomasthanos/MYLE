@@ -153,7 +153,11 @@ mod store {
         app.biometry()
             .authenticate(reason.into(), AuthOptions {
                 title: Some("MYLE Passwords".into()),
-                ..AuthOptions::default()
+                subtitle: None,
+                allow_device_credential: Some(false),
+                confirmation_required: Some(false),
+                cancel_title: Some("Cancel".into()),
+                fallback_title: None,
             })
             .map_err(|e| e.to_string())
     }
