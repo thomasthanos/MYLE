@@ -33,8 +33,8 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(
-        tauri::plugin::Builder::new("installer")
-            .setup(|app, api| {
+        tauri::plugin::Builder::<tauri::Wry, ()>::new("installer")
+            .setup(|app, api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
                 let handle = api.register_android_plugin("uk.thomast.myle.passwords", "InstallerPlugin")?;
                 app.manage(InstallerPlugin(handle));
                 Ok(())
