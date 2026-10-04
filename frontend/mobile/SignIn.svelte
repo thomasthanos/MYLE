@@ -10,8 +10,8 @@
   <div class="waiting" role="status">
     <LoaderCircle size={18} class="spin" />
     <span>
-      <strong>Continue in your browser</strong>
-      <small>Finish signing in with {names[account.signingIn]}; it comes back here by itself.</small>
+      <strong>Signing in with {names[account.signingIn]}…</strong>
+      <small>Finish on {names[account.signingIn]}'s page; it closes and comes back here by itself.</small>
     </span>
     <button class="btn small" onclick={() => account.cancelSignIn()}>Cancel</button>
   </div>

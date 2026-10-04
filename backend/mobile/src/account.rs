@@ -1,9 +1,11 @@
-//! The account on the phone: sign-in with Discord or Google in the browser,
-//! which comes back to the app through its own link (`REDIRECT_URL`), and
-//! the session kept in the app's own folder, which only this app can read.
+//! The account on the phone: sign-in with Discord or Google inside the app
+//! (iOS's sign-in sheet, Android's Custom Tab: `tauri-plugin-myle-mobile`),
+//! which comes back to the app's own address (`REDIRECT_URL`), and the
+//! session kept in the app's own folder, which only this app can read.
 //!
-//! The sign-in waiting for the browser is kept on disk too: iOS may end the
-//! app while the browser is in front, and the link then starts it again.
+//! On Android the page comes back as a link to the app. The sign-in waiting
+//! for it is kept on disk too: Android may end the app while the page is in
+//! front, and the link then starts it again.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,11 +16,13 @@ use myle_vault::http::err;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Url};
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_myle_mobile::{CANCELLED, MobileExt};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::oneshot;
 
 /// Must be among the Supabase project's Redirect URLs.
 pub const REDIRECT_URL: &str = "uk.thomast.myle.passwords://auth-callback";
+const SCHEME: &str = "uk.thomast.myle.passwords";
 const SESSION_FILE: &str = "account.json";
 const PENDING_FILE: &str = "sign-in.json";
 /// A sign-in older than this is not finished by a late return.
@@ -42,6 +46,9 @@ struct Inner {
     session: Option<Session>,
     loaded: bool,
     waiting: Option<Waiter>,
+    /// The page came back and the sign-in is being finished: closing the
+    /// sign-in page now is no reason to cancel it.
+    returning: bool,
 }
 
 #[derive(Clone)]
@@ -172,8 +179,13 @@ fn returned(app: &AppHandle, url: Url) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AccountState>();
+        state.lock().returning = true;
         let result = finish(&state, &url).await;
-        let waiting = state.lock().waiting.take();
+        let waiting = {
+            let mut inner = state.lock();
+            inner.returning = false;
+            inner.waiting.take()
+        };
         let unheard = match waiting {
             Some(waiter) => waiter.send(result).err(),
             None => Some(result),
@@ -234,7 +246,23 @@ pub fn account_profile(state: State<'_, AccountState>) -> Option<Profile> {
     state.session().map(|session| session.profile)
 }
 
-/// Signs in with the provider in the browser and returns who signed in.
+/// Ends the sign-in waiting for its page, unless the page came back and it
+/// is being finished.
+fn cancel(state: &AccountState) {
+    let waiter = {
+        let mut inner = state.lock();
+        if inner.returning {
+            return;
+        }
+        inner.waiting.take()
+    };
+    if let Some(waiter) = waiter {
+        let _ = waiter.send(Err("Sign-in was cancelled.".into()));
+    }
+    let _ = state.take_pending();
+}
+
+/// Signs in with the provider inside the app and returns who signed in.
 #[tauri::command]
 pub async fn account_sign_in(
     app: AppHandle,
@@ -244,26 +272,51 @@ pub async fn account_sign_in(
     let (verifier, challenge) = supabase::pkce_pair();
     let authorize = supabase::authorize_url(provider, REDIRECT_URL, &challenge)?;
     let (waiter, answer) = oneshot::channel();
-    // A new sign-in replaces one still waiting (the user came back from the
-    // browser without finishing it): that one ends as cancelled.
-    state.lock().waiting = Some(waiter);
+    {
+        // A new sign-in replaces one still waiting (the user closed its page
+        // without finishing it): that one ends as cancelled.
+        let mut inner = state.lock();
+        inner.waiting = Some(waiter);
+        inner.returning = false;
+    }
     state.save_pending(&verifier)?;
-    app.opener()
-        .open_url(authorize.as_str(), None::<&str>)
+
+    // iOS answers when the sheet closes; Android at once (its page comes
+    // back as a link, `listen`).
+    let handle = app.clone();
+    let address = authorize.to_string();
+    let shown = tauri::async_runtime::spawn_blocking(move || handle.myle_mobile().sign_in(&address, SCHEME))
+        .await
         .map_err(err)?;
+    match shown {
+        Ok(Some(back)) => returned(&app, Url::parse(&back).map_err(err)?),
+        Ok(None) => {}
+        Err(e) if e.contains(CANCELLED) => cancel(&state),
+        // No sign-in page in the app here (Windows): the browser.
+        Err(_) => app
+            .opener()
+            .open_url(authorize.as_str(), None::<&str>)
+            .map_err(err)?,
+    }
     tokio::select! {
         answer = answer => answer.unwrap_or_else(|_| Err("Sign-in was cancelled.".into())),
-        _ = tokio::time::sleep(SIGN_IN_TIMEOUT) => Err("Sign-in timed out. Try again.".into()),
+        _ = tokio::time::sleep(SIGN_IN_TIMEOUT) => {
+            cancel(&state);
+            Err("Sign-in timed out. Try again.".into())
+        }
     }
 }
 
-/// Stops waiting for the browser.
+/// Stops waiting for the sign-in page (the user closed it, or gave up).
 #[tauri::command]
-pub fn account_cancel_sign_in(state: State<'_, AccountState>) {
-    if let Some(waiter) = state.lock().waiting.take() {
-        let _ = waiter.send(Err("Sign-in was cancelled.".into()));
+pub async fn account_cancel_sign_in(app: AppHandle, state: State<'_, AccountState>) -> Result<(), String> {
+    if state.lock().returning {
+        return Ok(());
     }
-    let _ = state.take_pending();
+    cancel(&state);
+    tauri::async_runtime::spawn_blocking(move || app.myle_mobile().cancel_sign_in())
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]

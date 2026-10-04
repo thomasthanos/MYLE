@@ -15,6 +15,11 @@ function message(error: unknown) {
 
 /** In a plain browser (`npx vite --mode mobile`): a pretend account. */
 const preview = !isTauri();
+/** Android shows the sign-in page in a Custom Tab over the app; iOS in a
+ *  sheet that answers by itself. */
+const android = /Android/i.test(navigator.userAgent);
+/** Back in the app this long without the page coming back: it was closed. */
+const CLOSED_AFTER_MS = 1500;
 const previewProfile: Profile = { id: "preview", name: "Thomas", email: "thomas@example.com", avatarUrl: null, provider: "discord" };
 
 class MobileAccount {
@@ -62,6 +67,16 @@ class MobileAccount {
   cancelSignIn() {
     if (!preview) void accountApi.cancelSignIn();
     this.signingIn = null;
+  }
+
+  /** The app is in front again. On Android, back from the sign-in tab with
+   *  no answer means the user closed it: the sign-in ends as cancelled. */
+  resumed() {
+    if (!android || !this.signingIn) return;
+    const waiting = this.signingIn;
+    setTimeout(() => {
+      if (this.signingIn === waiting && document.visibilityState === "visible") this.cancelSignIn();
+    }, CLOSED_AFTER_MS);
   }
 
   async signOut() {

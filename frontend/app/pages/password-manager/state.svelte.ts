@@ -2,10 +2,14 @@
 // switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
 import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
+import { readFlag, writeFlag } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
 
 export type Filter = "all" | "favorites" | "weak" | "reused";
+
+/** Phones: Face ID / fingerprint was offered after an unlock. */
+const QUICK_UNLOCK_OFFERED_KEY = "myle.passwords.quickUnlockOffered";
 
 /** How the vault stands with the account, for the sync indicator. */
 export type SyncView =
@@ -342,7 +346,9 @@ class PasswordsState {
       await this.refresh();
       // Merges what changed elsewhere while this PC was locked.
       this.#syncSoon();
-      if (MOBILE && this.hello.available && !this.hello.enabled) {
+      // Offered once: the menu (⋯) turns it on later.
+      if (MOBILE && this.hello.available && !this.hello.enabled && !readFlag(QUICK_UNLOCK_OFFERED_KEY, false)) {
+        writeFlag(QUICK_UNLOCK_OFFERED_KEY, true);
         void confirm({
           title: `Enable ${QUICK_UNLOCK}?`,
           message: `Open your vault with ${QUICK_UNLOCK} next time instead of typing your master password.`,

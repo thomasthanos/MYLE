@@ -2840,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "myle-passwords"
-version = "9.2.4"
+version = "9.2.5"
 dependencies = [
  "futures-util",
  "myle-vault",
@@ -2848,13 +2848,14 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",
  "tauri-plugin-biometry",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-deep-link",
+ "tauri-plugin-myle-mobile",
  "tauri-plugin-opener",
  "tokio",
  "zeroize",
@@ -5078,6 +5079,15 @@ dependencies = [
  "thiserror 2.0.20",
  "toml 1.1.6+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-myle-mobile"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

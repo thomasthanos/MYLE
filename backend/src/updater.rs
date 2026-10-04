@@ -154,6 +154,10 @@ struct GhRelease {
     body: Option<String>,
     #[serde(default)]
     assets: Vec<GhAsset>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
 #[derive(Deserialize)]
@@ -215,10 +219,21 @@ async fn check_feed(client: &reqwest::Client, current: &Version) -> Result<Updat
     evaluate_feed(current, feed)
 }
 
+/// The newest release of the Windows app (`v1.2.3`): the repository also
+/// holds MYLE Passwords' (`mobile-v1.2.3`), which may be the newest of all.
+fn windows_release(releases: Vec<GhRelease>) -> Option<GhRelease> {
+    releases.into_iter().find(|release| {
+        let tag = release.tag_name.trim();
+        !release.draft
+            && !release.prerelease
+            && tag.strip_prefix(['v', 'V']).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+    })
+}
+
 async fn check_github(client: &reqwest::Client, current: &Version) -> Result<UpdateCheck, String> {
     let response = client
         .get(format!(
-            "https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            "https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30"
         ))
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -235,13 +250,19 @@ async fn check_github(client: &reqwest::Client, current: &Version) -> Result<Upd
         });
     }
 
-    let release: GhRelease = response
+    let releases: Vec<GhRelease> = response
         .error_for_status()
         .map_err(err)?
         .json()
         .await
         .map_err(err)?;
-    evaluate(current, release)
+    match windows_release(releases) {
+        Some(release) => evaluate(current, release),
+        None => Ok(UpdateCheck::UpToDate {
+            current: current.to_string(),
+            latest: current.to_string(),
+        }),
+    }
 }
 
 #[tauri::command]
@@ -657,6 +678,21 @@ mod tests {
         assert_eq!(asset.name, "MYLE.exe");
         assert_eq!(asset.version.as_deref(), Some("1.2.0"));
         assert_eq!(asset.size, 4_200_000);
+    }
+
+    #[test]
+    fn the_phone_apps_releases_are_passed_over() {
+        let list: Vec<GhRelease> = serde_json::from_value(serde_json::json!([
+            { "tag_name": "mobile-v9.2.4", "assets": [] },
+            { "tag_name": "v9.3.0-beta.1", "prerelease": true, "assets": [] },
+            { "tag_name": "v9.2.2", "body": "notes", "assets": setup_asset() },
+            { "tag_name": "v9.2.1", "assets": [] }
+        ]))
+        .unwrap();
+        assert_eq!(windows_release(list).unwrap().tag_name, "v9.2.2");
+        let only_phones: Vec<GhRelease> =
+            serde_json::from_value(serde_json::json!([{ "tag_name": "mobile-v1.0.0" }])).unwrap();
+        assert!(windows_release(only_phones).is_none());
     }
 
     #[test]

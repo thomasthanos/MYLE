@@ -17,7 +17,7 @@ const release = {
 test("Android reads the version and the APK where update.rs looks", async () => {
   const { latest } = feeds(release);
   assert.equal(latest.version, "1.2.3");
-  assert.equal(latest.android.url, "https://downloads.thomast.uk/MYLE-Passwords.apk");
+  assert.equal(latest.android.url, "https://downloads.thomast.uk/MYLE-Passwords-1.2.3.apk");
   assert.equal(latest.pubDate, "2026-10-04T12:00:00Z");
   // The app's own feed address is next to the files the feed names.
   const update = await readFile(new URL("../../backend/mobile/src/update.rs", import.meta.url), "utf8");
@@ -36,7 +36,7 @@ test("SideStore gets the IPA with the app's identity", async () => {
     buildVersion: "1.2.3",
     date: "2026-10-04",
     localizedDescription: "What's new: https://github.com/thomasthanos/MYLE/releases/tag/mobile-v1.2.3",
-    downloadURL: "https://downloads.thomast.uk/MYLE-Passwords.ipa",
+    downloadURL: "https://downloads.thomast.uk/MYLE-Passwords-1.2.3.ipa",
     size: 200,
     sha256: "bb",
     minOSVersion: MIN_IOS,

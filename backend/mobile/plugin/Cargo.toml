@@ -1,0 +1,16 @@
+[package]
+name = "tauri-plugin-myle-mobile"
+version = "1.0.0"
+description = "MYLE Passwords' own native code on phones: sign-in inside the app, installing updates, fitting the screen"
+authors = ["ThomasThanos"]
+edition = "2024"
+publish = false
+# The plugin build finds the Kotlin and Swift code through this.
+links = "tauri-plugin-myle-mobile"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

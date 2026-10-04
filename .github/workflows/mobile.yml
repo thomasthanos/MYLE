@@ -103,9 +103,6 @@ jobs:
           manifest=backend/mobile/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
           grep -n 'allowBackup\|android:scheme' "$manifest" || true
-          # Add FileProvider and native installer plugin for automatic in-app updates.
-          node scripts/patch-android.mjs
-          grep -n 'REQUEST_INSTALL_PACKAGES\|FileProvider' "$manifest" || { echo "::error::Installer patch failed"; exit 1; }
 
       - name: Build the APK
         run: npx tauri android build --apk --ci --target aarch64 --target armv7
@@ -193,6 +190,19 @@ jobs:
         run: |
           npx tauri ios init --ci
           npx tauri icon backend/icons/app-icon.svg
+          # The icon in its three looks: light (the default), dark and tinted
+          # (iOS 18+: Home Screen > Edit > Customize).
+          set=$(find backend/mobile/gen/apple -type d -name AppIcon.appiconset | head -1)
+          if [ -z "$set" ]; then
+            echo "::error::No AppIcon.appiconset in the Xcode project"
+            exit 1
+          fi
+          rm -f "$set"/*
+          cp backend/mobile/ios-icon/Contents.json "$set/"
+          for look in light dark tinted; do
+            cp "backend/icons/app-icon-$look.png" "$set/AppIcon-$look.png"
+          done
+          ls -la "$set"
 
       # Unsigned: SideStore signs it on the phone with the user's Apple ID.
       - name: Build the IPA
@@ -280,9 +290,18 @@ jobs:
             fi
             echo "Verified $FEED_BASE/$key"
           }
-          publish out/MYLE-Passwords.apk MYLE-Passwords.apk --content-type application/vnd.android.package-archive --cache-control no-cache
+          apk=(--content-type application/vnd.android.package-archive --cache-control no-cache)
+          # The app downloads this version's own file (mobile-latest.json): no
+          # cache can hand out the previous APK under that name.
+          publish out/MYLE-Passwords.apk "MYLE-Passwords-$VERSION.apk" "${apk[@]}"
+          served "MYLE-Passwords-$VERSION.apk" out/MYLE-Passwords.apk
+          # For links to "the latest APK" (the site, the README).
+          publish out/MYLE-Passwords.apk MYLE-Passwords.apk "${apk[@]}"
           served MYLE-Passwords.apk out/MYLE-Passwords.apk
-          publish out/MYLE-Passwords.ipa MYLE-Passwords.ipa --content-type application/octet-stream --cache-control no-cache
+          ipa=(--content-type application/octet-stream --cache-control no-cache)
+          publish out/MYLE-Passwords.ipa "MYLE-Passwords-$VERSION.ipa" "${ipa[@]}"
+          served "MYLE-Passwords-$VERSION.ipa" out/MYLE-Passwords.ipa
+          publish out/MYLE-Passwords.ipa MYLE-Passwords.ipa "${ipa[@]}"
           served MYLE-Passwords.ipa out/MYLE-Passwords.ipa
           publish backend/icons/icon.png myle-passwords-icon.png --content-type image/png
           publish out/sidestore.json sidestore.json --content-type application/json --cache-control no-cache
@@ -304,5 +323,5 @@ jobs:
             gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber
           else
             gh release create "${{ github.ref_name }}" "${files[@]}" \
-              --title "MYLE Passwords $VERSION" "${body[@]}" --latest
+              --title "MYLE Passwords $VERSION" "${body[@]}" --latest=false
           fi

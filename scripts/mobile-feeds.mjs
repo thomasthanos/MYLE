@@ -23,8 +23,9 @@ export function feeds({ version, tag, base, repo, apk, ipa, date = new Date() })
     version,
     notes,
     pubDate: date.toISOString().replace(/\.\d+Z$/, "Z"),
-    android: { url: `${base}/MYLE-Passwords.apk`, size: apk.size, sha256: apk.sha256 },
-    ios: { url: `${base}/MYLE-Passwords.ipa`, size: ipa.size, sha256: ipa.sha256, source: `${base}/sidestore.json` },
+    // This version's own file: no cache hands out an older APK by its name.
+    android: { url: `${base}/MYLE-Passwords-${version}.apk`, size: apk.size, sha256: apk.sha256 },
+    ios: { url: `${base}/MYLE-Passwords-${version}.ipa`, size: ipa.size, sha256: ipa.sha256, source: `${base}/sidestore.json` },
   };
   const sidestore = {
     name: "MYLE",

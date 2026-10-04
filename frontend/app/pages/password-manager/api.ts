@@ -246,9 +246,11 @@ export interface PasswordsApi {
   appHidden(hidden: boolean): Promise<boolean>;
   /** Phones (Android): a newer version, if there is one. */
   updateCheck(): Promise<MobileUpdate | null>;
-  /** Phones (Android): download update directly to app cache, cleaning old APKs. */
-  updateDownload(url: string, sha256?: string): Promise<string>;
-  /** Phones (Android): launch package installer for downloaded APK. */
+  /** Phones (Android): downloads the update into the app's own folder and
+   *  checks it; its path. One already downloaded is reused. */
+  updateDownload(update: MobileUpdate): Promise<string>;
+  /** Phones (Android): Android's installer over it. Rejects with
+   *  "allow-installs" when Android's setting for it opened instead. */
   updateInstall(path: string): Promise<void>;
   /** Phones (Android): download progress listener. */
   onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<() => void>;
@@ -306,7 +308,7 @@ const tauriApi: PasswordsApi = {
   onSynced: (handler) => listen<SyncResult>("passwords-synced", (event) => handler(event.payload)),
   appHidden: (hidden) => invoke("passwords_app_hidden", { hidden }),
   updateCheck: () => invoke("mobile_update_check"),
-  updateDownload: (url, sha256) => invoke("mobile_update_download", { url, sha256 }),
+  updateDownload: (update) => invoke("mobile_update_download", { update }),
   updateInstall: (path) => invoke("mobile_update_install", { path }),
   onUpdateProgress: (handler) => listen<UpdateProgress>("mobile://update-progress", (event) => handler(event.payload)),
 };
@@ -543,7 +545,8 @@ function previewApi(): PasswordsApi {
         : null;
     },
     async updateDownload() {
-      return "/cache/updates/MYLE-Passwords-latest.apk";
+      await wait(900);
+      return "/cache/updates/MYLE-Passwords-9.9.9.apk";
     },
     async updateInstall() {},
     async onUpdateProgress() {

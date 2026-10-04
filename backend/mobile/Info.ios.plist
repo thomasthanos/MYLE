@@ -19,47 +19,5 @@
 	<string>To open your password vault with Face ID.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>CFBundleIcons</key>
-	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>app-icon-dark</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<true/>
-			</dict>
-			<key>glass</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>app-icon-glass</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<true/>
-			</dict>
-			<key>light</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>app-icon-light</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<true/>
-			</dict>
-			<key>tinted</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>app-icon-tinted</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<true/>
-			</dict>
-		</dict>
-	</dict>
 </dict>
 </plist>

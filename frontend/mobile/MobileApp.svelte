@@ -2,19 +2,13 @@
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { onBackButtonPress } from "@tauri-apps/api/app";
-  import { openUrl } from "@tauri-apps/plugin-opener";
-  import CircleCheck from "@lucide/svelte/icons/circle-check";
-  import Download from "@lucide/svelte/icons/download";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Lock from "@lucide/svelte/icons/lock";
   import UserRound from "@lucide/svelte/icons/user-round";
-  import X from "@lucide/svelte/icons/x";
   import ConfirmHost from "../lib/components/ConfirmHost.svelte";
   import Logo from "../lib/components/Logo.svelte";
   import Toaster from "../lib/components/Toaster.svelte";
-  import { toast } from "../lib/toast.svelte";
   import { confirmState } from "../lib/confirm.svelte";
-  import { passwordsApi as api, type MobileUpdate } from "../app/pages/password-manager/api";
+  import { passwordsApi as api } from "../app/pages/password-manager/api";
   import PasswordManager from "../app/pages/password-manager/PasswordManager.svelte";
   import { passwords as p } from "../app/pages/password-manager/state.svelte";
   import AccountSheet from "./AccountSheet.svelte";
@@ -22,17 +16,14 @@
   import Scanner from "./Scanner.svelte";
   import { scanner } from "./camera.svelte";
   import { shell } from "./shell.svelte";
+  import UpdateBanner from "./UpdateBanner.svelte";
+  import { updater } from "./updater.svelte";
   import Welcome from "./Welcome.svelte";
 
   /** This phone has a vault: null until known. */
   let hasVault = $state<boolean | null>(null);
   /** The user chose a vault on this phone only, without an account. */
   let local = $state(false);
-  let update = $state<MobileUpdate | null>(null);
-  let updateState = $state<"available" | "downloading" | "ready" | "error">("available");
-  let downloadPercent = $state(0);
-  let downloadedPath = $state<string | null>(null);
-  let updateErrorMsg = $state<string | null>(null);
   /** Out of sight: the page is covered, so the app switcher's picture of
    *  it shows no passwords. */
   let away = $state(false);
@@ -48,7 +39,7 @@
         p.pageOpened();
       })
       .catch(() => (hasVault = true));
-    void checkForUpdates();
+    void updater.check();
 
     const onVisibility = () => void visibilityChanged(document.visibilityState === "hidden");
     document.addEventListener("visibilitychange", onVisibility);
@@ -59,61 +50,14 @@
     };
   });
 
-  async function checkForUpdates() {
-    try {
-      const found = await api.updateCheck();
-      if (found) {
-        update = found;
-        if (updateState !== "ready") {
-          updateState = "available";
-        }
-      }
-    } catch {}
-  }
-
-  async function startUpdateDownload() {
-    if (!update) return;
-    updateState = "downloading";
-    downloadPercent = 0;
-    updateErrorMsg = null;
-
-    let unlisten: (() => void) | undefined;
-    try {
-      unlisten = await api.onUpdateProgress((p) => {
-        if (p.total > 0) {
-          downloadPercent = Math.min(100, Math.round((p.downloaded / p.total) * 100));
-        }
-      });
-      const path = await api.updateDownload(update.url, update.sha256);
-      downloadedPath = path;
-      downloadPercent = 100;
-      updateState = "ready";
-      await triggerInstall(path);
-    } catch (err: unknown) {
-      updateState = "error";
-      updateErrorMsg = err instanceof Error ? err.message : String(err);
-      toast.error("Update download failed. You can retry or download via browser.");
-    } finally {
-      unlisten?.();
-    }
-  }
-
-  async function triggerInstall(path: string | null) {
-    if (!path) return;
-    try {
-      await api.updateInstall(path);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Install error: ${msg}`);
-    }
-  }
-
   async function visibilityChanged(hidden: boolean) {
     if (hidden) {
       away = true;
       void api.appHidden(true).catch(() => {});
       return;
     }
+    // Back from Android's sign-in tab without signing in (closed).
+    account.resumed();
     const locked = await api.appHidden(false).catch(() => false);
     if (locked) {
       // Face ID or the fingerprint asks at once, as on opening the app.
@@ -122,9 +66,7 @@
     }
     away = false;
     if (p.status === "unlocked" || locked) void p.syncNow();
-    if (!update || updateState === "available" || updateState === "error") {
-      void checkForUpdates();
-    }
+    updater.resumed();
   }
 
   /** Android's back button: closes what is open, then goes back a step;
@@ -162,48 +104,7 @@
     {/if}
   </header>
 
-  {#if update}
-    <div class="update" role="status">
-      <div class="update-row">
-        <span class="update-msg">
-          {#if updateState === "downloading"}
-            Downloading v{update.version}... {downloadPercent}%
-          {:else if updateState === "ready"}
-            v{update.version} ready to install.
-          {:else if updateState === "error"}
-            {updateErrorMsg || "Update download failed."}
-          {:else}
-            MYLE Passwords {update.version} is out.
-          {/if}
-        </span>
-
-        {#if updateState === "available"}
-          <button class="btn small primary" onclick={startUpdateDownload}>
-            <Download size={14} /> Update
-          </button>
-        {:else if updateState === "downloading"}
-          <span class="spinner"><LoaderCircle size={15} class="spin" /></span>
-        {:else if updateState === "ready"}
-          <button class="btn small primary" onclick={() => void triggerInstall(downloadedPath)}>
-            <CircleCheck size={14} /> Install
-          </button>
-        {:else if updateState === "error"}
-          <button class="btn small secondary" onclick={startUpdateDownload}>Retry</button>
-          <button class="btn small ghost" title="Download via browser" onclick={() => void openUrl(update!.url)}>
-            Browser
-          </button>
-        {/if}
-
-        <button class="icon-btn" aria-label="Later" onclick={() => (update = null)}><X size={15} /></button>
-      </div>
-
-      {#if updateState === "downloading"}
-        <div class="progress-track" aria-hidden="true">
-          <div class="progress-fill" style="width: {downloadPercent}%"></div>
-        </div>
-      {/if}
-    </div>
-  {/if}
+  <UpdateBanner />
 
   <main>
     {#if !account.loaded || hasVault === null}
@@ -252,65 +153,6 @@
 
   .account.signed-in {
     color: #8fe3b6;
-  }
-
-  .update {
-    display: flex;
-    flex-direction: column;
-    flex: none;
-    gap: 8px;
-    padding: 8px 12px 8px 16px;
-    background: rgb(var(--accent-rgb) / 0.14);
-    border-bottom: 1px solid rgb(var(--accent-rgb) / 0.2);
-    font-size: 13.5px;
-  }
-
-  .update-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .update-msg {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 500;
-  }
-
-  .progress-track {
-    width: 100%;
-    height: 4px;
-    border-radius: 2px;
-    background: rgb(255 255 255 / 0.12);
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.15s ease-out;
-  }
-
-  .spinner {
-    display: inline-flex;
-    align-items: center;
-    color: var(--accent);
-  }
-
-  :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   main {

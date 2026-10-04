@@ -1,17 +1,28 @@
 //! A newer MYLE Passwords for Android: `mobile-latest.json` next to the
 //! Windows app's feed (published by `.github/workflows/mobile.yml`).
-//! The app downloads the APK directly in-app, verifies its SHA-256 hash,
-//! deletes any old APK files to keep device storage clean, and triggers the
-//! Android Package Installer over this one (same signing key).
+//!
+//! The app downloads the APK itself into its own cache folder (no browser,
+//! nothing left in Downloads), checks its SHA-256 against the feed, and
+//! opens Android's installer over it (`tauri-plugin-myle-mobile`); Android
+//! installs it over this one because both are signed with the same key.
+//! Each version has its own address, so no cache anywhere can hand out the
+//! previous APK, and an update already downloaded is not downloaded again.
 //! iPhones get theirs through the SideStore source.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_myle_mobile::{ALLOW_INSTALLS, MobileExt};
 
 pub const FEED: &str = "https://downloads.thomast.uk/mobile-latest.json";
+/// Sent while an update downloads: `UpdateProgress`.
+const PROGRESS_EVENT: &str = "mobile://update-progress";
+const USER_AGENT: &str = "MYLE-Passwords-Updater";
 
 #[derive(Deserialize)]
 struct Feed {
@@ -23,16 +34,19 @@ struct Feed {
 #[derive(Deserialize)]
 struct Asset {
     url: String,
+    #[serde(default)]
     size: Option<u64>,
+    #[serde(default)]
     sha256: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Update {
     pub version: String,
+    /// The release's page.
     pub notes: String,
-    /// The APK URL.
+    /// The APK.
     pub url: String,
     pub size: Option<u64>,
     pub sha256: Option<String>,
@@ -40,54 +54,67 @@ pub struct Update {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateProgress {
-    pub downloaded: u64,
-    pub total: u64,
+struct UpdateProgress {
+    downloaded: u64,
+    total: u64,
 }
 
-/// Directory where in-app update APKs are stored and managed.
-fn update_dir(app: &AppHandle) -> Option<PathBuf> {
-    let base = app
+/// The app's own folder for downloaded updates (inside its cache, which the
+/// template's FileProvider shares with Android's installer).
+fn update_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
         .path()
         .app_cache_dir()
-        .or_else(|_| app.path().cache_dir())
-        .ok()?;
-    Some(base.join("updates"))
+        .map_err(|e| e.to_string())?
+        .join("updates"))
 }
 
-/// Deletes all leftover update APKs in the app cache and tries cleaning public Downloads.
-pub fn cleanup_old_updates(app: &AppHandle) {
-    if let Some(dir) = update_dir(app) {
-        clean_dir_apks(&dir);
-    }
+fn apk_name(version: &str) -> String {
+    format!("MYLE-Passwords-{version}.apk")
+}
 
-    // Best-effort cleanup of any leftover APKs in Android's public Downloads directory
-    #[cfg(target_os = "android")]
-    {
-        for path in [
-            "/storage/emulated/0/Download/MYLE-Passwords.apk",
-            "/sdcard/Download/MYLE-Passwords.apk",
-        ] {
+/// The version an APK in the update folder is for.
+fn apk_version(path: &Path) -> Option<semver::Version> {
+    let name = path.file_name()?.to_str()?;
+    semver::Version::parse(name.strip_prefix("MYLE-Passwords-")?.strip_suffix(".apk")?).ok()
+}
+
+/// At start: removes the updates that are installed now (or older), and
+/// anything left half downloaded. A newer one, not installed yet, stays.
+pub fn cleanup_old_updates(app: &AppHandle) {
+    if let Ok(dir) = update_dir(app) {
+        remove_installed(&dir, &app.package_info().version);
+    }
+}
+
+fn remove_installed(dir: &Path, current: &semver::Version) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let stale = match apk_version(&path) {
+            Some(version) => version <= *current,
+            None => true,
+        };
+        if stale && path.is_file() {
             let _ = std::fs::remove_file(path);
         }
-        for i in 1..=5 {
-            let _ = std::fs::remove_file(format!("/storage/emulated/0/Download/MYLE-Passwords ({i}).apk"));
-            let _ = std::fs::remove_file(format!("/sdcard/Download/MYLE-Passwords ({i}).apk"));
-        }
     }
 }
 
-fn clean_dir_apks(dir: &Path) {
-    if !dir.exists() {
-        return;
-    }
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "apk") {
-                let _ = std::fs::remove_file(path);
-            }
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn sha256_of(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            return Some(hex(&hasher.finalize()));
         }
+        hasher.update(&buffer[..read]);
     }
 }
 
@@ -97,7 +124,7 @@ pub async fn mobile_update_check(app: AppHandle) -> Result<Option<Update>, Strin
     if !cfg!(target_os = "android") {
         return Ok(None);
     }
-    let feed: Feed = myle_vault::http::client("MYLE-Passwords-Updater")?
+    let feed: Feed = myle_vault::http::client(USER_AGENT)?
         .get(FEED)
         .header("Cache-Control", "no-cache")
         .send()
@@ -111,95 +138,85 @@ pub async fn mobile_update_check(app: AppHandle) -> Result<Option<Update>, Strin
     Ok(newer(&app.package_info().version, feed))
 }
 
-/// Downloads the APK directly into app cache, emits progress, verifies SHA-256,
-/// and removes all previous APKs so storage is never wasted.
+/// Downloads the update into the app's own folder (sending `PROGRESS_EVENT`)
+/// and checks it; answers its path. One already downloaded is reused.
 #[tauri::command]
-pub async fn mobile_update_download(
-    app: AppHandle,
-    url: String,
-    sha256: Option<String>,
-) -> Result<String, String> {
-    let dir = update_dir(&app).ok_or_else(|| "Failed to resolve cache directory".to_string())?;
-    let _ = std::fs::create_dir_all(&dir);
-    // Delete any older APK before writing the new one
-    clean_dir_apks(&dir);
+pub async fn mobile_update_download(app: AppHandle, update: Update) -> Result<String, String> {
+    let version = semver::Version::parse(&update.version).map_err(|e| e.to_string())?;
+    let expected = update.sha256.as_deref().map(|hash| hash.trim().to_ascii_lowercase());
+    let dir = update_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let destination = dir.join(apk_name(&version.to_string()));
 
-    let destination = dir.join("MYLE-Passwords-update.apk");
+    // Downloaded before (the user stepped away from the installer).
+    if destination.is_file() && expected.is_some() && sha256_of(&destination) == expected {
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+    // Only this update's file stays.
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for path in entries.flatten().map(|entry| entry.path()) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 
-    let response = myle_vault::http::client("MYLE-Passwords-Updater")?
-        .get(&url)
+    let response = myle_vault::http::client(USER_AGENT)?
+        .get(&update.url)
         .header("Cache-Control", "no-cache")
+        .timeout(Duration::from_secs(15 * 60))
         .send()
         .await
-        .map_err(|e| format!("Download request failed: {e}"))?
+        .map_err(|e| format!("The download did not start: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("Download response error: {e}"))?;
-
-    let total = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
+        .map_err(|e| format!("The download was refused: {e}"))?;
+    let total = response.content_length().or(update.size).unwrap_or(0);
+    let partial = destination.with_extension("apk.part");
+    let mut file = std::fs::File::create(&partial).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
-    let mut file = std::fs::File::create(&destination)
-        .map_err(|e| format!("Failed to create destination file: {e}"))?;
-
+    let mut downloaded = 0u64;
+    let mut last_sent = Instant::now();
     let mut stream = response.bytes_stream();
-    let mut last_progress_emit = std::time::Instant::now();
-
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Download stream error: {e}"))?;
-        use std::io::Write;
-        file.write_all(&chunk)
-            .map_err(|e| format!("Failed writing chunk to disk: {e}"))?;
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                drop(file);
+                let _ = std::fs::remove_file(&partial);
+                return Err(format!("The download stopped: {e}"));
+            }
+        };
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
         hasher.update(&chunk);
         downloaded += chunk.len() as u64;
-
-        if last_progress_emit.elapsed() >= std::time::Duration::from_millis(80) || downloaded == total {
-            let _ = app.emit(
-                "mobile://update-progress",
-                UpdateProgress { downloaded, total },
-            );
-            last_progress_emit = std::time::Instant::now();
+        if last_sent.elapsed() >= Duration::from_millis(100) {
+            let _ = app.emit(PROGRESS_EVENT, UpdateProgress { downloaded, total });
+            last_sent = Instant::now();
         }
     }
-
-    use std::io::Write;
-    file.flush()
-        .map_err(|e| format!("Failed to flush file: {e}"))?;
+    file.flush().map_err(|e| e.to_string())?;
     drop(file);
+    let _ = app.emit(PROGRESS_EVENT, UpdateProgress { downloaded, total: total.max(downloaded) });
 
-    // Verify SHA-256 if provided
-    let calculated_hash = format!("{:x}", hasher.finalize());
-    if let Some(expected) = sha256 {
-        let expected_clean = expected.trim().to_ascii_lowercase();
-        if !expected_clean.is_empty() && calculated_hash != expected_clean {
-            let _ = std::fs::remove_file(&destination);
-            return Err("Downloaded update failed checksum verification. File was removed.".to_string());
-        }
+    let actual = hex(&hasher.finalize());
+    if expected.as_deref().is_some_and(|expected| !expected.is_empty() && expected != actual) {
+        let _ = std::fs::remove_file(&partial);
+        return Err("The downloaded update is not the published one. Try again in a moment.".into());
     }
-
-    Ok(destination.to_string_lossy().to_string())
+    std::fs::rename(&partial, &destination).map_err(|e| e.to_string())?;
+    Ok(destination.to_string_lossy().into_owned())
 }
 
-/// Triggers Android's native package installer sheet over the downloaded APK.
+/// Opens Android's installer over the downloaded update. Answers
+/// `"allow-installs"` when Android's setting for it opened instead.
 #[tauri::command]
 pub async fn mobile_update_install(app: AppHandle, path: String) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        #[derive(Serialize)]
-        struct InstallArgs {
-            path: String,
-        }
-        let handle = app.state::<crate::InstallerPlugin<tauri::Wry>>();
-        handle
-            .0
-            .run_mobile_plugin::<()>("install", InstallArgs { path })
-            .map_err(|e| e.to_string())?;
-        Ok(())
+    let inside = update_dir(&app)?;
+    if !Path::new(&path).starts_with(&inside) {
+        return Err("That is not a downloaded update.".into());
     }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (app, path);
-        Err("In-app APK installation is only supported on Android devices".into())
-    }
+    tauri::async_runtime::spawn_blocking(move || app.myle_mobile().install(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| if e.contains(ALLOW_INSTALLS) { ALLOW_INSTALLS.to_string() } else { e })
 }
 
 fn newer(current: &semver::Version, feed: Feed) -> Option<Update> {
@@ -230,8 +247,10 @@ mod tests {
     #[test]
     fn only_a_newer_apk_over_https_is_offered() {
         let current = semver::Version::new(1, 0, 0);
-        let apk = "https://downloads.thomast.uk/MYLE-Passwords.apk";
-        assert_eq!(newer(&current, feed("1.1.0", apk)).unwrap().version, "1.1.0");
+        let apk = "https://downloads.thomast.uk/MYLE-Passwords-1.1.0.apk";
+        let update = newer(&current, feed("1.1.0", apk)).unwrap();
+        assert_eq!(update.version, "1.1.0");
+        assert_eq!(update.sha256.as_deref(), Some("00"));
         assert!(newer(&current, feed("1.0.0", apk)).is_none());
         assert!(newer(&current, feed("0.9.0", apk)).is_none());
         assert!(newer(&current, feed("1.1.0", "http://example.com/x.apk")).is_none());
@@ -239,18 +258,20 @@ mod tests {
     }
 
     #[test]
-    fn clean_dir_apks_removes_only_apk_files() {
-        let temp = std::env::temp_dir().join(format!("myle_update_test_{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&temp);
-        let apk = temp.join("old.apk");
-        let txt = temp.join("keep.txt");
-        std::fs::write(&apk, b"fake apk").unwrap();
-        std::fs::write(&txt, b"keep me").unwrap();
-
-        clean_dir_apks(&temp);
-
-        assert!(!apk.exists());
-        assert!(txt.exists());
-        let _ = std::fs::remove_dir_all(&temp);
+    fn installed_updates_are_removed_and_a_newer_one_stays() {
+        let dir = std::env::temp_dir().join(format!("myle-updates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["MYLE-Passwords-9.2.4.apk", "MYLE-Passwords-9.2.5.apk", "MYLE-Passwords-9.2.6.apk", "MYLE-Passwords-9.2.6.apk.part", "old.apk"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        remove_installed(&dir, &semver::Version::new(9, 2, 5));
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["MYLE-Passwords-9.2.6.apk"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

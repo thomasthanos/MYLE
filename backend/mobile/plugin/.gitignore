@@ -1,0 +1,5 @@
+# Made by the plugin build (tauri-plugin) and by Gradle / SwiftPM.
+/android/.tauri/
+/android/build/
+/ios/.tauri/
+/ios/.build/
