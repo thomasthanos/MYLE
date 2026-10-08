@@ -2,7 +2,7 @@
   // Releasing a project: the version (synced across its files), the notes
   // (AI from the commits), checks, then build → commit → push → tag →
   // release and upload, or the tag's GitHub Actions workflow.
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Circle from "@lucide/svelte/icons/circle";
@@ -49,7 +49,8 @@
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
 
   const repoId = $derived(item.repo.id);
-  const s = $derived(gr.release(entry.id));
+  // The panel is made again for another project, so the id stays.
+  const s = gr.release(untrack(() => entry.id));
   const busy = $derived(gr.running(repoId));
 
   let info = $state<ReleaseInfo | null>(null);

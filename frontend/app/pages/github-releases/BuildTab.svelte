@@ -1,7 +1,7 @@
 <script lang="ts">
   // Building a project: the detected commands (or a typed one), a live log,
   // and a Problems panel whose items open in VS Code.
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import Copy from "@lucide/svelte/icons/copy";
   import Download from "@lucide/svelte/icons/download";
@@ -26,7 +26,8 @@
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
 
   const repoId = $derived(item.repo.id);
-  const session = $derived(gr.build(entry.id));
+  // The panel is made again for another project, so the id stays.
+  const session = gr.build(untrack(() => entry.id));
   const busy = $derived(gr.running(repoId));
 
   let info = $state<BuildInfo | null>(null);
@@ -203,6 +204,14 @@
     gap: 9px;
     min-height: 0;
     padding: 14px 16px 16px;
+    overflow-y: auto;
+  }
+
+  .bar,
+  .cmd,
+  .last,
+  .artifacts {
+    flex: none;
   }
 
   .bar {

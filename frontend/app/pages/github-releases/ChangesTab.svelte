@@ -210,7 +210,7 @@
     }
   }
 
-  let checkboxes: Record<string, HTMLInputElement> = {};
+  let checkboxes = $state<Record<string, HTMLInputElement>>({});
   let allBox = $state<HTMLInputElement>();
   $effect(() => {
     if (allBox) allBox.indeterminate = someStaged;

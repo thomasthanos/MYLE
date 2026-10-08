@@ -133,6 +133,13 @@
 </div>
 
 <style>
+  .progress,
+  .status-line,
+  .problems,
+  .log-foot {
+    flex: none;
+  }
+
   .progress {
     height: 6px;
     overflow: hidden;
@@ -189,7 +196,7 @@
   .problems {
     display: grid;
     gap: 3px;
-    max-height: 220px;
+    max-height: min(220px, 30vh);
     padding: 6px;
     overflow: auto;
     border: 1px solid rgb(255 255 255 / 0.06);
