@@ -9,8 +9,11 @@
 //!   `myle_vault::account`, shared with MYLE Passwords for phones.
 //! - Settings live in `user_settings.data` under their own key (`DATA_KEY`),
 //!   next to whatever the old app stored there, which is left untouched.
+//! - The owner-only pages (`owner`) open for a verdict this side gets from
+//!   Supabase about the signed-in user, never for anything the page says.
 
 mod oauth;
+pub(crate) mod owner;
 pub(crate) mod vault;
 
 use std::path::PathBuf;
@@ -18,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Notify;
 
 use crate::download::err;
@@ -32,6 +35,10 @@ const TABLE: &str = "user_settings";
 /// This app's settings inside the row's `data` object.
 const DATA_KEY: &str = "v7";
 const VAULT_FILE: &str = "account.bin";
+/// The owner verdict (`owner::Verdict`), sealed like the session.
+const ACCESS_FILE: &str = "account-access.bin";
+/// Tells the page that the owner-only pages opened or closed.
+pub(crate) const ACCESS_EVENT: &str = "account-access";
 const USER_AGENT: &str = "MakeYourLifeEasier-Account";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -40,6 +47,8 @@ struct Inner {
     session: Option<Session>,
     loaded: bool,
     signing_in: Option<Arc<Notify>>,
+    verdict: Option<owner::Verdict>,
+    verdict_loaded: bool,
 }
 
 /// The session, and a gate that lets one refresh run at a time.
@@ -70,10 +79,96 @@ impl AccountState {
             Some(session) => vault::save(&path, &serde_json::to_vec(session).map_err(err)?)?,
             None => vault::remove(&path),
         }
-        let mut inner = self.lock();
-        inner.session = session;
-        inner.loaded = true;
+        let was_owner = self.is_owner(app);
+        {
+            let mut inner = self.lock();
+            // A verdict is only ever about the user it was checked for.
+            let same_user = matches!(
+                (&session, &inner.verdict),
+                (Some(session), Some(verdict)) if session.profile.id == verdict.user_id
+            );
+            inner.session = session;
+            inner.loaded = true;
+            if !same_user {
+                inner.verdict = None;
+                inner.verdict_loaded = true;
+                remove_verdict();
+            }
+        }
+        self.announce(app, was_owner);
         Ok(())
+    }
+
+    /// The saved verdict, read once per run.
+    fn verdict(&self) -> Option<owner::Verdict> {
+        let mut inner = self.lock();
+        if !inner.verdict_loaded {
+            inner.verdict_loaded = true;
+            inner.verdict = access_path()
+                .ok()
+                .and_then(|path| vault::load(&path))
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+        }
+        inner.verdict.clone()
+    }
+
+    fn set_verdict(&self, app: &AppHandle, verdict: owner::Verdict) {
+        let was_owner = self.is_owner(app);
+        if let Ok(path) = access_path()
+            && let Ok(bytes) = serde_json::to_vec(&verdict)
+        {
+            let _ = vault::save(&path, &bytes);
+        }
+        {
+            let mut inner = self.lock();
+            inner.verdict = Some(verdict);
+            inner.verdict_loaded = true;
+        }
+        self.announce(app, was_owner);
+    }
+
+    /// Whether the signed-in user is the owner, by the last verdict from
+    /// Supabase. No network: the invoke handler asks this for every command.
+    pub(crate) fn is_owner(&self, app: &AppHandle) -> bool {
+        let Some(session) = self.session(app) else {
+            return false;
+        };
+        self.verdict()
+            .is_some_and(|verdict| verdict.admits(&session.profile.id, now()))
+    }
+
+    /// Tells the page when the owner-only pages open or close; on closing,
+    /// stops whatever they still run.
+    fn announce(&self, app: &AppHandle, was_owner: bool) {
+        let owner = self.is_owner(app);
+        if owner == was_owner {
+            return;
+        }
+        if !owner {
+            stop_owner_only_work(app);
+        }
+        let _ = app.emit(ACCESS_EVENT, owner);
+    }
+}
+
+/// Stops the owner-only pages' builds, releases, backups and comparisons.
+fn stop_owner_only_work(app: &AppHandle) {
+    if let Some(state) = app.try_state::<crate::github_releases::GithubReleasesState>() {
+        state.cancel_all();
+    }
+    if let Some(state) = app.try_state::<crate::project_backups::ProjectBackupsState>() {
+        state.cancel(None);
+        state.cancel_preview();
+    }
+}
+
+fn access_path() -> Result<PathBuf, String> {
+    Ok(crate::storage::roaming_dir()?.join(ACCESS_FILE))
+}
+
+fn remove_verdict() {
+    if let Ok(path) = access_path() {
+        vault::remove(&path);
     }
 }
 
@@ -96,8 +191,84 @@ pub(crate) async fn cloud(app: &AppHandle) -> Result<Option<Cloud>, String> {
     Ok(Some(Cloud::new(&session, client()?)))
 }
 
+/// Asks Supabase who the session's user is and keeps the verdict. When
+/// Supabase can't be reached, the last verdict stands (within its grace).
+async fn check_owner(app: &AppHandle, state: &AccountState, force: bool) -> bool {
+    let Some(session) = state.session(app) else {
+        return false;
+    };
+    if !force
+        && state
+            .verdict()
+            .is_some_and(|verdict| verdict.is_recent(&session.profile.id, now()))
+    {
+        return state.is_owner(app);
+    }
+    let Ok(session) = fresh_session(app, state).await else {
+        // Signed out by a refused refresh, or offline.
+        return state.is_owner(app);
+    };
+    match fetch_user(&session).await {
+        Ok(Some(user)) => {
+            let same_user =
+                user.get("id").and_then(Value::as_str) == Some(session.profile.id.as_str());
+            state.set_verdict(
+                app,
+                owner::Verdict {
+                    user_id: session.profile.id.clone(),
+                    owner: same_user && owner::is_owner(&user),
+                    checked_at: now(),
+                },
+            );
+        }
+        // Supabase refused the token: not the owner until a sign-in says so.
+        Ok(None) => state.set_verdict(
+            app,
+            owner::Verdict {
+                user_id: session.profile.id.clone(),
+                owner: false,
+                checked_at: now(),
+            },
+        ),
+        Err(_) => {}
+    }
+    state.is_owner(app)
+}
+
+/// Supabase's user object for the session (`Ok(None)`: the token was
+/// refused). Supabase checks the token; nothing here is taken on trust.
+async fn fetch_user(session: &Session) -> Result<Option<Value>, String> {
+    let response = client()?
+        .get(format!("{SUPABASE_URL}/auth/v1/user"))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .bearer_auth(&session.access_token)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(err)?;
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(format!("Supabase answered {status}"));
+    }
+    response.json().await.map(Some).map_err(err)
+}
+
 // ---------------------------------------------------------------------------
 // Commands
+
+/// Whether the owner-only pages are open. Checks with Supabase again when
+/// the last check is more than a few minutes old (or `recheck`).
+#[tauri::command]
+pub async fn account_access(
+    app: AppHandle,
+    state: State<'_, AccountState>,
+    recheck: Option<bool>,
+) -> Result<bool, String> {
+    Ok(check_owner(&app, &state, recheck.unwrap_or(false)).await)
+}
 
 /// The signed-in profile, if any. Reads the saved session; no network.
 #[tauri::command(async)]
@@ -125,6 +296,7 @@ pub async fn account_sign_in(
     let session = result?;
     let profile = session.profile.clone();
     state.store(&app, Some(session))?;
+    check_owner(&app, &state, true).await;
     // The browser has the focus now; bring the app back.
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
