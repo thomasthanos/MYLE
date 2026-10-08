@@ -1278,6 +1278,64 @@ pub async fn github_releases_release_info(entry_id: String) -> Result<ReleaseInf
     })
 }
 
+/// The newest commits of a project and how many of them came after its
+/// last release (for a clean working tree's overview).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentCommits {
+    pub commits: Vec<git::Commit>,
+    /// Commits since the last release (counted up to `UNRELEASED_LIMIT`).
+    pub unreleased: usize,
+    pub last_tag: Option<String>,
+}
+
+const RECENT_LIMIT: usize = 30;
+const UNRELEASED_LIMIT: usize = 200;
+
+#[tauri::command]
+pub async fn github_releases_recent_commits(
+    entry_id: String,
+    max: Option<usize>,
+) -> Result<RecentCommits, String> {
+    let entry = resolve(&entry_id).await?;
+    let status = git::status(&entry.root).await?;
+    if status.branch.head.is_none() {
+        return Ok(RecentCommits {
+            commits: Vec::new(),
+            unreleased: 0,
+            last_tag: None,
+        });
+    }
+    let tags = git::tags(&entry.root).await.unwrap_or_default();
+    let entry_for = entry.clone();
+    let versions =
+        blocking(move || versions::detect(&entry_for.dir, &entry_for.config.skip_version_files))
+            .await?;
+    let last_tag = project::last_tag(&tags, &entry.tag_prefix, versions.current.as_deref());
+    let max = max.unwrap_or(10).clamp(1, RECENT_LIMIT);
+    let commits = git::log(&entry.root, "HEAD", entry.sub.as_deref(), max).await?;
+    let unreleased = match &last_tag {
+        Some(tag) => git::log(
+            &entry.root,
+            &format!("{}..HEAD", tag.name),
+            entry.sub.as_deref(),
+            UNRELEASED_LIMIT,
+        )
+        .await
+        .map(|c| c.len())
+        .unwrap_or(0),
+        None => git::log(&entry.root, "HEAD", entry.sub.as_deref(), UNRELEASED_LIMIT)
+            .await
+            .map(|c| c.len())
+            .unwrap_or(0),
+    };
+    Ok(RecentCommits {
+        commits,
+        unreleased,
+        last_tag: last_tag.map(|tag| tag.name),
+    })
+}
+
 #[tauri::command]
 pub async fn github_releases_preflight(
     entry_id: String,

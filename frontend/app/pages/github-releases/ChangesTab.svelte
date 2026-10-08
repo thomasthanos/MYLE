@@ -17,6 +17,7 @@
   import DiffView from "../project-backups/DiffView.svelte";
   import type { Change } from "../project-backups/api";
   import { githubReleasesApi as api, messageOf, type ChangeKind, type FileChange, type FileDiff, type GitStatus } from "./api";
+  import CleanOverview from "./CleanOverview.svelte";
   import { githubReleases as gr, type ListItem } from "./state.svelte";
 
   let { item }: { item: ListItem } = $props();
@@ -232,6 +233,9 @@
     </div>
   {/if}
 
+  {#if git && !loadError && !changes.length}
+    <CleanOverview {item} {hidden} onShowHidden={entry?.monorepo ? () => (onlyApp = false) : undefined} />
+  {:else}
   <div class="grid">
     <section class="files">
       <div class="files-head">
@@ -348,6 +352,7 @@
       {/if}
     </section>
   </div>
+  {/if}
 
   {#if output}
     <div class="output" class:open={outputOpen}>
@@ -375,7 +380,14 @@
     gap: 10px;
     min-height: 0;
     padding: 12px;
+    overflow-y: auto;
+    scrollbar-width: thin;
     container: changes / inline-size;
+  }
+
+  .notice,
+  .output {
+    flex: none;
   }
 
   .notice {
@@ -403,10 +415,22 @@
     min-height: 0;
   }
 
+  /* Too narrow for side by side: the files, then the diff, and the tab
+     scrolls. */
   @container changes (max-width: 760px) {
     .grid {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: auto minmax(320px, 1fr);
+      display: flex;
+      flex: none;
+      flex-direction: column;
+    }
+
+    .file-list {
+      max-height: 220px;
+    }
+
+    .diff {
+      flex: none;
+      min-height: 320px;
     }
   }
 

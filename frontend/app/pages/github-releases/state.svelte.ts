@@ -310,11 +310,14 @@ class GithubReleasesState {
 
   selected = $derived.by<ListItem | null>(() => {
     const id = this.selectedId;
-    if (!id) return null;
+    // Nothing chosen yet (or it was removed): the first project, so the
+    // panel never opens empty.
+    if (!id) return this.items[0] ?? null;
     return (
       this.items.find((item) => item.id === id) ??
       // The repository's apps appeared after it was chosen: its first app.
       this.items.find((item) => item.repo.id === id.split("/")[0]) ??
+      this.items[0] ??
       null
     );
   });
@@ -639,6 +642,11 @@ class GithubReleasesState {
       options.apply(await options.run(options.provider ?? null));
     } catch (error) {
       const problem = problemOf(error);
+      const failed = problem.data?.provider as ProviderId | undefined;
+      if (problem.code === "RATE_LIMITED" && failed) {
+        const seconds = typeof problem.data?.retryAfter === "number" ? problem.data.retryAfter : 60;
+        this.aiLimits[failed] = Date.now() + seconds * 1000;
+      }
       const next = problem.data?.next;
       if (next) {
         const name = problem.data?.nextName ?? next;
@@ -650,6 +658,9 @@ class GithubReleasesState {
       options.setBusy(false);
     }
   }
+
+  /** Providers that hit their limit, until when (ms). */
+  aiLimits = $state<Partial<Record<ProviderId, number>>>({});
 
   get aiReady(): boolean {
     return !!this.page?.ai.providers.some((p) => p.ready);

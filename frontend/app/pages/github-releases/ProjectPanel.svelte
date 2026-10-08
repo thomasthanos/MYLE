@@ -76,18 +76,80 @@
   }
 
   const changeCount = $derived(entry?.monorepo ? entry.changes : (status?.changes ?? 0));
+  const versionFiles = $derived(entry ? entry.versions.files.filter((f) => !f.skipped).length : 0);
+  const mismatched = $derived((entry?.versions.mismatched.length ?? 0) > 0);
+
+  /** Alt+1…4 switch the tabs, Alt+R fetches and refreshes. */
+  function onKeydown(event: KeyboardEvent) {
+    if (!event.altKey || event.ctrlKey || event.metaKey || gr.settingsOpen || gr.found || event.defaultPrevented) return;
+    const at = ["1", "2", "3", "4"].indexOf(event.key);
+    if (at >= 0) {
+      event.preventDefault();
+      gr.setTab(tabs[at].id);
+    } else if (event.key.toLowerCase() === "r" && !busy) {
+      event.preventDefault();
+      void gr.fetch(repoId);
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <button class="back" onclick={() => (gr.showList = true)}><ArrowLeft size={15} /> All projects</button>
 
 <header class="head">
+  <span class="avatar" aria-hidden="true">{(entry?.name ?? item.repo.name).slice(0, 1).toUpperCase()}</span>
   <div class="title">
-    <h2>
-      {entry?.name ?? item.repo.name}
+    <div class="name-row">
+      <h2>{entry?.name ?? item.repo.name}</h2>
+      {#if entry?.versions.files.length}
+        <Popover align="start">
+          {#snippet trigger({ toggle })}
+            <button class="version" class:warn={mismatched} onclick={toggle} title={mismatched ? "The version files disagree" : `${versionFiles} version ${versionFiles === 1 ? "file" : "files"}`}>
+              {#if mismatched}<CircleAlert size={12} />{/if}v{entry.versions.current ?? "?"}
+            </button>
+          {/snippet}
+          {#snippet children()}
+          <div class="menu versions">
+            <div class="menu-label">Version files</div>
+            {#each entry.versions.files as file (file.path)}
+              <div class="vrow" class:off={file.skipped} class:bad={entry.versions.mismatched.includes(file.path)}>
+                <code>{file.path}</code><span>{file.skipped ? "skipped" : file.version}</span>
+              </div>
+            {/each}
+            {#if mismatched}
+              <p>A release sets them all to the new version.</p>
+            {/if}
+          </div>
+          {/snippet}
+        </Popover>
+      {:else if entry}
+        <span class="version muted" title="No version file found">no version</span>
+      {/if}
       {#if entry?.monorepo}<span class="in">in {item.repo.name}</span>{/if}
-    </h2>
-    <span class="path selectable" title={entry?.dir ?? item.repo.path}>{entry?.dir ?? item.repo.path}</span>
+    </div>
+    <div class="where">
+      {#if github && status?.remote}
+        <button class="repo" onclick={() => void openUrl(github)} title="Open on GitHub"><GithubMark size={12} /> {status.remote.owner}/{status.remote.repo}</button>
+        <span class="sep" aria-hidden="true">·</span>
+      {/if}
+      <button class="path" title="Open the folder: {entry?.dir ?? item.repo.path}" onclick={() => void reveal()}>{entry?.dir ?? item.repo.path}</button>
+    </div>
   </div>
+  {#if entry && status && !status.problem}
+    <div class="last" title={entry.lastTag?.legacy ? "A shared tag from before this app had its own" : "The newest release of this project"}>
+      <small>Last release</small>
+      {#if lastRelease}
+        <strong><Tag size={12} /> {lastRelease.tagName}</strong>
+        <em>{formatRelative(lastRelease.publishedAt ?? lastRelease.createdAt)}</em>
+      {:else if entry.lastTag}
+        <strong><Tag size={12} /> {entry.lastTag.name}</strong>
+        <em>{formatRelative(entry.lastTag.date)}</em>
+      {:else}
+        <strong class="none">Not released yet</strong>
+      {/if}
+    </div>
+  {/if}
   <div class="actions">
     {#if status && !status.problem}
       {#if status.branch.behind > 0}
@@ -101,7 +163,7 @@
         </button>
       {/if}
     {/if}
-    <button class="icon-btn" title="Fetch from GitHub and refresh" aria-label="Refresh" disabled={!!busy} onclick={() => void gr.fetch(repoId)}>
+    <button class="icon-btn" title="Fetch from GitHub and refresh (Alt+R)" aria-label="Refresh" disabled={!!busy} onclick={() => void gr.fetch(repoId)}>
       <RefreshCw size={15} class={busy === "fetch" || gr.refreshing[repoId] ? "spin" : ""} />
     </button>
     <Popover bind:open={menuOpen} align="end">
@@ -129,11 +191,7 @@
   </div>
 {:else}
   <div class="facts">
-    {#if github && status.remote}
-      <button class="fact link" onclick={() => void openUrl(github)} title="Open on GitHub">
-        <GithubMark size={13} /> {status.remote.owner}/{status.remote.repo}
-      </button>
-    {:else}
+    {#if !github}
       <span class="fact warn"><CircleAlert size={13} /> No GitHub remote</span>
     {/if}
     <span class="fact" title={status.branch.upstream ? `Tracks ${status.branch.upstream}` : "This branch isn't on GitHub yet"}>
@@ -143,44 +201,6 @@
     <span class="fact" class:attention={changeCount > 0}>
       <FileDiff size={13} /> {changeCount ? `${changeCount} changed ${changeCount === 1 ? "file" : "files"}` : "No changes"}
     </span>
-    {#if entry}
-      {#if entry.versions.files.length}
-        <Popover align="start">
-          {#snippet trigger({ toggle })}
-            <button class="fact link" class:warn={entry.versions.mismatched.length > 0} onclick={toggle}>
-              {#if entry.versions.mismatched.length}<CircleAlert size={13} />{/if}
-              v{entry.versions.current ?? "?"}
-              <em>{entry.versions.mismatched.length ? "files disagree" : `${entry.versions.files.filter((f) => !f.skipped).length} version ${entry.versions.files.length === 1 ? "file" : "files"}`}</em>
-            </button>
-          {/snippet}
-          {#snippet children()}
-          <div class="menu versions">
-            <div class="menu-label">Version files</div>
-            {#each entry.versions.files as file (file.path)}
-              <div class="vrow" class:off={file.skipped} class:bad={entry.versions.mismatched.includes(file.path)}>
-                <code>{file.path}</code><span>{file.skipped ? "skipped" : file.version}</span>
-              </div>
-            {/each}
-            {#if entry.versions.mismatched.length}
-              <p>A release sets them all to the new version.</p>
-            {/if}
-          </div>
-          {/snippet}
-        </Popover>
-      {:else}
-        <span class="fact"><CircleAlert size={13} /> No version file</span>
-      {/if}
-      <span class="fact" title={entry.lastTag?.legacy ? "A shared tag from before this app had its own" : "The newest tag of this project"}>
-        <Tag size={13} />
-        {#if lastRelease}
-          {lastRelease.tagName} <em>{formatRelative(lastRelease.publishedAt ?? lastRelease.createdAt)}</em>
-        {:else if entry.lastTag}
-          {entry.lastTag.name} <em>{formatRelative(entry.lastTag.date)}</em>
-        {:else}
-          Not released yet
-        {/if}
-      </span>
-    {/if}
     {#if run}
       <button class="fact link ci-{ci}" onclick={() => void openUrl(run.htmlUrl)} title={run.displayTitle ?? run.name ?? "Last Actions run"}>
         {#if ci === "running"}<LoaderCircle size={13} class="spin" />{:else if ci === "ok"}<CircleCheck size={13} />{:else}<CircleX size={13} />{/if}
@@ -193,8 +213,8 @@
   </div>
 
   <nav class="tabs" aria-label="Project">
-    {#each tabs as tab (tab.id)}
-      <button class="tab" class:active={gr.tab === tab.id} aria-current={gr.tab === tab.id ? "page" : undefined} onclick={() => gr.setTab(tab.id)}>
+    {#each tabs as tab, i (tab.id)}
+      <button class="tab" class:active={gr.tab === tab.id} aria-current={gr.tab === tab.id ? "page" : undefined} title="{tab.label} (Alt+{i + 1})" onclick={() => gr.setTab(tab.id)}>
         <tab.icon size={14} /> {tab.label}
         {#if tab.id === "changes" && changeCount}<span class="badge">{changeCount}</span>{/if}
         {#if tab.id === "build" && entry && gr.builds.get(entry.id)?.running}<LoaderCircle size={12} class="spin" />{/if}
@@ -243,38 +263,178 @@
 
   .head {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 16px 18px 10px;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px 12px;
+  }
+
+  .avatar {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.3);
+    border-radius: 13px;
+    background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.28), rgb(62 207 142 / 0.1));
+    color: #dfe3ff;
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 650;
   }
 
   .title {
+    display: grid;
     flex: 1;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
 
   h2 {
-    margin: 0 0 3px;
+    margin: 0;
+    overflow: hidden;
     font-family: var(--font-display);
-    font-size: 19px;
-    font-weight: 620;
+    font-size: 20px;
+    font-weight: 640;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .version {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.3);
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb) / 0.12);
+    color: #c9cffb;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 19px;
+  }
+
+  button.version:hover {
+    background: rgb(var(--accent-rgb) / 0.2);
+  }
+
+  .version.warn {
+    border-color: rgb(255 180 84 / 0.35);
+    background: rgb(255 180 84 / 0.1);
+    color: #ffd08a;
+  }
+
+  .version.muted {
+    border-color: rgb(255 255 255 / 0.08);
+    background: none;
+    color: var(--text-3);
   }
 
   .in {
-    margin-left: 4px;
+    flex: none;
     color: var(--text-3);
-    font-size: 13px;
-    font-weight: 450;
+    font-size: 12.5px;
+  }
+
+  .where {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    font-size: 11.5px;
+  }
+
+  .repo {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    color: #b7befa;
+    font-size: 12px;
+  }
+
+  .repo:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .sep {
+    color: var(--text-3);
   }
 
   .path {
-    display: block;
+    min-width: 0;
+    padding: 0;
     overflow: hidden;
     color: var(--text-3);
     font-family: var(--font-mono);
     font-size: 11px;
+    text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .path:hover {
+    color: var(--text-2);
+  }
+
+  .last {
+    display: grid;
+    flex: none;
+    justify-items: end;
+    gap: 1px;
+    padding: 4px 12px;
+    border-right: 1px solid rgb(255 255 255 / 0.07);
+  }
+
+  .last small {
+    color: var(--text-3);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .last strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .last strong.none {
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+
+  .last em {
+    color: var(--text-3);
+    font-size: 11px;
+    font-style: normal;
+  }
+
+  @container releases (max-width: 760px) {
+    .last {
+      display: none;
+    }
+  }
+
+  @container releases (max-width: 1100px) {
+    .facts .kinds {
+      display: none;
+    }
   }
 
   .actions {
@@ -343,8 +503,13 @@
   .facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 18px 12px;
+    align-items: center;
+    gap: 4px 2px;
+    margin: 0 18px 12px;
+    padding: 3px;
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: 10px;
+    background: rgb(0 0 0 / 0.12);
   }
 
   .fact {
@@ -353,12 +518,14 @@
     gap: 6px;
     height: 26px;
     padding: 0 9px;
-    border: 1px solid rgb(255 255 255 / 0.07);
     border-radius: 7px;
-    background: rgb(255 255 255 / 0.035);
     color: var(--text-1);
     font-size: 11.8px;
     white-space: nowrap;
+  }
+
+  .fact + .fact {
+    box-shadow: -1px 0 0 rgb(255 255 255 / 0.06);
   }
 
   .fact em {
@@ -392,6 +559,8 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    margin-left: auto;
+    padding-right: 4px;
   }
 
   .kinds span {

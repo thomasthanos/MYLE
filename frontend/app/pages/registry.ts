@@ -33,14 +33,17 @@ export interface PageDef {
   /** Fills the window's height and scrolls inside itself (a list beside
    *  its details), instead of the whole page scrolling. */
   fill?: boolean;
+  /** Only for the app's owner (see backend/src/account/owner.rs): hidden
+   *  from everyone else, and the backend refuses its commands. */
+  ownerOnly?: boolean;
 }
 
 const defs = [
   { id: "install-apps",         label: "Install Apps",          icon: IconInstallApps,   component: InstallApps },
   { id: "spotify-hub",          label: "Spotify Hub",           icon: IconSpotifyHub,    component: SpotifyHub },
   { id: "game-saves",           label: "Game Saves",            icon: IconGameSaves,     component: GameSaves },
-  { id: "project-backups",      label: "Project Backups",       icon: IconProjectBackups, component: ProjectBackups },
-  { id: "github-releases",      label: "GitHub Releases",       icon: IconGithubReleases, component: GithubReleases, fill: true },
+  { id: "project-backups",      label: "Project Backups",       icon: IconProjectBackups, component: ProjectBackups, ownerOnly: true },
+  { id: "github-releases",      label: "GitHub Releases",       icon: IconGithubReleases, component: GithubReleases, fill: true, ownerOnly: true },
   { id: "creative-hub",         label: "Creative Suite",        icon: IconCreativeHub,   component: CreativeHub },
   { id: "windows-optimization", label: "Windows Optimization",  icon: IconWindowsOpt,    component: WindowsOptimization },
   { id: "system-cleaner",       label: "System Cleaner",        icon: IconSystemCleaner, component: SystemCleaner },
@@ -52,3 +55,8 @@ const defs = [
 export type PageId = (typeof defs)[number]["id"];
 
 export const pages: readonly (PageDef & { id: PageId })[] = defs;
+
+/** Whether the page can be shown, given whether the owner is signed in. */
+export function canOpen(page: PageDef, owner: boolean): boolean {
+  return !page.ownerOnly || owner;
+}

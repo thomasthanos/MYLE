@@ -21,7 +21,7 @@
   import GithubMark from "./GithubMark.svelte";
   import ProjectPanel from "./ProjectPanel.svelte";
   import SettingsDialog from "./SettingsDialog.svelte";
-  import { buildKindLabels, githubReleases as gr, installTool, type ListItem } from "./state.svelte";
+  import { buildKindLabels, formatRelative, githubReleases as gr, installTool, type ListItem } from "./state.svelte";
 
   let searchInput = $state<HTMLInputElement>();
 
@@ -76,6 +76,30 @@
     if (item.entry?.monorepo) return `${item.repo.name} · ${remote}`;
     return remote;
   }
+
+  type Health = "problem" | "behind" | "changes" | "ahead" | "clean" | "unknown";
+
+  /** One word for the dot beside a project. */
+  function health(item: ListItem): Health {
+    const status = item.status;
+    if (!status) return "unknown";
+    if (status.problem) return "problem";
+    if (status.branch.behind) return "behind";
+    if (item.entry ? item.entry.changes : status.changes) return "changes";
+    if (status.branch.ahead) return "ahead";
+    return "clean";
+  }
+
+  const healthText: Record<Health, string> = {
+    problem: "Needs a look",
+    behind: "Newer commits on GitHub",
+    changes: "Uncommitted changes",
+    ahead: "Commits to push",
+    clean: "Clean and up to date",
+    unknown: "Reading…",
+  };
+
+  const attention = $derived(gr.items.filter((item) => !["clean", "unknown"].includes(health(item))).length);
 
   const showBanner = $derived(!!gr.page && (!gr.page.git || !account || (gbr && !gbr.dismissed)));
 </script>
@@ -141,16 +165,15 @@
           </div>
         {/if}
         {#if gbr && !gbr.dismissed}
-          <div class="banner info">
+          <div class="banner info" title={gbr.configPath ?? undefined}>
             <Info size={16} />
             <span>
               <strong>Brought over from Github-Build-Release.</strong>
               {#if gbr.project}Its last project was added{gbr.deepseekKey ? " and" : "."}{/if}
               {#if gbr.deepseekKey}{gbr.project ? " its" : "Its"} DeepSeek key is now kept encrypted here{gbr.plaintextRemoved ? "; the plain-text copy in its settings file was deleted." : "."}{/if}
               {#if gbr.error}<em>{gbr.error}</em>{/if}
-              {#if gbr.configPath}<small class="selectable">{gbr.configPath}</small>{/if}
             </span>
-            <button class="icon-btn" aria-label="Dismiss" onclick={() => void dismissImport()}><X size={14} /></button>
+            <button class="btn small ghost" onclick={() => void dismissImport()} title="Don't show this again">Got it</button>
           </div>
         {/if}
       </div>
@@ -183,7 +206,10 @@
           <div class="list-head">
             <div>
               <h2>Projects</h2>
-              <span>{gr.visible.length === gr.items.length ? `${gr.items.length} in ${gr.repos.length} ${gr.repos.length === 1 ? "repository" : "repositories"}` : `${gr.visible.length} of ${gr.items.length} shown`}</span>
+              <span>
+                {gr.visible.length === gr.items.length ? `${gr.items.length} in ${gr.repos.length} ${gr.repos.length === 1 ? "repository" : "repositories"}` : `${gr.visible.length} of ${gr.items.length} shown`}
+                {#if attention}<b> · {attention} {attention === 1 ? "needs" : "need"} attention</b>{/if}
+              </span>
             </div>
           </div>
           <div class="list-scroll" role="listbox" aria-label="Projects">
@@ -199,14 +225,18 @@
                 aria-selected={gr.selected?.id === item.id}
                 onclick={() => gr.select(item.id)}
               >
+                <span class="dot d-{health(item)}" title={healthText[health(item)]}></span>
                 <span class="text">
                   <strong>
                     {entry?.name ?? item.repo.name}
                     {#if entry?.versions.current}<span class="ver">{entry.versions.current}</span>{/if}
                   </strong>
                   <small>{subtitle(item)}</small>
-                  {#if entry?.buildKinds.length}
-                    <span class="kinds">{#each entry.buildKinds.slice(0, 3) as kind (kind)}<span>{buildKindLabels[kind]}</span>{/each}</span>
+                  {#if entry && !status?.problem}
+                    <span class="kinds">
+                      {#each entry.buildKinds.slice(0, 2) as kind (kind)}<span>{buildKindLabels[kind]}</span>{/each}
+                      <em>{entry.lastTag ? `${entry.lastTag.name} · ${formatRelative(entry.lastTag.date)}` : "not released"}</em>
+                    </span>
                   {/if}
                 </span>
                 <span class="marks">
@@ -228,6 +258,9 @@
                 <button class="btn small" onclick={() => (gr.query = "")}>Clear the search</button>
               </div>
             {/each}
+            {#if gr.visible.length && gr.visible.length < 5 && !gr.query}
+              <button class="add-more" onclick={() => void gr.addFolder()}><FolderPlus size={14} /> Add another project</button>
+            {/if}
           </div>
         </div>
 
@@ -372,7 +405,7 @@
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 10px 12px 10px 14px;
+    padding: 8px 10px 8px 14px;
     border: 1px solid rgb(var(--accent-rgb) / 0.28);
     border-radius: 12px;
     background: rgb(var(--accent-rgb) / 0.08);
@@ -389,16 +422,6 @@
 
   .banner strong {
     color: var(--text-1);
-  }
-
-  .banner small {
-    display: block;
-    overflow: hidden;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .banner em {
@@ -557,6 +580,46 @@
     color: #ffb27a;
   }
 
+  .dot {
+    flex: none;
+    align-self: flex-start;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: var(--text-3);
+  }
+
+  .d-clean {
+    background: #3ecf8e;
+    box-shadow: 0 0 0 3px rgb(62 207 142 / 0.14);
+  }
+
+  .d-changes {
+    background: #ffc66b;
+    box-shadow: 0 0 0 3px rgb(255 198 107 / 0.14);
+  }
+
+  .d-ahead {
+    background: #a9b3ff;
+    box-shadow: 0 0 0 3px rgb(169 179 255 / 0.16);
+  }
+
+  .d-behind {
+    background: #7fd8ff;
+    box-shadow: 0 0 0 3px rgb(127 216 255 / 0.16);
+  }
+
+  .d-problem {
+    background: #ff8f8f;
+    box-shadow: 0 0 0 3px rgb(255 143 143 / 0.16);
+  }
+
+  .list-head b {
+    color: #ffd08a;
+    font-weight: 500;
+  }
+
   .text {
     display: grid;
     flex: 1;
@@ -591,8 +654,21 @@
 
   .kinds {
     display: flex;
+    align-items: center;
     gap: 4px;
+    min-width: 0;
     margin-top: 2px;
+  }
+
+  .kinds em {
+    overflow: hidden;
+    margin-left: 2px;
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .kinds span {
@@ -637,6 +713,24 @@
   .warn-dot {
     display: inline-flex;
     color: #ffb84d;
+  }
+
+  .add-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 6px;
+    padding: 10px;
+    border: 1px dashed rgb(255 255 255 / 0.1);
+    border-radius: 10px;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .add-more:hover {
+    border-color: rgb(var(--accent-rgb) / 0.4);
+    color: var(--text-1);
   }
 
   .empty,

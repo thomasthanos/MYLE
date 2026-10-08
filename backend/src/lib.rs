@@ -103,6 +103,27 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
     }
 }
 
+/// Refuses the owner-only pages' commands (GitHub Releases, Project
+/// Backups) unless the signed-in account is the owner's, by the verdict the
+/// backend got from Supabase (`account::owner`). One check for every command,
+/// so a command added to those pages later is covered too.
+fn owner_gate(
+    handler: impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        if account::owner::is_owner_only_command(invoke.message.command()) {
+            let app = invoke.message.webview().app_handle().clone();
+            if !app.state::<account::AccountState>().is_owner(&app) {
+                invoke
+                    .resolver
+                    .reject("This page is only for the app's owner. Sign in with the owner's Discord account.");
+                return true;
+            }
+        }
+        handler(invoke)
+    }
+}
+
 /// Everything the app is built from, for its normal run and for a notice.
 fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
@@ -283,7 +304,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(owner_gate(tauri::generate_handler![
             finish_startup,
             start_page,
             passwords::passwords_browser_get,
@@ -336,6 +357,7 @@ pub fn run() {
             updater::check_for_update,
             updater::install_update,
             account::account_profile,
+            account::account_access,
             account::account_sign_in,
             account::account_cancel_sign_in,
             account::account_sign_out,
@@ -443,6 +465,7 @@ pub fn run() {
             github_releases::commands::github_releases_open_in_editor,
             github_releases::commands::github_releases_reveal,
             github_releases::commands::github_releases_release_info,
+            github_releases::commands::github_releases_recent_commits,
             github_releases::commands::github_releases_preflight,
             github_releases::commands::github_releases_ai_notes,
             github_releases::commands::github_releases_release,
@@ -469,7 +492,7 @@ pub fn run() {
             game_saves::commands::game_saves_sync_import,
             game_saves::commands::game_saves_cancel,
             game_saves::covers::game_saves_covers
-        ])
+        ]))
         .build(context())
         .expect("error while building the application");
 
