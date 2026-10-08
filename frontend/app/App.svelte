@@ -3,6 +3,8 @@
   import Toaster from "../lib/components/Toaster.svelte";
   import TooltipHost from "../lib/components/TooltipHost.svelte";
   import ContextMenuHost from "../lib/components/ContextMenuHost.svelte";
+  import WhatsNewHost from "../lib/components/WhatsNewHost.svelte";
+  import { whatsNew } from "../lib/whats-new.svelte";
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
@@ -26,6 +28,8 @@
     if (!isTauri()) return;
     // Every page's data and pictures, while the splash shows.
     void preloadApp();
+    // The notes of the versions an update brought, once per version.
+    void whatsNew.checkAfterStart();
     // The browser extension asked for the vault (to unlock it, or when it
     // started the app), or a scheduled backup's notice asked for Game Saves.
     void invoke<PageId | null>("start_page").then((page) => page && nav.go(page));
@@ -59,6 +63,7 @@
 </div>
 
 <Toaster />
+<WhatsNewHost />
 <ConfirmHost />
 <TooltipHost />
 <ContextMenuHost appActions />

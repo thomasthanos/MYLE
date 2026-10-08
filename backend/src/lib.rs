@@ -17,6 +17,7 @@ mod storage;
 mod tray;
 mod updater;
 mod webview_policy;
+mod whats_new;
 mod window_sizing;
 mod windows_optimization;
 
@@ -201,6 +202,8 @@ pub fn run() {
     if let Err(error) = storage::prepare() {
         eprintln!("Application-data migration failed: {error}");
     }
+    // Before any window creates the web view profile.
+    whats_new::note_previous_install();
     let account_state = account::AccountState::default();
     let cleanup = apps::Cleanup::default();
     let jobs = apps::Jobs::default();
@@ -355,6 +358,9 @@ pub fn run() {
             startup::startup_set_enabled,
             startup::startup_set_minimized,
             updater::check_for_update,
+            whats_new::whats_new_pending,
+            whats_new::whats_new_seen,
+            whats_new::whats_new_current,
             updater::install_update,
             account::account_profile,
             account::account_access,

@@ -17,6 +17,7 @@
   import Logo from "../../../lib/components/Logo.svelte";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
   import { settings } from "../../../lib/settings.svelte";
+  import { whatsNew } from "../../../lib/whats-new.svelte";
   import { toast } from "../../../lib/toast.svelte";
   import { checkForUpdate, formatBytes, installUpdate, type UpdateAsset } from "../../../lib/updater";
   import AccountCard from "./AccountCard.svelte";
@@ -269,8 +270,11 @@
         <button class="btn small" onclick={() => open(REPO_URL)}>
           <ExternalLink size={13} /> GitHub repository
         </button>
+        <button class="btn small" disabled={whatsNew.loading} onclick={() => void whatsNew.showCurrent()}>
+          {#if whatsNew.loading}<LoaderCircle size={13} class="spin" />{:else}<Sparkles size={13} />{/if} What's new
+        </button>
         <button class="btn small" onclick={() => open(`${REPO_URL}/releases`)}>
-          <ExternalLink size={13} /> Release notes
+          <ExternalLink size={13} /> All releases
         </button>
       </div>
     </section>

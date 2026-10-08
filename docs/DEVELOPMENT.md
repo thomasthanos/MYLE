@@ -317,6 +317,8 @@ To test without a release: Actions → Release → **Run workflow**. It builds a
 
 With no network, the app opens normally after ~2 seconds (the bar counts down).
 
+**What's new** (`backend/src/whats_new.rs`, `frontend/lib/components/WhatsNewHost.svelte`): on the first start of a new version the app shows the notes of every version since the one it last showed (kept in `whats-new.json` in the settings folder), newest first. They are the GitHub release bodies, asked for by Rust without a sign-in (the web view's CSP only reaches the app) and cached in `whats-new-cache.json`; offline or rate-limited, the cache, then this version's `docs/release-notes/<version>.md` (bundled by `backend/build.rs`), then a line with a link stand in. Markdown is read by `frontend/lib/markdown.ts` into plain data rendered as text: raw HTML is reduced to its text, pictures are left out, and only http(s) links are kept, opening in the browser. Versions up to 9.8 never wrote `whats-new.json`; when it is missing but MYLE ran on the PC before (its settings folder has files, or its web view profile exists), this version's notes are shown, and on a first install nothing is. Settings → About → **What's new** shows them again. For everyone, not only the owner.
+
 > The SHA-256 check catches files that got corrupted or changed along the way. It doesn't protect against the GitHub/Cloudflare account itself being compromised.
 
 ### Cloudflare Pages site (separate from the updater)
