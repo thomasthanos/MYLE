@@ -90,7 +90,7 @@
   function pickVersion(version: string) {
     s.version = version;
     s.touched = true;
-    if (info?.notesDir) s.notesFile = `${info.notesDir}/${version}.md`;
+    if (info?.notesDir && s.notesFile !== null) s.notesFile = `${info.notesDir}/${version.trim()}.md`;
   }
 
   function setMode(mode: Mode) {
@@ -125,15 +125,20 @@
     return () => clearTimeout(timer);
   });
 
+  // The checks run again as the form changes; only the newest answer counts
+  // (an older one finishing later would show checks for another version).
+  let checkSeq = 0;
   async function check() {
     if (!s.version.trim()) return;
+    const seq = ++checkSeq;
     checking = true;
     try {
-      checks = await api.preflight(entry.id, s.version.trim(), s.mode, s.includeChanges, s.mode === "local" && s.build);
+      const result = await api.preflight(entry.id, s.version.trim(), s.mode, s.includeChanges, s.mode === "local" && s.build);
+      if (seq === checkSeq) checks = result;
     } catch (error) {
-      checks = [{ id: "check", state: "fail", message: messageOf(error), fix: null }];
+      if (seq === checkSeq) checks = [{ id: "check", state: "fail", message: messageOf(error), fix: null }];
     } finally {
-      checking = false;
+      if (seq === checkSeq) checking = false;
     }
   }
 
@@ -197,7 +202,9 @@
     s.assets = [...list];
   }
 
-  const defaultTitle = $derived(entry.monorepo ? `${entry.name} v${s.version.trim()}` : `${item.repo.name} v${s.version.trim()}`);
+  // The GitHub repository's name ("MYLE"), not the folder's ("Make_Your_Life_Easier.A.E").
+  const repoName = $derived(item.status?.remote?.repo ?? item.repo.name);
+  const defaultTitle = $derived(entry.monorepo ? `${entry.name} ${tag}` : `${repoName} ${tag}`);
 
   async function release() {
     if (s.running) return;
@@ -377,6 +384,12 @@
           <input type="checkbox" class="switch" bind:checked={s.build} onchange={() => (s.touched = true)} disabled={!info.buildCommand} />
           <span>Build first {#if info.buildCommand}<code>{info.buildCommand}</code>{:else}<em>(no build command: set one in Build)</em>{/if}</span>
         </label>
+        {#if s.build && info.buildSteps.length > 1}
+          <p class="sub steps-line">{info.buildSteps.join(" → ")}</p>
+        {/if}
+        {#if s.build && info.fullBuild}
+          <p class="sub warn"><TriangleAlert size={12} /> This is only part of the project's build; the full one is <code>{info.fullBuild}</code>. <button class="link" onclick={() => gr.setTab("build")}>Change it in Build</button></p>
+        {/if}
         {#if !s.build}
           <div class="assets">
             <div class="assets-head">
@@ -405,8 +418,11 @@
       {:else if info.notesDir}
         <label class="opt">
           <input type="checkbox" class="switch" checked={!!s.notesFile} onchange={(e) => (s.notesFile = (e.currentTarget as HTMLInputElement).checked ? `${info!.notesDir}/${s.version.trim()}.md` : null)} />
-          <span>Save the notes to <code>{info.notesDir}/{s.version.trim()}.md</code> (the workflow reads them)</span>
+          <span>Save the notes to <code>{info.notesDir}/{s.version.trim()}.md</code> in the release commit (the workflow publishes them)</span>
         </label>
+        {#if s.notesFile && !s.notes.trim()}
+          <p class="sub">No notes written yet: without them, GitHub lists the changes since the last release.</p>
+        {/if}
       {/if}
       {#if ownChanges > 0}
         <label class="opt">

@@ -34,6 +34,7 @@ import {
 } from "./api";
 
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
+export { stageIsStep, stepReached } from "./pipeline";
 
 export type Tab = "changes" | "build" | "release" | "history";
 
@@ -77,6 +78,8 @@ export class BuildSession {
   dropped = $state(0);
   diagnostics = $state.raw<Diagnostic[]>([]);
   stage = $state<string | null>(null);
+  /** Every stage the build reached, in order (for the pipeline view). */
+  stages = $state.raw<string[]>([]);
   percent = $state(0);
   estimated = $state(true);
   outcome = $state<BuildOutcome | null>(null);
@@ -93,6 +96,7 @@ export class BuildSession {
     this.dropped = 0;
     this.diagnostics = [];
     this.stage = null;
+    this.stages = [];
     this.percent = 0;
     this.estimated = true;
     this.outcome = null;
@@ -127,6 +131,7 @@ export class BuildSession {
         break;
       case "stage":
         this.stage = event.data.text;
+        if (this.stages.at(-1) !== event.data.text && this.stages.length < 500) this.stages = [...this.stages, event.data.text];
         break;
       case "progress":
         this.percent = event.data.percent;

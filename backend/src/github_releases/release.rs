@@ -178,6 +178,29 @@ pub(crate) struct Context {
     pub workflows: Vec<Workflow>,
 }
 
+/// When each repository was last fetched for the checks.
+static CHECK_FETCHES: std::sync::Mutex<Vec<(PathBuf, Instant)>> = std::sync::Mutex::new(Vec::new());
+/// The checks follow the form as it is typed; they fetch at most this often.
+const CHECK_FETCH_EVERY: Duration = Duration::from_secs(90);
+
+/// Whether the checks should fetch `root` now (and notes that they do).
+fn check_fetch_due(root: &Path, now: Instant) -> bool {
+    let mut fetches = CHECK_FETCHES.lock().unwrap_or_else(|e| e.into_inner());
+    fetches.retain(|(_, at)| now.duration_since(*at) < CHECK_FETCH_EVERY);
+    if fetches.iter().any(|(path, _)| path == root) {
+        return false;
+    }
+    fetches.push((root.to_path_buf(), now));
+    true
+}
+
+/// The context for the live checks: fetched now and then, not on every
+/// keystroke (a fetch takes seconds, and the checks ran again on each).
+pub(crate) async fn context_for_checks(entry: Entry) -> Result<Context, String> {
+    let fetch = check_fetch_due(&entry.root, Instant::now());
+    context(entry, fetch).await
+}
+
 pub(crate) async fn context(entry: Entry, fetch: bool) -> Result<Context, String> {
     git::require_git()?;
     if fetch {
@@ -454,13 +477,29 @@ pub(crate) async fn preflight(
                 None,
             )),
         },
-        Mode::Local if build && !has_build => checks.push(check(
-            "build",
-            CheckState::Fail,
-            "No build command was found. Type one in the Build tab, or release without building.",
-            Some("build"),
-        )),
-        Mode::Local => {}
+        Mode::Local => {
+            if build && !has_build {
+                checks.push(check(
+                    "build",
+                    CheckState::Fail,
+                    "No build command was found. Type one in the Build tab, or release without building.",
+                    Some("build"),
+                ));
+            }
+            // The tag starts the repository's own release workflow anyway,
+            // which publishes the same release from GitHub.
+            if let Some(workflow) = project::workflow_for_tag(&context.workflows, &tag) {
+                checks.push(check(
+                    "workflow",
+                    CheckState::Warn,
+                    format!(
+                        "Pushing {tag} also starts {} on GitHub, which releases it too. Pick GitHub Actions to let it do the work.",
+                        workflow.name.clone().unwrap_or_else(|| workflow.file.clone())
+                    ),
+                    None,
+                ));
+            }
+        }
     }
     checks
 }
@@ -1052,7 +1091,17 @@ async fn finish_from_tag(
         }
         Mode::Actions => {
             run.step("workflow", StepState::Running, None);
-            let result = watch(run, token, owner, repo, commit, Some(tag)).await;
+            let workflow = tag_workflow(entry, tag).await;
+            let result = watch(
+                run,
+                token,
+                owner,
+                repo,
+                commit,
+                Some(tag),
+                workflow.as_ref(),
+            )
+            .await;
             match result {
                 Ok(done) => {
                     let success = done.conclusion.as_deref() == Some("success");
@@ -1269,6 +1318,40 @@ fn error_is_final(error: &str) -> bool {
             .any(|code| error.contains(code))
 }
 
+/// The run to follow among those a push of `commit` started: a push of
+/// `tag`, and of the release `workflow` when it is known. A tag can start
+/// several workflows (MYLE's starts Release and MYLE Passwords, which ends
+/// in seconds); following another one would call the release done early.
+pub(crate) fn pick_run(
+    runs: Vec<Run>,
+    tag: Option<&str>,
+    workflow: Option<&Workflow>,
+) -> Option<Run> {
+    let mut candidates = runs
+        .into_iter()
+        .filter(|r| r.event == "push")
+        .filter(|r| tag.is_none_or(|tag| r.head_branch.as_deref() == Some(tag)));
+    match workflow {
+        None => candidates.next(),
+        Some(workflow) => candidates.find(|r| match &r.path {
+            Some(path) => {
+                let path = path.split('@').next().unwrap_or(path).replace('\\', "/");
+                path.rsplit('/').next() == Some(workflow.file.as_str())
+            }
+            None => r.name.is_some() && r.name == workflow.name,
+        }),
+    }
+}
+
+/// The repository's workflow a push of `tag` starts.
+async fn tag_workflow(entry: &Entry, tag: &str) -> Option<Workflow> {
+    let root = entry.root.clone();
+    let workflows = super::blocking(move || project::release_workflows(&root))
+        .await
+        .ok()?;
+    project::workflow_for_tag(&workflows, tag).cloned()
+}
+
 /// Follows the workflow run a push of `commit` (and `tag`) started, to its
 /// end. Cancel stops watching, not the run.
 async fn watch(
@@ -1278,6 +1361,7 @@ async fn watch(
     repo: &str,
     commit: &str,
     tag: Option<&str>,
+    workflow: Option<&Workflow>,
 ) -> Result<Run, String> {
     let started = Instant::now();
     let found = loop {
@@ -1291,11 +1375,7 @@ async fn watch(
         let runs = github::runs_for_commit(token, owner, repo, commit)
             .await
             .unwrap_or_default();
-        let found = runs
-            .into_iter()
-            .filter(|r| r.event == "push")
-            .find(|r| tag.is_none_or(|tag| r.head_branch.as_deref() == Some(tag)));
-        if let Some(found) = found {
+        if let Some(found) = pick_run(runs, tag, workflow) {
             break found;
         }
         if started.elapsed() > Duration::from_secs(180) {
@@ -1406,6 +1486,10 @@ pub(crate) async fn watch_commit(
     let token = secrets::token()
         .ok_or_else(|| String::from(Problem::new("AUTH", "Connect your GitHub account first.")))?;
     let remote = ops::require_remote(&entry.root).await?;
+    let workflow = match tag.as_deref() {
+        Some(tag) => tag_workflow(&entry, tag).await,
+        None => None,
+    };
     watch(
         &run,
         &token,
@@ -1413,6 +1497,7 @@ pub(crate) async fn watch_commit(
         &remote.repo.unwrap_or_default(),
         &commit,
         tag.as_deref(),
+        workflow.as_ref(),
     )
     .await
 }
@@ -1492,5 +1577,91 @@ mod tests {
             .map(|c| c.path.as_str())
             .collect();
         assert_eq!(own, ["backup_projects/src/a.ts"]);
+    }
+
+    fn run_of(id: u64, name: &str, path: Option<&str>, branch: &str) -> Run {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": name,
+            "html_url": format!("https://github.com/a/b/actions/runs/{id}"),
+            "head_branch": branch,
+            "head_sha": "abc",
+            "event": "push",
+            "path": path,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_release_workflows_run_is_followed_not_another_on_the_same_tag() {
+        // MYLE's tag starts MYLE Passwords (done in seconds) and Release; the
+        // API lists the newest first.
+        let runs = || {
+            vec![
+                run_of(3, "CI", Some(".github/workflows/ci.yml"), "main"),
+                run_of(
+                    2,
+                    "MYLE Passwords",
+                    Some(".github/workflows/mobile.yml"),
+                    "v9.7.2",
+                ),
+                run_of(
+                    1,
+                    "Release",
+                    Some(".github/workflows/release.yml"),
+                    "v9.7.2",
+                ),
+            ]
+        };
+        let release = Workflow {
+            file: "release.yml".into(),
+            name: Some("Release".into()),
+            tags: vec!["v*".into()],
+        };
+        assert_eq!(
+            pick_run(runs(), Some("v9.7.2"), Some(&release)).map(|r| r.id),
+            Some(1)
+        );
+        // Without the workflow, the first run of the tag, as before.
+        assert_eq!(
+            pick_run(runs(), Some("v9.7.2"), None).map(|r| r.id),
+            Some(2)
+        );
+        // Not started yet: keep waiting.
+        assert!(pick_run(runs()[..2].to_vec(), Some("v9.7.2"), Some(&release)).is_none());
+        // Runs without a path are matched by name.
+        let unnamed = vec![
+            run_of(5, "MYLE Passwords", None, "v1.0.0"),
+            run_of(4, "Release", None, "v1.0.0"),
+        ];
+        assert_eq!(
+            pick_run(unnamed, Some("v1.0.0"), Some(&release)).map(|r| r.id),
+            Some(4)
+        );
+        // A path with a ref.
+        let with_ref = vec![run_of(
+            6,
+            "Release",
+            Some(".github/workflows/release.yml@refs/tags/v2.0.0"),
+            "v2.0.0",
+        )];
+        assert_eq!(
+            pick_run(with_ref, Some("v2.0.0"), Some(&release)).map(|r| r.id),
+            Some(6)
+        );
+    }
+
+    #[test]
+    fn the_live_checks_fetch_now_and_then() {
+        let root = std::env::temp_dir().join("myle-gr-check-fetch");
+        let other = std::env::temp_dir().join("myle-gr-check-fetch-other");
+        let now = Instant::now();
+        assert!(check_fetch_due(&root, now));
+        assert!(!check_fetch_due(&root, now + Duration::from_secs(5)));
+        assert!(check_fetch_due(&other, now + Duration::from_secs(5)));
+        assert!(check_fetch_due(
+            &root,
+            now + CHECK_FETCH_EVERY + Duration::from_secs(1)
+        ));
     }
 }

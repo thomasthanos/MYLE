@@ -516,6 +516,9 @@ pub struct Run {
     pub created_at: Option<String>,
     #[serde(alias = "updated_at", default)]
     pub updated_at: Option<String>,
+    /// The workflow file (`.github/workflows/release.yml`).
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Deserialize)]

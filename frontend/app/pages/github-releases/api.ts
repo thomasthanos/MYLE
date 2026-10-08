@@ -296,11 +296,20 @@ export interface Answer {
 
 // ─── Build ─────────────────────────────────────────────────────────────────
 
+export interface BuildStep {
+  title: string;
+  command: string | null;
+}
+
 export interface BuildOption {
   id: string;
   command: string;
   label: string;
   detail: string | null;
+  /** What it runs, in order. */
+  steps: BuildStep[];
+  /** The project's whole build: the one to run before a release. */
+  full: boolean;
 }
 
 export interface BuildPlan {
@@ -400,6 +409,9 @@ export interface ReleaseInfo {
   notesDir: string | null;
   branch: string | null;
   buildCommand: string | null;
+  buildSteps: string[];
+  /** The project's whole build, when the chosen command is not it. */
+  fullBuild: string | null;
 }
 
 export interface Commit {

@@ -2,7 +2,10 @@
   // Building a project: the detected commands (or a typed one), a live log,
   // and a Problems panel whose items open in VS Code.
   import { onMount, untrack } from "svelte";
+  import Circle from "@lucide/svelte/icons/circle";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleX from "@lucide/svelte/icons/circle-x";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Copy from "@lucide/svelte/icons/copy";
   import Download from "@lucide/svelte/icons/download";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -21,7 +24,7 @@
     type EntryStatus,
   } from "./api";
   import BuildLog from "./BuildLog.svelte";
-  import { duration, formatBytes, formatRelative, githubReleases as gr, type ListItem } from "./state.svelte";
+  import { duration, formatBytes, formatRelative, githubReleases as gr, stepReached, type ListItem } from "./state.svelte";
 
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
 
@@ -55,6 +58,21 @@
   const options = $derived((info?.plan.options ?? []).map((o) => ({ value: o.id, label: o.label })));
   const choice = $derived(info?.choice ?? info?.plan.options[0]?.id ?? "");
   const command = $derived(info?.customCommand ?? info?.plan.options.find((o) => o.id === choice)?.command ?? info?.plan.options[0]?.command ?? null);
+  const option = $derived(info?.customCommand ? null : (info?.plan.options.find((o) => o.id === choice) ?? info?.plan.options[0] ?? null));
+  /** The project's whole build, when another command is picked or typed. */
+  const fullOption = $derived(info?.plan.options.find((o) => o.full) ?? null);
+  const partial = $derived(!!fullOption && !!command && command !== fullOption.command);
+  const steps = $derived(option?.steps ?? []);
+  // The steps light up as the build reaches them (when this command runs).
+  const tracking = $derived(session.command === command && !session.install && (session.running || !!session.outcome));
+  const reached = $derived(tracking ? stepReached(session.stages, steps.map((s) => s.title)) : -1);
+  function stepState(index: number): "done" | "running" | "failed" | "waiting" {
+    if (!tracking) return "waiting";
+    if (session.outcome?.ok) return "done";
+    if (index < reached) return "done";
+    if (index === reached) return session.running ? "running" : "failed";
+    return "waiting";
+  }
 
   async function choose(id: string) {
     if (!info) return;
@@ -166,6 +184,25 @@
     {#if command && !customOpen}
       <code class="cmd selectable">{command}</code>
     {/if}
+    {#if steps.length > 1 && !customOpen}
+      <ol class="pipeline" aria-label="Build steps">
+        {#each steps as step, i (i)}
+          {@const state = stepState(i)}
+          <li class="p-{state}" title={step.command ?? step.title}>
+            {#if state === "done"}<CircleCheck size={13} />{:else if state === "running"}<LoaderCircle size={13} class="spin" />{:else if state === "failed"}<CircleX size={13} />{:else}<Circle size={13} />{/if}
+            <span class="n">{i + 1}</span>
+            <span>{step.title}</span>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+    {#if partial && fullOption && !session.running}
+      <div class="partial">
+        <TriangleAlert size={13} />
+        <span>This runs only part of the project's build{option?.id === "tauri" && option.label.includes("only") ? " (the app, no installer)" : ""}. Its full build is <code>{fullOption.command}</code>{fullOption.steps.length > 1 ? ` (${fullOption.steps.map((s) => s.title).join(" → ")})` : ""}.</span>
+        <button class="btn small" onclick={() => void choose(fullOption!.id)}>Use the full build</button>
+      </div>
+    {/if}
     {#if info.lastBuild && !session.running && !session.outcome}
       <span class="last">Last build {formatRelative(info.lastBuild.at)} · {duration(info.lastBuild.durationMs)} · {info.lastBuild.lines.toLocaleString()} lines</span>
     {/if}
@@ -176,6 +213,9 @@
       <div class="quiet"><Play size={20} /> Build the project to see its output here.</div>
     {/if}
 
+    {#if session.outcome?.ok && !session.install && !session.artifacts.length && session.command === command}
+      <p class="none-made">The build made no files to ship (installers, archives, update files). Check its output folder.</p>
+    {/if}
     {#if session.artifacts.length}
       <div class="artifacts">
         <div class="art-head"><Package size={14} /> Files the build made <span>{session.artifacts.length}</span></div>
@@ -251,6 +291,96 @@
   .last {
     color: var(--text-3);
     font-size: 11.5px;
+  }
+
+  .pipeline {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pipeline li {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px 3px 6px;
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 99px;
+    background: rgb(255 255 255 / 0.03);
+    color: var(--text-2);
+    font-size: 11.8px;
+  }
+
+  .pipeline .n {
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pipeline li :global(svg) {
+    color: var(--text-3);
+  }
+
+  .pipeline .p-done :global(svg) {
+    color: #7ee2a8;
+  }
+
+  .pipeline .p-running {
+    border-color: rgb(var(--accent-rgb) / 0.4);
+    background: rgb(var(--accent-rgb) / 0.12);
+    color: var(--text-1);
+  }
+
+  .pipeline .p-running :global(svg) {
+    color: rgb(var(--accent-rgb));
+  }
+
+  .pipeline .p-failed {
+    border-color: rgb(255 120 120 / 0.35);
+    color: #ffb3b3;
+  }
+
+  .pipeline .p-failed :global(svg) {
+    color: #ff9d9d;
+  }
+
+  .partial {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid rgb(255 196 92 / 0.25);
+    border-radius: 10px;
+    background: rgb(255 196 92 / 0.07);
+    color: var(--text-2);
+    font-size: 12px;
+  }
+
+  .partial > :global(svg) {
+    flex: none;
+    color: #ffd08a;
+  }
+
+  .partial span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .partial code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  .none-made {
+    flex: none;
+    margin: 0;
+    color: var(--text-3);
+    font-size: 12px;
   }
 
   .quiet {

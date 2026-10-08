@@ -214,7 +214,14 @@ impl Parser {
         }
 
         // Stages and progress.
-        if let Some(c) = p.npm_script.captures(trimmed) {
+        if let Some(step) = trimmed
+            .strip_prefix("==> ")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            // A build script's own step marker (`Write-Host "==> App 9.7.2"`).
+            info.stage = Some(step.to_string());
+        } else if let Some(c) = p.npm_script.captures(trimmed) {
             info.stage = Some(format!("Running {} ({})", &c[2], &c[1]));
         } else if trimmed.contains("vite v") && trimmed.contains("building") {
             info.stage = Some("Bundling with Vite".into());
@@ -725,6 +732,13 @@ mod tests {
         );
         assert_eq!(diags[5].tool, "go");
         assert_eq!(stages, ["Running build (myapp)"]);
+        let (_, stages) = run(&[
+            "==> App 9.7.2",
+            "   Compiling myle v1.0.0",
+            "==> Setup window",
+        ]);
+        assert_eq!(stages[0], "App 9.7.2");
+        assert_eq!(stages.last().unwrap(), "Setup window");
         assert_eq!(
             strip_ansi("\u{1b}[1;32mok\u{1b}[0m \u{1b}]0;title\u{7}done"),
             "ok done"

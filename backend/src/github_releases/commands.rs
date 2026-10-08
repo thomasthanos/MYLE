@@ -1201,6 +1201,37 @@ pub struct ReleaseInfo {
     pub notes_dir: Option<String>,
     pub branch: Option<String>,
     pub build_command: Option<String>,
+    /// The steps of that command, when it is a detected one.
+    pub build_steps: Vec<String>,
+    /// The project's whole build, when the chosen command is not it.
+    pub full_build: Option<String>,
+}
+
+/// The folder a release workflow reads its notes from: the first
+/// `…/release-notes/` path in it (`docs/release-notes`), in code or a comment.
+fn notes_dir_of(workflow: &str) -> Option<String> {
+    let path_char =
+        |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '\\');
+    workflow
+        .match_indices("release-notes/")
+        .find_map(|(at, _)| {
+            let start = workflow[..at]
+                .char_indices()
+                .rev()
+                .find(|(_, c)| !path_char(*c))
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+            let dir = workflow[start..at + "release-notes".len()]
+                .replace('\\', "/")
+                .trim_start_matches("./")
+                .to_string();
+            let ok = !dir.starts_with('/')
+                && !dir.split('/').any(|part| part.is_empty() || part == "..")
+                && workflow[at + "release-notes/".len()..].starts_with(|c: char| {
+                    c == '$' || c == '<' || c == '{' || c.is_ascii_alphanumeric()
+                });
+            ok.then_some(dir)
+        })
 }
 
 #[tauri::command]
@@ -1249,13 +1280,7 @@ pub async fn github_releases_release_info(entry_id: String) -> Result<ReleaseInf
         let text =
             std::fs::read_to_string(entry.root.join(".github").join("workflows").join(&w.file))
                 .ok()?;
-        let at = text.find("release-notes/")?;
-        let start = text[..at]
-            .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '=')
-            .map(|i| i + 1)
-            .unwrap_or(at);
-        let dir = text[start..at + "release-notes".len()].replace('\\', "/");
-        (!dir.contains('$') && !dir.contains("..")).then_some(dir)
+        notes_dir_of(&text)
     });
     let mode = entry.config.release_mode.clone().unwrap_or_else(|| {
         if workflow.is_some() {
@@ -1264,8 +1289,23 @@ pub async fn github_releases_release_info(entry_id: String) -> Result<ReleaseInf
             "local".into()
         }
     });
+    let build_command = chosen_command(&entry, &plan);
+    let build_steps = plan
+        .options
+        .iter()
+        .find(|o| Some(&o.command) == build_command.as_ref())
+        .map(|o| o.steps.iter().map(|s| s.title.clone()).collect())
+        .unwrap_or_default();
+    let full_build = plan
+        .options
+        .iter()
+        .find(|o| o.full)
+        .map(|o| o.command.clone())
+        .filter(|full| Some(full) != build_command.as_ref());
     Ok(ReleaseInfo {
-        build_command: chosen_command(&entry, &plan),
+        build_command,
+        build_steps,
+        full_build,
         versions,
         next,
         tag_prefix: entry.tag_prefix.clone(),
@@ -1348,7 +1388,7 @@ pub async fn github_releases_preflight(
     let entry_for = entry.clone();
     let plan = blocking(move || detect::plan(&entry_for.dir, &entry_for.root)).await?;
     let has_build = chosen_command(&entry, &plan).is_some();
-    let context = release::context(entry, true).await?;
+    let context = release::context_for_checks(entry).await?;
     Ok(release::preflight(&context, &version, mode, include_changes, has_build, build).await)
 }
 
