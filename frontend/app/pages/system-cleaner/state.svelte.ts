@@ -324,8 +324,9 @@ class CleanerState {
       });
       freed += summary.freed;
       skipped += summary.skipped;
-      // What the user pass left in the system folders is tried again below.
-      inUse += summary.skippedBytes - summary.adminSkippedBytes;
+      // What the user pass left in the system folders is tried again below,
+      // when there is an administrator pass; without one it stays left.
+      inUse += summary.skippedBytes - (withAdmin ? summary.adminSkippedBytes : 0);
 
       // The first pass already deleted files; a declined or failed UAC step
       // must not hide that, so it is reported on its own.
@@ -340,6 +341,7 @@ class CleanerState {
           const elevated = await cleanerApi.cleanElevated(adminIds, (e) => {
             if (e.event === "progress") return;
             this.#applyCleaned(e.data, true);
+            void step();
           });
           freed += elevated.freed;
           // From there, only what that pass itself left is still in use.
@@ -347,6 +349,8 @@ class CleanerState {
           inUse += elevated.skippedBytes;
         } catch (err) {
           adminNote = `The system folders were skipped: ${message(err)}`;
+          // Not tried again: what the user pass left there is still there.
+          inUse += summary.adminSkippedBytes;
         }
       }
 

@@ -36,14 +36,9 @@
   // without administrator approval. Say so instead of a plain "Cleaned".
   const partly = $derived(done && (measured?.bytes ?? 0) > 0);
   // The bytes the run could not remove: what the cards and the toast agree on.
-  const inUse = $derived(
-    done
-      ? Math.max(
-          (outcome?.skippedBytes ?? 0) - (outcome?.adminSkippedBytes ?? 0),
-          partly ? (measured?.bytes ?? 0) : 0,
-        )
-      : 0,
-  );
+  // An administrator pass already replaced its part of `skippedBytes` (and
+  // zeroed `adminSkippedBytes`); without one, those files are still there.
+  const inUse = $derived(done ? Math.max(outcome?.skippedBytes ?? 0, partly ? (measured?.bytes ?? 0) : 0) : 0);
   // Only when the leftovers are the system folders the user did not approve.
   const needsAdmin = $derived(partly && category.mayNeedAdmin && cleanerState.adminGranted !== true);
 </script>

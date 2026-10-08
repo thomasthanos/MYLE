@@ -196,6 +196,42 @@ test("what stays in use is told in bytes, without counting the admin pass twice"
   );
 });
 
+test("without the administrator pass, what the system folders kept is still counted as left", async () => {
+  await scanAll();
+  // The remeasure cannot see the system folders without approval.
+  remaining.temp = 0;
+  cleanerApi.clean = async (ids, onEvent) => {
+    answer(onEvent, [
+      {
+        event: "category",
+        data: { id: "temp", bytes: 600, files: 3, skipped: 1, skippedBytes: 400, adminSkipped: 1, adminSkippedBytes: 400, locked: false },
+      },
+      {
+        event: "category",
+        data: { id: "prefetch", bytes: 2_000, files: 4, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: false },
+      },
+      {
+        event: "category",
+        data: { id: "recycle-bin", bytes: 4_000, files: 4, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: false },
+      },
+    ]);
+    return { freed: 6_600, files: 11, skipped: 1, skippedBytes: 400, adminSkipped: 1, adminSkippedBytes: 400, locked: [] };
+  };
+  cleanerApi.cleanElevated = async () => {
+    throw new Error("Administrator approval was declined.");
+  };
+  try {
+    state.adminGranted = true;
+    const running = state.clean();
+    await settle(20);
+    confirmState.answer(true);
+    await running;
+    assert.equal(toast.visible[0].message, "Freed 6.4 KB · 400 B in use of 6.8 KB selected.", "the 400 B the admin pass never retried");
+  } finally {
+    remaining.temp = 400;
+  }
+});
+
 test("the bar follows the categories and ends full", async () => {
   await scanAll();
   const seen = [];
