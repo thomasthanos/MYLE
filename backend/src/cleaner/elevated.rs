@@ -58,6 +58,18 @@ pub struct Totals {
     pub files: u64,
     #[serde(default)]
     pub skipped: u64,
+    /// What the skipped files hold, so the page can size what is left in use.
+    #[serde(default)]
+    pub skipped_bytes: u64,
+}
+
+impl Totals {
+    /// Files that could not be removed: those in use, and the ones this
+    /// process decided not to touch. Their size is kept for the page.
+    fn skip(&mut self, bytes: u64) {
+        self.skipped += 1;
+        self.skipped_bytes += bytes;
+    }
 }
 
 /// One request to the helper: an action over the admin-only folders of
@@ -244,7 +256,7 @@ fn visit_directory(
     totals: &mut Totals,
 ) -> Result<(), String> {
     if depth >= MAX_DEPTH {
-        totals.skipped += 1;
+        totals.skip(0);
         return Ok(());
     }
 
@@ -326,6 +338,12 @@ fn visit_entry(
         return;
     }
     let listed_directory = entry.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    // For the paths that cannot open the entry: the size the listing gave.
+    let listed_bytes = if listed_directory {
+        0
+    } else {
+        entry.EndOfFile as u64
+    };
     let access = FILE_READ_ATTRIBUTES
         | if listed_directory {
             FILE_LIST_DIRECTORY
@@ -338,11 +356,11 @@ fn visit_entry(
             0
         };
     let Ok(child) = OwnedHandle::open_id(parent.0, entry.FileId, access) else {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     };
     let Ok(info) = child.info() else {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     };
     if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -350,35 +368,36 @@ fn visit_entry(
     }
     let is_directory = info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
     if is_directory != listed_directory {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     }
+    let listed_bytes = size_of_entry(&info);
     let Ok(final_path) = normalized_final_path(child.0) else {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     };
     if !is_below(root_path, &final_path) {
         // The entry moved outside the allowed root after enumeration and must
         // not be touched. The identity check below closes the remaining race
         // between this observation and acquiring the pinned path handle.
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     }
     // Open the discovered name without delete sharing and prove it still
     // names the same volume/file ID. This second handle pins the name against
     // rename and is the exact handle later passed to the delete API.
     let Ok(pinned) = OwnedHandle::open_path(Path::new(&final_path), access) else {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     };
     let Ok(pinned_info) = pinned.info() else {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     };
     if !same_file(&info, &pinned_info)
         || pinned_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
     {
-        totals.skipped += 1;
+        totals.skip(listed_bytes);
         return;
     }
     drop(child);
@@ -388,7 +407,7 @@ fn visit_entry(
     if is_directory {
         if patterns.is_empty() {
             if visit_directory(&child, root_path, patterns, action, depth + 1, totals).is_err() {
-                totals.skipped += 1;
+                totals.skip(0);
             }
             if action == Action::Clean {
                 let _ = child.delete(); // only succeeds when now empty
@@ -404,7 +423,7 @@ fn visit_entry(
     if !targets::matches(actual_name, patterns) {
         return;
     }
-    let size = ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64;
+    let size = size_of_entry(&info);
     match action {
         Action::Measure => {
             totals.bytes += size;
@@ -413,7 +432,7 @@ fn visit_entry(
         Action::Clean if info.nNumberOfLinks > 1 => {
             // OpenFileById does not identify which hard-link name will be
             // removed. Never let an outside link make that choice ambiguous.
-            totals.skipped += 1;
+            totals.skip(size);
         }
         Action::Clean => match child.delete() {
             Ok(()) => {
@@ -423,10 +442,19 @@ fn visit_entry(
             Err(_error) => {
                 #[cfg(test)]
                 eprintln!("delete failed for {final_path}: {_error}");
-                totals.skipped += 1;
+                totals.skip(size);
             }
         },
     }
+}
+
+/// The size a handle reports. For a folder it is meaningless, and 0 keeps the
+/// "still in use" figure about files only.
+fn size_of_entry(info: &BY_HANDLE_FILE_INFORMATION) -> u64 {
+    if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        return 0;
+    }
+    ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64
 }
 
 fn is_below(root: &str, candidate: &str) -> bool {
@@ -596,7 +624,8 @@ mod tests {
             Totals {
                 bytes: 50,
                 files: 2,
-                skipped: 0
+                skipped: 0,
+                skipped_bytes: 0,
             }
         );
         let cleaned = visit_target(&target, Action::Clean).unwrap();

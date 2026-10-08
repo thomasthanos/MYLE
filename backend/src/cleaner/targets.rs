@@ -271,8 +271,13 @@ pub struct Cleaned {
     pub files: u64,
     /// In use by another program, or not ours to delete.
     pub skipped: u64,
+    /// How much those hold, so the page can say "freed X, Y still in use"
+    /// instead of only counting files.
+    pub skipped_bytes: u64,
     /// Of `skipped`, those in folders the administrator pass cleans again.
     pub admin_skipped: u64,
+    /// Of `skipped_bytes`, the part the administrator pass cleans again.
+    pub admin_skipped_bytes: u64,
     pub locked: bool,
 }
 
@@ -303,6 +308,7 @@ pub fn clean(target: &Target) -> Cleaned {
         };
         if !inside {
             out.skipped += 1;
+            out.skipped_bytes += size;
             continue;
         }
         let removed = match link {
@@ -318,7 +324,10 @@ pub fn clean(target: &Target) -> Cleaned {
                 out.bytes += size;
                 out.files += 1;
             }
-            Err(_) => out.skipped += 1,
+            Err(_) => {
+                out.skipped += 1;
+                out.skipped_bytes += size;
+            }
         }
     }
 
@@ -530,6 +539,10 @@ mod tests {
         assert_eq!(cleaned.files, 2, "the open file is skipped");
         assert_eq!(cleaned.bytes, 502);
         assert_eq!(cleaned.skipped, 1);
+        assert_eq!(
+            cleaned.skipped_bytes, 1000,
+            "what is left in use is told in bytes too"
+        );
         assert!(root.exists(), "the folder itself stays");
         assert!(!root.join("sub").exists(), "empty subfolders go");
         assert!(root.join("a.log").exists());
