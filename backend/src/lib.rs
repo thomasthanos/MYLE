@@ -465,6 +465,7 @@ pub fn run() {
             github_releases::commands::github_releases_open_in_editor,
             github_releases::commands::github_releases_reveal,
             github_releases::commands::github_releases_release_info,
+            github_releases::commands::github_releases_recent_commits,
             github_releases::commands::github_releases_preflight,
             github_releases::commands::github_releases_ai_notes,
             github_releases::commands::github_releases_release,

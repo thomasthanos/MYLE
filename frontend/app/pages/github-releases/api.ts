@@ -402,6 +402,21 @@ export interface ReleaseInfo {
   buildCommand: string | null;
 }
 
+export interface Commit {
+  sha: string;
+  subject: string;
+  author: string;
+  /** Unix seconds. */
+  date: number;
+}
+
+/** The newest commits, and how many came after the last release. */
+export interface RecentCommits {
+  commits: Commit[];
+  unreleased: number;
+  lastTag: string | null;
+}
+
 export type CheckState = "ok" | "warn" | "fail";
 
 export interface Check {
@@ -533,6 +548,7 @@ export const githubReleasesApi = {
   reveal: (entryId: string, path: string | null) => invoke<void>("github_releases_reveal", { entryId, path }),
 
   releaseInfo: (entryId: string) => invoke<ReleaseInfo>("github_releases_release_info", { entryId }),
+  recentCommits: (entryId: string, max: number) => invoke<RecentCommits>("github_releases_recent_commits", { entryId, max }),
   preflight: (entryId: string, version: string, mode: Mode, includeChanges: boolean, build: boolean) =>
     invoke<Check[]>("github_releases_preflight", { entryId, version, mode, includeChanges, build }),
   aiNotes: (entryId: string, version: string, provider: ProviderId | null, polish: string | null) =>

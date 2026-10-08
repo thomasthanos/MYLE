@@ -419,7 +419,12 @@
         {@const age = pb.daysSinceBackup(project)}
         <article class="project surface" class:expanded>
           <div class="project-main">
-            <span class="project-icon"><FolderCode size={18} /></span>
+            <span
+              class="project-icon"
+              class:ok={!missing && !attempt && !!project.lastBackup && age !== null && age < 7}
+              class:warn={missing || attempt?.cancelled || (age !== null && age >= 30)}
+              class:bad={!!attempt && !attempt.cancelled}
+            ><FolderCode size={18} /></span>
             <div class="project-text">
               <div class="title-row">
                 <strong>{project.name}</strong>
@@ -638,6 +643,10 @@
     display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px;
     border: 1px solid rgb(var(--accent-rgb) / 0.12); background: rgb(var(--accent-rgb) / 0.05); color: rgb(169 179 255 / 0.8);
   }
+  /* The same health colours as the GitHub Releases list. */
+  .project-icon.ok { border-color: rgb(62 207 142 / 0.28); background: rgb(62 207 142 / 0.08); color: #6fdba5; }
+  .project-icon.warn { border-color: rgb(255 198 107 / 0.3); background: rgb(255 198 107 / 0.08); color: #ffc66b; }
+  .project-icon.bad { border-color: rgb(255 143 143 / 0.3); background: rgb(255 143 143 / 0.08); color: #ff8f8f; }
   .project-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
   .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
   .title-row strong { font-size: 13px; }
