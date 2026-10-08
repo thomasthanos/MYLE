@@ -292,8 +292,8 @@ class ProjectBackupsState {
     const groups: Group[] = [
       {
         key: "attention",
-        title: "Worth a look",
-        note: "A backup failed or the folder moved.",
+        title: "Did not finish",
+        note: "The last backup failed; the reason and the fix are below.",
         projects: of("failed"),
       },
       {
@@ -474,13 +474,24 @@ class ProjectBackupsState {
       const failed = run.results.filter((result) => !result.ok && result.code !== "CANCELLED");
       this.failures = failed;
       if (run.cancelled) toast.info("Backup cancelled.");
-      for (const result of done) {
-        const outcome = result.outcome!;
-        const late = outcome.finalCheckOk ? "" : " The cloud app is still catching up with it.";
-        toast.success(`${result.name}: ${outcome.name}.zip saved (${outcome.fileCount.toLocaleString()} files).${late}`, {
-          label: "Show",
-          run: () => void api.open("backups", result.projectId, `${outcome.monthFolder}/${outcome.name}.zip`),
-        });
+      // One toast per project for a few; a long run gets one line, not a
+      // queue of toasts that takes minutes to go by.
+      if (done.length > 3) {
+        const files = done.reduce((sum, result) => sum + (result.outcome?.fileCount ?? 0), 0);
+        const late = done.filter((result) => !result.outcome?.finalCheckOk).length;
+        toast.success(
+          `${done.length} projects backed up (${files.toLocaleString()} files).${late ? ` The cloud app is still catching up with ${late} of them.` : ""}`,
+          { label: "Show", run: () => void api.open("root") },
+        );
+      } else {
+        for (const result of done) {
+          const outcome = result.outcome!;
+          const late = outcome.finalCheckOk ? "" : " The cloud app is still catching up with it.";
+          toast.success(`${result.name}: ${outcome.name}.zip saved (${outcome.fileCount.toLocaleString()} files).${late}`, {
+            label: "Show",
+            run: () => void api.open("backups", result.projectId, `${outcome.monthFolder}/${outcome.name}.zip`),
+          });
+        }
       }
       const missing = failed.find((result) => result.code === "SOURCE_MISSING");
       if (missing && failed.length === 1 && done.length === 0) {

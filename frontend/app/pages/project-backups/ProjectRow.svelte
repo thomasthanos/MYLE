@@ -53,7 +53,7 @@
 
 <article class="project surface" class:expanded class:missing class:failed={health === "failed"}>
   <div class="project-main">
-    <span class="project-icon"><FolderCode size={18} /></span>
+    <span class="project-icon {badge.tone}"><FolderCode size={18} /></span>
     <div class="project-text">
       <div class="title-row">
         <strong>{project.name}</strong>
@@ -206,6 +206,26 @@
     border: 1px solid rgb(var(--accent-rgb) / 0.12);
     background: rgb(var(--accent-rgb) / 0.05);
     color: rgb(169 179 255 / 0.8);
+  }
+
+  /* The badge's colour on the icon too, as in the GitHub Releases list
+     (lost when the stash conflict was resolved). */
+  .project-icon.ok {
+    border-color: rgb(62 207 142 / 0.28);
+    background: rgb(62 207 142 / 0.08);
+    color: #6fdba5;
+  }
+
+  .project-icon.warn {
+    border-color: rgb(255 198 107 / 0.3);
+    background: rgb(255 198 107 / 0.08);
+    color: #ffc66b;
+  }
+
+  .project-icon.danger {
+    border-color: rgb(255 143 143 / 0.3);
+    background: rgb(255 143 143 / 0.08);
+    color: #ff8f8f;
   }
 
   .project-text {

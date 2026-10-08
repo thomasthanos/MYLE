@@ -200,7 +200,7 @@
 
   const filters: { id: "all" | Group["key"]; label: string }[] = [
     { id: "all", label: "All" },
-    { id: "attention", label: "Needs a look" },
+    { id: "attention", label: "Did not finish" },
     { id: "never", label: "Not backed up" },
     { id: "stale", label: "Getting old" },
     { id: "ok", label: "Up to date" },
@@ -256,16 +256,16 @@
           tone={summary.attention ? (summary.missing ? "danger" : "warn") : "quiet"}
         />
         <StatTile
-          label="in kept backups"
+          label="in latest backups"
           value={summary.knownSizes ? formatBytes(summary.backupBytes) : "—"}
           icon={Database}
-          title="The size of every zip MYLE keeps for these projects"
+          title="Each project's latest zip, together (older backups are not counted)"
         />
         <StatTile
           label="last backup"
           value={summary.newest === null ? "never" : pb.ago(summary.newest)}
           icon={Archive}
-          title={summary.oldest === null ? "No backup yet" : `Oldest backup kept: ${pb.ago(summary.oldest)}`}
+          title={summary.oldest === null ? "No backup yet" : `The project backed up longest ago: ${pb.ago(summary.oldest)}`}
         />
       </div>
       <p class="headline" class:good={summary.attention === 0 && !!pb.projects.length && hasDestination}>
