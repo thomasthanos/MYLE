@@ -69,8 +69,12 @@ pub enum CleanEvent {
         bytes: u64,
         files: u64,
         skipped: u64,
+        /// What the skipped files hold: the page says "still in use" in bytes.
+        skipped_bytes: u64,
         /// Of `skipped`, those the administrator pass tries again.
         admin_skipped: u64,
+        /// Of `skipped_bytes`, the part the administrator pass tries again.
+        admin_skipped_bytes: u64,
         locked: bool,
     },
 }
@@ -89,9 +93,14 @@ pub struct CleanSummary {
     freed: u64,
     files: u64,
     skipped: u64,
+    /// What the skipped files hold; after the administrator pass this is only
+    /// what is truly in use.
+    skipped_bytes: u64,
     /// Of `skipped`, those in administrator folders: the administrator pass
     /// tries them again and counts what it still leaves.
     admin_skipped: u64,
+    /// Of `skipped_bytes`, the part the administrator pass tries again.
+    admin_skipped_bytes: u64,
     /// Categories that still hold data only an administrator can remove.
     locked: Vec<String>,
 }
@@ -225,7 +234,9 @@ pub async fn cleaner_clean(
             summary.freed += cleaned.bytes;
             summary.files += cleaned.files;
             summary.skipped += cleaned.skipped;
+            summary.skipped_bytes += cleaned.skipped_bytes;
             summary.admin_skipped += cleaned.admin_skipped;
+            summary.admin_skipped_bytes += cleaned.admin_skipped_bytes;
             if cleaned.locked {
                 summary.locked.push(category.id.into());
             }
@@ -234,7 +245,9 @@ pub async fn cleaner_clean(
                 bytes: cleaned.bytes,
                 files: cleaned.files,
                 skipped: cleaned.skipped,
+                skipped_bytes: cleaned.skipped_bytes,
                 admin_skipped: cleaned.admin_skipped,
+                admin_skipped_bytes: cleaned.admin_skipped_bytes,
                 locked: cleaned.locked,
             });
         }
@@ -268,12 +281,15 @@ pub async fn cleaner_clean_elevated(
         summary.freed += entry.bytes;
         summary.files += entry.files;
         summary.skipped += entry.skipped;
+        summary.skipped_bytes += entry.skipped_bytes;
         let _ = on_event.send(CleanEvent::Category {
             id: category.id.into(),
             bytes: entry.bytes,
             files: entry.files,
             skipped: entry.skipped,
+            skipped_bytes: entry.skipped_bytes,
             admin_skipped: 0,
+            admin_skipped_bytes: 0,
             locked: false,
         });
     }
@@ -299,6 +315,7 @@ fn clean(category: &Category) -> targets::Cleaned {
                 },
                 Err(_) => targets::Cleaned {
                     skipped: files,
+                    skipped_bytes: bytes,
                     ..Default::default()
                 },
             }
@@ -310,8 +327,10 @@ fn clean(category: &Category) -> targets::Cleaned {
                 acc.bytes += one.bytes;
                 acc.files += one.files;
                 acc.skipped += one.skipped;
+                acc.skipped_bytes += one.skipped_bytes;
                 if target.admin {
                     acc.admin_skipped += one.skipped;
+                    acc.admin_skipped_bytes += one.skipped_bytes;
                 }
                 acc.locked |= one.locked;
                 acc
@@ -373,12 +392,22 @@ mod tests {
             bytes: 10,
             files: 2,
             skipped: 3,
+            skipped_bytes: 2048,
             admin_skipped: 1,
+            admin_skipped_bytes: 1024,
             locked: false,
         })
         .unwrap();
         assert_eq!(cleaned["data"]["adminSkipped"], 1);
-        let summary = serde_json::to_value(CleanSummary { admin_skipped: 4, ..Default::default() }).unwrap();
+        assert_eq!(cleaned["data"]["skippedBytes"], 2048);
+        assert_eq!(cleaned["data"]["adminSkippedBytes"], 1024);
+        let summary = serde_json::to_value(CleanSummary {
+            admin_skipped: 4,
+            skipped_bytes: 512,
+            ..Default::default()
+        })
+        .unwrap();
         assert_eq!(summary["adminSkipped"], 4);
+        assert_eq!(summary["skippedBytes"], 512);
     }
 }

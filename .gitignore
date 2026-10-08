@@ -21,6 +21,9 @@ Thumbs.db
 .claude/
 *.bak
 
+# Visual preview harness for the pages (dev only; see .preview/README.md)
+.preview/
+
 # Generated browser store packages
 extension/*.zip
 

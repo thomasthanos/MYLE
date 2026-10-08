@@ -93,6 +93,37 @@ export interface CompareView {
   secondId: string;
 }
 
+/** How a project is doing, for the card's badge and for the groups. */
+export type Health = "missing" | "failed" | "never" | "stale" | "due" | "ok" | "cancelled";
+
+/** What the page summary counts. */
+export interface Summary {
+  projects: number;
+  ok: number;
+  attention: number;
+  never: number;
+  stale: number;
+  missing: number;
+  /** Everything the kept backups hold, when the sizes are known. */
+  backupBytes: number;
+  knownSizes: number;
+  newest: number | null;
+  oldest: number | null;
+}
+
+/** A group of projects under one heading of the list. */
+export interface Group {
+  key: "attention" | "never" | "stale" | "ok" | "missing";
+  title: string;
+  note: string;
+  projects: Project[];
+}
+
+/** A backup older than this is called old; a project still has time. */
+const STALE_DAYS = 30;
+/** Backed up within this many days counts as up to date. */
+const FRESH_DAYS = 7;
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -141,6 +172,8 @@ class ProjectBackupsState {
   picked = $state<string[]>([]);
   /** Filters the project list (name, backup name or folder). */
   query = $state("");
+  /** Which group of the list is shown; "all" keeps the page as it was. */
+  filter = $state<"all" | Group["key"]>("all");
   /** Ticks every 30 s so "5 minutes ago" stays true. */
   clock = $state(Date.now());
   private loaded = false;
@@ -186,6 +219,114 @@ class ProjectBackupsState {
 
   isMissing(project: Project) {
     return this.page.missingSources.includes(project.id);
+  }
+
+  /** The last attempt that ended badly, for the card's badge. */
+  lastFailure(project: Project) {
+    const result = project.lastResult;
+    if (!result?.at || result.ok) return null;
+    return result;
+  }
+
+  /** Where the project stands, in one word. */
+  health(project: Project): Health {
+    if (this.isMissing(project)) return "missing";
+    const failure = this.lastFailure(project);
+    if (failure) return failure.cancelled ? "cancelled" : "failed";
+    if (!project.lastBackup) return "never";
+    const days = this.daysSinceBackup(project) ?? 0;
+    return days >= STALE_DAYS ? "stale" : days >= FRESH_DAYS ? "due" : "ok";
+  }
+
+  /** True when the project wants the user to do something. */
+  needsAttention(project: Project) {
+    const health = this.health(project);
+    return health !== "ok" && health !== "due";
+  }
+
+  /** Everything the page says about itself, in one pass. */
+  get summary(): Summary {
+    void this.clock;
+    const summary: Summary = {
+      projects: this.projects.length,
+      ok: 0,
+      attention: 0,
+      never: 0,
+      stale: 0,
+      missing: 0,
+      backupBytes: 0,
+      knownSizes: 0,
+      newest: null,
+      oldest: null,
+    };
+    for (const project of this.projects) {
+      const health = this.health(project);
+      if (health === "ok" || health === "due") summary.ok++;
+      if (health === "never") summary.never++;
+      if (health === "stale") summary.stale++;
+      if (health === "missing") summary.missing++;
+      if (this.needsAttention(project)) summary.attention++;
+      const backup = project.lastBackup;
+      if (!backup) continue;
+      summary.backupBytes += backup.zipSize;
+      summary.knownSizes++;
+      summary.newest = summary.newest === null ? backup.createdAt : Math.max(summary.newest, backup.createdAt);
+      summary.oldest = summary.oldest === null ? backup.createdAt : Math.min(summary.oldest, backup.createdAt);
+    }
+    return summary;
+  }
+
+  /**
+   * The projects, split into what the user should look at first. A project
+   * that needs a decision (a folder that moved, a backup that failed) comes
+   * before one that has simply been waiting. `filter` narrows it to one group.
+   */
+  get groups(): Group[] {
+    const all = this.allGroups;
+    return this.filter === "all" ? all : all.filter((group) => group.key === this.filter);
+  }
+
+  /** Every group, whatever the current filter is. Counts come from here. */
+  get allGroups(): Group[] {
+    const of = (...keys: Health[]) => this.filtered.filter((project) => keys.includes(this.health(project)));
+    const groups: Group[] = [
+      {
+        key: "attention",
+        title: "Worth a look",
+        note: "A backup failed or the folder moved.",
+        projects: of("failed"),
+      },
+      {
+        key: "never",
+        title: "Not backed up yet",
+        note: "Add them to the cloud with one click.",
+        // A cancelled attempt that never produced a backup still has none.
+        projects: of("never", "cancelled"),
+      },
+      {
+        key: "stale",
+        title: "Getting old",
+        note: `The last backup is ${STALE_DAYS} days old or more.`,
+        projects: of("stale"),
+      },
+      {
+        key: "ok",
+        title: "Up to date",
+        note: "Backed up recently and checked.",
+        projects: of("ok", "due"),
+      },
+      {
+        key: "missing",
+        title: "Folder not found",
+        note: "Point MYLE at the folder again, or remove the project.",
+        projects: of("missing"),
+      },
+    ];
+    return groups.filter((group) => group.projects.length > 0);
+  }
+
+  setFilter(filter: "all" | Group["key"]) {
+    this.filter = filter;
   }
 
   async init() {

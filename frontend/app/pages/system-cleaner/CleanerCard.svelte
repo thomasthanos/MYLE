@@ -10,7 +10,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Zap from "@lucide/svelte/icons/zap";
   import { formatSize, type CleanerCategory } from "./api";
-  import { cleanerState } from "./state.svelte";
+  import { cleanerState, freedAndInUse } from "./state.svelte";
 
   let { category }: { category: CleanerCategory } = $props();
 
@@ -35,6 +35,17 @@
   // Cleaned, but not everything could go: files in use, or system files
   // without administrator approval. Say so instead of a plain "Cleaned".
   const partly = $derived(done && (measured?.bytes ?? 0) > 0);
+  // The bytes the run could not remove: what the cards and the toast agree on.
+  const inUse = $derived(
+    done
+      ? Math.max(
+          (outcome?.skippedBytes ?? 0) - (outcome?.adminSkippedBytes ?? 0),
+          partly ? (measured?.bytes ?? 0) : 0,
+        )
+      : 0,
+  );
+  // Only when the leftovers are the system folders the user did not approve.
+  const needsAdmin = $derived(partly && category.mayNeedAdmin && cleanerState.adminGranted !== true);
 </script>
 
 <article class="card" class:on={checked} class:done class:partly class:working={cleanerState.phase === "cleaning" && checked}>
@@ -60,10 +71,9 @@
       <span class="hint" title={category.hint}>
         {#if partly}
           <TriangleAlert size={11} />
-          {outcome?.freed ? `Freed ${formatSize(outcome.freed)} · ` : ""}the rest is in use{locked ||
-          (category.mayNeedAdmin && !cleanerState.adminGranted)
-            ? " or needs administrator"
-            : ""}{outcome?.skipped ? ` (${outcome.skipped.toLocaleString()} files)` : ""}
+          {freedAndInUse(outcome?.freed ?? 0, inUse)}{needsAdmin ? " · needs administrator" : ""}{outcome?.skipped
+            ? ` (${outcome.skipped.toLocaleString()} ${outcome.skipped === 1 ? "file" : "files"})`
+            : ""}
         {:else if done}
           <CheckCheck size={11} />
           {outcome?.freed ? `Freed ${formatSize(outcome.freed)}` : "Cleaned"} · scan again to re-check

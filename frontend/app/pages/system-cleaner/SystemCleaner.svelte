@@ -6,6 +6,7 @@
   import RadarIcon from "@lucide/svelte/icons/radar";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
+  import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
   import { cleanerState } from "./state.svelte";
@@ -33,9 +34,13 @@
   const cleanLabel = $derived.by(() => {
     const p = cleanerState.progress;
     if (cleanerState.phase !== "cleaning") return "Clean selected";
+    if (cleanerState.settling) return "Checking what is left…";
     if (!p) return "Cleaning…";
-    return p.current ? `Cleaning ${p.done + 1}/${p.total} · ${p.current}` : `Cleaning ${p.done}/${p.total}`;
+    return p.current ? `Cleaning ${p.step}/${p.total} · ${p.current}` : `Cleaning ${p.step}/${p.total}`;
   });
+
+  const percent = $derived(Math.round(cleanerState.barPercent * 100));
+  const cleaningNow = $derived(cleanerState.phase === "cleaning");
 </script>
 
 <PageHeader title="System Cleaner" subtitle="Find and remove the files Windows leaves behind." />
@@ -87,6 +92,48 @@
       </button>
     </div>
   </div>
+
+  {#if cleanerState.autoSelected && !cleaningNow && cleanerState.phase === "idle"}
+    <p class="picked">
+      <CheckCheck size={12} />
+      Every category was ticked after the scan. Untick what you want to keep, then clean.
+    </p>
+  {/if}
+
+  {#if cleaningNow}
+    <div class="work" aria-live="polite">
+      <div class="work-head">
+        <span class="work-what">
+          {#if cleanerState.settling}
+            Checking what is left
+          {:else if cleanerState.progress?.pass === "administrator"}
+            With administrator rights
+          {:else}
+            Removing files
+          {/if}
+          {#if !cleanerState.settling && cleanerState.progress?.current}
+            <em>· {cleanerState.progress.current}</em>
+          {/if}
+        </span>
+        <span class="work-count">
+          {#if !cleanerState.settling && cleanerState.progress}
+            {cleanerState.progress.step}/{cleanerState.progress.total}
+          {/if}
+        </span>
+        <span class="work-pct" class:settled={cleanerState.barDone}>
+          {#if cleanerState.barDone}
+            <CheckCheck size={13} /> Done
+          {:else}
+            {percent}%
+          {/if}
+        </span>
+      </div>
+      <ProgressBar value={cleanerState.barPercent} done={cleanerState.barDone} label="Cleanup progress" />
+      <p class="work-note">
+        Files another program is holding open cannot be removed. They are listed on the cards below when it is over.
+      </p>
+    </div>
+  {/if}
 </section>
 
 {#if cleanerState.error}
@@ -185,6 +232,90 @@
     border-color: rgb(229 72 77 / 0.35);
     color: #ffb4b0;
     font-size: 13px;
+  }
+
+  /* The scan just ticked everything: say so, so the ticks are not a surprise. */
+  .picked {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-basis: 100%;
+    margin-top: 2px;
+    padding-top: 10px;
+    border-top: 1px solid rgb(255 255 255 / 0.06);
+    color: var(--text-3);
+    font-size: 11.5px;
+    animation: fade-in 260ms var(--ease-out) both;
+  }
+
+  .picked :global(svg) {
+    flex: none;
+    color: rgb(62 207 142 / 0.75);
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* The running clean: what is being removed and how far along it is. */
+  .work {
+    display: grid;
+    flex-basis: 100%;
+    gap: 7px;
+    margin-top: 4px;
+    padding-top: 13px;
+    border-top: 1px solid rgb(255 255 255 / 0.06);
+    animation: fade-in 220ms var(--ease-out) both;
+  }
+
+  .work-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 11.5px;
+  }
+
+  .work-what {
+    overflow: hidden;
+    color: var(--text-2);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .work-what em {
+    color: rgb(var(--accent-soft-rgb));
+    font-style: normal;
+  }
+
+  .work-count {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.05);
+    color: var(--text-3);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .work-pct {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    color: var(--text-2);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .work-pct.settled {
+    color: #98dfbd;
+  }
+
+  .work-note {
+    color: var(--text-3);
+    font-size: 10.75px;
   }
 
   .grid {
