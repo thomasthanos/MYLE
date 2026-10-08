@@ -505,6 +505,22 @@ export interface Deleted {
   error: string | null;
 }
 
+/** A tag no release uses. */
+export interface LoneTag {
+  name: string;
+  local: boolean;
+  remote: boolean;
+  /** Unix seconds. */
+  date: number | null;
+}
+
+export interface TagDeleted {
+  tag: string;
+  remoteDeleted: boolean;
+  localDeleted: boolean;
+  error: string | null;
+}
+
 export interface GhStatus {
   installed: boolean;
   signedIn: boolean;
@@ -577,6 +593,8 @@ export const githubReleasesApi = {
     invoke<Release>("github_releases_update_release", { repoId, releaseId, title, notes, prerelease }),
   deleteReleases: (repoId: string, releaseIds: number[], deleteTags: boolean) =>
     invoke<Deleted[]>("github_releases_delete_releases", { repoId, releaseIds, deleteTags }),
+  loneTags: (repoId: string) => invoke<LoneTag[]>("github_releases_lone_tags", { repoId }),
+  deleteTags: (repoId: string, tags: string[]) => invoke<TagDeleted[]>("github_releases_delete_tags", { repoId, tags }),
   aiCombine: (repoId: string, releaseIds: number[], provider: ProviderId | null) =>
     invoke<Notes>("github_releases_ai_combine", { repoId, releaseIds, provider }),
 

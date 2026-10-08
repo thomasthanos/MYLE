@@ -1640,6 +1640,116 @@ pub async fn github_releases_delete_releases(
     Ok(results)
 }
 
+/// A tag no release uses, on GitHub, here, or both.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoneTag {
+    pub name: String,
+    pub local: bool,
+    pub remote: bool,
+    /// Unix seconds, from the tag here.
+    pub date: Option<i64>,
+}
+
+/// The tags no release (drafts included) uses: the ones here first, newest
+/// first, then the ones only on GitHub.
+fn lone_tags(
+    released: &std::collections::HashSet<String>,
+    remote: &[String],
+    local: &[git::Tag],
+) -> Vec<LoneTag> {
+    let mut lone: Vec<LoneTag> = local
+        .iter()
+        .filter(|tag| !released.contains(&tag.name))
+        .map(|tag| LoneTag {
+            name: tag.name.clone(),
+            local: true,
+            remote: remote.contains(&tag.name),
+            date: (tag.date > 0).then_some(tag.date),
+        })
+        .collect();
+    for name in remote {
+        if !released.contains(name) && !local.iter().any(|tag| &tag.name == name) {
+            lone.push(LoneTag {
+                name: name.clone(),
+                local: false,
+                remote: true,
+                date: None,
+            });
+        }
+    }
+    lone
+}
+
+/// Tags without a release, for the Releases tab.
+#[tauri::command]
+pub async fn github_releases_lone_tags(repo_id: String) -> Result<Vec<LoneTag>, String> {
+    let (token, owner, repo, root) = github_of(&repo_id).await?;
+    let released = github::release_tags(&token, &owner, &repo).await?;
+    let remote = github::remote_tags(&token, &owner, &repo).await?;
+    let local = git::tags(&root).await.unwrap_or_default();
+    Ok(lone_tags(&released, &remote, &local))
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDeleted {
+    pub tag: String,
+    pub remote_deleted: bool,
+    pub local_deleted: bool,
+    pub error: Option<String>,
+}
+
+/// Deletes tags that have no release (the page asked first), on GitHub and
+/// here. Looked up again first: a tag a release uses is never deleted here.
+#[tauri::command]
+pub async fn github_releases_delete_tags(
+    repo_id: String,
+    tags: Vec<String>,
+) -> Result<Vec<TagDeleted>, String> {
+    let (token, owner, repo, root) = github_of(&repo_id).await?;
+    let released = github::release_tags(&token, &owner, &repo).await?;
+    let remote = github::remote_tags(&token, &owner, &repo).await?;
+    let local = git::tags(&root).await.unwrap_or_default();
+    let lone = lone_tags(&released, &remote, &local);
+    let mut results = Vec::new();
+    for name in tags {
+        let mut result = TagDeleted {
+            tag: name.clone(),
+            remote_deleted: false,
+            local_deleted: false,
+            error: None,
+        };
+        let Some(tag) = lone.iter().find(|t| t.name == name) else {
+            result.error = Some(if released.contains(&name) {
+                "A release uses it: delete the release instead.".into()
+            } else {
+                "No such tag.".into()
+            });
+            results.push(result);
+            continue;
+        };
+        if tag.remote {
+            if let Err(error) = github::delete_tag(&token, &owner, &repo, &name).await {
+                result.error = Some(problem_of(error).message);
+                results.push(result);
+                continue;
+            }
+            result.remote_deleted = true;
+        }
+        if tag.local && !name.starts_with('-') {
+            let deleted = git::run(&root, &["tag", "-d", &name]).await;
+            match deleted {
+                Ok(output) if output.ok() => result.local_deleted = true,
+                Ok(output) => result.error = Some(git::first_error(&output.all())),
+                Err(error) => result.error = Some(error),
+            }
+        }
+        results.push(result);
+    }
+    Ok(results)
+}
+
 /// One set of notes from several releases.
 #[tauri::command]
 pub async fn github_releases_ai_combine(
@@ -1915,6 +2025,84 @@ pub async fn github_releases_ai_test(provider: ProviderId) -> Result<Answer, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_notes_folder_a_release_workflow_reads() {
+        let myle = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+        )
+        .unwrap();
+        assert_eq!(notes_dir_of(&myle).as_deref(), Some("docs/release-notes"));
+        assert_eq!(
+            notes_dir_of("run: |\n  $notes = \"docs/release-notes/${env:VERSION}.md\"").as_deref(),
+            Some("docs/release-notes")
+        );
+        assert_eq!(
+            notes_dir_of("body_path: ./notes/release-notes/${{ github.ref_name }}.md").as_deref(),
+            Some("notes/release-notes")
+        );
+        // A mention that is not a path to a file in it is passed over.
+        assert_eq!(
+            notes_dir_of("# (see release-notes/ on the wiki)\nfile: changes/release-notes/$V.md")
+                .as_deref(),
+            Some("changes/release-notes")
+        );
+        assert_eq!(notes_dir_of("# nothing about notes"), None);
+        assert_eq!(notes_dir_of("x: ../release-notes/$V.md"), None);
+    }
+
+    #[test]
+    fn tags_without_a_release() {
+        let released: std::collections::HashSet<String> = ["v9.7.0", "v9.6.0", "mobile-v1.0.0"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let remote: Vec<String> = [
+            "v9.7.2",
+            "v9.7.1",
+            "v9.7.0",
+            "v9.6.0",
+            "old-only-on-github",
+            "mobile-v1.0.0",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let local = vec![
+            git::Tag {
+                name: "v9.7.3-local".into(),
+                date: 30,
+            },
+            git::Tag {
+                name: "v9.7.2".into(),
+                date: 20,
+            },
+            git::Tag {
+                name: "v9.7.1".into(),
+                date: 10,
+            },
+            git::Tag {
+                name: "v9.7.0".into(),
+                date: 5,
+            },
+        ];
+        let lone = lone_tags(&released, &remote, &local);
+        let names: Vec<(&str, bool, bool)> = lone
+            .iter()
+            .map(|t| (t.name.as_str(), t.local, t.remote))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("v9.7.3-local", true, false),
+                ("v9.7.2", true, true),
+                ("v9.7.1", true, true),
+                ("old-only-on-github", false, true),
+            ]
+        );
+        assert_eq!(lone[1].date, Some(20));
+        assert_eq!(lone[3].date, None);
+    }
 
     fn release(tag: &str, draft: bool) -> Release {
         serde_json::from_value(json!({

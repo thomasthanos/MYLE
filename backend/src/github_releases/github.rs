@@ -244,6 +244,60 @@ pub(crate) async fn releases(
     .await
 }
 
+/// The tag of every release of the repository, drafts too (all pages, so
+/// a tag is never taken for one without a release because its release was
+/// further down the list).
+pub(crate) async fn release_tags(
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<std::collections::HashSet<String>, String> {
+    #[derive(Deserialize)]
+    struct Brief {
+        tag_name: String,
+    }
+    let mut tags = std::collections::HashSet::new();
+    for page in 1..=50 {
+        let list: Vec<Brief> = get_json(
+            token,
+            &format!("{API}/repos/{owner}/{repo}/releases?per_page=100&page={page}"),
+        )
+        .await?;
+        let done = list.len() < 100;
+        tags.extend(list.into_iter().map(|r| r.tag_name));
+        if done {
+            return Ok(tags);
+        }
+    }
+    Err("The repository has too many releases to list.".into())
+}
+
+/// The repository's tags on GitHub (all pages).
+pub(crate) async fn remote_tags(
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Brief {
+        name: String,
+    }
+    let mut tags = Vec::new();
+    for page in 1..=50 {
+        let list: Vec<Brief> = get_json(
+            token,
+            &format!("{API}/repos/{owner}/{repo}/tags?per_page=100&page={page}"),
+        )
+        .await?;
+        let done = list.len() < 100;
+        tags.extend(list.into_iter().map(|t| t.name));
+        if done {
+            return Ok(tags);
+        }
+    }
+    Err("The repository has too many tags to list.".into())
+}
+
 pub(crate) async fn release_by_tag(
     token: &str,
     owner: &str,

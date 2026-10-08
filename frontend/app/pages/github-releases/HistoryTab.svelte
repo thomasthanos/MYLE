@@ -1,6 +1,7 @@
 <script lang="ts">
   // The project's releases on GitHub: edit their notes, delete some (and
-  // their tags, if asked), or combine several into one set of notes.
+  // their tags, if asked), or combine several into one set of notes; and the
+  // tags no release uses, to delete on their own.
   import { onMount, untrack } from "svelte";
   import Combine from "@lucide/svelte/icons/combine";
   import Download from "@lucide/svelte/icons/download";
@@ -8,12 +9,13 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Pencil from "@lucide/svelte/icons/pencil";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Tag from "@lucide/svelte/icons/tag";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { confirm } from "../../../lib/confirm.svelte";
   import { toast } from "../../../lib/toast.svelte";
-  import { githubReleasesApi as api, messageOf, type EntryStatus, type Release } from "./api";
+  import { githubReleasesApi as api, messageOf, type EntryStatus, type LoneTag, type Release } from "./api";
   import { formatRelative, githubReleases as gr, type ListItem } from "./state.svelte";
 
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
@@ -27,6 +29,10 @@
   let deleteTags = $state(false);
   let working = $state(false);
   let combining = $state(false);
+  let view = $state<"releases" | "tags">("releases");
+  let tags = $state<LoneTag[] | null>(null);
+  let tagsError = $state<string | null>(null);
+  let pickedTags = $state<string[]>([]);
 
   /** The release being edited (or the combined notes being saved). */
   let editor = $state<{ id: number; title: string; notes: string; prerelease: boolean; combined: number[] | null } | null>(null);
@@ -41,6 +47,7 @@
       return;
     }
     loading = true;
+    const lone = loadTags();
     try {
       releases = await api.listReleases(repoId);
       error = null;
@@ -48,7 +55,18 @@
     } catch (e) {
       error = messageOf(e);
     } finally {
+      await lone;
       loading = false;
+    }
+  }
+
+  async function loadTags() {
+    try {
+      tags = await api.loneTags(repoId);
+      tagsError = null;
+      pickedTags = pickedTags.filter((name) => tags!.some((t) => t.name === name));
+    } catch (e) {
+      tagsError = messageOf(e);
     }
   }
 
@@ -59,7 +77,51 @@
     return entry.lastTag?.legacy === true && /^v\d/.test(release.tagName) && release.tagName.split(".")[0] === entry.lastTag.name.split(".")[0];
   }
 
+  /** The same for a tag. */
+  function mineTag(name: string): boolean {
+    if (!entry.monorepo || name.startsWith(entry.tagPrefix)) return true;
+    return entry.lastTag?.legacy === true && /^v\d/.test(name) && name.split(".")[0] === entry.lastTag.name.split(".")[0];
+  }
+
   const shown = $derived((releases ?? []).filter((r) => all || mine(r)));
+  const shownTags = $derived((tags ?? []).filter((t) => all || mineTag(t.name)));
+  const pickedLone = $derived(shownTags.filter((t) => pickedTags.includes(t.name)));
+  const allTagsPicked = $derived(shownTags.length > 0 && pickedLone.length === shownTags.length);
+
+  function toggleTag(name: string) {
+    pickedTags = pickedTags.includes(name) ? pickedTags.filter((n) => n !== name) : [...pickedTags, name];
+  }
+
+  function where(tag: LoneTag): string {
+    return tag.local && tag.remote ? "on GitHub and this PC" : tag.remote ? "only on GitHub" : "only on this PC";
+  }
+
+  async function removeTags(names: string[]) {
+    const list = shownTags.filter((t) => names.includes(t.name));
+    if (!list.length) return;
+    const listed = list.slice(0, 15).map((t) => t.name).join(", ") + (list.length > 15 ? ` and ${list.length - 15} more` : "");
+    const ok = await confirm({
+      title: list.length === 1 ? `Delete the tag ${list[0].name}?` : `Delete ${list.length} tags?`,
+      message: `${listed}. No release uses ${list.length === 1 ? "it" : "them"}; ${list.length === 1 ? "it is" : "they are"} deleted on GitHub and on this PC. Links to ${list.length === 1 ? "it" : "them"} stop working. This can't be undone.`,
+      confirmLabel: list.length === 1 ? "Delete tag" : `Delete ${list.length} tags`,
+      danger: true,
+    });
+    if (!ok) return;
+    working = true;
+    try {
+      const results = await api.deleteTags(repoId, list.map((t) => t.name));
+      const done = results.filter((r) => !r.error && (r.remoteDeleted || r.localDeleted)).length;
+      if (done) toast.success(`Deleted ${done} ${done === 1 ? "tag" : "tags"}.`);
+      for (const f of results.filter((r) => r.error)) toast.error(`${f.tag}: ${f.error}`);
+      pickedTags = [];
+      await loadTags();
+      void gr.refresh(repoId);
+    } catch (e) {
+      toast.error(messageOf(e));
+    } finally {
+      working = false;
+    }
+  }
   const pickedReleases = $derived(shown.filter((r) => picked.includes(r.id)));
 
   function toggle(id: number) {
@@ -140,8 +202,16 @@
 
 <div class="history">
   <div class="bar">
+    <div class="views" role="tablist" aria-label="Show">
+      <button role="tab" aria-selected={view === "releases"} class:active={view === "releases"} onclick={() => (view = "releases")}>
+        Releases {#if releases}<span>{shown.length}</span>{/if}
+      </button>
+      <button role="tab" aria-selected={view === "tags"} class:active={view === "tags"} onclick={() => (view = "tags")} title="Tags no release uses (a failed or abandoned release leaves one)">
+        <Tag size={12} /> Tags without a release {#if tags}<span class:warn={shownTags.length > 0}>{shownTags.length}</span>{/if}
+      </button>
+    </div>
     {#if entry.monorepo}
-      <label class="opt"><input type="checkbox" class="switch" bind:checked={all} /> All releases of {item.repo.name}</label>
+      <label class="opt"><input type="checkbox" class="switch" bind:checked={all} /> All of {item.repo.name}</label>
     {/if}
     <span class="grow"></span>
     <button class="icon-btn" aria-label="Refresh" title="Refresh" disabled={loading} onclick={() => void load()}>
@@ -149,6 +219,41 @@
     </button>
   </div>
 
+  {#if view === "tags"}
+    {#if tagsError}
+      <div class="quiet">
+        <span>{tagsError}</span>
+        {#if !gr.page?.account}<button class="btn small" onclick={() => (gr.settingsOpen = "account")}>Connect GitHub</button>{/if}
+      </div>
+    {:else if !tags}
+      <div class="quiet"><LoaderCircle size={16} class="spin" /></div>
+    {:else if !shownTags.length}
+      <div class="quiet">Every tag has a release.</div>
+    {:else}
+      <div class="selection" class:idle={!pickedLone.length}>
+        <label class="opt">
+          <input type="checkbox" class="check" checked={allTagsPicked} indeterminate={pickedLone.length > 0 && !allTagsPicked} onchange={() => (pickedTags = allTagsPicked ? [] : shownTags.map((t) => t.name))} aria-label="Pick all" />
+          {pickedLone.length ? `${pickedLone.length} of ${shownTags.length} picked` : `Pick all ${shownTags.length}`}
+        </label>
+        <span class="grow"></span>
+        <button class="btn small danger" disabled={working || !pickedLone.length} onclick={() => void removeTags(pickedLone.map((t) => t.name))}>
+          {#if working}<LoaderCircle size={13} class="spin" />{:else}<Trash2 size={13} />{/if} Delete {pickedLone.length || ""} {pickedLone.length === 1 ? "tag" : "tags"}
+        </button>
+      </div>
+      <ul class="list">
+        {#each shownTags as t (t.name)}
+          <li class:picked={pickedTags.includes(t.name)}>
+            <input type="checkbox" class="check" checked={pickedTags.includes(t.name)} onchange={() => toggleTag(t.name)} aria-label="Pick {t.name}" />
+            <div class="text">
+              <strong><code class="tag-name">{t.name}</code></strong>
+              <small>{where(t)}{t.date ? ` · ${formatRelative(t.date)}` : ""}</small>
+            </div>
+            <button class="icon-btn danger" title="Delete this tag" aria-label="Delete {t.name}" disabled={working} onclick={() => void removeTags([t.name])}><Trash2 size={13} /></button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  {:else}
   {#if picked.length}
     <div class="selection">
       <span>{pickedReleases.length} picked</span>
@@ -214,6 +319,7 @@
       {/each}
     </ul>
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -239,6 +345,61 @@
 
   .grow {
     flex: 1;
+  }
+
+  .views {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: 10px;
+    background: rgb(255 255 255 / 0.03);
+  }
+
+  .views button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 12.3px;
+    cursor: pointer;
+  }
+
+  .views button:hover {
+    color: var(--text-1);
+  }
+
+  .views button.active {
+    background: rgb(var(--accent-rgb) / 0.16);
+    color: var(--text-1);
+  }
+
+  .views span {
+    padding: 0 6px;
+    border-radius: 99px;
+    background: rgb(255 255 255 / 0.08);
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .views span.warn {
+    background: rgb(255 196 92 / 0.16);
+    color: #ffd08a;
+  }
+
+  .selection.idle {
+    border-color: rgb(255 255 255 / 0.06);
+    background: rgb(255 255 255 / 0.03);
+  }
+
+  .tag-name {
+    font-size: 12.5px;
   }
 
   .opt {
