@@ -74,6 +74,11 @@ zeroize = { version = "1", features = ["derive"] }
 windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell"] }
 psl = "2"
 windows-future = "0.2"
+# Project Backups: CRC-32 of every zipped file, Unicode file names compared
+# alike however they were written (NFC), and the side-by-side text diff.
+crc32fast = "1"
+icu_normalizer = "2"
+similar = { version = "2", default-features = false, features = ["text"] }
 
 # Dev builds optimize the dependencies (not our crate, so rebuilds stay fast):
 # unoptimized SHA-256, zip and zlib made downloads and unpacking crawl.

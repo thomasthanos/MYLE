@@ -74,7 +74,7 @@ frontend/                     frontend (Svelte 5 + TS), Vite root
   public/                     static files shipped with the app (icons/)
 backend/                      backend (Rust + Tauri)
   src/lib.rs                  startup, splash → main
-  src/<feature>/               apps, game_saves, cleaner, spotify_hub, account, …
+  src/<feature>/               apps, game_saves, project_backups, cloud, cleaner, spotify_hub, account, …
   src/updater.rs               updater (feed on R2, GitHub Releases as a fallback)
   installer/                  setup.exe + uninstall.exe (Rust, its own Tauri window)
   vault/                      myle-vault: the Password Manager's vault, sync and account, shared with mobile/
@@ -191,6 +191,21 @@ The page sits after Install Apps and uses a bundled **Ludusavi v0.31.0** with it
   - If a service isn't found, its button asks for its folder and creates the backup folder inside it. Earlier backups stay in the old folder.
 
 Generated binaries/manifest are ignored by Git. On a fresh checkout, `npm run dev` or `npm run build` fetches them (or run `scripts/bootstrap-game-saves.ps1`). The pinned URLs and SHA-256 values live in `scripts/bootstrap-game-saves.ps1`, and the licenses/attributions ship in the installer from `backend/resources/ludusavi/`.
+
+## The "Project Backups" page
+
+Zips of project folders in Google Drive or Dropbox (`backend/src/project_backups/`, page in `frontend/app/pages/project-backups/`), a port of the standalone backup_projects app (desktop-utils) that writes the same folders and names, so both apps add to one history:
+`<cloud>\Projects Backup\<AppName>\<YYYY-MM Month>\<AppName>_D<day>_V<n>.zip`.
+
+- **Names.** Month folders are named in Greek as backup_projects does and read in any language (`2026-10 October` too). The version carries on from the highest `<AppName>_…_V<n>` in any month folder (`_D_V`, `_V_D` and `_V` names, zips and the old folder backups); `__partial__` leftovers and `all - pre release backups` never count.
+- **A backup.** The folder is walked with the exclusions (`walk.rs`), the zip is streamed (Deflate 6) to `%LOCALAPPDATA%\…\data\project-backups-staging`, every entry is read back against the size and CRC-32 read from the source, and the folder is walked once more, trusting nothing but metadata, to make sure no file is missing (`audit`). Only then is it copied next to the backups as `__partial__<name>__<ms>.zip`, re-read until its size and SHA-256 match (stale cloud views are retried for about a minute) and renamed. Without room for staging it is built and checked at the destination. `.backup-info.json` inside each zip has backup_projects' fields plus totals, exclusions and the items that cannot be zipped.
+- **Files Windows marks with a reparse point** (OneDrive/Dropbox placeholders, WOF-compressed files) are ordinary files to Rust's std and are backed up; links to files are followed, links to folders and junctions are listed as skipped. An online-only file whose app is not running (os error 362) starts OneDrive, Dropbox or Google Drive and the backup is tried once more.
+- **Exclusions.** A global list (`rules.rs` `DEFAULT_PATTERNS`: `.git`, `.agents`, `.claude`, `.codex`, `node_modules`, `dist`, `release`, `out`, `target`, caches, logs, archives, …) plus each project's additions and "always back up" patterns. `name/` is a folder anywhere, `a/b/` is anchored to the project folder, `*.log` a file. `build` is left out only when it is build output: git tracks nothing in it (the index is read directly, `gitindex.rs`) or a `.gitignore` lists it. Following `.gitignore` is off by default; `.env` files are always backed up. The editor and the Exclusions panel preview what a backup holds.
+- **Destination.** Google Drive's drive exists only while `GoogleDriveFS.exe` runs: the newest installed version is started and the drive waited for (2 minutes, cancellable); if it comes up under another letter and only one Drive folder is found, that one is used. Dropbox is found through its `info.json` and `Dropbox.exe` is started if it is not running. The cloud detection and launching live in `backend/src/cloud/`, shared with Game Saves.
+- **Before a backup** an optional program (`MyApp.exe`) is closed (`taskkill`, then forced after 1.5 s); MYLE never closes itself. A project whose folder is missing answers `SOURCE_MISSING`: the page opens the editor on the folder and the backup carries on after saving.
+- **Compare** two backups, or a backup with the project folder: names are normalized (`\` → `/`, Unicode NFC, a single wrapper folder ignored when that pairs more files, case-insensitive), files are matched by size and CRC-32 (a folder side is hashed), and the same exclusions apply. A deleted file that is still in the project folder is flagged (the newer backup is incomplete). Text files show a side-by-side diff (`similar`, up to 2 MB); binary files only their sizes.
+- **First start.** backup_projects' `%APPDATA%\ThomasThanos\Backup-projects\projects.json`, else its copy `Projects Backup\.backup-projects.json`, else the project folders in `Projects Backup` are imported once (by backup name; a program to close is dropped when it is MYLE). **Import** on the page runs it again for new ones. Settings: `%APPDATA%\ThomasThanos\MakeYourLifeEasier\project-backups.json`.
+- Tests (`cargo test project_backups`) include a zip made by backup_projects 2.0.6 (`project_backups/testdata/`), read, compared and continued.
 
 ## The "Password Manager" page
 
@@ -316,7 +331,7 @@ Preview the window in a browser: `npx vite` and `http://localhost:1420/installer
 | What | Where |
 |---|---|
 | Program | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\MYLE.exe` (existing installs keep this folder) |
-| Settings, account, Game Saves | `%APPDATA%\ThomasThanos\MakeYourLifeEasier` |
+| Settings, account, Game Saves, Project Backups | `%APPDATA%\ThomasThanos\MakeYourLifeEasier` |
 | Cache and WebView2 (localStorage) | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data` |
 | Desktop | Windows Desktop known folder (may redirect to OneDrive) · `MYLE.lnk` |
 | Start Menu | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\MYLE.lnk` |

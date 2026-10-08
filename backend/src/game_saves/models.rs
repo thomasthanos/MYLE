@@ -183,26 +183,7 @@ pub struct ScheduledBackupResult {
     pub error: Option<String>,
 }
 
-/// Cloud storage whose desktop app syncs a local folder.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CloudProvider {
-    Dropbox,
-    GoogleDrive,
-    Mega,
-    OneDrive,
-}
-
-impl CloudProvider {
-    pub fn name(self) -> &'static str {
-        match self {
-            CloudProvider::Dropbox => "Dropbox",
-            CloudProvider::GoogleDrive => "Google Drive",
-            CloudProvider::Mega => "MEGA",
-            CloudProvider::OneDrive => "OneDrive",
-        }
-    }
-}
+pub use crate::cloud::CloudProvider;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

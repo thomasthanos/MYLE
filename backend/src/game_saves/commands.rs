@@ -10,7 +10,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::atomic;
-use super::cloud;
+use crate::cloud::onedrive as cloud;
 use super::detection::{self, same_title};
 use super::engine::{Engine, EngineOutput, failure_detail};
 use super::models::{

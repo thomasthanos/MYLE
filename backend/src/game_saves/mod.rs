@@ -1,5 +1,4 @@
-mod atomic;
-mod cloud;
+pub(crate) mod atomic;
 pub(crate) mod commands;
 pub(crate) mod covers;
 mod detection;

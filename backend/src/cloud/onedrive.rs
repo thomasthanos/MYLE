@@ -1,4 +1,4 @@
-//! Saves kept in OneDrive as online-only files.
+//! Files kept in OneDrive as online-only files (game saves, project files).
 //!
 //! Such a file is only a placeholder on disk: OneDrive downloads it the moment
 //! something reads it, but only while OneDrive runs. Without it Windows answers

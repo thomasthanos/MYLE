@@ -1,11 +1,13 @@
 mod account;
 mod apps;
 pub mod cleaner;
+mod cloud;
 mod console;
 mod debloat;
 mod download;
 mod elevated_pipe;
 pub mod game_saves;
+pub mod project_backups;
 mod maintenance;
 mod passwords;
 mod spotify_hub;
@@ -212,6 +214,7 @@ pub fn run() {
         .manage(cleanup.clone())
         .manage(running.clone())
         .manage(game_saves_state.clone())
+        .manage(project_backups::ProjectBackupsState::default())
         .manage(spotify_hub_state.clone())
         .manage(windows_optimization_state.clone())
         .manage(passwords_state.clone())
@@ -395,6 +398,20 @@ pub fn run() {
             game_saves::commands::game_saves_scan,
             game_saves::commands::game_saves_update_database,
             game_saves::commands::game_saves_backup,
+            project_backups::commands::project_backups_get_state,
+            project_backups::commands::project_backups_import,
+            project_backups::commands::project_backups_set_provider,
+            project_backups::commands::project_backups_pick_folder,
+            project_backups::commands::project_backups_save_project,
+            project_backups::commands::project_backups_remove_project,
+            project_backups::commands::project_backups_set_exclusions,
+            project_backups::commands::project_backups_preview,
+            project_backups::commands::project_backups_backup,
+            project_backups::commands::project_backups_cancel,
+            project_backups::commands::project_backups_list,
+            project_backups::commands::project_backups_compare,
+            project_backups::commands::project_backups_file_diff,
+            project_backups::commands::project_backups_open,
             game_saves::commands::game_saves_restore,
             game_saves::commands::game_saves_undo_last_restore,
             game_saves::commands::game_saves_sync_export,
