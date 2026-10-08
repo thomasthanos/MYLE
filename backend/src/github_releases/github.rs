@@ -276,6 +276,22 @@ pub(crate) async fn release(
     get_json(token, &format!("{API}/repos/{owner}/{repo}/releases/{id}")).await
 }
 
+/// Whether GitHub has the tag `tag` (an exact name: `git/ref`, unlike
+/// `git/refs`, does not match prefixes).
+pub(crate) async fn tag_exists(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    tag: &str,
+) -> Result<bool, String> {
+    let url = format!("{API}/repos/{owner}/{repo}/git/ref/tags/{}", encode(tag));
+    match send(request(&client()?, reqwest::Method::GET, &url, token)).await {
+        Ok(_) => Ok(true),
+        Err(error) if error.contains("\"NOT_FOUND\"") => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// A failed tag delete that only found the tag gone already.
 pub(crate) fn tag_was_gone(error: &str) -> bool {
     error.contains("\"NOT_FOUND\"") || error.contains("Reference does not exist")

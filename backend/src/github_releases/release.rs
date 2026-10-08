@@ -422,6 +422,17 @@ pub(crate) async fn preflight(
             if let Some(remote) = &context.remote
                 && let (Some(owner), Some(repo)) = (&remote.owner, &remote.repo)
             {
+                // A tag only on GitHub (a failed release, another PC) would
+                // stop the tag push after the release commit is pushed.
+                if !local_tag && let Ok(true) = github::tag_exists(&token, owner, repo, &tag).await {
+                    checks.push(check(
+                        "tag",
+                        CheckState::Fail,
+                        format!("The tag {tag} is already on GitHub. Pick another version, or delete the tag under Releases → Tags without a release."),
+                        None,
+                    ));
+                    checks.retain(|c| !(c.id == "tag" && c.state == CheckState::Ok));
+                }
                 match github::release_by_tag(&token, owner, repo, &tag).await {
                     Ok(Some(_)) => checks.push(check(
                         "account",
@@ -670,7 +681,8 @@ pub(crate) async fn run(
     }
     let notes_rel: Option<String> = request
         .notes_file
-        .clone()
+        .as_deref()
+        .map(|file| file.replace('\\', "/"))
         .filter(|_| request.mode == Mode::Actions && !request.notes.trim().is_empty());
     if let Err(error) = versions::apply(&edits) {
         run.step("version", StepState::Failed, Some(error.clone()));
@@ -990,6 +1002,24 @@ async fn finish_from_tag(
     )
     .await
     .is_ok_and(|o| o.ok());
+    if exists {
+        // Left by an earlier attempt: only pushed when it is this commit's.
+        let points = git::read(&entry.root, &["rev-parse", &format!("refs/tags/{tag}^{{commit}}")])
+            .await
+            .map(|sha| sha.trim().to_string())
+            .unwrap_or_default();
+        if points.is_empty() || !(points.starts_with(commit) || commit.starts_with(&points)) {
+            run.step("tag", StepState::Failed, Some(format!("{tag} is on another commit")));
+            outcome.problem = Some(Problem::new(
+                "TAG_FAILED",
+                format!(
+                    "The commit is on GitHub, but the tag {tag} on this PC points at another commit. Delete that tag (Releases → Tags without a release) and resume."
+                ),
+            ));
+            outcome.resume = Some(resume_tag(&assets));
+            return outcome;
+        }
+    }
     if !exists {
         let message = if request.title.trim().is_empty() {
             tag.to_string()
@@ -1033,7 +1063,10 @@ async fn finish_from_tag(
     };
     if let Some(problem) = problem {
         run.step("tag", StepState::Failed, Some(problem.message.clone()));
-        let _ = git::run(&entry.root, &["tag", "-d", tag]).await;
+        // Only a tag made just now goes; one that was here before stays.
+        if !exists {
+            let _ = git::run(&entry.root, &["tag", "-d", tag]).await;
+        }
         outcome.problem = Some(
             Problem::new(
                 &problem.code,
@@ -1179,12 +1212,10 @@ async fn finish_release(
     };
     let mut release = match outcome.release.clone() {
         Some(release) => release,
-        None => match github::releases(token, owner, repo, 50)
-            .await
-            .map(|list| list.into_iter().find(|r| r.id == release_id))
-        {
-            Ok(Some(release)) => release,
-            Ok(None) => {
+        // By its id: a list could miss it behind newer releases.
+        None => match github::release(token, owner, repo, release_id).await {
+            Ok(release) => release,
+            Err(error) if error.contains("\"NOT_FOUND\"") => {
                 outcome.problem = Some(Problem::new(
                     "NOT_FOUND",
                     "The draft release is no longer on GitHub.",
