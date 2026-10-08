@@ -12,6 +12,15 @@ export interface LastBackup {
   zipSize: number;
 }
 
+/** How the last backup attempt of a project ended. */
+export interface LastResult {
+  at: number;
+  ok: boolean;
+  cancelled: boolean;
+  code: ResultCode | null;
+  error: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -23,6 +32,8 @@ export interface Project {
   extraExclusions: string[];
   keep: string[];
   lastBackup: LastBackup | null;
+  /** Set by every backup attempt (also failed and cancelled ones). */
+  lastResult?: LastResult | null;
 }
 
 export interface ProjectBackupsSettings {
@@ -98,7 +109,16 @@ export interface BackupOutcome {
   createdAt: number;
 }
 
-export type ResultCode = "SOURCE_MISSING" | "NO_PROVIDER" | "CANCELLED";
+export type ResultCode =
+  | "CANCELLED"
+  | "SOURCE_MISSING"
+  | "NO_PROVIDER"
+  | "CLOUD_NOT_INSTALLED"
+  | "CLOUD_NOT_READY"
+  | "CLOUD_OFFLINE"
+  | "DESTINATION_MISSING"
+  | "NO_FILES"
+  | "NAME_TAKEN";
 
 export interface ProjectResult {
   projectId: string;
@@ -130,10 +150,36 @@ export interface BackupEntry {
   broken: boolean;
 }
 
+/** Why something is left out: a pattern, a detected build/cache folder, .gitignore, or MYLE's own files. */
+export type RuleKind = "pattern" | "detected" | "gitignore" | "internal";
+
 export interface ExcludedItem {
   path: string;
   isDir: boolean;
   rule: string;
+  kind: RuleKind;
+}
+
+export interface RuleCount {
+  rule: string;
+  kind: RuleKind;
+  folders: number;
+  files: number;
+}
+
+/** One line of the "what will be backed up" tree, in display order. */
+export interface PreviewNode {
+  path: string;
+  name: string;
+  depth: number;
+  isDir: boolean;
+  /** Bytes backed up (folders: all inside); null for what is left out. */
+  size: number | null;
+  files: number;
+  rule: string | null;
+  kind: RuleKind | null;
+  /** Files of this folder not listed (the tree has a size limit). */
+  hiddenFiles: number;
 }
 
 export interface Preview {
@@ -141,8 +187,11 @@ export interface Preview {
   totalBytes: number;
   excluded: ExcludedItem[];
   excludedTotal: number;
+  byRule: RuleCount[];
   skipped: SkippedItem[];
   envFiles: string[];
+  tree: PreviewNode[];
+  treeHiddenFiles: number;
 }
 
 export interface PreviewRequest {
@@ -157,8 +206,11 @@ export interface PreviewRequest {
 
 export type ChangeStatus = "added" | "modified" | "deleted";
 
+export type FileKind = "text" | "image" | "binary";
+
 export interface Change {
   path: string;
+  kind: FileKind;
   status: ChangeStatus;
   oldName: string | null;
   newName: string | null;
@@ -192,10 +244,42 @@ export interface DiffRow {
   newText: string | null;
 }
 
+export interface SideInfo {
+  size: number;
+  /** Hex SHA-256 (files up to 512 MB). */
+  sha256: string | null;
+}
+
 export type FileDiff =
-  | { kind: "text"; rows: DiffRow[]; identical: boolean }
-  | { kind: "binary"; oldSize: number | null; newSize: number | null }
-  | { kind: "tooLarge"; oldSize: number | null; newSize: number | null };
+  | {
+      kind: "text";
+      rows: DiffRow[];
+      identical: boolean;
+      lineEndingsDiffer: boolean;
+      truncated: boolean;
+      oldLines: number;
+      newLines: number;
+      encoding: string | null;
+    }
+  | {
+      kind: "image";
+      mime: string;
+      /** data: URLs; null when that side is missing or too large to show. */
+      old: string | null;
+      new: string | null;
+      oldInfo: SideInfo | null;
+      newInfo: SideInfo | null;
+      /** The source, for SVG. */
+      rows: DiffRow[] | null;
+    }
+  | { kind: "binary"; old: SideInfo | null; new: SideInfo | null; tooLarge: boolean };
+
+export interface CompareProgress {
+  done: number;
+  total: number;
+}
+
+export type Job = "backup" | "compare";
 
 /** Stands for the project folder itself in a comparison. */
 export const SOURCE_ID = "source";
@@ -223,14 +307,22 @@ export const projectBackupsApi = {
     invoke<ProjectBackupsSettings>("project_backups_remove_project", { projectId }),
   setExclusions: (patterns: string[], smartBuild: boolean, followGitignore: boolean) =>
     invoke<ProjectBackupsSettings>("project_backups_set_exclusions", { patterns, smartBuild, followGitignore }),
+  /** A newer preview stops the one still running. */
   preview: (request: PreviewRequest) => invoke<Preview>("project_backups_preview", { request }),
+  cancelPreview: () => invoke<void>("project_backups_cancel_preview"),
   backup: (projectIds: string[], onEvent: (event: ProjectBackupsEvent) => void) =>
     invoke<BackupRun>("project_backups_backup", { projectIds, onEvent: channel(onEvent) }),
-  cancel: () => invoke<boolean>("project_backups_cancel"),
+  /** Cancels the running `job` (any job when null). */
+  cancel: (job: Job | null = null) => invoke<boolean>("project_backups_cancel", { job }),
+  /** Starts Google Drive or Dropbox; resolves to a line for the user. */
+  startCloud: (provider: BackupProvider) => invoke<string>("project_backups_start_cloud", { provider }),
   list: (projectId: string) => invoke<BackupEntry[]>("project_backups_list", { projectId }),
   /** The backend puts the older side first; `SOURCE_ID` is always the newer one. */
-  compare: (projectId: string, firstId: string, secondId: string) =>
-    invoke<CompareResult>("project_backups_compare", { projectId, firstId, secondId }),
+  compare: (projectId: string, firstId: string, secondId: string, onProgress: (progress: CompareProgress) => void) => {
+    const progress = new Channel<CompareProgress>();
+    progress.onmessage = onProgress;
+    return invoke<CompareResult>("project_backups_compare", { projectId, firstId, secondId, onProgress: progress });
+  },
   fileDiff: (projectId: string, oldId: string, newId: string, oldName: string | null, newName: string | null) =>
     invoke<FileDiff>("project_backups_file_diff", { projectId, oldId, newId, oldName, newName }),
   open: (target: OpenTarget, projectId: string | null = null, backupId: string | null = null) =>

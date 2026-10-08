@@ -28,10 +28,44 @@
   let firstInput = $state<HTMLInputElement>();
   let sourceInput = $state<HTMLInputElement>();
 
-  onMount(() => (fixMissing ? sourceInput : firstInput)?.focus());
+  let confirmDiscard = $state(false);
+  let discardBar = $state<HTMLElement>();
+  $effect(() => {
+    if (confirmDiscard) discardBar?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+  const initial = JSON.stringify([
+    editing?.name ?? "",
+    editing?.appName ?? "",
+    editing?.sourcePath ?? "",
+    editing?.closeApp ?? "",
+    (editing?.extraExclusions ?? []).join("\n"),
+    (editing?.keep ?? []).join("\n"),
+  ]);
+  const dirty = $derived(JSON.stringify([name, appName, sourcePath, closeApp, extra, keep]) !== initial);
+
+  onMount(() => {
+    (fixMissing ? sourceInput : firstInput)?.focus();
+    // A preview still reading a big folder stops with the dialog.
+    return () => {
+      if (previewing) void api.cancelPreview();
+    };
+  });
+
+  /** Closes the dialog; unsaved changes are confirmed first. */
+  function close() {
+    if (pb.busy) return;
+    if (dirty && !confirmDiscard) {
+      confirmDiscard = true;
+      return;
+    }
+    pb.closeEditor();
+  }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape" && !pb.busy) pb.closeEditor();
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    if (confirmDiscard) confirmDiscard = false;
+    else close();
   }
 
   /** A folder's name, made usable as a backup folder name. */
@@ -65,7 +99,9 @@
       });
     } catch (error) {
       preview = null;
-      previewError = error instanceof Error ? error.message : String(error);
+      const reason = error instanceof Error ? error.message : String(error);
+      // A newer preview (or closing) stopped this one: nothing to report.
+      previewError = reason === "Cancelled." ? null : reason;
     } finally {
       previewing = false;
     }
@@ -83,6 +119,7 @@
       extraExclusions: parseLines(extra),
       keep: parseLines(keep),
       lastBackup: editing?.lastBackup ?? null,
+      lastResult: editing?.lastResult ?? null,
     });
   }
 </script>
@@ -105,7 +142,7 @@
           <h2 id="project-editor-title">{fixMissing ? "Where is the project now?" : editing ? "Edit project" : "Add a project"}</h2>
           <p>Backups go to <code>{`Projects Backup\\${appName.trim() || "<backup name>"}`}</code> in your cloud folder.</p>
         </span>
-        <button class="icon-btn" type="button" aria-label="Close" disabled={!!pb.busy} onclick={() => pb.closeEditor()}><X size={16} /></button>
+        <button class="icon-btn" type="button" aria-label="Close" title="Close (Esc)" disabled={!!pb.busy} onclick={close}><X size={16} /></button>
       </header>
 
       {#if fixMissing}
@@ -153,18 +190,28 @@
           <textarea bind:value={keep} class="input mono" rows="4" disabled={!!pb.busy} placeholder={"build/\nvendor/keep.zip"} oninput={() => (preview = null)}></textarea>
         </label>
       </div>
-      <small class="hint">The global exclusions (node_modules, dist, .git and more) apply too; change them under Exclusions. <code>.env</code> files are backed up.</small>
+      <small class="hint">The global exclusions apply too (node_modules, dist, .git, caches…), and build output of Rust, .NET, Java, Python, C/C++, Flutter, Unity and others is found by itself. Change them under Exclusions. <code>.env</code> files are backed up.</small>
 
       <div class="preview-block">
         <button type="button" class="btn small" disabled={!sourcePath.trim() || previewing || !!pb.busy} onclick={runPreview}>
-          {#if previewing}<LoaderCircle size={13} class="spin" />{:else}<Eye size={13} />{/if} Preview what is backed up
+          {#if previewing}<LoaderCircle size={13} class="spin" />{:else}<Eye size={13} />{/if} {previewing ? "Reading the folder…" : preview ? "Preview again" : "Preview what is backed up"}
         </button>
+        {#if !preview && !previewing && !previewError}
+          <small class="hint">See the files that go into the zip, with sizes, and what is left out and why, before the first backup.</small>
+        {/if}
         {#if previewError}<p class="error">{previewError}</p>{/if}
         {#if preview}<PreviewList {preview} />{/if}
       </div>
 
       <footer>
-        <button type="button" class="btn" disabled={!!pb.busy} onclick={() => pb.closeEditor()}>Cancel</button>
+        {#if confirmDiscard}
+          <span class="discard" role="alert" bind:this={discardBar}>
+            Discard your changes?
+            <button type="button" class="btn small" onclick={() => (confirmDiscard = false)}>Keep editing</button>
+            <button type="button" class="btn small danger" onclick={() => pb.closeEditor()}>Discard</button>
+          </span>
+        {/if}
+        <button type="button" class="btn" disabled={!!pb.busy} onclick={close}>Cancel</button>
         <button class="btn primary" disabled={!name.trim() || !appName.trim() || !sourcePath.trim() || !!pb.busy}>
           {pb.busy === "save" ? "Saving…" : fixMissing ? "Save and back up" : editing ? "Save changes" : "Add project"}
         </button>
@@ -195,7 +242,10 @@
   .field .hint { margin-top: 0; }
   .preview-block { display: grid; gap: 8px; justify-items: start; }
   .error { color: rgb(255 145 145 / 0.85); font-size: 11.5px; }
-  footer { display: flex; justify-content: flex-end; gap: 8px; }
+  footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+  .discard { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: rgb(245 188 95 / 0.9); font-size: 12px; }
+  .danger { border-color: rgb(229 72 77 / 0.35); color: rgb(255 145 145); }
+  .preview-block .hint { margin-top: 0; }
   button:disabled { opacity: 0.45; pointer-events: none; }
   @media (max-width: 560px) { .row { grid-template-columns: minmax(0, 1fr); } }
 </style>

@@ -6,7 +6,10 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CloudUpload from "@lucide/svelte/icons/cloud-upload";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleX from "@lucide/svelte/icons/circle-x";
   import Download from "@lucide/svelte/icons/download";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderCode from "@lucide/svelte/icons/folder-code";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import FolderSearch from "@lucide/svelte/icons/folder-search";
@@ -15,27 +18,137 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Plus from "@lucide/svelte/icons/plus";
+  import Play from "@lucide/svelte/icons/play";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { readFlag, writeFlag } from "../../../lib/storage";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
   import CloudLogo from "../../../lib/components/CloudLogo.svelte";
   import ComparePanel from "./ComparePanel.svelte";
   import ExclusionsPanel from "./ExclusionsPanel.svelte";
   import ProjectEditor from "./ProjectEditor.svelte";
-  import { SOURCE_ID, type BackupProvider, type Project } from "./api";
+  import { SOURCE_ID, type BackupProvider, type Project, type ProjectResult } from "./api";
   import {
     formatBytes,
     formatDate,
-    formatRelative,
     projectBackupsState as pb,
     providerNames,
     samePath,
+    stageHints,
     stageLabels,
+    stageStep,
   } from "./state.svelte";
+
+  let searchInput = $state<HTMLInputElement>();
 
   onMount(() => {
     void pb.init();
+    const timer = setInterval(() => (pb.clock = Date.now()), 30_000);
+    return () => clearInterval(timer);
   });
+
+  /** "/" or Ctrl+F jumps to the project search; Escape clears it. */
+  function onKeydown(event: KeyboardEvent) {
+    if (pb.editor || pb.compare || event.defaultPrevented) return;
+    const target = event.target as HTMLElement | null;
+    const typing = !!target?.closest("input, textarea, select, [contenteditable='true']");
+    if ((event.key === "/" && !typing) || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f")) {
+      if (!searchInput) return;
+      event.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    } else if (event.key === "Escape" && target === searchInput && pb.query) {
+      event.preventDefault();
+      pb.query = "";
+    }
+  }
+
+  const GUIDE_KEY = "myle.projectBackups.guideHidden";
+  let guideHidden = $state(readFlag(GUIDE_KEY, false));
+  const hasDestination = $derived(!!pb.provider && !!pb.page.settings.cloudFolder);
+  const hasBackup = $derived(pb.projects.some((project) => !!project.lastBackup));
+  /** First-run steps, until the first backup is made (or the user hides them). */
+  const showGuide = $derived(!pb.loading && !guideHidden && (!hasDestination || !pb.projects.length || !hasBackup));
+
+  function hideGuide() {
+    guideHidden = true;
+    writeFlag(GUIDE_KEY, true);
+  }
+
+  function focusDestination() {
+    const tile = document.querySelector<HTMLButtonElement>(".cloud-tile");
+    tile?.scrollIntoView({ behavior: "smooth", block: "center" });
+    tile?.focus();
+  }
+
+  function reviewExclusions() {
+    pb.exclusionsOpen = true;
+    requestAnimationFrame(() =>
+      document.getElementById("project-backups-exclusions")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }
+
+  const otherProvider = (provider: BackupProvider | null): BackupProvider =>
+    provider === "dropbox" ? "googleDrive" : "dropbox";
+
+  interface FailureAction {
+    label: string;
+    icon: typeof Play;
+    run: () => void;
+    primary?: boolean;
+  }
+
+  /** What the user can do about a failed backup, by its code. */
+  function actionsFor(failure: ProjectResult): FailureAction[] {
+    const project = pb.projects.find((item) => item.id === failure.projectId);
+    const retry: FailureAction = { label: "Try again", icon: RotateCw, run: () => void pb.retryFailures([failure.projectId]) };
+    const provider = pb.provider;
+    switch (failure.code) {
+      case "SOURCE_MISSING":
+        return project ? [{ label: "Find the folder", icon: FolderSearch, run: () => pb.openEditor(project, true), primary: true }] : [];
+      case "NO_PROVIDER":
+        return [{ label: "Choose where backups go", icon: CloudUpload, run: focusDestination, primary: true }];
+      case "DESTINATION_MISSING":
+        return [
+          { label: "Choose the folder again", icon: FolderSearch, run: () => provider && void pb.useCloud(provider, null), primary: true },
+          retry,
+        ];
+      case "CLOUD_NOT_INSTALLED":
+        return [
+          {
+            label: `Back up to ${providerNames[otherProvider(provider)]}`,
+            icon: CloudUpload,
+            run: () => chooseTile(otherProvider(provider)),
+            primary: true,
+          },
+          {
+            label: "Get Google Drive",
+            icon: ExternalLink,
+            run: () => void openUrl("https://www.google.com/drive/download/"),
+          },
+        ];
+      case "CLOUD_NOT_READY":
+        return [
+          ...(provider ? [{ label: `Start ${providerNames[provider]}`, icon: Play, run: () => void pb.startCloud(provider), primary: true }] : []),
+          retry,
+        ];
+      case "NO_FILES":
+        return [
+          { label: "Review exclusions", icon: ListFilter, run: reviewExclusions, primary: true },
+          ...(project ? [{ label: "Edit project", icon: Pencil, run: () => pb.openEditor(project) }] : []),
+        ];
+      case "NAME_TAKEN":
+        return [{ ...retry, label: "Back up again", primary: true }];
+      default:
+        return [retry];
+    }
+  }
+
+  const step = $derived(pb.operation ? stageStep(pb.operation.stage) : null);
 
   const providers: BackupProvider[] = ["googleDrive", "dropbox"];
 
@@ -72,9 +185,19 @@
     void pb.useCloud(provider, folders.length === 1 ? folders[0].path : null);
   }
 
+  const lastAttempt = (project: Project) => {
+    const result = project.lastResult;
+    if (!result?.at) return null;
+    // A good backup is already told by the "Last backup" line.
+    if (result.ok) return null;
+    return result;
+  };
+
   const inUse = (provider: BackupProvider) => pb.provider === provider && !!pb.page.settings.cloudFolder;
   const backupsOf = (project: Project) => pb.backups[project.id] ?? [];
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="page-root" inert={!!pb.editor || !!pb.compare}>
   <div class="top">
@@ -173,25 +296,83 @@
           {#each pb.failures as failure (failure.projectId)}
             {@const project = pb.projects.find((item) => item.id === failure.projectId)}
             <li>
-              <b>{failure.name}</b>
+              <b>{project?.name ?? failure.name}</b>
               <span class="selectable">{failure.error}</span>
-              {#if failure.code === "SOURCE_MISSING" && project}
-                <button class="btn small" onclick={() => pb.openEditor(project, true)}><FolderSearch size={13} /> Find the folder</button>
-              {/if}
+              <span class="failure-actions">
+                {#each actionsFor(failure) as action (action.label)}
+                  <button class="btn small" class:primary={action.primary} disabled={pb.locked} onclick={action.run}>
+                    <action.icon size={13} /> {action.label}
+                  </button>
+                {/each}
+              </span>
             </li>
           {/each}
         </ul>
       </div>
-      <button class="btn small ghost" onclick={() => pb.dismissFailures()}>Dismiss</button>
+      <span class="banner-actions">
+        {#if pb.failures.length > 1}
+          <button class="btn small" disabled={pb.locked} onclick={() => pb.retryFailures()}><RotateCw size={13} /> Try all again</button>
+        {/if}
+        <button class="btn small ghost" onclick={() => pb.dismissFailures()}>Dismiss</button>
+      </span>
     </div>
+  {/if}
+
+  {#if showGuide}
+    <section class="guide surface" aria-labelledby="guide-heading" transition:slide={{ duration: 160 }}>
+      <div class="guide-head">
+        <h2 id="guide-heading">Get started in three steps</h2>
+        <button class="icon-btn" title="Hide these steps" aria-label="Hide the getting started steps" onclick={hideGuide}><X size={14} /></button>
+      </div>
+      <ol>
+        <li class:done={hasDestination}>
+          <span class="step-mark">{#if hasDestination}<Check size={12} />{:else}1{/if}</span>
+          <span class="step-text">
+            <strong>Choose where backups go</strong>
+            <small>{hasDestination ? `Backups go to ${pb.page.backupRoot ?? "your cloud folder"}.` : "Pick Google Drive or Dropbox above. Google Drive is started for you when a backup begins."}</small>
+          </span>
+          {#if !hasDestination}<button class="btn small" onclick={focusDestination}>Choose</button>{/if}
+        </li>
+        <li class:done={pb.projects.length > 0}>
+          <span class="step-mark">{#if pb.projects.length}<Check size={12} />{:else}2{/if}</span>
+          <span class="step-text">
+            <strong>Add a project folder</strong>
+            <small>Build output, dependencies and caches (node_modules, target, .venv, bin/obj and more) are left out by themselves; .env files are kept.</small>
+          </span>
+          {#if !pb.projects.length}
+            <button class="btn small" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={13} /> Add</button>
+          {/if}
+        </li>
+        <li class:done={hasBackup}>
+          <span class="step-mark">{#if hasBackup}<Check size={12} />{:else}3{/if}</span>
+          <span class="step-text">
+            <strong>Back up</strong>
+            <small>Each zip is checked twice (after zipping and after the copy) before it is kept. Compare any two backups later.</small>
+          </span>
+          {#if hasDestination && pb.projects.length && !hasBackup}
+            <button class="btn small primary" disabled={pb.locked} onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
+              <CloudUpload size={13} /> Back up now
+            </button>
+          {/if}
+        </li>
+      </ol>
+    </section>
   {/if}
 
   <div class="toolbar">
     <button class="btn primary" disabled={pb.locked || !pb.projects.length}
+      title={pb.query && pb.filtered.length !== pb.projects.length ? "Backs up every project, also those hidden by the search" : undefined}
       onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
       <CloudUpload size={15} /> Back up all
     </button>
     <button class="btn" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={15} /> Add project</button>
+    {#if pb.projects.length > 1}
+      <label class="search">
+        <Search size={13} />
+        <input bind:this={searchInput} bind:value={pb.query} class="input" type="search" placeholder="Search projects  /"
+          aria-label="Search projects" aria-keyshortcuts="/ Control+F" />
+      </label>
+    {/if}
     <span class="spacer"></span>
     <button class="btn ghost" disabled={pb.locked} title="Bring in the projects of the Backup Projects app"
       onclick={() => pb.importProjects()}>
@@ -204,12 +385,18 @@
     <div class="operation" aria-live="polite">
       <LoaderCircle size={14} class="spin" />
       <span class="operation-text">
-        <strong>{stageLabels[operation.stage]}</strong>
-        {#if operation.projectName}<small>{operation.projectName}{operation.total > 1 ? ` (${operation.index + 1}/${operation.total})` : ""}</small>{/if}
-        {#if operation.note}<small>{operation.note}</small>{/if}
+        <span class="operation-line">
+          <strong>{stageLabels[operation.stage]}</strong>
+          {#if operation.projectName}<small class="project-name">{operation.projectName}{operation.total > 1 ? ` · project ${operation.index + 1} of ${operation.total}` : ""}</small>{/if}
+          {#if step}<small>step {step.step} of {step.of}</small>{/if}
+        </span>
+        <small class="hint-line">{operation.note ?? stageHints[operation.stage]}</small>
       </span>
+      {#if operation.totalFiles}
+        <span class="numbers">{operation.doneFiles.toLocaleString()} / {operation.totalFiles.toLocaleString()} files</span>
+      {/if}
       {#if operation.totalBytes}
-        <span class="numbers">{formatBytes(operation.doneBytes)} / {formatBytes(operation.totalBytes)}</span>
+        <span class="numbers">{formatBytes(operation.doneBytes)} / {formatBytes(operation.totalBytes)}{progress !== null ? ` · ${Math.floor(progress)}%` : ""}</span>
       {/if}
       {#if elapsed >= 2}<span class="numbers">{formatElapsed(elapsed)}</span>{/if}
       <button class="btn small" disabled={pb.cancelling} onclick={() => pb.cancel()}>
@@ -225,9 +412,11 @@
     <div class="loading" role="status"><LoaderCircle size={17} class="spin" /> Loading Project Backups…</div>
   {:else}
     <div class="project-list">
-      {#each pb.projects as project (project.id)}
+      {#each pb.filtered as project (project.id)}
         {@const missing = pb.isMissing(project)}
         {@const expanded = pb.expanded === project.id}
+        {@const attempt = lastAttempt(project)}
+        {@const age = pb.daysSinceBackup(project)}
         <article class="project surface" class:expanded>
           <div class="project-main">
             <span class="project-icon"><FolderCode size={18} /></span>
@@ -237,11 +426,20 @@
                 <span class="tag" title={`Backups are named ${project.appName}_D<day>_V<number>.zip`}>{project.appName}</span>
                 {#if missing}<span class="tag warning">Folder not found</span>{/if}
                 {#if project.closeApp}<span class="tag" title="Closed before each backup">Closes {project.closeApp}</span>{/if}
+                {#if attempt && !attempt.cancelled}
+                  <span class="tag danger" title={attempt.error ?? "The last backup failed"}><CircleX size={11} /> Last try failed {pb.ago(attempt.at)}</span>
+                {:else if attempt?.cancelled}
+                  <span class="tag" title="The last backup was cancelled">Cancelled {pb.ago(attempt.at)}</span>
+                {:else if project.lastBackup && age !== null && age < 7}
+                  <span class="tag ok" title="The last backup was checked and kept"><CircleCheck size={11} /> Up to date</span>
+                {:else if age !== null && age >= 30}
+                  <span class="tag warning" title="No backup for a month or more">{age} days old</span>
+                {/if}
               </div>
               <span class="source selectable" title={project.sourcePath}>{project.sourcePath || "No folder chosen"}</span>
               <small>
                 {#if project.lastBackup}
-                  Last backup {formatRelative(project.lastBackup.createdAt)} · {project.lastBackup.name} ·
+                  Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · {project.lastBackup.name} ·
                   {formatBytes(project.lastBackup.zipSize)} · {project.lastBackup.fileCount.toLocaleString()} files
                 {:else}
                   Not backed up from MYLE yet
@@ -318,6 +516,13 @@
           {/if}
         </article>
       {:else}
+        {#if pb.projects.length}
+          <div class="empty surface small">
+            <strong>No project matches “{pb.query}”</strong>
+            <p>The search looks at names, backup names and folders.</p>
+            <div class="empty-actions"><button class="btn small" onclick={() => (pb.query = "")}><X size={13} /> Clear the search</button></div>
+          </div>
+        {:else}
         <div class="empty surface">
           <span class="empty-icon"><FolderCode size={25} /></span>
           <strong>No projects yet</strong>
@@ -327,6 +532,7 @@
             <button class="btn" disabled={pb.locked} onclick={() => pb.importProjects()}><Download size={14} /> Import</button>
           </div>
         </div>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -383,6 +589,28 @@
   .failures li b { color: var(--text-1); font-weight: 600; }
   .failures li span { color: var(--text-2); overflow-wrap: anywhere; }
 
+  .banner-actions { display: flex; flex: none; flex-wrap: wrap; gap: 6px; }
+  .failure-actions { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .failures li .failure-actions { flex-basis: 100%; }
+
+  .guide { display: grid; gap: 9px; margin-bottom: 12px; padding: 12px 13px; }
+  .guide-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .guide-head h2 { color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .guide ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .guide li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 9px; border-radius: 9px; background: rgb(0 0 0 / 0.1); }
+  .guide li.done { opacity: 0.62; }
+  .step-mark {
+    display: grid; place-items: center; flex: none; width: 21px; height: 21px; border-radius: 999px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.3); color: var(--accent); font-size: 11px; font-weight: 700;
+  }
+  .guide li.done .step-mark { border-color: rgb(62 207 142 / 0.35); color: #98dfbd; }
+  .step-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .step-text strong { font-size: 12px; font-weight: 600; }
+  .step-text small { color: var(--text-3); font-size: 10.75px; line-height: 1.45; }
+
+  .search { display: flex; align-items: center; gap: 6px; color: var(--text-3); }
+  .search input { width: 210px; height: 30px; font-size: 12px; }
+
   .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
   .spacer { flex: 1; }
 
@@ -390,8 +618,10 @@
     position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 10px;
     padding: 7px 8px 9px; border-radius: 9px; background: rgb(var(--accent-rgb) / 0.045); color: var(--accent);
   }
-  .operation-text { display: flex; flex: 1; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; }
+  .operation-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .operation-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; }
   .operation-text strong { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .hint-line { color: var(--text-3); }
   .operation-text small { overflow: hidden; color: var(--text-3); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
   .numbers { margin-left: auto; color: var(--text-2); font-size: 10.5px; font-variant-numeric: tabular-nums; }
   .numbers + .numbers { margin-left: 0; }
@@ -413,6 +643,9 @@
   .title-row strong { font-size: 13px; }
   .tag { padding: 1px 6px; border-radius: 5px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: 10px; white-space: nowrap; }
   .tag.warning { background: rgb(245 176 65 / 0.1); color: rgb(245 188 95 / 0.9); }
+  .tag.danger { background: rgb(229 72 77 / 0.1); color: rgb(255 145 145 / 0.9); }
+  .tag.ok { background: rgb(62 207 142 / 0.08); color: #98dfbd; }
+  .tag { display: inline-flex; align-items: center; gap: 3px; }
   .source { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
   .project-text small { overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
   .project-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
@@ -432,6 +665,7 @@
   .backup-meta { color: var(--text-3); font-size: 10.5px; white-space: nowrap; }
   .backup-meta.right { margin-left: auto; font-variant-numeric: tabular-nums; }
 
+  .empty.small { padding: 22px 20px; }
   .empty { display: grid; justify-items: center; gap: 7px; padding: 42px 20px; text-align: center; }
   .empty-icon {
     display: grid; place-items: center; width: 50px; height: 50px; margin-bottom: 2px;
@@ -448,6 +682,7 @@
     .project-actions { width: 100%; justify-content: flex-start; }
     .backup-meta.date { display: none; }
     .operation { flex-wrap: wrap; }
+    .search input { width: 160px; }
   }
   @container (max-width: 470px) {
     .cloud-list { grid-template-columns: minmax(0, 1fr); }

@@ -4,6 +4,8 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Select from "../../../lib/components/Select.svelte";
+  import { onMount } from "svelte";
+  import { confirm } from "../../../lib/confirm.svelte";
   import { projectBackupsApi as api, type Preview } from "./api";
   import PreviewList from "./PreviewList.svelte";
   import { parseLines, projectBackupsState as pb } from "./state.svelte";
@@ -30,6 +32,21 @@
     preview = null;
   }
 
+  onMount(() => () => {
+    if (previewing) void api.cancelPreview();
+  });
+
+  async function resetToDefaults() {
+    const ok = await confirm({
+      title: "Use the default exclusions?",
+      message: "Your own patterns in this list are replaced by MYLE's defaults. Nothing changes until you press Save.",
+      confirmLabel: "Use defaults",
+    });
+    if (!ok) return;
+    text = pb.page.defaultExclusions.join("\n");
+    edited();
+  }
+
   async function runPreview() {
     if (!previewProject) return;
     previewing = true;
@@ -38,7 +55,8 @@
       preview = await api.preview({ projectId: previewProject, patterns: parseLines(text), smartBuild, followGitignore });
     } catch (error) {
       preview = null;
-      previewError = error instanceof Error ? error.message : String(error);
+      const reason = error instanceof Error ? error.message : String(error);
+      previewError = reason === "Cancelled." ? null : reason;
     } finally {
       previewing = false;
     }
@@ -67,8 +85,8 @@
     <div class="side">
       <label class="toggle surface">
         <span>
-          <strong>Smart build folders</strong>
-          <small>Leave out <code>build</code> only when it is build output: git tracks nothing in it, or <code>.gitignore</code> lists it. Kept when it holds sources such as an installer script.</small>
+          <strong>Find build and cache folders</strong>
+          <small>Leaves out folders such as <code>target</code>, <code>build</code>, <code>bin</code>/<code>obj</code>, <code>out</code>, <code>venv</code> or Unity's <code>Library</code> only when they are output: a marker says so (Cargo.toml, a .csproj, pyvenv.cfg, CMakeCache.txt, …), git tracks nothing in them, or <code>.gitignore</code> lists them. Folders git tracks, like an installer's <code>build</code>, are always kept.</small>
         </span>
         <input class="switch" type="checkbox" bind:checked={smartBuild} onchange={edited} disabled={!!pb.busy} />
       </label>
@@ -83,7 +101,7 @@
   </div>
 
   <div class="actions">
-    <button class="btn ghost" disabled={!!pb.busy} onclick={() => { text = pb.page.defaultExclusions.join("\n"); edited(); }}>
+    <button class="btn ghost" disabled={!!pb.busy || parseLines(text).join("\n") === pb.page.defaultExclusions.join("\n")} onclick={resetToDefaults}>
       <RotateCcw size={14} /> Defaults
     </button>
     <span class="spacer"></span>

@@ -15,6 +15,7 @@ import {
   type Stage,
 } from "./api";
 
+import { formatRelative } from "../game-saves/state.svelte";
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
 
 export const stageLabels: Record<Stage, string> = {
@@ -30,6 +31,37 @@ export const stageLabels: Record<Stage, string> = {
   finishing: "Finishing",
 };
 
+/** What each stage does, in plain words (shown under the stage). */
+export const stageHints: Record<Stage, string> = {
+  preparing: "Getting the backup folder ready.",
+  startingCloud: "The cloud app has to run for its folder to be there.",
+  closingApp: "So no file is half-written while it is zipped.",
+  scanning: "Listing the files and leaving out build and cache folders.",
+  zipping: "Packing the files into a zip on this PC first.",
+  verifying: "Reading the zip back to be sure every file is whole.",
+  checkingCompleteness: "Comparing the zip with the project folder.",
+  copying: "Copying the checked zip into the cloud folder.",
+  verifyingCopy: "Reading the copy back from the cloud folder.",
+  finishing: "Naming the backup and saving its details.",
+};
+
+/** The order of the stages, for "step 3 of 8" (starting the cloud app and closing the app only happen sometimes). */
+const stageOrder: Stage[] = [
+  "preparing",
+  "scanning",
+  "zipping",
+  "verifying",
+  "checkingCompleteness",
+  "copying",
+  "verifyingCopy",
+  "finishing",
+];
+
+export function stageStep(stage: Stage): { step: number; of: number } | null {
+  const index = stageOrder.indexOf(stage);
+  return index < 0 ? null : { step: index + 1, of: stageOrder.length };
+}
+
 export const providerNames: Record<BackupProvider, string> = {
   googleDrive: "Google Drive",
   dropbox: "Dropbox",
@@ -43,6 +75,8 @@ interface OperationView {
   stage: Stage;
   doneBytes: number;
   totalBytes: number;
+  doneFiles: number;
+  totalFiles: number;
   note: string | null;
 }
 
@@ -65,7 +99,7 @@ function message(error: unknown): string {
 
 const emptyPage: PageState = {
   settings: {
-    version: 1,
+    version: 2,
     provider: null,
     cloudFolder: null,
     projects: [],
@@ -105,6 +139,10 @@ class ProjectBackupsState {
   backupsLoading = $state<string | null>(null);
   /** Backups ticked for a comparison (at most two). */
   picked = $state<string[]>([]);
+  /** Filters the project list (name, backup name or folder). */
+  query = $state("");
+  /** Ticks every 30 s so "5 minutes ago" stays true. */
+  clock = $state(Date.now());
   private loaded = false;
 
   get locked() {
@@ -123,6 +161,27 @@ class ProjectBackupsState {
     const folder = this.page.settings.cloudFolder;
     if (!folder) return null;
     return this.page.clouds.find((cloud) => samePath(cloud.path, folder)) ?? null;
+  }
+
+  /** The projects that match the search box. */
+  get filtered() {
+    const query = this.query.trim().toLowerCase();
+    if (!query) return this.projects;
+    return this.projects.filter((project) =>
+      [project.name, project.appName, project.sourcePath].some((text) => text.toLowerCase().includes(query)),
+    );
+  }
+
+  /** "5 minutes ago", kept fresh by `clock`. */
+  ago(value: number) {
+    void this.clock;
+    return formatRelative(value);
+  }
+
+  /** Days since the last good backup, or null when there is none. */
+  daysSinceBackup(project: Project) {
+    if (!project.lastBackup) return null;
+    return Math.floor((this.clock - project.lastBackup.createdAt) / 86_400_000);
   }
 
   isMissing(project: Project) {
@@ -263,6 +322,8 @@ class ProjectBackupsState {
       stage: "preparing",
       doneBytes: 0,
       totalBytes: 0,
+      doneFiles: 0,
+      totalFiles: 0,
       note: null,
     };
     try {
@@ -306,16 +367,22 @@ class ProjectBackupsState {
         operation.stage = "preparing";
         operation.doneBytes = 0;
         operation.totalBytes = 0;
+        operation.doneFiles = 0;
+        operation.totalFiles = 0;
         operation.note = null;
         break;
       case "stage":
         operation.stage = event.data.stage;
         operation.doneBytes = 0;
         operation.totalBytes = 0;
+        operation.doneFiles = 0;
+        operation.totalFiles = 0;
         break;
       case "progress":
         operation.doneBytes = event.data.doneBytes;
         operation.totalBytes = event.data.totalBytes;
+        operation.doneFiles = event.data.doneFiles;
+        operation.totalFiles = event.data.totalFiles;
         break;
       case "message":
         operation.note = event.data.text;
@@ -327,7 +394,7 @@ class ProjectBackupsState {
     if (!this.operation || this.cancelling) return;
     this.cancelling = true;
     try {
-      await api.cancel();
+      await api.cancel("backup");
     } catch (error) {
       this.cancelling = false;
       toast.error(`Could not cancel: ${message(error)}`);
@@ -336,6 +403,18 @@ class ProjectBackupsState {
 
   dismissFailures() {
     this.failures = [];
+  }
+
+  /** Backs up the projects of the failure list again. */
+  async retryFailures(projectIds: string[] = this.failures.map((failure) => failure.projectId)) {
+    await this.backup(projectIds);
+  }
+
+  /** Starts Google Drive or Dropbox for a backup that could not reach it. */
+  async startCloud(provider: BackupProvider) {
+    const text = await this.run("cloud", () => api.startCloud(provider));
+    if (text) toast.info(`${text} Try the backup again once it is signed in.`);
+    await this.refresh();
   }
 
   async toggleBackups(projectId: string) {
