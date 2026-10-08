@@ -3,9 +3,18 @@
   import { fly } from "svelte/transition";
   import { nav } from "../../lib/nav.svelte";
   import { settings } from "../../lib/settings.svelte";
-  import { pages } from "../pages/registry";
+  import { account } from "../account/account.svelte";
+  import { canOpen, pages } from "../pages/registry";
 
-  const def = $derived(pages.find((p) => p.id === nav.current)!);
+  // An owner-only page someone else lands on (a link, a sign-out while it
+  // is open) gives way to the first page. Before the first answer about the
+  // account is in, the first page shows without forgetting where to go.
+  const asked = $derived(pages.find((p) => p.id === nav.current));
+  const allowed = $derived(!!asked && canOpen(asked, account.owner));
+  const def = $derived(allowed && asked ? asked : pages[0]);
+  $effect(() => {
+    if (!allowed && account.accessKnown) nav.go(pages[0].id);
+  });
   const Page = $derived(def.component);
   // A short slide-in; none at all in the lighter mode or with reduced motion,
   // so a slow machine spends its first frames on the page, not the animation.

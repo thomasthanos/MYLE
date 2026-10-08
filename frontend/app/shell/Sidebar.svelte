@@ -3,10 +3,12 @@
   import PanelLeftOpen from "@lucide/svelte/icons/panel-left-open";
   import { badges } from "../../lib/badges.svelte";
   import { nav } from "../../lib/nav.svelte";
-  import { pages, type PageDef } from "../pages/registry";
+  import { account } from "../account/account.svelte";
+  import { canOpen, pages, type PageDef } from "../pages/registry";
 
-  const topPages = pages.filter((p) => !p.bottom);
-  const bottomPages = pages.filter((p) => p.bottom);
+  const shown = $derived(pages.filter((p) => canOpen(p, account.owner)));
+  const topPages = $derived(shown.filter((p) => !p.bottom));
+  const bottomPages = $derived(shown.filter((p) => p.bottom));
 
   // Collapsed mode shows a tooltip beside the hovered icon. It is rendered
   // outside the glass panel, because backdrop-filter would clip a fixed child.

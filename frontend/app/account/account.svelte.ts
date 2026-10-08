@@ -5,10 +5,11 @@
 // is pushed a couple of seconds after it happens; the cloud is read at start,
 // after signing in, and on "Sync now".
 import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { confirm } from "../../lib/confirm.svelte";
 import { onStorageChange, readJson } from "../../lib/storage";
 import { toast } from "../../lib/toast.svelte";
-import { accountApi, type Profile, type Provider } from "./api";
+import { ACCESS_EVENT, accountApi, type Profile, type Provider } from "./api";
 import { apply, collect, isSnapshot, isSynced } from "./snapshot";
 
 const UPDATED_AT_KEY = "myle.sync.updatedAt";
@@ -45,6 +46,11 @@ class AccountState {
   syncing = $state(false);
   lastSyncedAt = $state<number | null>(readJson<number | null>(SYNCED_AT_KEY, null, (v) => typeof v === "number"));
   error = $state<string | null>(null);
+  /** The owner-only pages (GitHub Releases, Project Backups) are open. The
+   *  backend decides and enforces it; this only shows or hides them. */
+  owner = $state(false);
+  /** The first answer about `owner` is in (until then a page waits). */
+  accessKnown = $state(false);
   #started = false;
   #applying = false;
   #pushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -56,12 +62,35 @@ class AccountState {
     if (!isTauri() || this.#started) return;
     this.#started = true;
     onStorageChange((key) => this.#onLocalChange(key));
+    void listen<boolean>(ACCESS_EVENT, (event) => (this.owner = event.payload === true));
+    // Checked again now and then (the backend skips it when it checked lately).
+    window.addEventListener("focus", () => void this.refreshAccess());
     try {
       this.profile = await accountApi.profile();
     } catch {
       this.profile = null;
     }
-    if (this.profile) void this.sync();
+    if (this.profile) {
+      void this.refreshAccess();
+      void this.sync();
+    } else {
+      this.accessKnown = true;
+    }
+  }
+
+  async refreshAccess(recheck = false) {
+    if (!isTauri() || !this.profile) {
+      this.owner = false;
+      this.accessKnown = true;
+      return;
+    }
+    try {
+      this.owner = await accountApi.access(recheck);
+    } catch {
+      this.owner = false;
+    } finally {
+      this.accessKnown = true;
+    }
   }
 
   async signIn(provider: Provider) {
@@ -70,6 +99,7 @@ class AccountState {
     this.error = null;
     try {
       this.profile = await accountApi.signIn(provider);
+      void this.refreshAccess();
       toast.success(`Signed in with ${PROVIDER_NAMES[provider]} as ${this.profile.name ?? this.profile.email ?? "you"}.`);
       await this.sync();
     } catch (error) {
@@ -104,6 +134,7 @@ class AccountState {
       return;
     }
     this.profile = null;
+    this.owner = false;
     this.error = null;
     toast.info("Signed out.");
   }
