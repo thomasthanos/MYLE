@@ -16,6 +16,9 @@ use crate::cloud::CloudProvider;
 
 const FILE_NAME: &str = "project-backups.json";
 const MAX_PATTERNS: usize = 500;
+/// 2: names such as `target`, `out` and `release` are decided by the files
+/// around them, no longer by the pattern list.
+pub(crate) const SETTINGS_VERSION: u32 = 2;
 
 /// Held while the settings are read, changed and saved.
 static EDIT: Mutex<()> = Mutex::new(());
@@ -34,6 +37,18 @@ pub struct LastBackup {
     pub zip_size: u64,
 }
 
+/// How the last backup attempt of a project ended.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LastResult {
+    /// Unix milliseconds.
+    pub at: i64,
+    pub ok: bool,
+    pub cancelled: bool,
+    pub code: Option<String>,
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Project {
@@ -48,6 +63,7 @@ pub struct Project {
     pub extra_exclusions: Vec<String>,
     pub keep: Vec<String>,
     pub last_backup: Option<LastBackup>,
+    pub last_result: Option<LastResult>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -71,7 +87,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            version: 1,
+            version: SETTINGS_VERSION,
             provider: None,
             cloud_folder: None,
             projects: Vec::new(),
@@ -137,8 +153,11 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
         }
         Err(error) => return Err(format!("Can't read the Project Backups settings: {error}")),
     };
-    match serde_json::from_str(&text) {
-        Ok(settings) => Ok(settings),
+    match serde_json::from_str::<Settings>(&text) {
+        Ok(mut settings) => {
+            migrate(&mut settings);
+            Ok(settings)
+        }
         Err(_) => {
             // Keep a damaged file for a look rather than overwrite it.
             let aside = path.with_extension(format!(
@@ -149,6 +168,37 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
             Ok(Settings::default())
         }
     }
+}
+
+/// Brings settings of an older MYLE up to date. The global list loses the
+/// 9.4.0 defaults that are now told apart by markers (`target/`, `out/`,
+/// `release/`, `gen/`, `venv/`, `*.obj`) and gains the new defaults; what
+/// the user added or removed stays as it was.
+pub(crate) fn migrate(settings: &mut Settings) {
+    if settings.version >= SETTINGS_VERSION {
+        return;
+    }
+    let old: Vec<String> = super::rules::DEFAULT_PATTERNS_V1
+        .iter()
+        .map(|p| p.to_lowercase())
+        .collect();
+    let current: Vec<String> = DEFAULT_PATTERNS.iter().map(|p| p.to_lowercase()).collect();
+    settings.exclusions.retain(|pattern| {
+        let lower = pattern.to_lowercase();
+        !old.contains(&lower) || current.contains(&lower)
+    });
+    for pattern in DEFAULT_PATTERNS {
+        let lower = pattern.to_lowercase();
+        if !old.contains(&lower)
+            && !settings
+                .exclusions
+                .iter()
+                .any(|known| known.to_lowercase() == lower)
+        {
+            settings.exclusions.push((*pattern).to_string());
+        }
+    }
+    settings.version = SETTINGS_VERSION;
 }
 
 pub(crate) fn save(settings: &Settings) -> Result<(), String> {
@@ -288,9 +338,11 @@ pub(crate) fn check_project(
     if project.id.trim().is_empty() {
         project.id = uuid::Uuid::new_v4().to_string();
         project.last_backup = None;
+        project.last_result = None;
     } else if let Some(index) = existing {
         // The backup history is the app's to keep, not the editor's.
         project.last_backup = settings.projects[index].last_backup.clone();
+        project.last_result = settings.projects[index].last_result.clone();
     } else {
         return Err("This project no longer exists.".into());
     }
@@ -628,5 +680,33 @@ mod tests {
             "the damaged file is kept aside"
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn settings_of_9_4_0_are_brought_up_to_date() {
+        let mut settings = Settings {
+            version: 1,
+            exclusions: super::super::rules::DEFAULT_PATTERNS_V1
+                .iter()
+                .map(|p| p.to_string())
+                .filter(|p| p != "*.zip")
+                .chain(["secrets/".to_string()])
+                .collect(),
+            ..Settings::default()
+        };
+        migrate(&mut settings);
+        assert_eq!(settings.version, SETTINGS_VERSION);
+        let has = |p: &str| settings.exclusions.iter().any(|known| known == p);
+        // Decided by markers now.
+        for gone in ["target/", "out/", "release/", "gen/", "venv/", "*.obj"] {
+            assert!(!has(gone), "{gone}");
+        }
+        // New defaults come in; the user's own changes stay.
+        assert!(has(".ruff_cache/") && has(".dart_tool/") && has("node_modules/"));
+        assert!(has("secrets/"));
+        assert!(!has("*.zip"), "a default the user removed stays removed");
+        let again = settings.clone();
+        migrate(&mut settings);
+        assert_eq!(settings, again);
     }
 }

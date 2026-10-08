@@ -11,7 +11,7 @@ use serde::Serialize;
 use similar::{DiffTag, TextDiff};
 use zip::ZipArchive;
 
-use super::rules::{BACKUP_INFO_FILE, Rules};
+use super::rules::{BACKUP_INFO_FILE, Rules, TreeListing};
 use super::walk;
 
 /// Text files larger than this are compared by size only.
@@ -112,11 +112,12 @@ fn single_root(keys: &[&String]) -> Option<String> {
     root.map(str::to_string)
 }
 
+/// `key` without its first folder (every key is under it when `prefix` is set).
 fn strip<'a>(key: &'a str, prefix: &str) -> &'a str {
     if prefix.is_empty() {
         key
     } else {
-        &key[prefix.len() + 1..]
+        key.split_once('/').map(|(_, rest)| rest).unwrap_or(key)
     }
 }
 
@@ -218,6 +219,8 @@ pub enum Status {
 #[serde(rename_all = "camelCase")]
 pub struct Change {
     pub path: String,
+    /// How the page can show it: text, image or other binary.
+    pub kind: FileKind,
     pub status: Status,
     pub old_name: Option<String>,
     pub new_name: Option<String>,
@@ -238,39 +241,6 @@ pub struct Comparison {
     pub unchanged: usize,
 }
 
-fn read_stored(side: &Side, stored: &str, limit: Option<u64>) -> Result<Vec<u8>, String> {
-    match side {
-        Side::Zip(path) => {
-            let file = File::open(path).map_err(|error| format!("Can't open the zip: {error}"))?;
-            let mut archive = ZipArchive::new(BufReader::new(file))
-                .map_err(|error| format!("Can't read the zip: {error}"))?;
-            let entry = archive
-                .by_name(stored)
-                .map_err(|error| format!("\"{stored}\": {error}"))?;
-            read_limited(entry, limit)
-        }
-        Side::Folder(root) => {
-            let path = folder_file(root, stored)?;
-            let file =
-                File::open(&path).map_err(|error| format!("Can't read \"{stored}\": {error}"))?;
-            read_limited(file, limit)
-        }
-    }
-}
-
-fn read_limited(reader: impl Read, limit: Option<u64>) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    match limit {
-        Some(limit) => reader.take(limit + 1).read_to_end(&mut bytes),
-        None => {
-            let mut reader = reader;
-            reader.read_to_end(&mut bytes)
-        }
-    }
-    .map_err(|error| format!("Can't read the file: {error}"))?;
-    Ok(bytes)
-}
-
 /// A file inside `root` by its relative name, refusing names that leave it.
 fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let mut path = root.to_path_buf();
@@ -286,7 +256,7 @@ fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn folder_crc(side: &Side, info: &FileInfo) -> Result<u32, String> {
+fn folder_crc(side: &Side, info: &FileInfo, cancelled: &dyn Fn() -> bool) -> Result<u32, String> {
     let Side::Folder(root) = side else {
         return info.crc.ok_or_else(|| "Missing CRC".to_string());
     };
@@ -295,6 +265,9 @@ fn folder_crc(side: &Side, info: &FileInfo) -> Result<u32, String> {
     let mut hasher = crc32fast::Hasher::new();
     let mut buffer = vec![0u8; 1024 * 1024];
     loop {
+        if cancelled() {
+            return Err(super::CANCELLED.into());
+        }
         let read = file
             .read(&mut buffer)
             .map_err(|error| format!("Can't read \"{}\": {error}", info.stored))?;
@@ -308,23 +281,29 @@ fn folder_crc(side: &Side, info: &FileInfo) -> Result<u32, String> {
 
 /// The changes from `old` to `new`. Files `rules` leaves out of backups are
 /// left out here too; `source` (the project folder) marks deleted files that
-/// are still there.
+/// are still there. `progress` gets the files compared so far and in all.
 pub(crate) fn compare(
     old: &Side,
     new: &Side,
     rules: &Rules,
     source: Option<&Path>,
     cancelled: &dyn Fn() -> bool,
+    progress: &dyn Fn(u64, u64),
 ) -> Result<Comparison, String> {
     let old_files = list_files(old, cancelled)?;
     let new_files = list_files(new, cancelled)?;
     let pairs = match_files(&old_files, &new_files);
+    // What the folders hold on either side tells build output from sources
+    // (a `Cargo.toml` next to `target`), as it did for the backup.
+    let listing = TreeListing::from_paths(pairs.keys().map(String::as_str));
     let mut result = Comparison::default();
-    for (path, pair) in pairs {
+    let total = pairs.len() as u64;
+    for (index, (path, pair)) in pairs.into_iter().enumerate() {
         if cancelled() {
             return Err(super::CANCELLED.into());
         }
-        if path == BACKUP_INFO_FILE || rules.excluded_path(&path) {
+        progress(index as u64, total);
+        if path == BACKUP_INFO_FILE || rules.excluded_path(&path, &listing) {
             continue;
         }
         let old_info = pair.old.as_ref().and_then(|key| old_files.get(key));
@@ -333,7 +312,9 @@ pub(crate) fn compare(
             (Some(_), None) => Status::Deleted,
             (None, Some(_)) => Status::Added,
             (Some(a), Some(b)) => {
-                if a.size != b.size || folder_crc(old, a)? != folder_crc(new, b)? {
+                if a.size != b.size
+                    || folder_crc(old, a, cancelled)? != folder_crc(new, b, cancelled)?
+                {
                     Status::Modified
                 } else {
                     result.unchanged += 1;
@@ -350,6 +331,7 @@ pub(crate) fn compare(
             Status::Deleted => result.deleted += 1,
         }
         result.changes.push(Change {
+            kind: FileKind::of(&path),
             path,
             status,
             old_name: old_info.map(|info| info.stored.clone()),
@@ -359,6 +341,7 @@ pub(crate) fn compare(
             still_in_source,
         });
     }
+    progress(total, total);
     result.changes.sort_by(|a, b| {
         a.status
             .cmp(&b.status)
@@ -388,92 +371,373 @@ pub struct Row {
     pub new_text: Option<String>,
 }
 
+/// How a changed file can be shown, from its name (the content decides in
+/// the end: a "text" file with NUL bytes is shown as binary).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileKind {
+    Text,
+    Image,
+    Binary,
+}
+
+const IMAGE_TYPES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("ico", "image/x-icon"),
+    ("bmp", "image/bmp"),
+    ("avif", "image/avif"),
+    ("svg", "image/svg+xml"),
+];
+
+const BINARY_TYPES: &[&str] = &[
+    "exe", "dll", "so", "dylib", "lib", "a", "bin", "dat", "db", "sqlite", "sqlite3", "pdf",
+    "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "avi", "mov",
+    "mkv", "webm", "psd", "ai", "blend", "fbx", "glb", "jar", "class", "wasm", "node", "pyd",
+    "iso", "msi", "nupkg", "docx", "xlsx", "pptx", "icns", "tga", "tif", "tiff", "dds", "jks",
+    "keystore", "pfx", "p12",
+];
+
+fn extension(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.to_lowercase())
+        .unwrap_or_default()
+}
+
+fn image_type(path: &str) -> Option<&'static str> {
+    let ext = extension(path);
+    IMAGE_TYPES
+        .iter()
+        .find(|(known, _)| *known == ext)
+        .map(|(_, mime)| *mime)
+}
+
+impl FileKind {
+    pub(crate) fn of(path: &str) -> FileKind {
+        if image_type(path).is_some() {
+            FileKind::Image
+        } else if BINARY_TYPES.contains(&extension(path).as_str()) {
+            FileKind::Binary
+        } else {
+            FileKind::Text
+        }
+    }
+}
+
+/// One side of a file shown as binary.
 #[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase")]
+pub struct SideInfo {
+    pub size: u64,
+    /// Hex SHA-256, for files up to `MAX_HASH_BYTES`.
+    pub sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum FileDiff {
     Text {
         rows: Vec<Row>,
         identical: bool,
+        /// Only the line endings differ (CRLF / LF).
+        line_endings_differ: bool,
+        /// More rows than `MAX_ROWS`: the rest is left out.
+        truncated: bool,
+        old_lines: usize,
+        new_lines: usize,
+        /// Set when a side is not UTF-8 (`UTF-16 LE`).
+        encoding: Option<String>,
+    },
+    Image {
+        mime: String,
+        /// `data:` URLs.
+        old: Option<String>,
+        new: Option<String>,
+        old_info: Option<SideInfo>,
+        new_info: Option<SideInfo>,
+        /// The source, for SVG.
+        rows: Option<Vec<Row>>,
     },
     Binary {
-        old_size: Option<u64>,
-        new_size: Option<u64>,
-    },
-    TooLarge {
-        old_size: Option<u64>,
-        new_size: Option<u64>,
+        old: Option<SideInfo>,
+        new: Option<SideInfo>,
+        /// Text too large to show line by line.
+        too_large: bool,
     },
 }
 
-fn is_binary(bytes: &[u8]) -> bool {
-    bytes[..bytes.len().min(8000)].contains(&0)
+/// Images larger than this are described, not shown.
+const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+/// Files larger than this get no SHA-256 (reading them takes too long).
+const MAX_HASH_BYTES: u64 = 512 * 1024 * 1024;
+/// Rows of a diff sent to the page at most.
+const MAX_ROWS: usize = 20_000;
+
+/// Runs `read` on the file `stored` of `side`.
+fn with_reader<T>(
+    side: &Side,
+    stored: &str,
+    read: impl FnOnce(&mut dyn Read) -> Result<T, String>,
+) -> Result<T, String> {
+    match side {
+        Side::Zip(path) => {
+            let file = File::open(path).map_err(|error| format!("Can't open the zip: {error}"))?;
+            let mut archive = ZipArchive::new(BufReader::new(file))
+                .map_err(|error| format!("Can't read the zip: {error}"))?;
+            let mut entry = archive
+                .by_name(stored)
+                .map_err(|error| format!("\"{stored}\": {error}"))?;
+            read(&mut entry)
+        }
+        Side::Folder(root) => {
+            let path = folder_file(root, stored)?;
+            let mut file =
+                File::open(&path).map_err(|error| format!("Can't read \"{stored}\": {error}"))?;
+            read(&mut file)
+        }
+    }
 }
 
-fn line_text(line: &str) -> String {
-    line.trim_end_matches(['\n', '\r']).to_string()
+fn read_stored(side: &Side, stored: &str, limit: u64) -> Result<Vec<u8>, String> {
+    with_reader(side, stored, |reader| {
+        let mut bytes = Vec::new();
+        reader
+            .take(limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("Can't read the file: {error}"))?;
+        Ok(bytes)
+    })
 }
 
-/// A side-by-side line diff of one file of two backups (either name may be
-/// missing: an added or deleted file).
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Size and SHA-256 of the file `stored`, read to its end.
+fn side_info(side: &Side, stored: &str, size: Option<u64>) -> Result<SideInfo, String> {
+    use sha2::{Digest, Sha256};
+    if size.is_some_and(|size| size > MAX_HASH_BYTES) {
+        return Ok(SideInfo {
+            size: size.unwrap_or(0),
+            sha256: None,
+        });
+    }
+    with_reader(side, stored, |reader| {
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0u8; 1024 * 1024];
+        let mut total = 0u64;
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .map_err(|error| format!("Can't read the file: {error}"))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+            total += read as u64;
+        }
+        Ok(SideInfo {
+            size: total,
+            sha256: Some(hex(&hasher.finalize())),
+        })
+    })
+}
+
+fn info_of(bytes: &[u8]) -> SideInfo {
+    use sha2::{Digest, Sha256};
+    SideInfo {
+        size: bytes.len() as u64,
+        sha256: Some(hex(&Sha256::digest(bytes))),
+    }
+}
+
+/// The text of a file, or `None` for binary content. UTF-8 (with or
+/// without a byte order mark) and UTF-16 with one; anything else that has no
+/// NUL byte is read as UTF-8, replacing what is not.
+pub(crate) fn decode_text(bytes: &[u8]) -> Option<(String, Option<&'static str>)> {
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return Some((String::from_utf8_lossy(rest).into_owned(), None));
+    }
+    let utf16 = |rest: &[u8], little: bool| {
+        let units: Vec<u16> = rest
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| {
+                if little {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return Some((utf16(rest, true), Some("UTF-16 LE")));
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return Some((utf16(rest, false), Some("UTF-16 BE")));
+    }
+    if bytes[..bytes.len().min(8000)].contains(&0) {
+        return None;
+    }
+    Some((String::from_utf8_lossy(bytes).into_owned(), None))
+}
+
+fn data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+/// What changed in one file of two backups (either name may be missing: an
+/// added or deleted file), read from the zips or folders as far as the
+/// limits allow: a line diff for text, both pictures for images, size and
+/// SHA-256 for anything else.
 pub(crate) fn file_diff(
     old: &Side,
     old_name: Option<&str>,
     new: &Side,
     new_name: Option<&str>,
 ) -> Result<FileDiff, String> {
-    let old_bytes = old_name
-        .map(|name| read_stored(old, name, Some(MAX_DIFF_BYTES)))
-        .transpose()?;
-    let new_bytes = new_name
-        .map(|name| read_stored(new, name, Some(MAX_DIFF_BYTES)))
-        .transpose()?;
-    let size = |bytes: &Option<Vec<u8>>| bytes.as_ref().map(|bytes| bytes.len() as u64);
-    if [&old_bytes, &new_bytes].iter().any(|bytes| {
+    let path = new_name.or(old_name).unwrap_or_default();
+    if let Some(mime) = image_type(path) {
+        let read = |side: &Side, name: Option<&str>| {
+            name.map(|name| read_stored(side, name, MAX_IMAGE_BYTES))
+                .transpose()
+        };
+        let (old_bytes, new_bytes) = (read(old, old_name)?, read(new, new_name)?);
+        let fits = |bytes: &Option<Vec<u8>>| {
+            bytes
+                .as_ref()
+                .is_none_or(|bytes| bytes.len() as u64 <= MAX_IMAGE_BYTES)
+        };
+        if fits(&old_bytes) && fits(&new_bytes) {
+            let rows = (mime == "image/svg+xml")
+                .then(|| {
+                    let text = |bytes: &Option<Vec<u8>>| {
+                        bytes
+                            .as_deref()
+                            .and_then(decode_text)
+                            .map(|(text, _)| text)
+                            .unwrap_or_default()
+                    };
+                    match text_diff(&text(&old_bytes), &text(&new_bytes)) {
+                        FileDiff::Text { rows, .. } => Some(rows),
+                        _ => None,
+                    }
+                })
+                .flatten();
+            return Ok(FileDiff::Image {
+                mime: mime.to_string(),
+                old: old_bytes.as_deref().map(|bytes| data_url(mime, bytes)),
+                new: new_bytes.as_deref().map(|bytes| data_url(mime, bytes)),
+                old_info: old_bytes.as_deref().map(info_of),
+                new_info: new_bytes.as_deref().map(info_of),
+                rows,
+            });
+        }
+        return binary(old, old_name, new, new_name, false);
+    }
+    let read = |side: &Side, name: Option<&str>| {
+        name.map(|name| read_stored(side, name, MAX_DIFF_BYTES))
+            .transpose()
+    };
+    let (old_bytes, new_bytes) = (read(old, old_name)?, read(new, new_name)?);
+    let too_large = [&old_bytes, &new_bytes].iter().any(|bytes| {
         bytes
             .as_ref()
-            .is_some_and(|b| b.len() as u64 > MAX_DIFF_BYTES)
-    }) {
-        return Ok(FileDiff::TooLarge {
-            old_size: size(&old_bytes),
-            new_size: size(&new_bytes),
-        });
+            .is_some_and(|bytes| bytes.len() as u64 > MAX_DIFF_BYTES)
+    });
+    if too_large {
+        return binary(old, old_name, new, new_name, true);
     }
-    if [&old_bytes, &new_bytes]
-        .iter()
-        .any(|bytes| bytes.as_ref().is_some_and(|b| is_binary(b)))
-    {
+    let decode = |bytes: &Option<Vec<u8>>| match bytes {
+        None => Some(None),
+        Some(bytes) => decode_text(bytes).map(Some),
+    };
+    let (Some(old_text), Some(new_text)) = (decode(&old_bytes), decode(&new_bytes)) else {
         return Ok(FileDiff::Binary {
-            old_size: size(&old_bytes),
-            new_size: size(&new_bytes),
+            old: old_bytes.as_deref().map(info_of),
+            new: new_bytes.as_deref().map(info_of),
+            too_large: false,
         });
+    };
+    let encoding = [&old_text, &new_text]
+        .iter()
+        .find_map(|side| side.as_ref().and_then(|(_, encoding)| *encoding))
+        .map(str::to_string);
+    let old_text = old_text.map(|(text, _)| text).unwrap_or_default();
+    let new_text = new_text.map(|(text, _)| text).unwrap_or_default();
+    let mut diff = text_diff(&old_text, &new_text);
+    if let FileDiff::Text { encoding: slot, .. } = &mut diff {
+        *slot = encoding;
     }
-    let old_text = old_bytes
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_default();
-    let new_text = new_bytes
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_default();
-    Ok(text_diff(&old_text, &new_text))
+    Ok(diff)
 }
 
+fn binary(
+    old: &Side,
+    old_name: Option<&str>,
+    new: &Side,
+    new_name: Option<&str>,
+    too_large: bool,
+) -> Result<FileDiff, String> {
+    Ok(FileDiff::Binary {
+        old: old_name
+            .map(|name| side_info(old, name, None))
+            .transpose()?,
+        new: new_name
+            .map(|name| side_info(new, name, None))
+            .transpose()?,
+        too_large,
+    })
+}
+
+fn line_text(line: &str) -> String {
+    line.trim_end_matches(['\n', '\r']).to_string()
+}
+
+/// A side-by-side line diff of two texts, with three lines of context
+/// around each change. Line endings alone don't make lines differ.
 pub(crate) fn text_diff(old: &str, new: &str) -> FileDiff {
-    let diff = TextDiff::from_lines(old, new);
+    let old_lf = old.replace("\r\n", "\n");
+    let new_lf = new.replace("\r\n", "\n");
+    let line_endings_differ = old != new && old_lf == new_lf;
+    let diff = TextDiff::from_lines(&old_lf, &new_lf);
     let old_lines: Vec<&str> = diff.old_slices().to_vec();
     let new_lines: Vec<&str> = diff.new_slices().to_vec();
     let groups = diff.grouped_ops(3);
     let identical = groups.is_empty();
     let mut rows = Vec::new();
-    for (index, group) in groups.iter().enumerate() {
+    let gap = || Row {
+        kind: RowKind::Gap,
+        old_line: None,
+        old_text: None,
+        new_line: None,
+        new_text: None,
+    };
+    let mut truncated = false;
+    'groups: for (index, group) in groups.iter().enumerate() {
         if index > 0 || group.first().is_some_and(|op| op.old_range().start > 0) {
-            rows.push(Row {
-                kind: RowKind::Gap,
-                old_line: None,
-                old_text: None,
-                new_line: None,
-                new_text: None,
-            });
+            rows.push(gap());
         }
         for op in group {
+            if rows.len() >= MAX_ROWS {
+                truncated = true;
+                break 'groups;
+            }
             let (tag, olds, news) = op.as_tag_tuple();
             match tag {
                 DiffTag::Equal => {
@@ -532,18 +796,25 @@ pub(crate) fn text_diff(old: &str, new: &str) -> FileDiff {
             }
         }
     }
-    if let Some(last) = groups.last().and_then(|group| group.last())
+    if rows.len() > MAX_ROWS {
+        rows.truncate(MAX_ROWS);
+        truncated = true;
+    }
+    if !truncated
+        && let Some(last) = groups.last().and_then(|group| group.last())
         && last.old_range().end < old_lines.len()
     {
-        rows.push(Row {
-            kind: RowKind::Gap,
-            old_line: None,
-            old_text: None,
-            new_line: None,
-            new_text: None,
-        });
+        rows.push(gap());
     }
-    FileDiff::Text { rows, identical }
+    FileDiff::Text {
+        rows,
+        identical,
+        line_endings_differ,
+        truncated,
+        old_lines: old_lines.len(),
+        new_lines: new_lines.len(),
+        encoding: None,
+    }
 }
 
 /// Whether `path` is a folder (an older folder backup) or a file.
@@ -667,6 +938,7 @@ mod tests {
             &defaults(),
             Some(&source),
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         let summary: Vec<(&str, Status, bool)> = result
@@ -704,6 +976,7 @@ mod tests {
             &defaults(),
             None,
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         assert!(result.changes.is_empty(), "{:?}", result.changes);
@@ -716,6 +989,7 @@ mod tests {
             &defaults(),
             None,
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         assert_eq!(result.modified, 1);
@@ -728,7 +1002,10 @@ mod tests {
         let new = old
             .replace("line 10\n", "line ten\n")
             .replace("line 20\n", "");
-        let FileDiff::Text { rows, identical } = text_diff(&old, &new) else {
+        let FileDiff::Text {
+            rows, identical, ..
+        } = text_diff(&old, &new)
+        else {
             panic!()
         };
         assert!(!identical);
@@ -744,7 +1021,10 @@ mod tests {
                 .any(|row| row.kind == RowKind::Removed && row.old_line == Some(20))
         );
         assert_eq!(rows[0].kind, RowKind::Gap);
-        let FileDiff::Text { identical, rows } = text_diff("a\n", "a\n") else {
+        let FileDiff::Text {
+            identical, rows, ..
+        } = text_diff("a\n", "a\n")
+        else {
             panic!()
         };
         assert!(identical && rows.is_empty());
@@ -753,25 +1033,28 @@ mod tests {
         let zip = root.join("b.zip");
         make_zip(
             &zip,
-            &[("img.png", b"\x89PNG\0\0data"), ("a.txt", b"one\n")],
+            &[("blob.dat", b"\x89PNG\0\0data"), ("a.txt", b"one\n")],
         );
         let folder = root.join("f");
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("a.txt"), "two\n").unwrap();
         let diff = file_diff(
             &Side::Zip(zip.clone()),
-            Some("img.png"),
+            Some("blob.dat"),
             &Side::Folder(folder.clone()),
             None,
         )
         .unwrap();
-        assert!(matches!(
-            diff,
-            FileDiff::Binary {
-                old_size: Some(10),
-                new_size: None
-            }
-        ));
+        let FileDiff::Binary {
+            old: Some(old),
+            new: None,
+            too_large: false,
+        } = diff
+        else {
+            panic!("binary: {diff:?}")
+        };
+        assert_eq!(old.size, 10);
+        assert_eq!(old.sha256.as_deref().map(str::len), Some(64));
         let diff = file_diff(
             &Side::Zip(zip),
             Some("a.txt"),
@@ -795,6 +1078,149 @@ mod tests {
             )
             .is_err()
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn images_are_shown_and_texts_are_decoded() {
+        let root = temp("images");
+        let zip = root.join("a.zip");
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        make_zip(
+            &zip,
+            &[
+                ("icons/app.png", png),
+                ("logo.svg", b"<svg>\n<g/>\n</svg>\n"),
+            ],
+        );
+        let folder = root.join("f");
+        fs::create_dir_all(folder.join("icons")).unwrap();
+        fs::write(
+            folder.join("icons").join("app.png"),
+            b"\x89PNG\r\n\x1a\nnew",
+        )
+        .unwrap();
+        fs::write(folder.join("logo.svg"), "<svg>\n<g id=\"x\"/>\n</svg>\n").unwrap();
+        let diff = file_diff(
+            &Side::Zip(zip.clone()),
+            Some("icons/app.png"),
+            &Side::Folder(folder.clone()),
+            Some("icons/app.png"),
+        )
+        .unwrap();
+        let FileDiff::Image {
+            mime,
+            old: Some(old),
+            new: Some(new),
+            rows: None,
+            ..
+        } = diff
+        else {
+            panic!("an image")
+        };
+        assert_eq!(mime, "image/png");
+        assert!(old.starts_with("data:image/png;base64,") && old != new);
+        // SVG: both pictures and the source.
+        let diff = file_diff(
+            &Side::Zip(zip),
+            Some("logo.svg"),
+            &Side::Folder(folder),
+            Some("logo.svg"),
+        )
+        .unwrap();
+        assert!(
+            matches!(diff, FileDiff::Image { rows: Some(ref rows), .. } if rows.iter().any(|row| row.kind == RowKind::Changed))
+        );
+        assert_eq!(FileKind::of("a/B.PNG"), FileKind::Image);
+        assert_eq!(FileKind::of("app.exe"), FileKind::Binary);
+        assert_eq!(FileKind::of("src/main.rs"), FileKind::Text);
+
+        // UTF-16 with a byte order mark (.reg, some .rc files) is text.
+        let utf16: Vec<u8> = [0xFF, 0xFE]
+            .into_iter()
+            .chain("Windows\r\n".encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
+        assert_eq!(
+            decode_text(&utf16),
+            Some(("Windows\r\n".to_string(), Some("UTF-16 LE")))
+        );
+        assert_eq!(
+            decode_text(b"\xEF\xBB\xBFhi").map(|(t, _)| t).as_deref(),
+            Some("hi")
+        );
+        assert_eq!(decode_text(b"a\0b"), None);
+        // CRLF against LF: the same text.
+        let FileDiff::Text {
+            identical,
+            line_endings_differ,
+            ..
+        } = text_diff("a\r\nb\r\n", "a\nb\n")
+        else {
+            panic!()
+        };
+        assert!(identical && line_endings_differ);
+        // An added file is shown whole; a huge one is cut.
+        let FileDiff::Text {
+            rows, new_lines, ..
+        } = text_diff("", "x\ny\n")
+        else {
+            panic!()
+        };
+        assert_eq!((rows.len(), new_lines), (2, 2));
+        let long: String = (0..MAX_ROWS + 50).map(|n| format!("{n}\n")).collect();
+        let FileDiff::Text {
+            rows, truncated, ..
+        } = text_diff("", &long)
+        else {
+            panic!()
+        };
+        assert!(truncated && rows.len() == MAX_ROWS);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn exclusions_in_a_comparison_follow_the_markers_in_the_backup() {
+        // A Rust project: target/ beside Cargo.toml is output on both sides,
+        // a game's "target" sprites folder is not.
+        let root = temp("markers");
+        let old = root.join("old.zip");
+        make_zip(
+            &old,
+            &[
+                ("Cargo.toml", b"[package]"),
+                ("src/main.rs", b"fn main() {}"),
+            ],
+        );
+        let new = root.join("new.zip");
+        make_zip(
+            &new,
+            &[
+                ("Cargo.toml", b"[package]"),
+                ("src/main.rs", b"fn main() {}"),
+                ("target/debug/app.exe", b"MZ"),
+                ("game/target/sprite.txt", b"s"),
+            ],
+        );
+        let rules = Rules::compile(
+            &RuleInput {
+                patterns: DEFAULT_PATTERNS.iter().map(|p| p.to_string()).collect(),
+                smart_build: true,
+                ..RuleInput::default()
+            },
+            None,
+        )
+        .unwrap();
+        let result = compare(
+            &Side::Zip(old),
+            &Side::Zip(new),
+            &rules,
+            None,
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+        let added: Vec<&str> = result.changes.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(added, ["game/target/sprite.txt"]);
         let _ = fs::remove_dir_all(root);
     }
 }

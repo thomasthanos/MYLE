@@ -15,8 +15,8 @@ use super::archive::{self, RETRY_DELAYS};
 use super::compare::{self, Comparison, FileDiff, Side};
 use super::engine::{self, BackupEntry, BackupOutcome, BackupRequest, Preview};
 use super::rules::RuleInput;
-use super::state::{ProjectBackupsState, Running};
-use super::store::{self, ImportReport, LastBackup, Project, Settings};
+use super::state::{Job, ProjectBackupsState, Running};
+use super::store::{self, ImportReport, LastBackup, LastResult, Project, Settings};
 use super::{Failure, Sink, Stage};
 use crate::cloud::launch::{self, Started};
 use crate::cloud::{CloudProvider, detection, onedrive};
@@ -336,9 +336,14 @@ pub struct PreviewRequest {
 }
 
 /// What a backup of a folder would hold and leave out, with the exclusions
-/// being edited.
+/// being edited. A newer preview (or `project_backups_cancel_preview`)
+/// stops this one.
 #[tauri::command]
-pub async fn project_backups_preview(request: PreviewRequest) -> Result<Preview, String> {
+pub async fn project_backups_preview(
+    state: State<'_, ProjectBackupsState>,
+    request: PreviewRequest,
+) -> Result<Preview, String> {
+    let cancelled = state.begin_preview();
     blocking(move || {
         let settings = store::load()?;
         let project = request
@@ -379,9 +384,14 @@ pub async fn project_backups_preview(request: PreviewRequest) -> Result<Preview,
         let mut skip = Vec::new();
         skip.extend(settings.backup_root());
         skip.extend(archive::staging_dir());
-        engine::preview(&source, &input, &skip, &|| false)
+        engine::preview(&source, &input, &skip, &cancelled)
     })
     .await?
+}
+
+#[tauri::command]
+pub fn project_backups_cancel_preview(state: State<'_, ProjectBackupsState>) {
+    state.cancel_preview();
 }
 
 // ─── Backing up ────────────────────────────────────────────────────────────
@@ -439,7 +449,15 @@ impl Sink for ChannelSink<'_> {
     }
 }
 
-impl ChannelSink<'_> {
+impl<'a> ChannelSink<'a> {
+    fn new(channel: &'a Channel<ProjectBackupsEvent>, running: &'a Running) -> Self {
+        ChannelSink {
+            channel,
+            running,
+            last: std::sync::Mutex::new(None),
+        }
+    }
+
     fn message(&self, text: impl Into<String>) {
         let _ = self
             .channel
@@ -466,12 +484,12 @@ fn wait_until(limit: Duration, sink: &dyn Sink, ready: impl Fn() -> bool) -> Res
 
 /// The `Projects Backup` folder, ready to write to: starts Google Drive (and
 /// waits for its drive) or Dropbox when needed.
-fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, (Option<&'static str>, Failure)> {
-    let settings = store::load().map_err(|error| (None, Failure::Message(error)))?;
+fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, Failure> {
+    let settings = store::load().map_err(Failure::Message)?;
     let (Some(provider), Some(folder)) = (settings.provider, settings.cloud_folder.clone()) else {
-        return Err((
-            Some("NO_PROVIDER"),
-            Failure::Message("Choose where the backups go: Google Drive or Dropbox.".into()),
+        return Err(Failure::Coded(
+            "NO_PROVIDER",
+            "Choose where the backups go: Google Drive or Dropbox.".into(),
         ));
     };
     let mut folder = PathBuf::from(folder);
@@ -481,19 +499,20 @@ fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, (Option<&'static st
                 sink.stage(Stage::StartingCloud);
                 match launch::start_google_drive() {
                     Ok(Started::NotInstalled) => {
-                        return Err((
-                            None,
-                            Failure::Message(
-                                "Google Drive for desktop is not installed on this PC.".into(),
-                            ),
+                        return Err(Failure::Coded(
+                            "CLOUD_NOT_INSTALLED",
+                            "Google Drive for desktop is not installed on this PC. Install it, or back up to Dropbox.".into(),
                         ));
                     }
-                    Ok(Started::Launched) => sink.message("Starting Google Drive…"),
-                    Ok(Started::AlreadyRunning) => sink.message("Waiting for Google Drive…"),
-                    Err(error) => return Err((None, Failure::Message(error))),
+                    Ok(Started::Launched) => {
+                        sink.message("Starting Google Drive… (this can take up to two minutes)")
+                    }
+                    Ok(Started::AlreadyRunning) => {
+                        sink.message("Waiting for Google Drive's drive to appear…")
+                    }
+                    Err(error) => return Err(Failure::Coded("CLOUD_NOT_READY", error)),
                 }
-                let appeared = wait_until(DRIVE_WAIT, sink, || folder.is_dir())
-                    .map_err(|failure| (None, failure))?;
+                let appeared = wait_until(DRIVE_WAIT, sink, || folder.is_dir())?;
                 if !appeared {
                     // The drive may have come up under another letter.
                     let drives: Vec<CloudChoice> = clouds()
@@ -503,12 +522,12 @@ fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, (Option<&'static st
                         })
                         .collect();
                     let [only] = drives.as_slice() else {
-                        return Err((
-                            None,
-                            Failure::Message(format!(
-                                "Google Drive's folder \"{}\" did not appear. Check that Google Drive is signed in, then try again.",
+                        return Err(Failure::Coded(
+                            "CLOUD_NOT_READY",
+                            format!(
+                                "Google Drive's folder \"{}\" did not appear within two minutes. Check that Google Drive is running and signed in, then try again.",
                                 folder.display()
-                            )),
+                            ),
                         ));
                     };
                     folder = PathBuf::from(&only.path);
@@ -517,7 +536,7 @@ fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, (Option<&'static st
                         settings.cloud_folder = Some(adopted);
                         Ok(())
                     })
-                    .map_err(|error| (None, Failure::Message(error)))?;
+                    .map_err(Failure::Message)?;
                     sink.message(format!("Google Drive is now at {}", folder.display()));
                 }
             }
@@ -528,27 +547,27 @@ fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, (Option<&'static st
                 sink.message("Started Dropbox");
             }
             if !folder.is_dir() {
-                return Err((
-                    None,
-                    Failure::Message(format!(
-                        "The Dropbox folder \"{}\" was not found.",
+                return Err(Failure::Coded(
+                    "DESTINATION_MISSING",
+                    format!(
+                        "The Dropbox folder \"{}\" was not found. Choose the Dropbox folder again.",
                         folder.display()
-                    )),
+                    ),
                 ));
             }
         }
         _ => {
-            return Err((
-                Some("NO_PROVIDER"),
-                Failure::Message("Choose Google Drive or Dropbox.".into()),
+            return Err(Failure::Coded(
+                "NO_PROVIDER",
+                "Choose Google Drive or Dropbox.".into(),
             ));
         }
     }
     let root = folder.join(super::naming::BACKUP_ROOT_NAME);
     std::fs::create_dir_all(&root).map_err(|error| {
-        (
-            None,
-            Failure::Message(format!("Can't create \"{}\": {error}", root.display())),
+        Failure::Coded(
+            "DESTINATION_MISSING",
+            format!("Can't create \"{}\": {error}", root.display()),
         )
     })?;
     Ok(root)
@@ -611,7 +630,20 @@ async fn close_program(exe: &str) {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 }
 
-/// Backs up the given projects one after another.
+/// The result code the page acts on for a failure.
+fn code_of(failure: &Failure) -> Option<&'static str> {
+    match failure {
+        Failure::Cancelled => Some("CANCELLED"),
+        Failure::SourceMissing => Some("SOURCE_MISSING"),
+        Failure::CloudOffline(_) => Some("CLOUD_OFFLINE"),
+        Failure::Coded(code, _) => Some(code),
+        Failure::Message(_) => None,
+    }
+}
+
+/// Backs up the given projects one after another. For each: the project
+/// folder is checked, the destination made ready (a cloud app started),
+/// only then is its program closed, and the backup made.
 #[tauri::command]
 pub async fn project_backups_backup(
     app: AppHandle,
@@ -619,7 +651,7 @@ pub async fn project_backups_backup(
     project_ids: Vec<String>,
     on_event: Channel<ProjectBackupsEvent>,
 ) -> Result<BackupRun, String> {
-    let running = state.begin()?;
+    let running = state.begin(Job::Backup)?;
     let version = app.package_info().version.to_string();
     let settings = blocking(store::load).await??;
     let projects: Vec<Project> = project_ids
@@ -642,32 +674,27 @@ pub async fn project_backups_backup(
             project_id: project.id.clone(),
             name: project.name.clone(),
         });
-        if !project.source_path.trim().is_empty()
-            && Path::new(&project.source_path).is_dir()
-            && let Some(exe) = project.close_app.as_deref()
-        {
-            let _ = on_event.send(ProjectBackupsEvent::Stage {
-                stage: Stage::ClosingApp,
-            });
-            close_program(exe).await;
-        }
-        let channel = on_event.clone();
-        let run = running.clone();
-        let version = version.clone();
-        let job = project.clone();
-        let result = blocking(move || run_one(&job, &version, &channel, &run)).await?;
+        let result = backup_one(&project, &version, &on_event, &running).await;
         let (ok, code, error, outcome) = match result {
             Ok(outcome) => (true, None, None, Some(outcome)),
-            Err((code, failure)) => {
-                let code = code.or(match failure {
-                    Failure::Cancelled => Some("CANCELLED"),
-                    Failure::SourceMissing => Some("SOURCE_MISSING"),
-                    _ => None,
-                });
-                (false, code.map(str::to_string), Some(failure.text()), None)
-            }
+            Err(failure) => (
+                false,
+                code_of(&failure).map(str::to_string),
+                Some(failure.text()),
+                None,
+            ),
         };
-        let stop = matches!(code.as_deref(), Some("CANCELLED" | "NO_PROVIDER"));
+        // Without a destination, or cancelled, the others would fail the same way.
+        let stop = matches!(
+            code.as_deref(),
+            Some(
+                "CANCELLED"
+                    | "NO_PROVIDER"
+                    | "CLOUD_NOT_INSTALLED"
+                    | "CLOUD_NOT_READY"
+                    | "DESTINATION_MISSING"
+            )
+        );
         results.push(ProjectResult {
             project_id: project.id,
             name: project.name,
@@ -682,30 +709,38 @@ pub async fn project_backups_backup(
     }
     let cancelled = running.cancelled();
     drop(running);
-    let finished: Vec<(String, LastBackup)> = results
+    let now = super::naming::unix_millis(std::time::SystemTime::now());
+    let finished: Vec<(String, Option<LastBackup>, LastResult)> = results
         .iter()
-        .filter_map(|result| {
-            let outcome = result.outcome.as_ref()?;
-            Some((
-                result.project_id.clone(),
-                LastBackup {
-                    name: outcome.name.clone(),
-                    created_at: outcome.created_at,
-                    file_count: outcome.file_count,
-                    zip_size: outcome.zip_size,
-                },
-            ))
+        .map(|result| {
+            let last = result.outcome.as_ref().map(|outcome| LastBackup {
+                name: outcome.name.clone(),
+                created_at: outcome.created_at,
+                file_count: outcome.file_count,
+                zip_size: outcome.zip_size,
+            });
+            let attempt = LastResult {
+                at: now,
+                ok: result.ok,
+                cancelled: result.code.as_deref() == Some("CANCELLED"),
+                code: result.code.clone(),
+                error: result.error.clone(),
+            };
+            (result.project_id.clone(), last, attempt)
         })
         .collect();
     let settings = blocking(move || {
         store::edit(|settings| {
-            for (id, last) in finished {
+            for (id, last, attempt) in finished {
                 if let Some(project) = settings
                     .projects
                     .iter_mut()
                     .find(|project| project.id == id)
                 {
-                    project.last_backup = Some(last);
+                    if last.is_some() {
+                        project.last_backup = last;
+                    }
+                    project.last_result = Some(attempt);
                 }
             }
             Ok(())
@@ -719,45 +754,98 @@ pub async fn project_backups_backup(
     })
 }
 
-fn run_one(
+async fn backup_one(
     project: &Project,
     version: &str,
     channel: &Channel<ProjectBackupsEvent>,
-    running: &Running,
-) -> Result<BackupOutcome, (Option<&'static str>, Failure)> {
-    let sink = ChannelSink {
-        channel,
-        running,
-        last: std::sync::Mutex::new(None),
-    };
+    running: &std::sync::Arc<Running>,
+) -> Result<BackupOutcome, Failure> {
     if project.source_path.trim().is_empty() || !Path::new(&project.source_path).is_dir() {
-        return Err((Some("SOURCE_MISSING"), Failure::SourceMissing));
+        return Err(Failure::SourceMissing);
     }
-    let backup_root = ensure_destination(&sink)?;
-    let settings = store::load().map_err(|error| (None, Failure::Message(error)))?;
+    let (sink_channel, sink_running) = (channel.clone(), running.clone());
+    let backup_root =
+        blocking(move || ensure_destination(&ChannelSink::new(&sink_channel, &sink_running)))
+            .await
+            .map_err(Failure::Message)??;
+    if let Some(exe) = project.close_app.as_deref() {
+        let _ = channel.send(ProjectBackupsEvent::Stage {
+            stage: Stage::ClosingApp,
+        });
+        let _ = channel.send(ProjectBackupsEvent::Message {
+            text: format!("Closing {exe}…"),
+        });
+        close_program(exe).await;
+    }
+    let (job, version, channel, running) = (
+        project.clone(),
+        version.to_string(),
+        channel.clone(),
+        running.clone(),
+    );
+    blocking(move || run_one(&job, &backup_root, &version, &channel, &running))
+        .await
+        .map_err(Failure::Message)?
+}
+
+fn run_one(
+    project: &Project,
+    backup_root: &Path,
+    version: &str,
+    channel: &Channel<ProjectBackupsEvent>,
+    running: &Running,
+) -> Result<BackupOutcome, Failure> {
+    let sink = ChannelSink::new(channel, running);
+    let settings = store::load().map_err(Failure::Message)?;
     let staging = archive::staging_dir();
     let request = BackupRequest {
         project,
         rules: settings.rule_input(Some(project)),
-        backup_root: &backup_root,
+        backup_root,
         staging: staging.as_deref(),
         app_version: version,
         delays: RETRY_DELAYS,
     };
     match engine::backup_project(&request, &sink) {
         Err(Failure::CloudOffline(path)) => {
-            if !bring_online(&path, &sink).map_err(|failure| (None, failure))? {
-                return Err((None, Failure::CloudOffline(path)));
+            if !bring_online(&path, &sink)? {
+                return Err(Failure::CloudOffline(path));
             }
-            engine::backup_project(&request, &sink).map_err(|failure| (None, failure))
+            engine::backup_project(&request, &sink)
         }
-        other => other.map_err(|failure| (None, failure)),
+        other => other,
     }
 }
 
+/// Cancels the running backup (`job` = `backup`) or comparison (`compare`).
 #[tauri::command]
-pub fn project_backups_cancel(state: State<'_, ProjectBackupsState>) -> bool {
-    state.cancel()
+pub fn project_backups_cancel(state: State<'_, ProjectBackupsState>, job: Option<String>) -> bool {
+    let job = match job.as_deref() {
+        Some("backup") => Some(Job::Backup),
+        Some("compare") => Some(Job::Compare),
+        _ => None,
+    };
+    state.cancel(job)
+}
+
+/// Starts the cloud app of `provider` (an action on a failed backup).
+#[tauri::command]
+pub async fn project_backups_start_cloud(provider: CloudProvider) -> Result<String, String> {
+    blocking(move || {
+        let started = match provider {
+            CloudProvider::GoogleDrive => launch::start_google_drive()?,
+            CloudProvider::Dropbox => launch::start_dropbox()?,
+            _ => return Err("Choose Google Drive or Dropbox.".to_string()),
+        };
+        Ok(match started {
+            Started::Launched => format!("{} is starting.", provider.name()),
+            Started::AlreadyRunning => format!("{} is already running.", provider.name()),
+            Started::NotInstalled => {
+                return Err(format!("{} is not installed on this PC.", provider.name()));
+            }
+        })
+    })
+    .await?
 }
 
 // ─── Listing and comparing ─────────────────────────────────────────────────
@@ -823,14 +911,22 @@ fn order(dir: &Path, app_name: &str, a: String, b: String) -> (String, String) {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareProgress {
+    pub done: u64,
+    pub total: u64,
+}
+
 #[tauri::command]
 pub async fn project_backups_compare(
     state: State<'_, ProjectBackupsState>,
     project_id: String,
     first_id: String,
     second_id: String,
+    on_progress: Channel<CompareProgress>,
 ) -> Result<CompareResult, String> {
-    let running = std::sync::Arc::new(state.begin()?);
+    let running = std::sync::Arc::new(state.begin(Job::Compare)?);
     blocking(move || {
         let (settings, project, dir) = project_and_dir(&project_id)?;
         let (old_id, new_id) = order(&dir, &project.app_name, first_id, second_id);
@@ -841,7 +937,17 @@ pub async fn project_backups_compare(
         let rules =
             super::rules::Rules::compile(&settings.rule_input(Some(&project)), source.as_deref())?;
         let cancelled = || running.cancelled();
-        let comparison = compare::compare(&old, &new, &rules, source.as_deref(), &cancelled)?;
+        let last = std::sync::Mutex::new(None::<Instant>);
+        let progress = |done: u64, total: u64| {
+            let mut last = last.lock().unwrap_or_else(|p| p.into_inner());
+            if done < total && last.is_some_and(|at| at.elapsed() < Duration::from_millis(150)) {
+                return;
+            }
+            *last = Some(Instant::now());
+            let _ = on_progress.send(CompareProgress { done, total });
+        };
+        let comparison =
+            compare::compare(&old, &new, &rules, source.as_deref(), &cancelled, &progress)?;
         Ok(CompareResult {
             old_id,
             new_id,

@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 
-use super::rules::{Exclusion, Rules};
+use super::rules::{DirNames, Early, Exclusion, Rules, StackListing};
 
 #[derive(Clone, Debug)]
 pub(crate) struct SourceFile {
@@ -138,6 +138,26 @@ fn is_skipped_dir(path: &Path, skip: &[PathBuf]) -> bool {
     skip.iter().any(|dir| same_path(dir, path))
 }
 
+/// The entries of a folder, sorted by name.
+fn read_sorted(dir: &Path) -> Result<Vec<fs::DirEntry>, String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
+    let mut entries: Vec<fs::DirEntry> = entries
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    Ok(entries)
+}
+
+fn names_of(entries: &[fs::DirEntry]) -> DirNames {
+    let mut names = DirNames::default();
+    for entry in entries {
+        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        names.add(&entry.file_name().to_string_lossy(), is_dir);
+    }
+    names
+}
+
 /// Every file of `root` a backup holds, in a stable order.
 pub(crate) fn walk(
     root: &Path,
@@ -146,34 +166,48 @@ pub(crate) fn walk(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Walk, String> {
     let mut out = Walk::default();
-    walk_dir(root, "", rules, skip_dirs, cancelled, &mut out)?;
+    let listing = StackListing::default();
+    let entries = read_sorted(root)?;
+    listing.set("", names_of(&entries));
+    walk_dir(
+        &Walker {
+            rules,
+            skip_dirs,
+            cancelled,
+            listing: &listing,
+        },
+        "",
+        entries,
+        &mut out,
+    )?;
     Ok(out)
 }
 
+struct Walker<'a> {
+    rules: &'a Rules,
+    skip_dirs: &'a [PathBuf],
+    cancelled: &'a dyn Fn() -> bool,
+    listing: &'a StackListing,
+}
+
 fn walk_dir(
-    dir: &Path,
+    walker: &Walker,
     rel: &str,
-    rules: &Rules,
-    skip_dirs: &[PathBuf],
-    cancelled: &dyn Fn() -> bool,
+    entries: Vec<fs::DirEntry>,
     out: &mut Walk,
 ) -> Result<(), String> {
-    if cancelled() {
+    if (walker.cancelled)() {
         return Err(super::CANCELLED.into());
     }
-    let entries = fs::read_dir(dir)
-        .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
-    let mut entries: Vec<fs::DirEntry> = entries
-        .collect::<Result<_, _>>()
-        .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
-    entries.sort_by_key(|entry| entry.file_name());
+    let rules = walker.rules;
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
         let child = join_rel(rel, &name);
         match classify(entry.file_type().ok(), &path)? {
             Kind::Dir => {
-                if let Some(why) = rules.excluded_dir(&child) {
+                let early = rules.early_dir(&child);
+                if let Early::Excluded(why) = early {
                     out.excluded.push(Excluded {
                         rel: child,
                         is_dir: true,
@@ -181,16 +215,43 @@ fn walk_dir(
                     });
                     continue;
                 }
-                if is_skipped_dir(&path, skip_dirs) {
+                if is_skipped_dir(&path, walker.skip_dirs) {
                     continue;
                 }
+                // Read before deciding: markers inside (CACHEDIR.TAG,
+                // pyvenv.cfg) tell output apart. A folder that can't be read
+                // only fails the backup when it is not left out anyway.
+                let inner = read_sorted(&path);
+                walker
+                    .listing
+                    .set(&child, inner.as_deref().map(names_of).unwrap_or_default());
+                if matches!(early, Early::Undecided)
+                    && let Some(why) = rules.detected_dir(&child, walker.listing)
+                {
+                    walker.listing.forget(&child);
+                    out.excluded.push(Excluded {
+                        rel: child,
+                        is_dir: true,
+                        why,
+                    });
+                    continue;
+                }
+                let inner = match inner {
+                    Ok(inner) => inner,
+                    Err(error) => {
+                        walker.listing.forget(&child);
+                        return Err(error);
+                    }
+                };
                 let before = (
                     out.files.len(),
                     out.empty_dirs.len(),
                     out.excluded.len(),
                     out.skipped.len(),
                 );
-                walk_dir(&path, &child, rules, skip_dirs, cancelled, out)?;
+                let result = walk_dir(walker, &child, inner, out);
+                walker.listing.forget(&child);
+                result?;
                 if before
                     == (
                         out.files.len(),
@@ -203,7 +264,7 @@ fn walk_dir(
                 }
             }
             Kind::File { link } => {
-                if let Some(why) = rules.excluded_file(&child) {
+                if let Some(why) = rules.excluded_file(&child, walker.listing) {
                     out.excluded.push(Excluded {
                         rel: child,
                         is_dir: false,
@@ -224,7 +285,9 @@ fn walk_dir(
                 });
             }
             Kind::Skip(reason) => {
-                if rules.excluded_dir(&child).is_some() || rules.excluded_file(&child).is_some() {
+                if !matches!(rules.early_dir(&child), Early::Undecided | Early::Keep)
+                    || rules.excluded_file(&child, walker.listing).is_some()
+                {
                     continue;
                 }
                 out.skipped.push(Skipped { rel: child, reason });
@@ -247,47 +310,104 @@ pub(crate) fn audit(
 ) -> Vec<String> {
     let mut missing = Vec::new();
     let since = since.checked_sub(Duration::from_secs(2)).unwrap_or(since);
-    audit_dir(root, "", rules, skip_dirs, archived, since, &mut missing);
+    let listing = StackListing::default();
+    let Some(entries) = audit_entries(root) else {
+        return missing;
+    };
+    listing.set("", audit_names(&entries));
+    let auditor = Auditor {
+        rules,
+        skip_dirs,
+        archived,
+        since,
+        listing: &listing,
+    };
+    audit_dir(&auditor, "", entries, &mut missing);
     missing.sort();
     missing
 }
 
-fn audit_dir(
-    dir: &Path,
-    rel: &str,
-    rules: &Rules,
-    skip_dirs: &[PathBuf],
-    archived: &HashSet<String>,
+struct Auditor<'a> {
+    rules: &'a Rules,
+    skip_dirs: &'a [PathBuf],
+    archived: &'a HashSet<String>,
     since: SystemTime,
-    missing: &mut Vec<String>,
-) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = dir.join(&name);
-        let child = join_rel(rel, &name);
-        let (Ok(own), Ok(meta)) = (fs::symlink_metadata(&path), fs::metadata(&path)) else {
-            continue; // gone meanwhile, or a broken link
-        };
-        if meta.is_dir() {
-            if own.file_type().is_symlink()
-                || rules.excluded_dir(&child).is_some()
-                || is_skipped_dir(&path, skip_dirs)
+    listing: &'a StackListing,
+}
+
+/// A folder's entries with their metadata, read without trusting entry types.
+struct AuditEntry {
+    name: String,
+    path: PathBuf,
+    own: fs::Metadata,
+    meta: fs::Metadata,
+}
+
+fn audit_entries(dir: &Path) -> Option<Vec<AuditEntry>> {
+    let entries = fs::read_dir(dir).ok()?;
+    Some(
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let path = dir.join(&name);
+                // Gone meanwhile, or a broken link.
+                let own = fs::symlink_metadata(&path).ok()?;
+                let meta = fs::metadata(&path).ok()?;
+                Some(AuditEntry {
+                    name,
+                    path,
+                    own,
+                    meta,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn audit_names(entries: &[AuditEntry]) -> DirNames {
+    let mut names = DirNames::default();
+    for entry in entries {
+        names.add(
+            &entry.name,
+            entry.meta.is_dir() && !entry.own.file_type().is_symlink(),
+        );
+    }
+    names
+}
+
+fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &mut Vec<String>) {
+    let rules = auditor.rules;
+    for entry in entries {
+        let child = join_rel(rel, &entry.name);
+        if entry.meta.is_dir() {
+            if entry.own.file_type().is_symlink() || is_skipped_dir(&entry.path, auditor.skip_dirs)
             {
                 continue;
             }
-            audit_dir(&path, &child, rules, skip_dirs, archived, since, missing);
-        } else if meta.is_file() {
-            if rules.excluded_file(&child).is_some() {
+            let early = rules.early_dir(&child);
+            if matches!(early, Early::Excluded(_)) {
                 continue;
             }
-            let changed = [meta.modified().ok(), meta.created().ok()]
+            let Some(inner) = audit_entries(&entry.path) else {
+                continue;
+            };
+            auditor.listing.set(&child, audit_names(&inner));
+            let excluded = matches!(early, Early::Undecided)
+                && rules.detected_dir(&child, auditor.listing).is_some();
+            if !excluded {
+                audit_dir(auditor, &child, inner, missing);
+            }
+            auditor.listing.forget(&child);
+        } else if entry.meta.is_file() {
+            if rules.excluded_file(&child, auditor.listing).is_some() {
+                continue;
+            }
+            let changed = [entry.meta.modified().ok(), entry.meta.created().ok()]
                 .into_iter()
                 .flatten()
-                .any(|time| time >= since);
-            if !changed && !archived.contains(&child) {
+                .any(|time| time >= auditor.since);
+            if !changed && !auditor.archived.contains(&child) {
                 missing.push(child);
             }
         }

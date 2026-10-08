@@ -11,6 +11,7 @@
 mod archive;
 pub mod commands;
 mod compare;
+mod detect;
 mod engine;
 mod gitindex;
 mod naming;
@@ -59,6 +60,9 @@ pub(crate) enum Failure {
     /// The project folder is not there (moved, renamed, another drive).
     SourceMissing,
     Message(String),
+    /// A problem the page offers an action for (`NO_FILES`, `NAME_TAKEN`,
+    /// `CLOUD_NOT_INSTALLED`, …), with its message.
+    Coded(&'static str, String),
 }
 
 impl Failure {
@@ -77,7 +81,7 @@ impl Failure {
                 path.display()
             ),
             Failure::SourceMissing => "The project folder was not found.".into(),
-            Failure::Message(text) => text.clone(),
+            Failure::Message(text) | Failure::Coded(_, text) => text.clone(),
         }
     }
 }

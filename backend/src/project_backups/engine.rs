@@ -101,8 +101,16 @@ pub(crate) fn backup_project(
     let cancelled = || sink.cancelled();
     let found = walk::walk(&source, &rules, &skip_dirs, &cancelled)?;
     if found.files.is_empty() {
-        return Err(Failure::Message(
-            "There are no files to back up in the project folder.".into(),
+        return Err(Failure::Coded(
+            "NO_FILES",
+            if found.excluded.is_empty() {
+                "The project folder is empty: there is nothing to back up.".into()
+            } else {
+                format!(
+                    "Every file of the project folder is left out by the exclusions ({} items). Check them with Preview.",
+                    found.excluded.len()
+                )
+            },
         ));
     }
     let skipped: Vec<SkippedItem> = found
@@ -130,6 +138,7 @@ pub(crate) fn backup_project(
         "totalBytes": total_bytes,
         "emptyFolders": found.empty_dirs.len(),
         "excludedCount": found.excluded.len(),
+        "excludedByRule": excluded_by_rule(&found),
         "exclusions": request.rules.patterns.iter().chain(&request.rules.extra).collect::<Vec<_>>(),
         "kept": request.rules.keep,
         "skipped": skipped.iter().map(|item| &item.path).collect::<Vec<_>>(),
@@ -188,6 +197,18 @@ pub(crate) fn backup_project(
         final_check_ok: verified.final_check_ok,
         created_at: naming::unix_millis(now),
     })
+}
+
+/// `{ reason: count }` of what a backup left out, for its info file.
+fn excluded_by_rule(found: &walk::Walk) -> serde_json::Map<String, serde_json::Value> {
+    let mut counts = serde_json::Map::new();
+    for item in &found.excluded {
+        let entry = counts
+            .entry(item.why.describe())
+            .or_insert(serde_json::Value::from(0u64));
+        *entry = serde_json::Value::from(entry.as_u64().unwrap_or(0) + 1);
+    }
+    counts
 }
 
 // ─── Listing ───────────────────────────────────────────────────────────────
@@ -315,6 +336,38 @@ pub struct ExcludedItem {
     pub path: String,
     pub is_dir: bool,
     pub rule: String,
+    /// `pattern`, `detected`, `gitignore` or `internal`.
+    pub kind: &'static str,
+}
+
+/// How many items one reason left out.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCount {
+    pub rule: String,
+    pub kind: &'static str,
+    pub folders: usize,
+    pub files: usize,
+}
+
+/// One line of the "what will be backed up" tree, in display order.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewNode {
+    pub path: String,
+    pub name: String,
+    pub depth: usize,
+    pub is_dir: bool,
+    /// Bytes backed up (folders: everything inside); `None` for what is left
+    /// out (never read).
+    pub size: Option<u64>,
+    /// Files backed up inside a folder.
+    pub files: u64,
+    /// Why it is left out.
+    pub rule: Option<String>,
+    pub kind: Option<&'static str>,
+    /// Files of this folder not listed (the tree has a size limit).
+    pub hidden_files: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -324,11 +377,174 @@ pub struct Preview {
     pub total_bytes: u64,
     pub excluded: Vec<ExcludedItem>,
     pub excluded_total: usize,
+    pub by_rule: Vec<RuleCount>,
     pub skipped: Vec<SkippedItem>,
     pub env_files: Vec<String>,
+    pub tree: Vec<PreviewNode>,
+    /// Files directly in the project folder not listed in the tree.
+    pub tree_hidden_files: u64,
 }
 
 const PREVIEW_LIMIT: usize = 1000;
+/// Lines of the preview tree at most (folders and what is left out come
+/// first; files fill the rest).
+const TREE_LIMIT: usize = 4000;
+
+#[derive(Default)]
+struct TreeDir {
+    size: u64,
+    files: u64,
+    dirs: std::collections::BTreeMap<String, TreeDir>,
+    /// (name, size) of the files directly inside.
+    own_files: Vec<(String, u64)>,
+    /// (name, is_dir, why) left out directly inside.
+    excluded: Vec<(String, bool, super::rules::Exclusion)>,
+}
+
+impl TreeDir {
+    fn dir_mut(&mut self, parts: &[&str]) -> &mut TreeDir {
+        let mut dir = self;
+        for part in parts {
+            dir = dir.dirs.entry((*part).to_string()).or_default();
+        }
+        dir
+    }
+}
+
+fn build_tree(found: &walk::Walk) -> (Vec<PreviewNode>, u64) {
+    let mut root = TreeDir::default();
+    for file in &found.files {
+        let parts: Vec<&str> = file.rel.split('/').collect();
+        let (name, parents) = parts.split_last().expect("a file name");
+        let mut dir = &mut root;
+        dir.size += file.size;
+        dir.files += 1;
+        for part in parents {
+            dir = dir.dirs.entry((*part).to_string()).or_default();
+            dir.size += file.size;
+            dir.files += 1;
+        }
+        dir.own_files.push(((*name).to_string(), file.size));
+    }
+    for rel in &found.empty_dirs {
+        let parts: Vec<&str> = rel.split('/').collect();
+        root.dir_mut(&parts);
+    }
+    for item in &found.excluded {
+        let parts: Vec<&str> = item.rel.split('/').collect();
+        let (name, parents) = parts.split_last().expect("a name");
+        root.dir_mut(parents)
+            .excluded
+            .push(((*name).to_string(), item.is_dir, item.why.clone()));
+    }
+    // Folders and what is left out always fit (they are few); files fill
+    // what is left of the limit, shallow ones first.
+    let structural = count_structural(&root);
+    let mut budget = TREE_LIMIT.saturating_sub(structural);
+    let mut out = Vec::new();
+    let hidden = flatten(&root, "", 0, &mut budget, &mut out);
+    (out, hidden)
+}
+
+fn count_structural(dir: &TreeDir) -> usize {
+    dir.dirs.len() + dir.excluded.len() + dir.dirs.values().map(count_structural).sum::<usize>()
+}
+
+/// Adds the lines of `dir`'s content; returns how many of its own files
+/// did not fit.
+fn flatten(
+    dir: &TreeDir,
+    rel: &str,
+    depth: usize,
+    budget: &mut usize,
+    out: &mut Vec<PreviewNode>,
+) -> u64 {
+    enum Item<'a> {
+        Dir(&'a String, &'a TreeDir),
+        Excluded(&'a String, bool, &'a super::rules::Exclusion),
+    }
+    let mut items: Vec<Item> = dir
+        .dirs
+        .iter()
+        .map(|(name, child)| Item::Dir(name, child))
+        .chain(
+            dir.excluded
+                .iter()
+                .filter(|(_, is_dir, _)| *is_dir)
+                .map(|(name, is_dir, why)| Item::Excluded(name, *is_dir, why)),
+        )
+        .collect();
+    let key = |item: &Item| match item {
+        Item::Dir(name, _) | Item::Excluded(name, _, _) => name.to_lowercase(),
+    };
+    items.sort_by_key(key);
+    for item in items {
+        match item {
+            Item::Dir(name, child) => {
+                let path = walk::join_rel(rel, name);
+                let index = out.len();
+                out.push(PreviewNode {
+                    path: path.clone(),
+                    name: name.clone(),
+                    depth,
+                    is_dir: true,
+                    size: Some(child.size),
+                    files: child.files,
+                    rule: None,
+                    kind: None,
+                    hidden_files: 0,
+                });
+                out[index].hidden_files = flatten(child, &path, depth + 1, budget, out);
+            }
+            Item::Excluded(name, is_dir, why) => out.push(PreviewNode {
+                path: walk::join_rel(rel, name),
+                name: name.clone(),
+                depth,
+                is_dir,
+                size: None,
+                files: 0,
+                rule: Some(why.describe()),
+                kind: Some(why.kind()),
+                hidden_files: 0,
+            }),
+        }
+    }
+    let mut files: Vec<(&String, Option<u64>, Option<&super::rules::Exclusion>)> = dir
+        .own_files
+        .iter()
+        .map(|(name, size)| (name, Some(*size), None))
+        .chain(
+            dir.excluded
+                .iter()
+                .filter(|(_, is_dir, _)| !*is_dir)
+                .map(|(name, _, why)| (name, None, Some(why))),
+        )
+        .collect();
+    files.sort_by_key(|(name, _, _)| name.to_lowercase());
+    let mut hidden = 0u64;
+    for (name, size, why) in files {
+        // What is left out is always listed; included files while they fit.
+        if why.is_none() {
+            if *budget == 0 {
+                hidden += 1;
+                continue;
+            }
+            *budget -= 1;
+        }
+        out.push(PreviewNode {
+            path: walk::join_rel(rel, name),
+            name: name.clone(),
+            depth,
+            is_dir: false,
+            size,
+            files: 0,
+            rule: why.map(|why| why.describe()),
+            kind: why.map(|why| why.kind()),
+            hidden_files: 0,
+        });
+    }
+    hidden
+}
 
 pub(crate) fn preview(
     source: &Path,
@@ -351,10 +567,33 @@ pub(crate) fn preview(
                 .next()
                 .unwrap_or(&file.rel)
                 .to_lowercase();
-            name == ".env" || name.starts_with(".env.")
+            super::rules::is_env_file(&name)
         })
         .map(|file| file.rel.clone())
         .collect();
+    let mut by_rule: Vec<RuleCount> = Vec::new();
+    for item in &found.excluded {
+        let rule = item.why.describe();
+        let entry = match by_rule.iter_mut().position(|known| known.rule == rule) {
+            Some(index) => &mut by_rule[index],
+            None => {
+                by_rule.push(RuleCount {
+                    rule,
+                    kind: item.why.kind(),
+                    folders: 0,
+                    files: 0,
+                });
+                by_rule.last_mut().expect("just added")
+            }
+        };
+        if item.is_dir {
+            entry.folders += 1;
+        } else {
+            entry.files += 1;
+        }
+    }
+    by_rule.sort_by_key(|count| std::cmp::Reverse(count.folders + count.files));
+    let (tree, tree_hidden_files) = build_tree(&found);
     Ok(Preview {
         file_count: found.files.len(),
         total_bytes: found.total_bytes(),
@@ -367,8 +606,10 @@ pub(crate) fn preview(
                 path: item.rel.clone(),
                 is_dir: item.is_dir,
                 rule: item.why.describe(),
+                kind: item.why.kind(),
             })
             .collect(),
+        by_rule,
         skipped: found
             .skipped
             .iter()
@@ -377,6 +618,8 @@ pub(crate) fn preview(
                 reason: item.reason.describe().into(),
             })
             .collect(),
+        tree,
+        tree_hidden_files,
         env_files,
     })
 }
@@ -565,12 +808,32 @@ mod tests {
         put(&root, "src/a.rs", "a");
         put(&root, ".env.local", "X=1");
         put(&root, "target/debug/app.exe", "x");
+        put(
+            &root,
+            "target/CACHEDIR.TAG",
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        );
         let preview = preview(&root, &input(), &[], &|| false).unwrap();
         assert_eq!(preview.file_count, 2);
         assert_eq!(preview.env_files, [".env.local"]);
         assert_eq!(preview.excluded.len(), 1);
         assert_eq!(preview.excluded[0].path, "target");
-        assert_eq!(preview.excluded[0].rule, "target/");
+        assert_eq!(preview.excluded[0].kind, "detected");
+        // The tree: the folders, sizes and what is left out with its reason.
+        let lines: Vec<(&str, Option<u64>, Option<&str>)> = preview
+            .tree
+            .iter()
+            .map(|node| (node.path.as_str(), node.size, node.rule.as_deref()))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                ("src", Some(1), None),
+                ("src/a.rs", Some(1), None),
+                ("target", None, Some("Rust build output (Cargo)")),
+                (".env.local", Some(3), None),
+            ]
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -635,6 +898,7 @@ mod tests {
             &rules,
             Some(&source),
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         assert!(same.changes.is_empty(), "{:?}", same.changes);
@@ -665,6 +929,7 @@ mod tests {
             &rules,
             Some(&source),
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         assert!(diff.changes.is_empty(), "{:?}", diff.changes);
@@ -681,6 +946,7 @@ mod tests {
             &rules,
             Some(&source),
             &|| false,
+            &|_, _| {},
         )
         .unwrap();
         assert_eq!(changed.modified, 1);

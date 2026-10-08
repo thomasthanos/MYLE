@@ -327,7 +327,9 @@ pub(crate) fn hash_file(path: &Path) -> io::Result<Content> {
 }
 
 /// Copies `from` to `to` (which must not exist) and flushes it to disk.
-fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<u64, Failure> {
+/// Returns the size and SHA-256 of what was read, so the zip is not read
+/// once more just to hash it.
+fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<Content, Failure> {
     let mut input = File::open(from)
         .map_err(|error| Failure::Message(format!("Can't read the zip: {error}")))?;
     let total = input.metadata().map(|meta| meta.len()).unwrap_or(0);
@@ -338,6 +340,7 @@ fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<u64, Failure>
         .map_err(|error| io_failure(format!("Can't create \"{}\"", to.display()), error, to))?;
     let result = (|| {
         let mut buffer = vec![0u8; BUFFER];
+        let mut hasher = Sha256::new();
         let mut done = 0u64;
         loop {
             if sink.cancelled() {
@@ -349,6 +352,7 @@ fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<u64, Failure>
             if read == 0 {
                 break;
             }
+            hasher.update(&buffer[..read]);
             output.write_all(&buffer[..read]).map_err(|error| {
                 io_failure(format!("Can't write \"{}\"", to.display()), error, to)
             })?;
@@ -358,7 +362,10 @@ fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<u64, Failure>
         // Not every virtual file system supports flushing; the copy is
         // verified by reading it back either way.
         let _ = output.sync_all();
-        Ok(done)
+        Ok(Content {
+            size: done,
+            sha256: hasher.finalize().into(),
+        })
     })();
     drop(output);
     if result.is_err() {
@@ -455,14 +462,29 @@ pub(crate) fn format_size(bytes: u64) -> String {
     }
 }
 
+/// The message of a backup that someone else saved under the same name
+/// while this one ran.
+pub(crate) const NAME_TAKEN: &str = "NAME_TAKEN";
+
+/// Renames `from` to `to`, never replacing an existing `to`: backup_projects
+/// may have saved a backup with the same name meanwhile.
 fn rename_with_retries(from: &Path, to: &Path, sink: &dyn Sink) -> Result<(), Failure> {
     let mut last = None;
     for attempt in 0..6 {
         if attempt > 0 {
             pause(500, sink)?;
         }
-        match fs::rename(from, to) {
+        match rename_no_replace(from, to) {
             Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(Failure::Coded(
+                    NAME_TAKEN,
+                    format!(
+                        "Another program saved \"{}\" while this backup ran. Nothing was overwritten; back up again to save it as the next version.",
+                        to.file_name().unwrap_or_default().to_string_lossy()
+                    ),
+                ));
+            }
             Err(error) => last = Some(error),
         }
     }
@@ -470,6 +492,35 @@ fn rename_with_retries(from: &Path, to: &Path, sink: &dyn Sink) -> Result<(), Fa
         "Can't rename the finished zip: {}",
         last.map(|error| error.to_string()).unwrap_or_default()
     )))
+}
+
+#[cfg(windows)]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+    let wide =
+        |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (from_w, to_w) = (wide(from), wide(to));
+    // SAFETY: both strings are NUL-terminated and outlive the call. Without
+    // MOVEFILE_REPLACE_EXISTING the call fails when `to` exists.
+    let ok = unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    if ok != 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    // ERROR_FILE_EXISTS (80) and ERROR_ALREADY_EXISTS (183).
+    if matches!(error.raw_os_error(), Some(80 | 183)) {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, error));
+    }
+    Err(error)
+}
+
+#[cfg(not(windows))]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    if to.exists() {
+        return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+    }
+    fs::rename(from, to)
 }
 
 pub(crate) fn partial_name(base: &str) -> String {
@@ -576,11 +627,9 @@ pub(crate) fn write_verified(
             sink.stage(Stage::Verifying);
             verify_zip(local, Some(&written), sink)
                 .map_err(|error| Failure::from(error).context("The zip failed its check"))?;
-            let content = hash_file(local)
-                .map_err(|error| Failure::Message(format!("Can't read the zip: {error}")))?;
             before_finalize(&written)?;
             sink.stage(Stage::Copying);
-            copy_durable(local, &partial, sink)
+            let content = copy_durable(local, &partial, sink)
                 .map_err(|failure| failure.context("Copying to the backup folder failed"))?;
             if let Some(hook) = after_copy {
                 hook(&partial);
@@ -627,11 +676,6 @@ pub(crate) fn write_verified(
 
     let finished = result.and_then(|(written, content)| {
         sink.stage(Stage::Finishing);
-        if final_path.exists() {
-            return Err(Failure::Message(
-                "Another program created the same backup meanwhile".into(),
-            ));
-        }
         rename_with_retries(&partial, final_path, sink)?;
         Ok((written, content))
     });

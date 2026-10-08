@@ -43,11 +43,30 @@ pub(crate) fn start_dropbox() -> Result<Started, String> {
     spawn(&exe, &["/systemstartup"]).map(|_| Started::Launched)
 }
 
+/// Starts `exe` on its own: not a child of MYLE's console or job, so it keeps
+/// running when MYLE closes (or is updated).
 fn spawn(exe: &Path, args: &[&str]) -> Result<(), String> {
-    std::process::Command::new(exe)
-        .args(args)
-        .current_dir(exe.parent().unwrap_or(Path::new(".")))
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let command = |flags: u32| {
+        let mut command = std::process::Command::new(exe);
+        command
+            .args(args)
+            .current_dir(exe.parent().unwrap_or(Path::new(".")))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags);
+        command
+    };
+    let detached = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    // A job that does not allow breaking away refuses the first form.
+    command(detached | CREATE_BREAKAWAY_FROM_JOB)
         .spawn()
+        .or_else(|_| command(detached).spawn())
         .map(|_| ())
         .map_err(|error| format!("{} could not be started: {error}", exe.display()))
 }

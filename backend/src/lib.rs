@@ -408,6 +408,8 @@ pub fn run() {
             project_backups::commands::project_backups_preview,
             project_backups::commands::project_backups_backup,
             project_backups::commands::project_backups_cancel,
+            project_backups::commands::project_backups_cancel_preview,
+            project_backups::commands::project_backups_start_cloud,
             project_backups::commands::project_backups_list,
             project_backups::commands::project_backups_compare,
             project_backups::commands::project_backups_file_diff,
