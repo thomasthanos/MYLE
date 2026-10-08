@@ -26,6 +26,8 @@ use crate::github_releases::store::BuildStats;
 const MAX_DIAGNOSTICS: usize = 1000;
 /// How often lines are sent to the page.
 const BATCH: Duration = Duration::from_millis(120);
+/// How long output may stay open after the shell has ended.
+const LINGER: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -324,6 +326,10 @@ pub(crate) async fn run(
     };
 
     let mut cancelled = false;
+    // When the shell has ended but something it started still holds the
+    // output open (MSVC's mspdbsrv, a daemon), the pipes never close.
+    let mut exited: Option<(Instant, std::process::ExitStatus)> = None;
+    let mut leftovers_killed = false;
     while open > 0 {
         let chunk = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await;
         if cancel.load(Ordering::Relaxed) {
@@ -333,6 +339,22 @@ pub(crate) async fn run(
             }
             let _ = child.kill().await;
             break;
+        }
+        if exited.is_none()
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            exited = Some((Instant::now(), status));
+        }
+        if let Some((at, _)) = exited {
+            if !leftovers_killed && at.elapsed() >= LINGER {
+                leftovers_killed = true;
+                if let Some(job) = job.as_ref() {
+                    job.kill();
+                }
+            }
+            if at.elapsed() >= LINGER * 2 {
+                break;
+            }
         }
         match chunk {
             Ok(Some(Chunk::Out(bytes))) => {
@@ -422,6 +444,8 @@ pub(crate) async fn run(
     }
     let status = if cancelled {
         None
+    } else if let Some((_, status)) = exited {
+        Some(status)
     } else {
         tokio::time::timeout(Duration::from_secs(30), child.wait())
             .await
@@ -514,5 +538,29 @@ mod tests {
             .map(|l| l.text.trim().to_string())
             .collect();
         assert!(lines.contains(&"hello".to_string()), "{lines:?}");
+    }
+
+    #[test]
+    fn a_build_ends_when_its_shell_does_even_if_a_child_keeps_the_output() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = std::env::temp_dir();
+        let started = Instant::now();
+        // `start /b` leaves a process holding the shell's output behind.
+        let outcome = runtime.block_on(run(
+            Request {
+                dir: &dir,
+                command: "start /b ping -n 30 127.0.0.1 && echo done",
+                last: None,
+                log_path: None,
+            },
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        ));
+        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(outcome.ok);
     }
 }
