@@ -13,7 +13,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { CLOUD_PROVIDERS, type BackupSchedule, type CloudProvider, type DetectedFolder, type RootStore, type ScheduleWeekday } from "./api";
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
-  import CloudLogo from "./CloudLogo.svelte";
+  import CloudLogo from "../../../lib/components/CloudLogo.svelte";
   import { formatDate, gameSavesState as gs, samePath } from "./state.svelte";
 
   const scheduleOptions: SelectOption<BackupSchedule>[] = [

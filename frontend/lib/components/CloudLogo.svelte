@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { CloudProvider } from "./api";
+  /** The cloud apps whose folder MYLE can back up to (Game Saves, Project Backups). */
+  type CloudProvider = "dropbox" | "googleDrive" | "mega" | "oneDrive";
 
   let { provider, size = 18 }: { provider: CloudProvider; size?: number } = $props();
 </script>
