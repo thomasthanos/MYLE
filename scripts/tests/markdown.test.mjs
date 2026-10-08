@@ -75,3 +75,13 @@ test("the 9.8.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "table"));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
+
+test("the 9.9.0 notes, the first the What's new window shows, read cleanly", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const md = await readFile(new URL("../../docs/release-notes/9.9.0.md", import.meta.url), "utf8");
+  const blocks = parseMarkdown(md);
+  assert.ok(text(blocks[0].c).startsWith("See what changed"));
+  assert.ok(blocks.some((b) => b.t === "table"));
+  assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("What's new window")));
+  assert.ok(!JSON.stringify(blocks).includes("<"));
+});
