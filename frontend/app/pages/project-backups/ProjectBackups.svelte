@@ -435,72 +435,6 @@
       </button>
     </div>
 
-<<<<<<< Updated upstream
-  {#if pb.loading}
-    <div class="loading" role="status"><LoaderCircle size={17} class="spin" /> Loading Project Backups…</div>
-  {:else}
-    <div class="project-list">
-      {#each pb.filtered as project (project.id)}
-        {@const missing = pb.isMissing(project)}
-        {@const expanded = pb.expanded === project.id}
-        {@const attempt = lastAttempt(project)}
-        {@const age = pb.daysSinceBackup(project)}
-        <article class="project surface" class:expanded>
-          <div class="project-main">
-            <span
-              class="project-icon"
-              class:ok={!missing && !attempt && !!project.lastBackup && age !== null && age < 7}
-              class:warn={missing || attempt?.cancelled || (age !== null && age >= 30)}
-              class:bad={!!attempt && !attempt.cancelled}
-            ><FolderCode size={18} /></span>
-            <div class="project-text">
-              <div class="title-row">
-                <strong>{project.name}</strong>
-                <span class="tag" title={`Backups are named ${project.appName}_D<day>_V<number>.zip`}>{project.appName}</span>
-                {#if missing}<span class="tag warning">Folder not found</span>{/if}
-                {#if project.closeApp}<span class="tag" title="Closed before each backup">Closes {project.closeApp}</span>{/if}
-                {#if attempt && !attempt.cancelled}
-                  <span class="tag danger" title={attempt.error ?? "The last backup failed"}><CircleX size={11} /> Last try failed {pb.ago(attempt.at)}</span>
-                {:else if attempt?.cancelled}
-                  <span class="tag" title="The last backup was cancelled">Cancelled {pb.ago(attempt.at)}</span>
-                {:else if project.lastBackup && age !== null && age < 7}
-                  <span class="tag ok" title="The last backup was checked and kept"><CircleCheck size={11} /> Up to date</span>
-                {:else if age !== null && age >= 30}
-                  <span class="tag warning" title="No backup for a month or more">{age} days old</span>
-                {/if}
-              </div>
-              <span class="source selectable" title={project.sourcePath}>{project.sourcePath || "No folder chosen"}</span>
-              <small>
-                {#if project.lastBackup}
-                  Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · {project.lastBackup.name} ·
-                  {formatBytes(project.lastBackup.zipSize)} · {project.lastBackup.fileCount.toLocaleString()} files
-                {:else}
-                  Not backed up from MYLE yet
-                {/if}
-              </small>
-            </div>
-            <div class="project-actions">
-              {#if missing}
-                <button class="btn small" disabled={pb.locked} onclick={() => pb.openEditor(project, true)}>
-                  <FolderSearch size={13} /> Find folder
-                </button>
-              {:else}
-                <button class="btn small primary" disabled={pb.locked} onclick={() => pb.backup([project.id])}>
-                  <CloudUpload size={13} /> Back up
-                </button>
-              {/if}
-              <button class="btn small" aria-expanded={expanded} onclick={() => pb.toggleBackups(project.id)}>
-                <Archive size={13} /> Backups <ChevronDown size={13} class={expanded ? "flip" : ""} />
-              </button>
-              <button class="icon-btn" title="Open the project folder" aria-label={`Open ${project.name}'s folder`}
-                disabled={missing} onclick={() => pb.open("source", project.id)}><FolderOpen size={15} /></button>
-              <button class="icon-btn" title="Edit" aria-label={`Edit ${project.name}`} disabled={pb.locked}
-                onclick={() => pb.openEditor(project)}><Pencil size={14} /></button>
-              <button class="icon-btn remove" title="Remove" aria-label={`Remove ${project.name}`} disabled={pb.locked}
-                onclick={() => pb.removeProject(project)}><Trash2 size={14} /></button>
-            </div>
-          </div>
-=======
     {#if pb.projects.length > 1}
       <div class="filters" role="group" aria-label="Show projects by state">
         {#each filters as filter (filter.id)}
@@ -516,7 +450,6 @@
         {/each}
       </div>
     {/if}
->>>>>>> Stashed changes
 
     {#if pb.operation}
       {@const operation = pb.operation}
@@ -1075,26 +1008,6 @@
     gap: 1px;
     min-width: 0;
   }
-<<<<<<< Updated upstream
-  /* The same health colours as the GitHub Releases list. */
-  .project-icon.ok { border-color: rgb(62 207 142 / 0.28); background: rgb(62 207 142 / 0.08); color: #6fdba5; }
-  .project-icon.warn { border-color: rgb(255 198 107 / 0.3); background: rgb(255 198 107 / 0.08); color: #ffc66b; }
-  .project-icon.bad { border-color: rgb(255 143 143 / 0.3); background: rgb(255 143 143 / 0.08); color: #ff8f8f; }
-  .project-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
-  .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-  .title-row strong { font-size: 13px; }
-  .tag { padding: 1px 6px; border-radius: 5px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: 10px; white-space: nowrap; }
-  .tag.warning { background: rgb(245 176 65 / 0.1); color: rgb(245 188 95 / 0.9); }
-  .tag.danger { background: rgb(229 72 77 / 0.1); color: rgb(255 145 145 / 0.9); }
-  .tag.ok { background: rgb(62 207 142 / 0.08); color: #98dfbd; }
-  .tag { display: inline-flex; align-items: center; gap: 3px; }
-  .source { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
-  .project-text small { overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
-  .project-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
-  .project-actions :global(.flip) { transform: rotate(180deg); }
-  .remove { color: rgb(255 145 145 / 0.68); }
-=======
->>>>>>> Stashed changes
 
   .operation-line {
     display: flex;
