@@ -15,7 +15,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { confirm } from "../../../lib/confirm.svelte";
   import { toast } from "../../../lib/toast.svelte";
-  import { githubReleasesApi as api, messageOf, type EntryStatus, type LoneTag, type Release } from "./api";
+  import { githubReleasesApi as api, messageOf, type Deleted, type EntryStatus, type LoneTag, type Release } from "./api";
   import { formatRelative, githubReleases as gr, type ListItem } from "./state.svelte";
 
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
@@ -142,10 +142,10 @@
     working = true;
     try {
       const results = await api.deleteReleases(repoId, ids, deleteTags);
-      const failed = results.filter((r) => !r.ok || r.error);
       const done = results.filter((r) => r.ok).length;
       if (done) toast.success(`Deleted ${done} ${done === 1 ? "release" : "releases"}.`);
-      for (const f of failed) toast.error(`${f.tag || f.releaseId}: ${f.error ?? "not deleted"}`);
+      for (const f of results.filter((r) => r.error)) toast.error(`${f.tag || f.releaseId}: ${f.error}`);
+      for (const kept of results.filter((r) => r.tagKept)) toast.info(`${kept.tag}: ${kept.tagKept}`);
       picked = [];
       await load();
       void gr.loadRemote(repoId);
@@ -163,19 +163,13 @@
 
   async function save() {
     if (!editor) return;
+    if (editor.combined) return saveCombined();
     working = true;
     try {
       const updated = await api.updateRelease(repoId, editor.id, editor.title.trim(), editor.notes, editor.prerelease);
       releases = (releases ?? []).map((r) => (r.id === updated.id ? updated : r));
-      const combined = editor.combined;
       editor = null;
       toast.success(`Saved ${updated.tagName}.`);
-      // The others are deleted only when the user says so.
-      const others = (combined ?? []).filter((id) => id !== updated.id);
-      if (others.length) {
-        picked = others;
-        await remove(others);
-      }
     } catch (e) {
       toast.error(messageOf(e));
     } finally {
@@ -183,11 +177,100 @@
     }
   }
 
+  /** The releases a combine deletes (all picked but the one getting the notes). */
+  const combineOthers = $derived(editor?.combined ? (releases ?? []).filter((r) => editor!.combined!.includes(r.id) && r.id !== editor!.id) : []);
+
+  /** Why a release's tag stays when its release goes, if it does. */
+  function tagStays(release: Release, target: Release, combined: number[]): string | null {
+    if (release.tagName === target.tagName) return `the combined release uses it`;
+    if ((releases ?? []).some((r) => r.tagName === release.tagName && !combined.includes(r.id))) return "another release uses it";
+    return null;
+  }
+
+  /** What a combine couldn't delete, to try again. */
+  let leftovers = $state<{ targetId: number; targetTag: string; failures: Deleted[] } | null>(null);
+  let retrying = $state(false);
+
+  function report(results: Deleted[], targetId: number, targetTag: string, combinedInto: string | null) {
+    const failures = results.filter((d) => d.error);
+    const releasesGone = results.filter((d) => d.ok && d.releaseId).length;
+    const tagsGone = results.filter((d) => d.tagDeleted).length;
+    if (combinedInto) {
+      toast.success(
+        `Combined into ${combinedInto}. Deleted ${releasesGone} ${releasesGone === 1 ? "release" : "releases"} and ${tagsGone} ${tagsGone === 1 ? "tag" : "tags"}.`,
+      );
+    } else if (releasesGone || tagsGone) {
+      toast.success(`Deleted ${releasesGone ? `${releasesGone} ${releasesGone === 1 ? "release" : "releases"}` : ""}${releasesGone && tagsGone ? " and " : ""}${tagsGone ? `${tagsGone} ${tagsGone === 1 ? "tag" : "tags"}` : ""}.`);
+    }
+    for (const kept of results.filter((d) => d.tagKept)) toast.info(`${kept.tag}: ${kept.tagKept}`);
+    leftovers = failures.length ? { targetId, targetTag, failures } : null;
+  }
+
+  async function saveCombined() {
+    if (!editor?.combined) return;
+    const combined = editor.combined;
+    const target = (releases ?? []).find((r) => r.id === editor!.id);
+    if (!target) return;
+    const others = combineOthers;
+    const lines = others.map((r) => {
+      const stays = tagStays(r, target, combined);
+      const name = r.name && r.name !== r.tagName ? `${r.name} (${r.tagName})` : r.tagName;
+      return stays ? `• ${name}: the release only; its tag stays (${stays})` : `• ${name}: the release and its tag ${r.tagName}`;
+    });
+    const ok = await confirm({
+      title: `Combine ${combined.length} releases into ${target.tagName}?`,
+      message:
+        `${target.tagName} gets the combined title and notes, and keeps its tag.\n\n` +
+        `Then ${others.length === 1 ? "this is" : `these ${others.length} are`} deleted, on GitHub and on this PC:\n${lines.join("\n")}\n\n` +
+        `If saving the notes fails, nothing is deleted. Downloads of the deleted releases' files stop working. This can't be undone.`,
+      confirmLabel: `Save and delete ${others.length}`,
+      danger: true,
+    });
+    if (!ok || !editor) return;
+    working = true;
+    try {
+      const result = await api.combine(repoId, target.id, editor.title.trim(), editor.notes, editor.prerelease, others.map((r) => r.id));
+      editor = null;
+      picked = [];
+      report(result.deleted, result.release.id, result.release.tagName, result.release.tagName);
+      await load();
+      void gr.loadRemote(repoId);
+      void gr.refresh(repoId);
+    } catch (e) {
+      // Nothing was deleted: the editor stays open with the notes.
+      toast.error(messageOf(e));
+    } finally {
+      working = false;
+    }
+  }
+
+  async function retryLeftovers() {
+    if (!leftovers) return;
+    const { targetId, targetTag, failures } = leftovers;
+    retrying = true;
+    try {
+      const results = await api.combineRetry(
+        repoId,
+        targetId,
+        failures.filter((d) => !d.ok && d.releaseId).map((d) => d.releaseId),
+        failures.filter((d) => d.ok && !d.tagDeleted && !d.tagKept && d.tag).map((d) => d.tag),
+      );
+      report(results, targetId, targetTag, null);
+      await load();
+      void gr.refresh(repoId);
+    } catch (e) {
+      toast.error(messageOf(e));
+    } finally {
+      retrying = false;
+    }
+  }
+
   function combine() {
-    const ids = pickedReleases.map((r) => r.id);
-    if (ids.length < 2) return;
     // The notes go on the newest one.
-    const newest = pickedReleases[0];
+    const byDate = [...pickedReleases].sort((a, b) => Date.parse(b.publishedAt ?? b.createdAt ?? "") - Date.parse(a.publishedAt ?? a.createdAt ?? "") || 0);
+    const ids = byDate.map((r) => r.id);
+    if (ids.length < 2) return;
+    const newest = byDate[0];
     void gr.ai({
       run: (provider) => api.aiCombine(repoId, ids, provider),
       apply: (notes) => {
@@ -259,11 +342,32 @@
       <span>{pickedReleases.length} picked</span>
       <label class="opt"><input type="checkbox" class="check" bind:checked={deleteTags} /> Delete their tags too</label>
       <span class="grow"></span>
-      <button class="btn small" disabled={pickedReleases.length < 2 || combining || working} onclick={() => (gr.aiReady ? combine() : (gr.settingsOpen = "ai"))} title="One set of notes from the picked releases, saved on the newest">
+      <button class="btn small" disabled={pickedReleases.length < 2 || combining || working} onclick={() => (gr.aiReady ? combine() : (gr.settingsOpen = "ai"))} title="One set of notes from the picked releases on the newest; the others and their tags are then deleted (you confirm first)">
         {#if combining}<LoaderCircle size={13} class="spin" />{:else}<Combine size={13} />{/if} Combine notes
       </button>
       <button class="btn small danger" disabled={working} onclick={() => void remove(pickedReleases.map((r) => r.id))}><Trash2 size={13} /> Delete</button>
       <button class="icon-btn" aria-label="Clear the selection" onclick={() => (picked = [])}><X size={13} /></button>
+    </div>
+  {/if}
+
+  {#if leftovers}
+    <div class="leftovers" role="alert">
+      <div class="leftovers-head">
+        <strong>The combine into {leftovers.targetTag} left some behind</strong>
+        <button class="icon-btn" aria-label="Dismiss" onclick={() => (leftovers = null)}><X size={13} /></button>
+      </div>
+      <ul>
+        {#each leftovers.failures as f (f.releaseId + f.tag)}
+          <li><code>{f.tag || f.releaseId}</code> {f.error}</li>
+        {/each}
+      </ul>
+      <div class="leftovers-foot">
+        <span class="hint">The notes are saved on {leftovers.targetTag}; its tag is never deleted.</span>
+        <span class="grow"></span>
+        <button class="btn small" disabled={retrying || working} onclick={() => void retryLeftovers()}>
+          {#if retrying}<LoaderCircle size={13} class="spin" />{:else}<RefreshCw size={13} />{/if} Try again
+        </button>
+      </div>
     </div>
   {/if}
 
@@ -278,10 +382,10 @@
       <div class="editor-foot">
         <label class="opt"><input type="checkbox" class="check" bind:checked={editor.prerelease} /> Pre-release</label>
         <span class="grow"></span>
-        {#if editor.combined}<span class="hint">After saving, you're asked whether to delete the other {editor.combined.length - 1}.</span>{/if}
-        <button class="btn small ghost" onclick={() => (editor = null)}>Cancel</button>
-        <button class="btn small primary" disabled={working || !editor.title.trim()} onclick={() => void save()}>
-          {#if working}<LoaderCircle size={13} class="spin" />{/if} Save on GitHub
+        {#if editor.combined}<span class="hint">Saving deletes {combineOthers.map((r) => r.tagName).join(", ")} and their tags; you confirm first.</span>{/if}
+        <button class="btn small ghost" disabled={working} onclick={() => (editor = null)}>Cancel</button>
+        <button class="btn small primary" class:danger={!!editor.combined} disabled={working || !editor.title.trim() || (!!editor.combined && !editor.notes.trim())} onclick={() => void save()}>
+          {#if working}<LoaderCircle size={13} class="spin" />{/if} {editor.combined ? `Save and delete ${combineOthers.length}` : "Save on GitHub"}
         </button>
       </div>
     </div>
@@ -341,6 +445,14 @@
     display: flex;
     align-items: center;
     gap: 9px;
+  }
+
+  .editor-foot {
+    flex-wrap: wrap;
+  }
+
+  .editor-foot .opt {
+    white-space: nowrap;
   }
 
   .grow {
@@ -438,6 +550,35 @@
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.5;
+  }
+
+  .leftovers {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid rgb(255 120 120 / 0.3);
+    border-radius: 10px;
+    background: rgb(255 120 120 / 0.06);
+    font-size: 12.3px;
+  }
+
+  .leftovers-head,
+  .leftovers-foot {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .leftovers-head strong {
+    flex: 1;
+  }
+
+  .leftovers ul {
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    padding-left: 16px;
+    color: var(--text-2);
   }
 
   .hint {

@@ -474,6 +474,8 @@ pub fn run() {
             github_releases::commands::github_releases_list_releases,
             github_releases::commands::github_releases_update_release,
             github_releases::commands::github_releases_delete_releases,
+            github_releases::commands::github_releases_combine,
+            github_releases::commands::github_releases_combine_retry,
             github_releases::commands::github_releases_lone_tags,
             github_releases::commands::github_releases_delete_tags,
             github_releases::commands::github_releases_ai_combine,

@@ -500,9 +500,18 @@ export interface ReleaseOutcome {
 export interface Deleted {
   releaseId: number;
   tag: string;
+  /** The release is gone (deleted now, or already). */
   ok: boolean;
   tagDeleted: boolean;
+  /** Why the tag stayed although it was to go (another release uses it). */
+  tagKept: string | null;
   error: string | null;
+}
+
+/** A combine: the release with the merged notes, and what was deleted. */
+export interface Combined {
+  release: Release;
+  deleted: Deleted[];
 }
 
 /** A tag no release uses. */
@@ -595,6 +604,10 @@ export const githubReleasesApi = {
     invoke<Deleted[]>("github_releases_delete_releases", { repoId, releaseIds, deleteTags }),
   loneTags: (repoId: string) => invoke<LoneTag[]>("github_releases_lone_tags", { repoId }),
   deleteTags: (repoId: string, tags: string[]) => invoke<TagDeleted[]>("github_releases_delete_tags", { repoId, tags }),
+  combine: (repoId: string, targetId: number, title: string, notes: string, prerelease: boolean, deleteIds: number[]) =>
+    invoke<Combined>("github_releases_combine", { repoId, targetId, title, notes, prerelease, deleteIds }),
+  combineRetry: (repoId: string, targetId: number, releaseIds: number[], tags: string[]) =>
+    invoke<Deleted[]>("github_releases_combine_retry", { repoId, targetId, releaseIds, tags }),
   aiCombine: (repoId: string, releaseIds: number[], provider: ProviderId | null) =>
     invoke<Notes>("github_releases_ai_combine", { repoId, releaseIds, provider }),
 

@@ -1576,18 +1576,104 @@ pub async fn github_releases_update_release(
     .await
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deleted {
     pub release_id: u64,
     pub tag: String,
+    /// The release is gone (deleted now, or already).
     pub ok: bool,
     pub tag_deleted: bool,
+    /// Why the tag stayed although it was to go (another release uses it).
+    pub tag_kept: Option<String>,
     pub error: Option<String>,
 }
 
+/// The tags that must stay when the releases `deleting` go: the ones the
+/// other releases use, and `keep` (the release a combine saved its notes on).
+fn tags_to_keep(
+    all: &[Release],
+    deleting: &[u64],
+    keep: Option<&str>,
+) -> std::collections::HashSet<String> {
+    all.iter()
+        .filter(|release| !deleting.contains(&release.id))
+        .map(|release| release.tag_name.clone())
+        .chain(keep.map(str::to_string))
+        .collect()
+}
+
+/// Deletes the tag `tag` on GitHub (gone already counts as deleted) and
+/// here, if it is here.
+async fn delete_tag_everywhere(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    root: &Path,
+    local: &[git::Tag],
+    tag: &str,
+) -> Result<(), String> {
+    if let Err(error) = github::delete_tag(token, owner, repo, tag).await
+        && !github::tag_was_gone(&error)
+    {
+        return Err(problem_of(error).message);
+    }
+    if tag.starts_with('-') || !local.iter().any(|t| t.name == tag) {
+        return Ok(());
+    }
+    match git::run(root, &["tag", "-d", tag]).await {
+        Ok(output) if output.ok() => Ok(()),
+        Ok(output) => Err(format!(
+            "Deleted on GitHub, not on this PC: {}",
+            git::first_error(&output.all())
+        )),
+        Err(error) => Err(format!("Deleted on GitHub, not on this PC: {error}")),
+    }
+}
+
+/// Deletes one release and, with `with_tag`, its tag unless `keep` has it.
+#[allow(clippy::too_many_arguments)]
+async fn delete_release_and_tag(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    root: &Path,
+    local: &[git::Tag],
+    release: &Release,
+    with_tag: bool,
+    keep: &std::collections::HashSet<String>,
+) -> Deleted {
+    let mut result = Deleted {
+        release_id: release.id,
+        tag: release.tag_name.clone(),
+        ..Deleted::default()
+    };
+    match github::delete_release(token, owner, repo, release.id).await {
+        Ok(()) => result.ok = true,
+        Err(error) if error.contains("\"NOT_FOUND\"") => result.ok = true,
+        Err(error) => {
+            result.error = Some(problem_of(error).message);
+            return result;
+        }
+    }
+    if !with_tag {
+        return result;
+    }
+    if keep.contains(&release.tag_name) {
+        result.tag_kept = Some("Another release uses this tag, so it stays.".into());
+        return result;
+    }
+    match delete_tag_everywhere(token, owner, repo, root, local, &release.tag_name).await {
+        Ok(()) => result.tag_deleted = true,
+        Err(error) => {
+            result.error = Some(format!("The release was deleted, its tag wasn't: {error}"))
+        }
+    }
+    result
+}
+
 /// Deletes releases (the page asked first); with `delete_tags`, their tags
-/// too, on GitHub and here.
+/// too, on GitHub and here, except a tag another release still uses.
 #[tauri::command]
 pub async fn github_releases_delete_releases(
     repo_id: String,
@@ -1595,45 +1681,183 @@ pub async fn github_releases_delete_releases(
     delete_tags: bool,
 ) -> Result<Vec<Deleted>, String> {
     let (token, owner, repo, root) = github_of(&repo_id).await?;
-    let releases = github::releases(&token, &owner, &repo, 100).await?;
+    let all = github::all_releases(&token, &owner, &repo).await?;
+    let keep = tags_to_keep(&all, &release_ids, None);
+    let local = git::tags(&root).await.unwrap_or_default();
     let mut results = Vec::new();
     for id in release_ids {
-        let Some(release) = releases.iter().find(|r| r.id == id) else {
+        let Some(release) = all.iter().find(|r| r.id == id) else {
             results.push(Deleted {
                 release_id: id,
-                tag: String::new(),
-                ok: false,
-                tag_deleted: false,
                 error: Some("Not found on GitHub.".into()),
+                ..Deleted::default()
             });
             continue;
         };
-        let mut result = Deleted {
-            release_id: id,
-            tag: release.tag_name.clone(),
-            ok: false,
-            tag_deleted: false,
-            error: None,
+        results.push(
+            delete_release_and_tag(
+                &token,
+                &owner,
+                &repo,
+                &root,
+                &local,
+                release,
+                delete_tags,
+                &keep,
+            )
+            .await,
+        );
+    }
+    Ok(results)
+}
+
+/// The same notes, as GitHub keeps them (it may change line endings and
+/// trim the ends).
+fn same_notes(saved: &str, sent: &str) -> bool {
+    let normal = |text: &str| text.replace("\r\n", "\n").trim().to_string();
+    normal(saved) == normal(sent)
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Combined {
+    /// The release with the combined notes, as GitHub has it now.
+    pub release: Release,
+    pub deleted: Vec<Deleted>,
+}
+
+/// Combines releases into one (the page asked first, naming all of them):
+/// saves the notes on `target_id`, checks GitHub kept them, and only then
+/// deletes the releases `delete_ids` and their tags, on GitHub and here. The
+/// target's tag is never deleted; nothing is when saving failed.
+#[tauri::command]
+pub async fn github_releases_combine(
+    repo_id: String,
+    target_id: u64,
+    title: String,
+    notes: String,
+    prerelease: bool,
+    delete_ids: Vec<u64>,
+) -> Result<Combined, String> {
+    let failed = |message: String| String::from(Problem::new("COMBINE_FAILED", message));
+    if notes.trim().is_empty() || title.trim().is_empty() {
+        return Err(failed(
+            "The combined release needs a title and notes. Nothing was changed or deleted.".into(),
+        ));
+    }
+    let (token, owner, repo, root) = github_of(&repo_id).await?;
+    let all = github::all_releases(&token, &owner, &repo).await?;
+    let Some(target) = all.iter().find(|r| r.id == target_id) else {
+        return Err(failed(
+            "The release that gets the notes is no longer on GitHub. Nothing was deleted.".into(),
+        ));
+    };
+    let mut delete_ids: Vec<u64> = delete_ids.into_iter().filter(|id| *id != target_id).collect();
+    delete_ids.sort_unstable();
+    delete_ids.dedup();
+    github::update_release(
+        &token,
+        &owner,
+        &repo,
+        target_id,
+        &json!({ "name": title.trim(), "body": notes, "prerelease": prerelease }),
+    )
+    .await
+    .map_err(|error| {
+        failed(format!(
+            "Saving the notes on {} failed, so nothing was deleted: {}",
+            target.tag_name,
+            problem_of(error).message
+        ))
+    })?;
+    let saved = github::release(&token, &owner, &repo, target_id)
+        .await
+        .map_err(|error| {
+            failed(format!(
+                "Couldn't check the notes on {}, so nothing was deleted: {}",
+                target.tag_name,
+                problem_of(error).message
+            ))
+        })?;
+    if !same_notes(saved.body.as_deref().unwrap_or(""), &notes) {
+        return Err(failed(format!(
+            "GitHub didn't keep the combined notes on {}, so nothing was deleted.",
+            target.tag_name
+        )));
+    }
+    let keep = tags_to_keep(&all, &delete_ids, Some(&saved.tag_name));
+    let local = git::tags(&root).await.unwrap_or_default();
+    let mut deleted = Vec::new();
+    for id in delete_ids {
+        let Some(release) = all.iter().find(|r| r.id == id) else {
+            // Gone already: nothing left to delete.
+            deleted.push(Deleted {
+                release_id: id,
+                ok: true,
+                ..Deleted::default()
+            });
+            continue;
         };
-        match github::delete_release(&token, &owner, &repo, id).await {
-            Ok(()) => {
-                result.ok = true;
-                if delete_tags {
-                    match github::delete_tag(&token, &owner, &repo, &release.tag_name).await {
-                        Ok(()) => {
-                            result.tag_deleted = true;
-                            let _ = git::run(&root, &["tag", "-d", &release.tag_name]).await;
-                        }
-                        Err(error) => {
-                            result.error = Some(format!(
-                                "The release was deleted, its tag wasn't: {}",
-                                problem_of(error).message
-                            ))
-                        }
-                    }
-                }
+        deleted.push(
+            delete_release_and_tag(&token, &owner, &repo, &root, &local, release, true, &keep)
+                .await,
+        );
+    }
+    Ok(Combined {
+        release: saved,
+        deleted,
+    })
+}
+
+/// Tries again what a combine couldn't delete: the releases `release_ids`
+/// (with their tags) and the tags `tags` whose release is gone. The tag of
+/// `target_id`, and any tag a release still uses, stays.
+#[tauri::command]
+pub async fn github_releases_combine_retry(
+    repo_id: String,
+    target_id: u64,
+    release_ids: Vec<u64>,
+    tags: Vec<String>,
+) -> Result<Vec<Deleted>, String> {
+    let (token, owner, repo, root) = github_of(&repo_id).await?;
+    let all = github::all_releases(&token, &owner, &repo).await?;
+    let Some(target) = all.iter().find(|r| r.id == target_id) else {
+        return Err(Problem::new(
+            "COMBINE_FAILED",
+            "The combined release is no longer on GitHub, so nothing more is deleted.",
+        )
+        .into());
+    };
+    let release_ids: Vec<u64> = release_ids.into_iter().filter(|id| *id != target_id).collect();
+    let keep = tags_to_keep(&all, &release_ids, Some(&target.tag_name));
+    let local = git::tags(&root).await.unwrap_or_default();
+    let mut results = Vec::new();
+    for id in release_ids {
+        match all.iter().find(|r| r.id == id) {
+            Some(release) => results.push(
+                delete_release_and_tag(&token, &owner, &repo, &root, &local, release, true, &keep)
+                    .await,
+            ),
+            None => results.push(Deleted {
+                release_id: id,
+                ok: true,
+                ..Deleted::default()
+            }),
+        }
+    }
+    for tag in tags {
+        let mut result = Deleted {
+            tag: tag.clone(),
+            ok: true,
+            ..Deleted::default()
+        };
+        if keep.contains(&tag) {
+            result.tag_kept = Some("A release uses this tag, so it stays.".into());
+        } else {
+            match delete_tag_everywhere(&token, &owner, &repo, &root, &local, &tag).await {
+                Ok(()) => result.tag_deleted = true,
+                Err(error) => result.error = Some(error),
             }
-            Err(error) => result.error = Some(problem_of(error).message),
         }
         results.push(result);
     }
@@ -2102,6 +2326,37 @@ mod tests {
         );
         assert_eq!(lone[1].date, Some(20));
         assert_eq!(lone[3].date, None);
+    }
+
+    #[test]
+    fn a_combine_keeps_the_target_tag_and_tags_other_releases_use() {
+        let with_id = |id: u64, tag: &str| Release {
+            id,
+            ..release(tag, false)
+        };
+        // v1.2.0 has a draft on the same tag that is not being deleted.
+        let all = vec![
+            with_id(1, "v1.3.0"),
+            with_id(2, "v1.2.0"),
+            with_id(3, "v1.2.0"),
+            with_id(4, "v1.1.0"),
+            with_id(5, "v1.0.0"),
+        ];
+        let keep = tags_to_keep(&all, &[2, 4], Some("v1.3.0"));
+        assert!(keep.contains("v1.3.0"));
+        assert!(keep.contains("v1.2.0"));
+        assert!(keep.contains("v1.0.0"));
+        assert!(!keep.contains("v1.1.0"));
+        // The target's tag stays even when the target is in the list.
+        assert!(tags_to_keep(&all, &[1, 4], Some("v1.3.0")).contains("v1.3.0"));
+    }
+
+    #[test]
+    fn the_combined_notes_are_checked_the_way_github_keeps_them() {
+        assert!(same_notes("### New\n- a\n", "### New\r\n- a"));
+        assert!(same_notes("  x  ", "x"));
+        assert!(!same_notes("", "### New\n- a"));
+        assert!(!same_notes("### New\n- a", "### New\n- b"));
     }
 
     fn release(tag: &str, draft: bool) -> Release {

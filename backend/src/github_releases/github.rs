@@ -244,6 +244,43 @@ pub(crate) async fn releases(
     .await
 }
 
+/// Every release of the repository, drafts too, newest first (all pages).
+pub(crate) async fn all_releases(
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<Release>, String> {
+    let mut all = Vec::new();
+    for page in 1..=50 {
+        let list: Vec<Release> = get_json(
+            token,
+            &format!("{API}/repos/{owner}/{repo}/releases?per_page=100&page={page}"),
+        )
+        .await?;
+        let done = list.len() < 100;
+        all.extend(list);
+        if done {
+            return Ok(all);
+        }
+    }
+    Err("The repository has too many releases to list.".into())
+}
+
+/// One release, as GitHub has it now.
+pub(crate) async fn release(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    id: u64,
+) -> Result<Release, String> {
+    get_json(token, &format!("{API}/repos/{owner}/{repo}/releases/{id}")).await
+}
+
+/// A failed tag delete that only found the tag gone already.
+pub(crate) fn tag_was_gone(error: &str) -> bool {
+    error.contains("\"NOT_FOUND\"") || error.contains("Reference does not exist")
+}
+
 /// The tag of every release of the repository, drafts too (all pages, so
 /// a tag is never taken for one without a release because its release was
 /// further down the list).
