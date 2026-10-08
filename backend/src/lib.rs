@@ -7,6 +7,7 @@ mod debloat;
 mod download;
 mod elevated_pipe;
 pub mod game_saves;
+pub mod github_releases;
 pub mod project_backups;
 mod maintenance;
 mod passwords;
@@ -185,6 +186,7 @@ pub fn run() {
     let running = maintenance::Running::default();
     let game_saves_state = game_saves::GameSavesState::default();
     let spotify_hub_state = spotify_hub::SpotifyHubState::default();
+    let github_releases_state = github_releases::GithubReleasesState::default();
     let windows_optimization_state = windows_optimization::WindowsOptimizationState::default();
     let passwords_state = passwords::PasswordsState::default();
     let passwords_windows_state = passwords::WindowsFillState::default();
@@ -215,6 +217,7 @@ pub fn run() {
         .manage(running.clone())
         .manage(game_saves_state.clone())
         .manage(project_backups::ProjectBackupsState::default())
+        .manage(github_releases_state.clone())
         .manage(spotify_hub_state.clone())
         .manage(windows_optimization_state.clone())
         .manage(passwords_state.clone())
@@ -414,6 +417,52 @@ pub fn run() {
             project_backups::commands::project_backups_compare,
             project_backups::commands::project_backups_file_diff,
             project_backups::commands::project_backups_open,
+            github_releases::commands::github_releases_get_state,
+            github_releases::commands::github_releases_dismiss_import,
+            github_releases::commands::github_releases_status,
+            github_releases::commands::github_releases_fetch,
+            github_releases::commands::github_releases_add_folder,
+            github_releases::commands::github_releases_scan_folder,
+            github_releases::commands::github_releases_add_repos,
+            github_releases::commands::github_releases_remove_repo,
+            github_releases::commands::github_releases_set_entry,
+            github_releases::commands::github_releases_remote,
+            github_releases::commands::github_releases_changes,
+            github_releases::commands::github_releases_file_diff,
+            github_releases::commands::github_releases_stage,
+            github_releases::commands::github_releases_commit,
+            github_releases::commands::github_releases_push,
+            github_releases::commands::github_releases_pull,
+            github_releases::commands::github_releases_cancel,
+            github_releases::commands::github_releases_cancel_scan,
+            github_releases::commands::github_releases_ai_commit_message,
+            github_releases::commands::github_releases_build_info,
+            github_releases::commands::github_releases_build,
+            github_releases::commands::github_releases_artifacts,
+            github_releases::commands::github_releases_checksum,
+            github_releases::commands::github_releases_open_in_editor,
+            github_releases::commands::github_releases_reveal,
+            github_releases::commands::github_releases_release_info,
+            github_releases::commands::github_releases_preflight,
+            github_releases::commands::github_releases_ai_notes,
+            github_releases::commands::github_releases_release,
+            github_releases::commands::github_releases_resume,
+            github_releases::commands::github_releases_watch,
+            github_releases::commands::github_releases_list_releases,
+            github_releases::commands::github_releases_update_release,
+            github_releases::commands::github_releases_delete_releases,
+            github_releases::commands::github_releases_ai_combine,
+            github_releases::commands::github_releases_gh_status,
+            github_releases::commands::github_releases_connect_gh,
+            github_releases::commands::github_releases_connect_token,
+            github_releases::commands::github_releases_disconnect,
+            github_releases::commands::github_releases_gh_login,
+            github_releases::commands::github_releases_install_tool,
+            github_releases::commands::github_releases_ai_set_key,
+            github_releases::commands::github_releases_ai_remove_key,
+            github_releases::commands::github_releases_ai_set_settings,
+            github_releases::commands::github_releases_ai_ollama_models,
+            github_releases::commands::github_releases_ai_test,
             game_saves::commands::game_saves_restore,
             game_saves::commands::game_saves_undo_last_restore,
             game_saves::commands::game_saves_sync_export,
@@ -432,6 +481,7 @@ pub fn run() {
             running.stop_all();
             game_saves_state.cancel();
             spotify_hub_state.cancel_all();
+            github_releases_state.cancel_all();
             jobs.cancel_all();
             cleanup.run();
         }

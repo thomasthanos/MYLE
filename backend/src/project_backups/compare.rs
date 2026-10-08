@@ -687,6 +687,77 @@ pub(crate) fn file_diff(
     Ok(diff)
 }
 
+/// The same preview as `file_diff`, for two versions already in memory
+/// (GitHub Releases: the committed file and the one in the folder). A side
+/// is `None` when the file is missing there; `Err(size)` when it was too
+/// large to read.
+pub(crate) fn bytes_diff(
+    path: &str,
+    old: Option<Result<Vec<u8>, u64>>,
+    new: Option<Result<Vec<u8>, u64>>,
+) -> FileDiff {
+    let too_large = |side: &Option<Result<Vec<u8>, u64>>| matches!(side, Some(Err(_)));
+    let info = |side: &Option<Result<Vec<u8>, u64>>| match side {
+        None => None,
+        Some(Ok(bytes)) => Some(info_of(bytes)),
+        Some(Err(size)) => Some(SideInfo { size: *size, sha256: None }),
+    };
+    if too_large(&old) || too_large(&new) {
+        return FileDiff::Binary { old: info(&old), new: info(&new), too_large: true };
+    }
+    let old = old.map(|side| side.unwrap_or_default());
+    let new = new.map(|side| side.unwrap_or_default());
+    if let Some(mime) = image_type(path) {
+        let fits = |bytes: &Option<Vec<u8>>| bytes.as_ref().is_none_or(|b| b.len() as u64 <= MAX_IMAGE_BYTES);
+        if fits(&old) && fits(&new) {
+            let rows = (mime == "image/svg+xml").then(|| {
+                let text = |bytes: &Option<Vec<u8>>| bytes.as_deref().and_then(decode_text).map(|(t, _)| t).unwrap_or_default();
+                match text_diff(&text(&old), &text(&new)) {
+                    FileDiff::Text { rows, .. } => Some(rows),
+                    _ => None,
+                }
+            }).flatten();
+            return FileDiff::Image {
+                mime: mime.to_string(),
+                old: old.as_deref().map(|b| data_url(mime, b)),
+                new: new.as_deref().map(|b| data_url(mime, b)),
+                old_info: old.as_deref().map(info_of),
+                new_info: new.as_deref().map(info_of),
+                rows,
+            };
+        }
+    }
+    let decode = |bytes: &Option<Vec<u8>>| match bytes {
+        None => Some(None),
+        Some(bytes) => decode_text(bytes).map(Some),
+    };
+    let (Some(old_text), Some(new_text)) = (decode(&old), decode(&new)) else {
+        return FileDiff::Binary {
+            old: old.as_deref().map(info_of),
+            new: new.as_deref().map(info_of),
+            too_large: false,
+        };
+    };
+    let encoding = [&old_text, &new_text]
+        .iter()
+        .find_map(|side| side.as_ref().and_then(|(_, encoding)| *encoding))
+        .map(str::to_string);
+    let mut diff = text_diff(
+        &old_text.map(|(t, _)| t).unwrap_or_default(),
+        &new_text.map(|(t, _)| t).unwrap_or_default(),
+    );
+    if let FileDiff::Text { encoding: slot, .. } = &mut diff {
+        *slot = encoding;
+    }
+    diff
+}
+
+/// The most of a file `bytes_diff` needs: larger files are compared by
+/// size and SHA-256 only.
+pub(crate) fn preview_limit(path: &str) -> u64 {
+    if image_type(path).is_some() { MAX_IMAGE_BYTES } else { MAX_DIFF_BYTES }
+}
+
 fn binary(
     old: &Side,
     old_name: Option<&str>,

@@ -10,7 +10,7 @@
 
 mod archive;
 pub mod commands;
-mod compare;
+pub(crate) mod compare;
 mod detect;
 mod engine;
 mod gitindex;
