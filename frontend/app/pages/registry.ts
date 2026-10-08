@@ -4,6 +4,7 @@ import IconInstallApps from "../../lib/icons/IconInstallApps.svelte";
 import IconSpotifyHub from "../../lib/icons/IconSpotifyHub.svelte";
 import IconGameSaves from "../../lib/icons/IconGameSaves.svelte";
 import IconProjectBackups from "../../lib/icons/IconProjectBackups.svelte";
+import IconGithubReleases from "../../lib/icons/IconGithubReleases.svelte";
 import IconCreativeHub from "../../lib/icons/IconCreativeHub.svelte";
 import IconWindowsOpt from "../../lib/icons/IconWindowsOpt.svelte";
 import IconSystemCleaner from "../../lib/icons/IconSystemCleaner.svelte";
@@ -12,6 +13,7 @@ import IconPasswords from "../../lib/icons/IconPasswords.svelte";
 import IconSettings from "../../lib/icons/IconSettings.svelte";
 import CreativeHub from "./creative-hub/CreativeHub.svelte";
 import GameSaves from "./game-saves/GameSaves.svelte";
+import GithubReleases from "./github-releases/GithubReleases.svelte";
 import InstallApps from "./install-apps/InstallApps.svelte";
 import PasswordManager from "./password-manager/PasswordManager.svelte";
 import ProjectBackups from "./project-backups/ProjectBackups.svelte";
@@ -38,6 +40,7 @@ const defs = [
   { id: "spotify-hub",          label: "Spotify Hub",           icon: IconSpotifyHub,    component: SpotifyHub },
   { id: "game-saves",           label: "Game Saves",            icon: IconGameSaves,     component: GameSaves },
   { id: "project-backups",      label: "Project Backups",       icon: IconProjectBackups, component: ProjectBackups },
+  { id: "github-releases",      label: "GitHub Releases",       icon: IconGithubReleases, component: GithubReleases, fill: true },
   { id: "creative-hub",         label: "Creative Suite",        icon: IconCreativeHub,   component: CreativeHub },
   { id: "windows-optimization", label: "Windows Optimization",  icon: IconWindowsOpt,    component: WindowsOptimization },
   { id: "system-cleaner",       label: "System Cleaner",        icon: IconSystemCleaner, component: SystemCleaner },

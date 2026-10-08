@@ -523,12 +523,19 @@ pub async fn github_releases_remove_repo(
     .await?
 }
 
+/// A field that may be missing (left alone), `null` (cleared) or a value.
+fn double<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrySettings {
     pub skip_version_files: Option<Vec<String>>,
     pub release_mode: Option<String>,
+    #[serde(default, deserialize_with = "double")]
     pub build_command: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double")]
     pub build_choice: Option<Option<String>>,
 }
 
@@ -1740,6 +1747,7 @@ pub async fn github_releases_ai_remove_key(provider: ProviderId) -> Result<AiVie
 pub struct AiChanges {
     pub order: Option<Vec<ProviderId>>,
     pub models: Option<BTreeMap<ProviderId, String>>,
+    #[serde(default, deserialize_with = "double")]
     pub ollama_url: Option<Option<String>>,
     pub ollama_enabled: Option<bool>,
 }
@@ -1816,6 +1824,19 @@ mod tests {
             "html_url": "https://github.com/a/b/releases/tag/x", "assets": []
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn missing_null_and_set_fields_differ() {
+        let missing: EntrySettings = serde_json::from_value(json!({})).unwrap();
+        let cleared: EntrySettings = serde_json::from_value(json!({ "buildCommand": null })).unwrap();
+        let set: EntrySettings = serde_json::from_value(json!({ "buildCommand": "npm run build" })).unwrap();
+        assert_eq!(missing.build_command, None);
+        assert_eq!(cleared.build_command, Some(None));
+        assert_eq!(set.build_command, Some(Some("npm run build".into())));
+        let ai: AiChanges = serde_json::from_value(json!({ "models": { "groq": "x" }, "order": ["openrouter", "groq"] })).unwrap();
+        assert_eq!(ai.order.unwrap(), [ProviderId::OpenRouter, ProviderId::Groq]);
+        assert_eq!(ai.models.unwrap()[&ProviderId::Groq], "x");
     }
 
     #[test]
