@@ -1,6 +1,7 @@
 <script lang="ts">
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import FileClock from "@lucide/svelte/icons/file-clock";
+  import FolderDown from "@lucide/svelte/icons/folder-down";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import ImageIcon from "@lucide/svelte/icons/image";
   import Lock from "@lucide/svelte/icons/lock";
@@ -21,6 +22,7 @@
     update: RefreshCw,
     thumbnails: ImageIcon,
     errors: TriangleAlert,
+    downloads: FolderDown,
   };
   const Icon = $derived(icons[category.icon] ?? HardDrive);
 

@@ -10,6 +10,7 @@ import { confirm } from "../../../lib/confirm.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { cleanerApi, formatSize, type CleanerCategory } from "./api";
+import { DOWNLOADS, DOWNLOADS_CATEGORY, deleteDownloads, previewDownloads, type Preview } from "./downloads";
 
 const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned" };
 
@@ -99,6 +100,8 @@ class CleanerState {
   autoSelected = $state(false);
   lastCleaned = $state<number | null>(readJson<number | null>(KEY.lastCleaned, null, (v) => typeof v === "number"));
   error = $state<string | null>(null);
+  /** The Downloads folder's last preview: what the scan found, and what stays. */
+  downloads = $state<Preview | null>(null);
   #raf = 0;
   #barTarget = 0;
   /** When the running visual step is free to move on; see `step` in `clean`. */
@@ -132,7 +135,9 @@ class CleanerState {
   async load() {
     if (!isTauri()) return;
     try {
-      this.categories = await cleanerApi.categories();
+      // The Downloads folder is measured and cleaned by its own commands,
+      // with the same card, tick and Clean button as the rest.
+      this.categories = [...(await cleanerApi.categories()), DOWNLOADS_CATEGORY];
       // Drop ids from an older build so nothing invisible stays selected.
       const known = new Set(this.categories.map((c) => c.id));
       for (const id of [...this.selected]) if (!known.has(id)) this.selected.delete(id);
@@ -200,11 +205,13 @@ class CleanerState {
           )
       : Promise.resolve(null);
 
+    const downloadsPass = this.#measureDownloads();
     try {
       await cleanerApi.scan((e) => {
         user[e.data.id] = { bytes: e.data.bytes, files: e.data.files, locked: e.data.locked };
         show(e.data.id);
       });
+      await downloadsPass;
       this.scanned = true;
     } catch (err) {
       this.error = message(err);
@@ -215,6 +222,33 @@ class CleanerState {
     if (wantsAdmin) this.#afterAdminScan(adminError);
     this.phase = "idle";
     this.#selectAllAfterScan();
+  }
+
+  async #measureDownloads() {
+    try {
+      this.downloads = await previewDownloads();
+      this.sizes[DOWNLOADS] = { bytes: this.downloads.total, files: this.downloads.items.length, locked: false };
+    } catch (err) {
+      this.downloads = null;
+      toast.error(`Downloads folder: ${message(err)}`);
+    }
+  }
+
+  /** Deletes the Downloads items the scan listed (each checked again). */
+  async #cleanDownloads(): Promise<{ freed: number; skipped: number }> {
+    const items = this.downloads?.items ?? [];
+    const outcome = await deleteDownloads(items.map((item) => item.path));
+    const skippedBytes = items.reduce((sum, item) => sum + item.size, 0) - outcome.freed;
+    this.#applyCleaned({
+      id: DOWNLOADS,
+      bytes: outcome.freed,
+      files: outcome.deleted,
+      skipped: outcome.skipped.length,
+      skippedBytes: Math.max(0, skippedBytes),
+      adminSkipped: 0,
+      adminSkippedBytes: 0,
+    });
+    return { freed: outcome.freed, skipped: outcome.skipped.length };
   }
 
   /** A scan is only useful when it ends with something ticked: select the rest. */
@@ -256,7 +290,8 @@ class CleanerState {
     if (this.busy || !this.selected.size) return;
     const chosen = this.categories.filter((c) => this.selected.has(c.id) && !this.cleaned.has(c.id));
     if (!chosen.length) return;
-    const ids = chosen.map((c) => c.id);
+    const withDownloads = chosen.some((c) => c.id === DOWNLOADS);
+    const ids = chosen.map((c) => c.id).filter((id) => id !== DOWNLOADS);
     // What the scan measured for this selection: the number the user was shown
     // before saying yes. Held on to, because the run measures again at the end.
     const selectedBefore = chosen.reduce((sum, c) => sum + (this.sizes[c.id]?.bytes ?? 0), 0);
@@ -278,8 +313,11 @@ class CleanerState {
       title: "Clean selected items?",
       message:
         `${chosen.map((c) => `• ${c.title}`).join("\n")}\n\nThis frees about ${formatSize(selectedBefore)} and cannot be undone.` +
-        adminLine,
-      confirmLabel: "Clean now",
+        adminLine +
+        (withDownloads
+          ? `\n\nDownloads folder: ${this.downloads?.items.length ?? 0} item(s) are deleted PERMANENTLY. They do not go to the Recycle Bin and cannot be restored. Documents and anything modified in the last 7 days stay.`
+          : ""),
+      confirmLabel: withDownloads ? "Clean and delete permanently" : "Clean now",
       danger: true,
     });
     if (!ok || this.busy) return;
@@ -287,7 +325,7 @@ class CleanerState {
     // The state the bar and the labels are drawn from. `passIds`, `passTitles`
     // and `done` follow the pass that is running; both passes clean in order.
     let passIds = ids;
-    let passTitles = chosen.map((c) => c.title);
+    let passTitles = chosen.filter((c) => c.id !== DOWNLOADS).map((c) => c.title);
     let done = 0;
     let pass: "user" | "administrator" = "user";
     // What the passes left behind, and what is truly in use when all is done.
@@ -317,11 +355,20 @@ class CleanerState {
     this.#startBar();
     this.progress = { pass, step: 1, total: passIds.length, current: passTitles[0] ?? "" };
     try {
-      const summary = await cleanerApi.clean(ids, (e) => {
-        if (e.event === "progress") return;
-        this.#applyCleaned(e.data);
-        void step();
-      });
+      if (withDownloads) {
+        this.progress = { pass, step: 1, total: passIds.length + 1, current: "Downloads folder" };
+        const result = await this.#cleanDownloads();
+        freed += result.freed;
+        skipped += result.skipped;
+      }
+      const empty = { freed: 0, files: 0, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: [] };
+      const summary = ids.length
+        ? await cleanerApi.clean(ids, (e) => {
+            if (e.event === "progress") return;
+            this.#applyCleaned(e.data);
+            void step();
+          })
+        : empty;
       freed += summary.freed;
       skipped += summary.skipped;
       // What the user pass left in the system folders is tried again below,
@@ -358,10 +405,12 @@ class CleanerState {
       // was freed; the bytes of the skipped files are a lower bound.
       this.#setBarTarget(1);
       this.settling = true;
-      await this.#remeasure(ids, withAdmin && adminNote === null);
-      inUse = Math.max(inUse, this.#stillThere(ids));
+      if (ids.length) await this.#remeasure(ids, withAdmin && adminNote === null);
+      if (withDownloads) await this.#measureDownloads();
+      const all = withDownloads ? [...ids, DOWNLOADS] : ids;
+      inUse = Math.max(inUse, this.#stillThere(all));
 
-      for (const id of ids) {
+      for (const id of all) {
         this.cleaned.add(id);
         this.selected.delete(id);
       }

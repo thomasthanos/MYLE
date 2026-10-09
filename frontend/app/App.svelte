@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { autoCleanDownloads } from "./pages/system-cleaner/downloads";
   import ConfirmHost from "../lib/components/ConfirmHost.svelte";
   import Toaster from "../lib/components/Toaster.svelte";
   import TooltipHost from "../lib/components/TooltipHost.svelte";
@@ -34,7 +33,6 @@
     void whatsNew.checkAfterStart();
     // The browser extension asked for the vault (to unlock it, or when it
     // started the app), or a scheduled backup's notice asked for Game Saves.
-    void autoCleanDownloads();
     void invoke<PageId | null>("start_page").then((page) => {
       if (!page) return;
       nav.go(page);
