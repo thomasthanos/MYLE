@@ -187,5 +187,22 @@
             "password": "123",
             "onlyRun": true
         }
+    },
+    {
+        "id": "creative.wandenhancer",
+        "name": "Wand Enhancer",
+        "description": "Advanced UX and interoperability extension for Wand (WeMod) app.",
+        "category": "Tools",
+        "icon": "/icons/Wand-Enhancer.svg",
+        "sizeHint": 2060288,
+        "digest": null,
+        "source": {
+            "type": "github",
+            "repo": "ThomasThanos/Wand-Enhancer",
+            "asset": "WandEnhancer\\.exe"
+        },
+        "setup": {
+            "type": "wandEnhancer"
+        }
     }
 ]

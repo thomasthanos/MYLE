@@ -5,9 +5,12 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Image from "@lucide/svelte/icons/image";
   import Package from "@lucide/svelte/icons/package";
+  import Play from "@lucide/svelte/icons/play";
   import RefreshCcw from "@lucide/svelte/icons/refresh-ccw";
+  import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
+  import Wrench from "@lucide/svelte/icons/wrench";
   import X from "@lucide/svelte/icons/x";
-  import { creativeState, CLIP_STUDIO_ID, type CreativeApp, type Job } from "./state.svelte";
+  import { creativeState, CLIP_STUDIO_ID, WAND_ENHANCER_ID, type CreativeApp, type Job } from "./state.svelte";
 
   let { app }: { app: CreativeApp } = $props();
 
@@ -21,6 +24,8 @@
     video: Clapperboard,
     art: Brush,
     office: FileText,
+    tools: Wrench,
+    enhancement: WandSparkles,
   };
   const CategoryIcon = $derived(categoryIcons[app.category.toLowerCase()] ?? Package);
 
@@ -68,6 +73,13 @@
   const showRevert = $derived(
     app.id === CLIP_STUDIO_ID && creativeState.clipStudioRestoreReady,
   );
+
+  /**
+   * True only for Wand Enhancer once the exe is present in roaming directory.
+   */
+  const showWandLaunch = $derived(
+    app.id === WAND_ENHANCER_ID && creativeState.wandEnhancerReady,
+  );
 </script>
 
 <article class="card" class:working={!!job}>
@@ -96,6 +108,20 @@
       </div>
       <button class="icon-btn" title="Cancel" aria-label="Cancel {app.name}" onclick={() => creativeState.cancel(app)}>
         <X size={16} />
+      </button>
+    {:else if showWandLaunch}
+      <!-- After install: launch directly, with an icon button to rebuild/re-download if desired -->
+      <button class="btn primary launch" onclick={() => creativeState.launchWandEnhancer()}>
+        <Play size={14} />
+        Run Wand Enhancer
+      </button>
+      <button
+        class="icon-btn"
+        title="Re-download & Build"
+        aria-label="Rebuild {app.name}"
+        onclick={() => creativeState.install(app)}
+      >
+        <RefreshCcw size={14} />
       </button>
     {:else if showRevert}
       <!-- After install: replace the primary button with the revert action -->

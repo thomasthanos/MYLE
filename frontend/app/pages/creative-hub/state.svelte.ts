@@ -5,6 +5,7 @@ import { toast } from "../../../lib/toast.svelte";
 import type { JobEvent, JobOutcome, Stage } from "../install-apps/api";
 
 export const CLIP_STUDIO_ID = "creative.clipstudiopaint.5.1.4";
+export const WAND_ENHANCER_ID = "creative.wandenhancer";
 
 export interface CreativeApp {
   id: string;
@@ -45,6 +46,8 @@ class CreativeState {
   jobs = $state<Record<string, Job>>({});
   /** True when the Clip Studio restore exe is present in Downloads. */
   clipStudioRestoreReady = $state(false);
+  /** True when WandEnhancer.exe is present in roaming directory. */
+  wandEnhancerReady = $state(false);
   #loaded = false;
 
   async load() {
@@ -54,9 +57,12 @@ class CreativeState {
       this.apps = await invoke<CreativeApp[]>("creative_catalog");
       this.error = null;
       this.#loaded = true;
-      // Quick synchronous fs check — no perceptible delay.
+      // Quick synchronous fs checks — no perceptible delay.
       this.clipStudioRestoreReady = await invoke<boolean>(
         "creative_clip_studio_restore_available",
+      );
+      this.wandEnhancerReady = await invoke<boolean>(
+        "creative_wand_enhancer_available",
       );
     } catch (err) {
       this.error = message(err);
@@ -117,6 +123,11 @@ class CreativeState {
           "creative_clip_studio_restore_available",
         );
       }
+      if (app.id === WAND_ENHANCER_ID) {
+        this.wandEnhancerReady = await invoke<boolean>(
+          "creative_wand_enhancer_available",
+        );
+      }
     }
   }
 
@@ -130,6 +141,15 @@ class CreativeState {
       toast.success(note);
     } catch (err) {
       toast.error(`Swap failed: ${message(err)}`);
+    }
+  }
+
+  async launchWandEnhancer() {
+    try {
+      const note = await invoke<string>("creative_wand_enhancer_launch");
+      toast.success(note);
+    } catch (err) {
+      toast.error(`Launch failed: ${message(err)}`);
     }
   }
 }

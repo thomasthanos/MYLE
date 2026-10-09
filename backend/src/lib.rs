@@ -385,6 +385,8 @@ pub fn run() {
             apps::creative::creative_install,
             apps::creative::creative_clip_studio_restore_available,
             apps::creative::creative_clip_studio_swap_exe,
+            apps::creative::creative_wand_enhancer_available,
+            apps::creative::creative_wand_enhancer_launch,
             cleaner::cleaner_categories,
             cleaner::cleaner_scan,
             cleaner::cleaner_scan_elevated,

@@ -64,12 +64,15 @@ enum Setup {
         to: Option<String>,
         password: Option<String>,
     },
+    /// Save the built executable to %APPDATA%\ThomasThanos\MakeYourLifeEasier and run it.
+    WandEnhancer,
 }
 
 impl Setup {
     fn action_label(&self) -> &'static str {
         match self {
             Setup::Extract { .. } => "Download & Extract",
+            Setup::WandEnhancer => "Download & Build",
             _ => "Download & Setup",
         }
     }
@@ -289,6 +292,33 @@ async fn run(
     }
 
     let (target, args) = match &entry.setup {
+        Setup::WandEnhancer => {
+            let _ = on_event.send(JobEvent::Stage {
+                stage: Stage::Installing,
+            });
+            let _ = on_event.send(JobEvent::Note {
+                text: "Configuring Wand Enhancer...".into(),
+            });
+
+            // Close existing instances to prevent file lock when updating
+            let _ = super::process::hidden("taskkill")
+                .args(["/IM", WAND_ENHANCER_EXE, "/F"])
+                .status()
+                .await;
+
+            let roaming = crate::storage::roaming_dir()?;
+            tokio::fs::create_dir_all(&roaming).await.map_err(err)?;
+            let dest_exe = roaming.join(WAND_ENHANCER_EXE);
+
+            tokio::fs::copy(&file, &dest_exe).await.map_err(err)?;
+
+            // Launch the built executable
+            let _ = std::process::Command::new(&dest_exe).spawn();
+
+            return Ok(JobOutcome::Done {
+                note: Some(format!("Saved to {} and launched.", dest_exe.display())),
+            });
+        }
         Setup::Installer { args } => (file.clone(), args.clone()),
         Setup::Extract { to, password } => {
             let _ = on_event.send(JobEvent::Stage {
@@ -590,6 +620,34 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     }
 }
 
+#[allow(dead_code)]
+pub const WAND_ENHANCER_ID: &str = "creative.wandenhancer";
+pub const WAND_ENHANCER_EXE: &str = "WandEnhancer.exe";
+
+/// Location where WandEnhancer.exe is saved: %APPDATA%\ThomasThanos\MakeYourLifeEasier\WandEnhancer.exe
+pub fn wand_enhancer_exe_path() -> Result<PathBuf, String> {
+    crate::storage::roaming_dir().map(|dir| dir.join(WAND_ENHANCER_EXE))
+}
+
+/// Returns true when WandEnhancer.exe is already present in roaming dir.
+#[tauri::command]
+pub fn creative_wand_enhancer_available() -> bool {
+    wand_enhancer_exe_path().map(|p| p.is_file()).unwrap_or(false)
+}
+
+/// Launches the installed WandEnhancer.exe.
+#[tauri::command]
+pub async fn creative_wand_enhancer_launch() -> Result<String, String> {
+    let path = wand_enhancer_exe_path()?;
+    if !path.is_file() {
+        return Err(format!("WandEnhancer.exe was not found at {}", path.display()));
+    }
+    std::process::Command::new(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch WandEnhancer: {e}"))?;
+    Ok("Wand Enhancer launched.".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,6 +760,10 @@ mod tests {
             }
             .action_label(),
             "Download & Setup"
+        );
+        assert_eq!(
+            Setup::WandEnhancer.action_label(),
+            "Download & Build"
         );
     }
 
