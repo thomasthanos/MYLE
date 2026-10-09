@@ -48,6 +48,25 @@
     if (p.takeHelloOnOpen() && !p.busy) void p.unlockWithHello(true);
   });
 
+  // A website's sign-in waits for the vault: Windows Hello asks at once
+  // (once), as soon as this window can show it; else the password field.
+  $effect(() => {
+    if (!p.helloForSite || p.busy || recovering) return;
+    if (!p.hello.enabled) {
+      p.helloForSite = false;
+      input?.focus();
+      return;
+    }
+    const go = () => {
+      if (document.visibilityState !== "visible" || !p.helloForSite) return;
+      p.helloForSite = false;
+      void p.unlockWithHello(true);
+    };
+    go();
+    document.addEventListener("visibilitychange", go);
+    return () => document.removeEventListener("visibilitychange", go);
+  });
+
   async function unlockWithHello() {
     if (p.busy) return;
     await p.unlockWithHello();
@@ -88,6 +107,9 @@
       {#if p.busy}<LockKeyholeOpen size={26} />{:else}<LockKeyhole size={26} />{/if}
     </span>
     <h2>Your vault is locked</h2>
+    {#if p.siteWaiting}
+      <p class="site-waiting" role="status">A sign-in in your browser is waiting for your passkey. Unlock to carry on: it finishes by itself.</p>
+    {/if}
     {#if p.hello.enabled}
       <p>Open it with {QUICK_UNLOCK}, or with your master password.</p>
       <button class="btn primary hello" bind:this={helloButton} disabled={p.busy} onclick={unlockWithHello}>
@@ -528,5 +550,15 @@
     .recovery-intro h2 {
       font-size: 19px;
     }
+  }
+
+  .site-waiting {
+    margin: 0 0 4px;
+    padding: 8px 12px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.4);
+    border-radius: 10px;
+    background: rgb(var(--accent-rgb) / 0.12);
+    color: var(--text-1);
+    font-size: 12.5px;
   }
 </style>

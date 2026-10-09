@@ -328,28 +328,39 @@ async function submitted(message, sender) {
  *  `stopped()` ends the wait early (the page no longer needs it). The wait
  *  covers MYLE being started here too, so a page that asked while it was
  *  closed carries on by itself once it is open and unlocked. */
-async function whenUnlocked(stopped = () => false) {
-  const until = Date.now() + 120_000;
+async function whenUnlocked(stopped = () => false, limit = 120_000) {
+  return (await untilUnlocked(stopped, limit)).unlocked;
+}
+
+/** Polls MYLE until its vault is open, `stopped()` or `limit` ms; with the
+ *  last state seen ("notRunning", "locked", ...), for the page's prompt. */
+async function untilUnlocked(stopped, limit) {
+  const until = Date.now() + limit;
+  let state = "unknown";
   while (Date.now() < until && !stopped()) {
     const status = await ask({ type: "status" });
-    if (status?.ok && status.state === "unlocked") return true;
+    state = status?.ok ? String(status.state) : String(status?.error ?? "noHost");
+    if (state === "unlocked") return { unlocked: true, state };
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
-  return false;
+  return { unlocked: false, state };
 }
 
 /** A page waiting for the vault to open, by tab: one wait each, and a new
  *  one (or the page saying it is done) ends the one before. */
 const unlockWaits = new Map();
 
-async function waitForUnlock(sender) {
+/** `seconds` (at most 30): the page asks again in rounds, saying in its
+ *  prompt how far MYLE is (starting, locked), until its own time is up. */
+async function waitForUnlock(sender, seconds) {
   const tabId = sender.tab.id;
   const token = {};
   unlockWaits.set(tabId, token);
-  const unlocked = await whenUnlocked(() => unlockWaits.get(tabId) !== token);
+  const limit = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 2), 30) * 1000 : 120_000;
+  const { unlocked, state } = await untilUnlocked(() => unlockWaits.get(tabId) !== token, limit);
   if (unlockWaits.get(tabId) === token) unlockWaits.delete(tabId);
   if (unlocked) void syncPasskeySites();
-  return { ok: true, unlocked };
+  return { ok: true, unlocked, state };
 }
 
 async function offer(sender) {
@@ -531,7 +542,7 @@ async function passkeySiteKnown(rpId, sender) {
 
 async function listPasskeys(message, sender, rpId) {
   const allow = list(message.allow) ? message.allow : [];
-  const answer = await ask({ type: "passkeyList", url: sender.url, rpId, allow });
+  const answer = await ask({ type: "passkeyList", url: sender.url, rpId, allow, wake: message.wake === true });
   if (answer?.ok && Array.isArray(answer.passkeys)) {
     void syncPasskeySites();
     // Only a full list says the site has none; a short "allow" list may
@@ -637,7 +648,7 @@ async function handle(message, sender) {
       return openApp();
     case "waitUnlocked":
       // While MYLE's prompt on the page waits for the vault to open.
-      return sender.frameId === 0 || !(await embeddedIn(sender)) ? waitForUnlock(sender) : refused;
+      return sender.frameId === 0 || !(await embeddedIn(sender)) ? waitForUnlock(sender, message.seconds) : refused;
     case "stopWaiting":
       if (unlockWaits.has(sender.tab.id)) unlockWaits.delete(sender.tab.id);
       return { ok: true };

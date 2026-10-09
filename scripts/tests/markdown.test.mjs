@@ -126,3 +126,13 @@ test("the 9.12.1 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Browser extension (1.4.1)")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
+
+test("the 9.13.0 notes read cleanly", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const md = await readFile(new URL("../../docs/release-notes/9.13.0.md", import.meta.url), "utf8");
+  const blocks = parseMarkdown(md);
+  assert.ok(text(blocks[0].c).startsWith("Passkeys that wait for MYLE"));
+  assert.ok(blocks.some((b) => b.t === "table"));
+  assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Browser extension (1.5.0)")));
+  assert.ok(!JSON.stringify(blocks).includes("<"));
+});

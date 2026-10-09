@@ -110,6 +110,10 @@ class PasswordsState {
    *  after the user came to the page, never when the vault locks while they
    *  are on it (by hand, or after a while away). */
   #helloOnOpenUntil = 0;
+  /** A website's sign-in waits for the vault (the browser extension asked):
+   *  the lock screen says so and asks Windows Hello by itself, once. */
+  siteWaiting = $state(false);
+  helloForSite = $state(false);
   /** Hosts already asked about since the vault opened. */
   #askedIcons = new Set<string>();
   #unlistenIcon: (() => void) | null = null;
@@ -206,6 +210,16 @@ class PasswordsState {
     }
   }
 
+  /** The browser extension wants the vault for a sign-in. */
+  async wantUnlock() {
+    // Asked as the app starts: the vault's state may not be read yet.
+    const info = await api.status().catch(() => null);
+    if (info?.status !== "locked") return;
+    if (!this.hello.enabled) await this.#readHello();
+    this.siteWaiting = true;
+    this.helloForSite = true;
+  }
+
   /** The user came to the page. */
   pageOpened() {
     this.#helloOnOpenUntil = Date.now() + 4000;
@@ -228,6 +242,7 @@ class PasswordsState {
     const ok = await this.#run(() => api.helloUnlock().then(() => true));
     if (!ok && quiet) this.error = null;
     if (ok) {
+      this.siteWaiting = false;
       this.status = "unlocked";
       await this.refresh();
       this.#syncSoon();
