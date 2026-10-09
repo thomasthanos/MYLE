@@ -9,6 +9,7 @@
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
+  import DownloadsCard from "./DownloadsCard.svelte";
   import { cleanerState } from "./state.svelte";
 
   onMount(() => {
@@ -148,6 +149,8 @@
     <CleanerCard {category} />
   {/each}
 </div>
+
+<DownloadsCard />
 
 <style>
   .hero {
