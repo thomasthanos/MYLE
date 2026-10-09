@@ -9,7 +9,7 @@ const all = [...registry.matchAll(/\{ id: "([a-z-]+)",\s+label: "[^"]+",\s+group
   ([, id, group, rest]) => ({ id, group, ownerOnly: rest.includes("ownerOnly: true"), lazy: false }),
 );
 for (const page of all) {
-  const entry = registry.slice(registry.indexOf(`id: "${page.id}"`)).split(/\n  \{ id:|\n\] as const/)[0];
+  const entry = registry.slice(registry.indexOf(`id: "${page.id}"`)).split(/\n {2}\{ id:|\n\] as const/)[0];
   page.lazy = entry.includes("load: () => import(");
 }
 const everyone = all.filter((page) => !page.ownerOnly);
