@@ -28,7 +28,11 @@ function page() {
       return Promise.resolve({ native: "get", options });
     }
   }
-  class PublicKeyCredential {}
+  class PublicKeyCredential {
+    static isUserVerifyingPlatformAuthenticatorAvailable() {
+      return Promise.resolve(false);
+    }
+  }
   class AuthenticatorAttestationResponse {}
   class AuthenticatorAssertionResponse {}
   const context = vm.createContext({
@@ -46,7 +50,9 @@ function page() {
     atob,
   });
   window.top = window;
-  window.postMessage = (data) => posted.push(data);
+  const traces = [];
+  // MYLE's debug notes go to the page as well; the questions are counted apart.
+  window.postMessage = (data) => (data?.kind === "trace" ? traces.push(data) : posted.push(data));
   vm.runInContext(source, context, { filename: "passkeys.js" });
   /** MYLE's part answering the last question. */
   const answer = (reply, index = posted.length - 1) => {
@@ -54,7 +60,7 @@ function page() {
     Object.assign(event, { source: window, data: { source: EXTENSION, id: posted[index].id, ...reply } });
     window.dispatchEvent(event);
   };
-  return { context, posted, answer, window };
+  return { context, posted, answer, window, traces };
 }
 
 const made = {
@@ -195,19 +201,23 @@ test("a site asking for its old U2F keys (appid) hears that a MYLE passkey is no
 
 test("an empty helper frame of the page's own origin asks MYLE through the page", async () => {
   const parent = page();
-  class CredentialsContainer {
-    get(options) {
-      return Promise.resolve({ native: "frame", options });
-    }
-    create(options) {
-      return Promise.resolve({ native: "frame", options });
-    }
-  }
   const frame = (origin) => {
+    // Each frame has its own realm, and so its own prototypes.
+    class CredentialsContainer {
+      get(options) {
+        return Promise.resolve({ native: "frame", options });
+      }
+      create(options) {
+        return Promise.resolve({ native: "frame", options });
+      }
+    }
     const window = new EventTarget();
     window.top = { origin: "https://example.com", navigator: parent.context.navigator };
+    window.postMessage = () => {};
     const context = vm.createContext({
       window,
+      EventTarget,
+      location: { origin, href: `${origin}/` },
       self: { origin },
       navigator: { credentials: new CredentialsContainer() },
       CredentialsContainer,
@@ -228,4 +238,35 @@ test("an empty helper frame of the page's own origin asks MYLE through the page"
   // Another origin: the browser's own, untouched.
   const other = frame("https://evil.example");
   assert.equal((await other.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } })).native, "frame");
+});
+
+test("MYLE's wrappers read as the browser's own functions", () => {
+  const { context } = page();
+  const read = vm.runInContext("Function.prototype.toString.call(navigator.credentials.get)", context);
+  assert.match(read, /^get\(options\)/, "the stand-in's own source, as the browser's would be native code");
+  assert.equal(vm.runInContext("navigator.credentials.get === CredentialsContainer.prototype.get", context), true);
+  assert.equal(vm.runInContext("String(Function.prototype.toString).includes('__myle')", context), false);
+});
+
+
+test("a sign-in asked before MYLE's part of the page started is asked again on its hello", async () => {
+  const { context, posted, answer, window } = page();
+  const pending = context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } });
+  assert.equal(posted.length, 1);
+  const hello = new Event("message");
+  Object.assign(hello, { source: window, data: { source: EXTENSION, kind: "hello" } });
+  window.dispatchEvent(hello);
+  assert.equal(posted.length, 2, "asked again");
+  assert.equal(posted[1].id, posted[0].id, "as the same question, answered once");
+  answer({ result: "native" });
+  assert.equal((await pending).native, "get");
+  // Once bridged, a question is asked just once.
+  void context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([2]) } });
+  window.dispatchEvent(Object.assign(new Event("message"), { source: window, data: { source: EXTENSION, kind: "hello" } }));
+  assert.equal(posted.length, 3);
+});
+
+test("a site asking for a platform authenticator hears MYLE is one", async () => {
+  const { context } = page();
+  assert.equal(await context.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(), true);
 });

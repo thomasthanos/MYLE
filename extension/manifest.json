@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MYLE Passwords",
   "short_name": "MYLE Passwords",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Fills in your saved logins from your MYLE password vault, and offers to save new ones.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5vJu4DWi31JrlEH5HvEot3xK+H0epXvGkzddOrLEUwqRPl+K/Sxbv7KfESA3LfJItCQgdyOoGTfYp624pvOV1L6lBaOL4wVHRgxgeDLjciBoPcOWMQRluurUw0rB7VI534JBln8Wwv9cIuObCyHlDIP5m9SzCqgbTEgJu0BcVhGfh9AMG7PeZcZN/9z/x1roNl9qlDRp9TazbslhyL4ZXAXPLyyY8uOKyuLbGIEIGglDm1+Hk8Fz2QlcNgTq9f4eG8z/gOnUgrdCWou+msIYbx4cUWhd6QI9rfaaunNuEazOPwWvFXmVtNUUDZjSqgZAusqjt5Vwn/b7JniqUldGWwIDAQAB",
   "icons": {
