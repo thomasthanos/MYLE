@@ -26,6 +26,24 @@
   document.documentElement.setAttribute(COPY, "");
 
   const send = (message) => ext.runtime.sendMessage(message).catch(() => ({ ok: false, error: "noHost" }));
+
+  // --- Debug log --------------------------------------------------------------
+  //
+  // Off unless "Debug log" is on in the toolbar popup. Then every passkey
+  // step shows in this page's console (F12 → Console), as "[MYLE passkeys]":
+  // never a challenge, a key or a password.
+  let debugging = false;
+  const VERSION = ext.runtime.getManifest?.().version ?? "?";
+  const debug = (...parts) => debugging && console.info("%c[MYLE passkeys]", "color:#848ede;font-weight:600", ...parts);
+  void ext.storage.local.get("debug").then((found) => {
+    debugging = found.debug === true;
+    debug(`extension ${VERSION} on ${location.origin}${window === window.top ? "" : " (a frame)"}`);
+    // The page-world part answers with how things stand there.
+    if (debugging) window.postMessage({ source: "myle-passkeys/extension", kind: "ping" }, location.origin === "null" ? "*" : location.origin);
+  }, () => {});
+  ext.storage.onChanged?.addListener((changes, area) => {
+    if (area === "local" && changes.debug) debugging = changes.debug.newValue === true;
+  });
   const LOCAL = ["localhost", "127.0.0.1", "[::1]"];
   const siteName = location.hostname.replace(/^www\./, "");
 
@@ -833,6 +851,7 @@
 
   const FROM_PAGE = "myle-passkeys/page";
   const TO_PAGE = "myle-passkeys/extension";
+  const heard = new Set();
   /** A sign-in form's standing request for a passkey picked from the menu. */
   let waitingPasskey = null;
   /** The request MYLE's prompt is for. */
@@ -920,6 +939,9 @@
    *  user is asked to unlock it, and the request goes on by itself after. */
   async function passkeysHere(id, options, retry) {
     const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [] });
+    debug("MYLE's list", listed?.ok ?
+      { rpId: listed.rpId, found: listed.passkeys?.length ?? 0, notAskedFor: listed.unlisted ?? 0, mylesIds: listed.unlistedIds ?? [] } :
+      { error: listed?.error ?? "none", known: listed?.known ?? false, detail: listed?.detail ?? "" });
     if (prompted !== id) return null;
     if (listed?.ok && Array.isArray(listed.passkeys)) return listed;
     const site = options.rpId || siteName;
@@ -952,6 +974,7 @@
       }
     } else {
       prompted = null;
+      debug(`leaving it to the browser: ${listed?.error ?? "no answer"}`);
       if (listed?.error === "rpMismatch") refuse(id, "rpMismatch");
       else answerPage(id, { result: "native" });
     }
@@ -1010,7 +1033,9 @@
     const listed = await passkeysHere(id, options, () => offerSignIn(id, options));
     if (!listed) return;
     if (!listed.passkeys.length) {
+      if (listed.unlisted > 0) return notAskedFor(id, listed);
       prompted = null;
+      debug("MYLE has no passkey for this site: leaving it to the browser");
       return answerPage(id, { result: "native" });
     }
     const keys = document.createElement("div");
@@ -1033,6 +1058,20 @@
       });
       keys.append(button);
     }
+  }
+
+  /** MYLE has a passkey for the site, but the site asked only for others
+   *  (its sign-in lists the passkeys it knows for the account): said, rather
+   *  than stepping aside without a word. */
+  function notAskedFor(id, listed) {
+    const many = listed.unlisted > 1;
+    prompt(id, `${listed.rpId} did not ask for MYLE's passkey`,
+      `MYLE has ${many ? `${listed.unlisted} passkeys` : "a passkey"} for ${listed.rpId}, but this sign-in asks for ` +
+      `${many ? "others" : "another one"}. The site may not have ${many ? "them" : "it"} on file (if saving ${many ? "them" : "it"} there ` +
+      "did not finish), or this is another account. Use another device now, then add a passkey again in the site's security settings.", [
+        cancel(id),
+        anotherDevice(id),
+      ]);
   }
 
   /** For the menu on a sign-in field: the passkeys a waiting sign-in form
@@ -1067,16 +1106,29 @@
     return { items, locked: false };
   }
 
+  addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== FROM_PAGE || event.data.kind !== "trace") return;
+    const { event: what, data } = event.data;
+    if (typeof what === "string" && what.length < 40) debug(`page: ${what}`, data && typeof data === "object" ? data : "");
+  });
+
   if (window === window.top) {
     addEventListener("message", (event) => {
-      if (event.source !== window || event.data?.source !== FROM_PAGE) return;
+      if (event.source !== window || event.data?.source !== FROM_PAGE || event.data.kind === "trace") return;
       const { id, kind, options } = event.data;
       if (typeof id !== "string" || id.length > 80) return;
+      // A question asked before this script started comes again when it says
+      // hello; one that was heard anyway is answered once.
+      if (kind !== "abort") {
+        if (heard.has(id)) return;
+        heard.add(id);
+      }
       if (kind === "abort") {
         if (waitingPasskey?.id === id) waitingPasskey = null;
         if (prompted === id) closePrompt();
         return;
       }
+      debug(`asked: ${kind}`, { rpId: options?.rpId ?? "(page host)", allow: options?.allow ?? [] });
       if (!options || typeof options !== "object") return answerPage(id, { result: "native" });
       if (kind === "conditional") {
         waitingPasskey = { id, options };
@@ -1092,6 +1144,8 @@
         answerPage(id, { result: "native" });
       }
     });
+    // Listening now: the page-world part asks again what it asked before.
+    window.postMessage({ source: TO_PAGE, kind: "hello" }, location.origin);
   }
 
   // --- Offering to save -------------------------------------------------------

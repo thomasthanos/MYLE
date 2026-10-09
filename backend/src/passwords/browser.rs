@@ -1034,6 +1034,20 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
                 return Err("badRequest".into());
             }
             let found = state.with_quiet(|vault| vault.passkeys_for(&rp_id, &allow))?;
+            // Passkeys of this site the page did not ask for (its list names
+            // others): MYLE says so instead of quietly stepping aside. Their
+            // ids (not secret: sites list them) help the debug log.
+            let unlisted: Vec<String> = if allow.is_empty() {
+                Vec::new()
+            } else {
+                state
+                    .with_quiet(|vault| vault.passkeys_for(&rp_id, &[]))?
+                    .into_iter()
+                    .map(|(_, _, key)| key.credential_id)
+                    .filter(|id| !found.iter().any(|(_, _, key)| key.credential_id == *id))
+                    .take(8)
+                    .collect()
+            };
             let list: Vec<Value> = found
                 .iter()
                 .map(|(_, title, key)| {
@@ -1045,7 +1059,7 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
                     })
                 })
                 .collect();
-            Ok(json!({ "ok": true, "rpId": rp_id, "passkeys": list }))
+            Ok(json!({ "ok": true, "rpId": rp_id, "passkeys": list, "unlisted": unlisted.len(), "unlistedIds": unlisted }))
         }
         Request::PasskeyCreate {
             url,

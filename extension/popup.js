@@ -401,3 +401,13 @@ function retry() {
 }
 
 retry();
+
+// The version loaded in this browser, and the debug log (read by the
+// extension's part in each page, which writes to that page's console).
+document.getElementById("version").textContent = `MYLE Passwords ${ext.runtime.getManifest().version}`;
+const debugBox = document.getElementById("debug");
+void ext.storage.local.get("debug").then((found) => (debugBox.checked = found.debug === true));
+debugBox.addEventListener("change", () => {
+  void ext.storage.local.set({ debug: debugBox.checked });
+  note(debugBox.checked ? "Debug log on: reload the page, then open its console (F12)." : "Debug log off.");
+});
