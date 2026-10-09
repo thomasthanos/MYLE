@@ -9,7 +9,7 @@ use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
@@ -228,9 +228,23 @@ async fn stream(
     );
     let mut hasher = want_hash.then(Sha256::new);
     let mut downloaded = 0u64;
-    let mut last_report = Instant::now();
     let mut body = response.bytes_stream();
-    while let Some(chunk) = body.next().await {
+    // Progress goes out on a clock, not only when a chunk lands: a connection
+    // that delivers in bursts still moves the bar every 100 ms.
+    let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        let chunk = tokio::select! {
+            biased;
+            next = body.next() => match next {
+                Some(chunk) => chunk,
+                None => break,
+            },
+            _ = ticker.tick() => {
+                on_progress(downloaded, shown(downloaded));
+                continue;
+            }
+        };
         if is_cancelled() {
             return Err(CANCELLED.into());
         }
@@ -240,10 +254,6 @@ async fn stream(
         }
         file.write_all(&chunk).await.map_err(err)?;
         downloaded += chunk.len() as u64;
-        if last_report.elapsed() >= PROGRESS_INTERVAL {
-            on_progress(downloaded, shown(downloaded));
-            last_report = Instant::now();
-        }
     }
     file.flush().await.map_err(err)?;
     if let Some(exact) = exact.filter(|exact| *exact != downloaded) {
