@@ -174,44 +174,24 @@
   });
   const nothingFound = $derived(terms.length > 0 && !Object.values(sectionShown).some(Boolean));
 
-  let content = $state<HTMLElement>();
-
+  const TAB_KEY = "myle.settings.tab";
+  /** One section at a time (the tab), all that match while searching. */
   function goTo(id: SectionId) {
-    const target = content?.querySelector<HTMLElement>(`#settings-${id}`);
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    target?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    active = id;
+    query = "";
+    try {
+      localStorage.setItem(TAB_KEY, id);
+    } catch {
+      // Private storage off: the tab is just not remembered.
+    }
   }
-
-  // The section in view is the one marked in the navigation: the last one
-  // whose heading has passed the top of the page (the last one at the end).
-  $effect(() => {
-    if (!content) return;
-    const scroller = content.closest<HTMLElement>(".scroller");
-    const target: HTMLElement | Window = scroller ?? window;
-    let frame = 0;
-    const update = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (!content) return;
-        const shown = sections.filter((section) => sectionShown[section.id]);
-        const top = (scroller?.getBoundingClientRect().top ?? 0) + (scroller?.clientHeight ?? innerHeight) * 0.35;
-        const atEnd = scroller ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4 : false;
-        let current = shown[0]?.id;
-        for (const section of shown) {
-          const element = content.querySelector<HTMLElement>(`#settings-${section.id}`);
-          if (element && element.getBoundingClientRect().top <= top) current = section.id;
-        }
-        if (atEnd && shown.length) current = shown[shown.length - 1].id;
-        if (current) active = current;
-      });
-    };
-    update();
-    target.addEventListener("scroll", update, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      target.removeEventListener("scroll", update);
-    };
-  });
+  try {
+    const saved = localStorage.getItem(TAB_KEY);
+    if (saved && sections.some((section) => section.id === saved)) active = saved as SectionId;
+  } catch {
+    // As above.
+  }
+  const hiddenSection = (id: SectionId) => (terms.length ? !sectionShown[id] : active !== id);
 
   function onKey(event: KeyboardEvent) {
     // Ctrl+F (or "/") searches the settings.
@@ -257,22 +237,20 @@
           <button
             class="nav-item"
             class:active={active === section.id && !terms.length}
-            disabled={!sectionShown[section.id]}
-            aria-current={active === section.id ? "true" : undefined}
+            disabled={terms.length > 0 && !sectionShown[section.id]}
+            title={section.hint}
+            aria-current={active === section.id && !terms.length ? "page" : undefined}
             onclick={() => goTo(section.id)}
           >
-            <span class="nav-icon"><Icon size={15} /></span>
-            <span class="nav-text">
-              <b>{section.label}</b>
-              <small>{section.hint}</small>
-            </span>
+            <span class="nav-icon"><Icon size={14} /></span>
+            <span class="nav-text"><b>{section.label}</b></span>
           </button>
         </li>
       {/each}
     </ul>
   </nav>
 
-  <div class="content" bind:this={content}>
+  <div class="content">
     {#if nothingFound}
       <div class="empty">
         <Search size={22} />
@@ -282,18 +260,21 @@
       </div>
     {/if}
 
-    <section id="settings-account" class="group" hidden={!sectionShown.account} aria-labelledby="account-heading">
+    <section id="settings-account" class="group" hidden={hiddenSection("account")} aria-labelledby="account-heading">
       <header class="group-head">
         <h2 id="account-heading">Account &amp; sync</h2>
         <p>Sign in to keep your choices the same on every PC. Everything works without an account too.</p>
       </header>
       <div class="stack">
         <AccountCard />
-        <SyncedData />
+        <details class="more">
+          <summary>What is saved in your account, and what stays on this PC</summary>
+          <SyncedData />
+        </details>
       </div>
     </section>
 
-    <section id="settings-appearance" class="group" hidden={!sectionShown.appearance} aria-labelledby="appearance-heading">
+    <section id="settings-appearance" class="group" hidden={hiddenSection("appearance")} aria-labelledby="appearance-heading">
       <header class="group-head">
         <h2 id="appearance-heading">Appearance</h2>
         <p>Pick a theme. It applies at once, to every MYLE window.</p>
@@ -339,7 +320,7 @@
       </div>
     </section>
 
-    <section id="settings-startup" class="group" hidden={!sectionShown.startup} aria-labelledby="startup-heading">
+    <section id="settings-startup" class="group" hidden={hiddenSection("startup")} aria-labelledby="startup-heading">
       <header class="group-head">
         <h2 id="startup-heading">Startup &amp; tray</h2>
         <p>Whether MYLE opens with Windows, and what closing its window does.</p>
@@ -403,7 +384,7 @@
       </div>
     </section>
 
-    <section id="settings-updates" class="group" hidden={!sectionShown.updates} aria-labelledby="updates-heading">
+    <section id="settings-updates" class="group" hidden={hiddenSection("updates")} aria-labelledby="updates-heading">
       <header class="group-head">
         <h2 id="updates-heading">Updates</h2>
         <p>MYLE checks for a new version every time it starts. You can also check now.</p>
@@ -456,7 +437,7 @@
       </div>
     </section>
 
-    <section id="settings-about" class="group" hidden={!sectionShown.about} aria-labelledby="about-heading">
+    <section id="settings-about" class="group" hidden={hiddenSection("about")} aria-labelledby="about-heading">
       <header class="group-head">
         <h2 id="about-heading">About</h2>
         <p>What changed lately, and where MYLE lives.</p>
@@ -622,13 +603,6 @@
     font-weight: 600;
   }
 
-  .nav-text small {
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 11px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
 
   /* --- Sections --- */
 
@@ -1011,9 +985,145 @@
     .nav-item {
       width: auto;
     }
+  }
 
-    .nav-text small {
-      display: none;
-    }
+  /* --- Compact: tabs across the top, one section at a time --- */
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .side {
+    position: static;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .side ul {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 2px;
+    order: 1;
+    padding: 3px;
+    border: 1px solid var(--btn-border);
+    border-radius: 10px;
+    background: rgb(0 0 0 / 0.18);
+  }
+
+  .search {
+    order: 2;
+    flex: 1 1 160px;
+    min-width: 110px;
+    max-width: 240px;
+    height: 32px;
+    margin-left: auto;
+  }
+
+  .nav-item {
+    width: auto;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 7px;
+  }
+
+  .nav-icon {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+  }
+
+  .nav-text b {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .content {
+    gap: 14px;
+  }
+
+  .group {
+    gap: 8px;
+  }
+
+  .group-head h2 {
+    font-size: 14px;
+  }
+
+  .group-head p {
+    margin-top: 1px;
+    font-size: 11.5px;
+  }
+
+  .stack {
+    gap: 10px;
+  }
+
+  .panel {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .panel.rows {
+    padding: 4px;
+  }
+
+  .row {
+    gap: 10px;
+    padding: 8px 8px;
+  }
+
+  .row-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .text strong {
+    font-size: 12.5px;
+  }
+
+  .text small {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .preview {
+    height: 52px;
+  }
+
+  .theme {
+    padding: 8px;
+  }
+
+  .update,
+  .links {
+    padding-top: 8px;
+  }
+
+  .empty {
+    padding: 24px 16px;
+  }
+
+  .more > summary {
+    padding: 8px 12px;
+    border: 1px solid var(--btn-border);
+    border-radius: 10px;
+    background: var(--btn-fill);
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+    list-style-position: inside;
+  }
+
+  .more > summary:hover {
+    background: var(--btn-fill-hover);
+    color: var(--text-1);
+  }
+
+  .more[open] > summary {
+    margin-bottom: 10px;
   }
 </style>

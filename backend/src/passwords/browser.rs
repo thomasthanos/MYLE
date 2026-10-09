@@ -472,7 +472,7 @@ fn write_message(output: &mut impl Write, value: &Value) -> std::io::Result<()> 
 
 /// How long the host waits for the app it started to answer, before it tells
 /// the browser the app is not running after all.
-const APP_START_WAIT: Duration = Duration::from_secs(25);
+const APP_START_WAIT: Duration = Duration::from_secs(20);
 /// How often it looks for the app's pipe while it waits.
 const APP_START_POLL: Duration = Duration::from_millis(250);
 
@@ -486,21 +486,30 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
         let reply = if running {
             ask_app(&request_from(browser, copy, &message))
                 .unwrap_or_else(|| json!({ "ok": false, "error": "notRunning" }))
+        } else if is_open(&message) {
+            // The extension's own "open": start it (it shows the vault).
+            let how = launch_app();
+            json!({ "ok": how.is_some(), "detail": how.unwrap_or("could not start MYLE") })
         } else if !wants_the_app(&message) {
-            // The extension's own "open": start it (it shows the vault), or
-            // say it is already up, which for the user is the same thing.
-            json!({ "ok": start_app() })
+            // Anything else (a page's status poll, logins) never starts it.
+            json!({ "ok": false, "error": "notRunning" })
         } else {
             // The browser asked while MYLE was closed. The app is started and
             // this same host waits for it, so the request is answered here
             // instead of the page hearing "MYLE is not running" and giving up:
             // the sign-in the user just started carries on by itself.
-            if start_app() {
-                wait_for_app(APP_START_WAIT);
-            }
-            match app_running().then(|| ask_app(&request_from(browser, copy, &message))).flatten() {
+            let how = launch_app();
+            let up = how.is_some() && wait_for_app(APP_START_WAIT);
+            match up.then(|| ask_app(&request_from(browser, copy, &message))).flatten() {
                 Some(answer) => answer,
-                None => json!({ "ok": false, "error": "notRunning" }),
+                None => json!({
+                    "ok": false,
+                    "error": "notRunning",
+                    "detail": match how {
+                        Some(how) => format!("{how}; MYLE did not answer in {}s", APP_START_WAIT.as_secs()),
+                        None => "could not start MYLE".to_owned(),
+                    },
+                }),
             }
         };
         write_message(&mut output, &reply)?;
@@ -521,31 +530,124 @@ fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
 /// in a login is not started here: the extension's menu has its own Open MYLE
 /// button, and a page must not bring the app up by itself.
 fn wants_the_app(message: &Value) -> bool {
-    matches!(
-        message.get("type").and_then(Value::as_str),
-        Some("passkeyList") | Some("passkeyGet") | Some("passkeyCreate")
-    )
+    match message.get("type").and_then(Value::as_str) {
+        Some("passkeyList") => message.get("wake").and_then(Value::as_bool) == Some(true),
+        Some("passkeyGet") | Some("passkeyCreate") => true,
+        _ => false,
+    }
 }
 
-/// Starts MYLE on the Password Manager page. The browser is the parent of the
-/// copy the app starts; that is how the extension's Open button already
-/// brings it up.
-fn start_app() -> bool {
-    std::env::current_exe()
-        .and_then(|exe| std::process::Command::new(exe).arg("--open-passwords").spawn())
+fn is_open(message: &Value) -> bool {
+    message.get("type").and_then(Value::as_str) == Some("open")
+}
+
+/// The flag MYLE starts with to open on the Password Manager and ask to be
+/// unlocked; also what the `myle:` link starts it with.
+pub const OPEN_FLAG: &str = "--open-passwords";
+/// MYLE's own link scheme (`myle://passwords`), registered for this user.
+const PROTOCOL: &str = "myle";
+
+/// Starts MYLE on the Password Manager page, and says how.
+///
+/// A program the browser starts lives in the browser's job: what it starts
+/// in turn can be ended with it, and it holds the browser's pipes. So the
+/// app is started on its own (no console, no inherited handles, out of the
+/// job when the job allows it), and if it is still not up after a moment,
+/// through Windows' shell with MYLE's `myle:` link, which starts it from
+/// Explorer like a click on its shortcut.
+fn launch_app() -> Option<&'static str> {
+    if spawn_detached() {
+        if wait_for_app(Duration::from_secs(6)) {
+            return Some("started");
+        }
+        if open_link() {
+            return Some("started, then asked Windows to open MYLE");
+        }
+        return Some("started");
+    }
+    open_link().then_some("asked Windows to open MYLE")
+}
+
+fn spawn_detached() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let start = |flags: u32| {
+        Command::new(&exe)
+            .arg(OPEN_FLAG)
+            .current_dir(exe.parent().unwrap_or(Path::new(".")))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+            .is_ok()
+    };
+    // Breaking away is refused in a job that does not allow it: then as is.
+    start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)
+        || start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+}
+
+/// Opens `myle://passwords` through Explorer: the copy it starts is
+/// Explorer's, not the browser's.
+fn open_link() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    if register_protocol().is_err() {
+        return false;
+    }
+    let windows = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    Command::new(windows.join("explorer.exe"))
+        .arg(format!("{PROTOCOL}://passwords"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0100_0000 | 0x0000_0008)
+        .spawn()
+        .or_else(|_| {
+            Command::new(windows.join("explorer.exe"))
+                .arg(format!("{PROTOCOL}://passwords"))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        })
         .is_ok()
+}
+
+/// `myle:` links start this program on the Password Manager (for this user
+/// only). Whatever the link says after the scheme is not passed on.
+pub fn register_protocol() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let command = format!("\"{}\" {OPEN_FLAG}", exe.display());
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey(format!(r"Software\Classes\{PROTOCOL}")).map_err(|e| e.to_string())?;
+    let current: Option<String> = key.open_subkey(r"shell\open\command").and_then(|k| k.get_value("")).ok();
+    if current.as_deref() == Some(command.as_str()) {
+        return Ok(());
+    }
+    key.set_value("", &"URL:MYLE").map_err(|e| e.to_string())?;
+    key.set_value("URL Protocol", &"").map_err(|e| e.to_string())?;
+    let (open, _) = key.create_subkey(r"shell\open\command").map_err(|e| e.to_string())?;
+    open.set_value("", &command).map_err(|e| e.to_string())
 }
 
 /// Waits, up to `limit`, for the app to answer on its pipe. Milliseconds
 /// count: the app's window and vault come up in a couple of seconds.
-fn wait_for_app(limit: Duration) {
+fn wait_for_app(limit: Duration) -> bool {
     let until = Instant::now() + limit;
     while Instant::now() < until {
         if app_running() {
-            return;
+            return true;
         }
         std::thread::sleep(APP_START_POLL);
     }
+    app_running()
 }
 
 fn app_running() -> bool {
@@ -595,6 +697,7 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
         tauri::async_runtime::spawn_blocking(move || {
             if filling {
                 let _ = ensure_registered();
+                let _ = register_protocol();
             } else {
                 unregister_hosts();
             }
@@ -691,6 +794,10 @@ enum Request {
         rp_id: Option<String>,
         #[serde(default)]
         allow: Vec<String>,
+        /// The site's own request waits on it (not a menu on a field): a
+        /// closed MYLE is started, a locked one asks to be unlocked.
+        #[serde(default)]
+        wake: bool,
     },
     /// A new passkey, for the page's `navigator.credentials.create()`.
     PasskeyCreate {
@@ -774,7 +881,12 @@ fn fits(saved: &str, page: &str) -> Option<bool> {
 
 fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     if let Request::Open = request {
-        open_vault(app);
+        let locked = state.with_quiet(|vault| Ok(vault.status())).is_ok_and(|status| status == Status::Locked);
+        if locked {
+            ask_to_unlock(app);
+        } else {
+            open_vault(app);
+        }
         return json!({ "ok": true });
     }
     let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling)).unwrap_or(false);
@@ -1081,10 +1193,16 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
         return Err("busy".into());
     }
     if status != Status::Unlocked {
+        let wakes = !matches!(request, Request::PasskeyList { wake: false, .. });
+        if status != Status::New && wakes {
+            // A sign-in waits on MYLE: it comes forward and asks to be
+            // unlocked (Windows Hello when it is on).
+            ask_to_unlock(app);
+        }
         return Err(if status == Status::New { "noVault" } else { "locked" }.into());
     }
     match request {
-        Request::PasskeyList { url, rp_id, allow } => {
+        Request::PasskeyList { url, rp_id, allow, .. } => {
             let host = page_host(&url).ok_or("insecure")?;
             let rp_id = passkeys::rp_id_for(&host, rp_id.as_deref())?;
             if allow.len() > 64 {
@@ -1273,8 +1391,29 @@ fn same_login_in<'a>(
 }
 
 /// Brings the app forward on the Password Manager page.
+/// What the Password Manager hears when a website waits for the vault: it
+/// asks to be unlocked at once.
+pub const UNLOCK_EVENT: &str = "myle-unlock-wanted";
+
+/// Brings MYLE to its vault and asks for it to be unlocked: at most every
+/// few seconds, however many requests a sign-in makes.
+pub fn ask_to_unlock(app: &AppHandle) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|at| at.elapsed() < Duration::from_secs(4)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    open_vault(app);
+    let _ = app.emit(UNLOCK_EVENT, ());
+}
+
 pub fn open_vault(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    // Still starting: the splash hands over to the vault by itself.
+    let starting = app.get_webview_window("splash").is_some();
+    if let Some(window) = app.get_webview_window("main").filter(|_| !starting) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -1365,7 +1504,7 @@ mod tests {
         // the click they already made carries on instead of hearing "not
         // running" and making MYLE look as if it had no passkey at all.
         for message in [
-            json!({ "type": "passkeyList", "url": "https://accounts.google.com/" }),
+            json!({ "type": "passkeyList", "url": "https://accounts.google.com/", "wake": true }),
             json!({ "type": "passkeyGet", "url": "https://x.com/", "challenge": "Y2g", "credentialId": "a" }),
             json!({ "type": "passkeyCreate", "url": "https://x.com/", "rpName": "X" }),
         ] {
@@ -1375,6 +1514,8 @@ mod tests {
         // and a page must never bring the app up by itself. The extension's own
         // "open" starts it through the host's other path.
         for message in [
+            // The menu on a sign-in field asking what MYLE has, by itself.
+            json!({ "type": "passkeyList", "url": "https://accounts.google.com/" }),
             json!({ "type": "logins", "url": "https://x.com/" }),
             json!({ "type": "fill", "id": "1" }),
             json!({ "type": "open" }),

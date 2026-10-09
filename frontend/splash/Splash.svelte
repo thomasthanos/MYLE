@@ -40,7 +40,11 @@
   let version = $state("");
 
   const countdown = $derived(phase === "error");
-  const indeterminate = $derived(progress === null && !countdown);
+  /** Where the start is: checking, updating (only with one), opening. */
+  const steps = ["Check", "Update", "Open"];
+  const stepAt = $derived(
+    phase === "checking" || phase === "error" ? 0 : phase === "starting" ? 2 : 1,
+  );
   const tone = $derived(phase === "error" ? "error" : phase === "starting" ? "done" : "busy");
 
   let updater = { checkForUpdate, installUpdate, finishStartup };
@@ -195,7 +199,13 @@
 
 <div class="splash" data-tauri-drag-region>
   <div class="center">
-    <SplashLogo {tone} />
+    <SplashLogo {tone} progress={countdown ? 1 : progress} hold={ERROR_HOLD_MS} />
+
+    <ol class="steps" aria-label="Starting MYLE">
+      {#each steps as step, index (step)}
+        <li class:current={index === stepAt} class:past={index < stepAt}><i></i>{step}</li>
+      {/each}
+    </ol>
 
     <div class="text" aria-live="polite">
       {#key title}
@@ -206,17 +216,6 @@
       <p class="detail" class:error={phase === "error"} title={detail}>{detail || " "}</p>
     </div>
 
-    <div
-      class="bar"
-      class:indeterminate
-      class:countdown
-      class:done={phase === "starting"}
-      style:--hold="{ERROR_HOLD_MS}ms"
-    >
-      <div class="fill" style:transform={progress === null || countdown ? undefined : `scaleX(${progress})`}>
-        <div class="shine"></div>
-      </div>
-    </div>
 
     <div class="meta">
       <span>{transfer}</span>
@@ -305,59 +304,19 @@
     color: rgb(255 200 196 / 0.6);
   }
 
-  .bar {
-    position: relative;
-    width: 232px;
-    height: 5px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.08);
-    box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.35);
-  }
 
-  .fill {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    border-radius: inherit;
-    background: var(--accent-grad);
-    box-shadow: 0 0 12px var(--accent-glow);
-    transform-origin: left center;
-    transform: scaleX(0);
-    transition: transform 160ms linear;
-  }
 
   /* A glint running along the filled part; it is scaled with the fill, so it
      never shows past it. */
-  .shine {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 40%;
-    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
-    opacity: 0;
-  }
 
-  .indeterminate .fill {
-    width: 38%;
-    transition: none;
-  }
 
-  .countdown .fill {
-    background: linear-gradient(90deg, #ff9f7a, #e5484d);
-    box-shadow: 0 0 10px rgb(229 72 77 / 0.45);
-    transform: scaleX(1);
-    transition: none;
-  }
 
-  .done .fill {
-    transition: transform 320ms var(--ease-out);
-  }
 
   .meta {
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    width: 232px;
+    width: 200px;
     height: 16px;
     margin-top: 8px;
     font-size: 11px;
@@ -379,7 +338,6 @@
 
   @media (prefers-reduced-motion: no-preference) {
     .text,
-    .bar,
     .meta,
     .version {
       animation: enter 520ms var(--ease-out) both;
@@ -389,7 +347,6 @@
       animation-delay: 120ms;
     }
 
-    .bar,
     .meta {
       animation-delay: 200ms;
     }
@@ -398,17 +355,8 @@
       animation-delay: 280ms;
     }
 
-    .indeterminate .fill {
-      animation: sweep 1.25s var(--ease-in-out) infinite;
-    }
 
-    .countdown .fill {
-      animation: drain var(--hold) linear forwards;
-    }
 
-    .bar:not(.indeterminate, .countdown) .shine {
-      animation: shine 1.6s var(--ease-in-out) infinite;
-    }
   }
 
   @keyframes enter {
@@ -418,29 +366,50 @@
     }
   }
 
-  @keyframes sweep {
-    from {
-      transform: translateX(-100%);
-    }
-    to {
-      transform: translateX(265%);
-    }
+
+
+
+  .steps {
+    display: flex;
+    gap: 14px;
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    color: var(--text-3);
   }
 
-  @keyframes drain {
-    to {
-      transform: scaleX(0);
-    }
+  .steps li {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: color var(--dur-base, 200ms) var(--ease-out);
   }
 
-  @keyframes shine {
-    from {
-      opacity: 1;
-      transform: translateX(-100%);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(250%);
-    }
+  .steps i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.16);
+    transition: background var(--dur-base, 200ms) var(--ease-out), transform var(--dur-base, 200ms) var(--ease-out);
+  }
+
+  .steps .past {
+    color: var(--text-2);
+  }
+
+  .steps .past i {
+    background: #34d399;
+  }
+
+  .steps .current {
+    color: var(--text-1);
+  }
+
+  .steps .current i {
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.8);
+    transform: scale(1.25);
   }
 </style>

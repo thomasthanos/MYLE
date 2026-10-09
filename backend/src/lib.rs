@@ -96,7 +96,7 @@ fn start_page() -> Option<&'static str> {
 }
 
 fn page_asked(args: &[String]) -> Option<&'static str> {
-    if args.iter().any(|a| a == "--open-passwords") {
+    if args.iter().any(|a| a == passwords::browser::OPEN_FLAG) {
         Some("password-manager")
     } else if args.iter().any(|a| a == game_saves::notice::OPEN_FLAG) {
         Some("game-saves")
@@ -228,6 +228,10 @@ pub fn run() {
                     let _ = splash.set_focus();
                 }
                 None => tray::show_window(app),
+            }
+            // The browser extension (or a myle: link) wants the vault.
+            if args.iter().any(|a| a == passwords::browser::OPEN_FLAG) {
+                passwords::browser::ask_to_unlock(app);
             }
             // A scheduled backup's notice was clicked: go to Game Saves.
             if args.iter().any(|a| a == game_saves::notice::OPEN_FLAG) {

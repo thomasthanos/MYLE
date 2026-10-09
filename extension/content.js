@@ -922,16 +922,40 @@
     setTimeout(() => prompted === id && closePrompt(), 2600);
   }
 
+  /** How long a sign-in waits for MYLE to start and be unlocked. */
+  const UNLOCK_WAIT = 180;
+
   /** Waits for the vault to be unlocked while prompt `id` is up, then
-   *  carries on with `retry`: the user only has to unlock MYLE. */
+   *  carries on with `retry`: the user only has to unlock MYLE. Asks in
+   *  rounds, so the prompt says how far MYLE is; the page's request stays
+   *  open all the while. */
   async function carryOnWhenUnlocked(id, text, retry) {
-    const waited = await send({ type: "waitUnlocked" });
-    if (prompted !== id) return;
-    if (waited?.unlocked) {
-      text.textContent = "MYLE is unlocked. Looking for your passkey…";
-      return retry();
+    const started = Date.now();
+    let opened = false;
+    while (prompted === id) {
+      const left = UNLOCK_WAIT - Math.round((Date.now() - started) / 1000);
+      if (left <= 0) break;
+      const waited = await send({ type: "waitUnlocked", seconds: Math.min(left, 6) });
+      if (prompted !== id) return;
+      debug("waiting for MYLE", { state: waited?.state ?? "none", unlocked: waited?.unlocked === true });
+      if (waited?.unlocked) {
+        text.textContent = "MYLE is unlocked. Signing you in…";
+        return retry();
+      }
+      const state = waited?.state;
+      if (state === "notRunning" && !opened && Date.now() - started > 8000) {
+        // Still not up: start it once more (the first try may have lost).
+        opened = true;
+        void send({ type: "open" });
+      }
+      const seconds = Math.max(0, UNLOCK_WAIT - Math.round((Date.now() - started) / 1000));
+      text.textContent = state === "notRunning" || state === "noHost"
+        ? `Starting MYLE… The sign-in waits for it (${seconds}s).`
+        : `Unlock your vault in MYLE (Windows Hello or your master password). The sign-in carries on by itself (${seconds}s).`;
+      if (state === "noHost" || state === "disabled") break;
     }
-    text.textContent = "MYLE is still locked. Unlock it, then press Try again.";
+    if (prompted !== id) return;
+    text.textContent = "MYLE did not open in time. Open and unlock it, then press Try again.";
   }
 
   /** Whether MYLE takes part for this site; else the browser's own passkeys.
@@ -939,7 +963,7 @@
    *  goes on by itself after: the vault may hold this site's passkey, and not
    *  asking at all is what makes it look like MYLE has none. */
   async function passkeysHere(id, options, retry) {
-    const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [] });
+    const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [], wake: true });
     debug("MYLE's list", listed?.ok ?
       { rpId: listed.rpId, found: listed.passkeys?.length ?? 0, notAskedFor: listed.unlisted ?? 0, mylesIds: listed.unlistedIds ?? [] } :
       { error: listed?.error ?? "none", known: listed?.known ?? false, detail: listed?.detail ?? "" });
@@ -976,8 +1000,11 @@
           }
         }],
       ]);
-      // Already waiting: unlocking MYLE by hand carries on too.
-      if (!closed) {
+      // MYLE has this site's passkey (or is merely locked): it is started and
+      // brought forward at once, asks to be unlocked (Windows Hello when it
+      // is on), and the sign-in carries on by itself.
+      if (!closed || listed?.known) {
+        if (closed || locked) void send({ type: "open" });
         waiting = true;
         void carryOnWhenUnlocked(id, text, retry);
       }
@@ -1038,8 +1065,10 @@
     userVerification: options.userVerification,
   });
 
-  async function offerSignIn(id, options) {
-    const listed = await passkeysHere(id, options, () => offerSignIn(id, options));
+  /** `afterUnlock`: the user just opened MYLE for this sign-in; with one
+   *  passkey for it, that is the choice, and it is used at once. */
+  async function offerSignIn(id, options, afterUnlock = false) {
+    const listed = await passkeysHere(id, options, () => offerSignIn(id, options, true));
     if (!listed) return;
     if (!listed.passkeys.length) {
       if (listed.unlisted > 0) return notAskedFor(id, listed);
@@ -1066,6 +1095,20 @@
         }
       });
       keys.append(button);
+    }
+    if (afterUnlock && listed.passkeys.length === 1) {
+      debug("one passkey, MYLE just unlocked for it: signing in");
+      const [only] = listed.passkeys;
+      for (const other of keys.querySelectorAll("button")) other.disabled = true;
+      text.textContent = `Signing in as ${only.userName || only.userDisplayName || "your account"}… ${busyLine}`;
+      const answer = await usePasskey(options, only.credentialId);
+      if (prompted !== id) return;
+      if (answer?.ok && answer.credential) {
+        closePrompt();
+        answerPage(id, { result: "credential", credential: answer.credential });
+      } else {
+        failed(id, text, answer?.error);
+      }
     }
   }
 

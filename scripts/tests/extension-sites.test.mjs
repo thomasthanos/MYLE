@@ -16,6 +16,8 @@ async function background() {
     },
     crypto: globalThis.crypto,
     URL,
+    setTimeout,
+    clearTimeout,
   });
   context.globalThis = context;
   for (const file of ["psl.js", "background.js"]) {
@@ -87,6 +89,8 @@ async function backgroundWithTab(reply = { ok: true }) {
     },
     crypto: globalThis.crypto,
     URL,
+    setTimeout,
+    clearTimeout,
   });
   context.globalThis = context;
   for (const file of ["psl.js", "background.js"]) {

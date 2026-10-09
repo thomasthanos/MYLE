@@ -33,8 +33,17 @@
     void whatsNew.checkAfterStart();
     // The browser extension asked for the vault (to unlock it, or when it
     // started the app), or a scheduled backup's notice asked for Game Saves.
-    void invoke<PageId | null>("start_page").then((page) => page && nav.go(page));
+    void invoke<PageId | null>("start_page").then((page) => {
+      if (!page) return;
+      nav.go(page);
+      // Started by the extension for a sign-in: it asks to be unlocked.
+      if (page === "password-manager") void passwords.wantUnlock();
+    });
     const unlisten = listen<PageId>("myle-navigate", (event) => nav.go(event.payload));
+    const unlistenUnlock = listen("myle-unlock-wanted", () => {
+      nav.go("password-manager");
+      void passwords.wantUnlock();
+    });
     const unlistenWindows = listen<WindowsTarget>("passwords-windows-target", (event) => {
       passwords.windowsTarget = event.payload;
       nav.go("password-manager");
@@ -42,6 +51,7 @@
     return () => {
       gameSavesState.stopWatcher();
       void unlisten.then((off) => off());
+      void unlistenUnlock.then((off) => off());
       void unlistenWindows.then((off) => off());
     };
   });
