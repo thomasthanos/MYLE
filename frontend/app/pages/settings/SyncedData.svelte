@@ -11,7 +11,7 @@
     {
       icon: SlidersHorizontal,
       title: "App preferences",
-      detail: "Transparency, sidebar, page layouts, filters and sort order",
+      detail: "Dark theme, sidebar, page layouts, filters and sort order",
     },
     {
       icon: PackagePlus,

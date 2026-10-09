@@ -2,11 +2,39 @@
 // switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
 import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
-import { readFlag, writeFlag } from "../../../lib/storage";
+import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
 
-export type Filter = "all" | "favorites" | "weak" | "reused";
+export type Filter = "all" | "favorites" | "weak" | "reused" | "totp";
+/** The list's order: by name, or the most recently changed first. */
+export type Sort = "name" | "recent";
+
+const SORT_KEY = "myle.passwords.sort";
+/** How long a Copy button shows that it worked. */
+const COPIED_FOR = 1600;
+
+/** The words of a search, lowercased: every one has to match somewhere. */
+export function searchWords(query: string): string[] {
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Whether `entry` has every word of the search in one of its fields. */
+export function matches(entry: Summary, words: string[]): boolean {
+  if (!words.length) return true;
+  const haystack = [
+    entry.title,
+    entry.username,
+    entry.folder,
+    entry.notes,
+    ...entry.urls,
+    ...entry.apps.flatMap((a) => [a.name, a.exe]),
+    ...entry.passkeys.flatMap((k) => [k.rpId, k.userName]),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
 
 /** Phones: Face ID / fingerprint was offered after an unlock. */
 const QUICK_UNLOCK_OFFERED_KEY = "myle.passwords.quickUnlockOffered";
@@ -56,6 +84,12 @@ class PasswordsState {
   entries = $state<Summary[]>([]);
   query = $state("");
   filter = $state<Filter>("all");
+  sort = $state<Sort>(readJson<Sort>(SORT_KEY, "name", (v) => v === "name" || v === "recent"));
+  /** The Copy button that just worked ("id:field"), for its tick. */
+  copied = $state<string | null>(null);
+  #copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When each shown password hides itself again, by entry id. */
+  #revealTimers = new Map<string, ReturnType<typeof setTimeout>>();
   panel = $state<Panel>({ kind: "none" });
   windowsTarget = $state<WindowsTarget | null>(null);
   /** Passwords the user chose to show, by entry id. Forgotten on lock. */
@@ -85,18 +119,23 @@ class PasswordsState {
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
 
   readonly visible = $derived.by(() => {
-    const q = this.query.trim().toLowerCase();
+    const words = searchWords(this.query);
+    const byName = (a: Summary, b: Summary) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }) ||
+      a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
     return this.entries
       .filter((e) => {
         if (this.filter === "favorites" && !e.favorite) return false;
         if (this.filter === "weak" && e.strength !== "weak") return false;
         if (this.filter === "reused" && !e.reused) return false;
-        if (!q) return true;
-        return [e.title, e.username, e.folder, e.notes, ...e.urls, ...e.apps.flatMap((a) => [a.name, a.exe])].some((v) =>
-          v.toLowerCase().includes(q),
-        );
+        if (this.filter === "totp" && !e.hasTotp) return false;
+        return matches(e, words);
       })
-      .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title));
+      .sort((a, b) =>
+        this.sort === "recent"
+          ? b.updatedAt - a.updatedAt || byName(a, b)
+          : Number(b.favorite) - Number(a.favorite) || byName(a, b),
+      );
   });
 
   readonly counts = $derived({
@@ -104,7 +143,19 @@ class PasswordsState {
     favorites: this.entries.filter((e) => e.favorite).length,
     weak: this.entries.filter((e) => e.strength === "weak").length,
     reused: this.entries.filter((e) => e.reused).length,
+    totp: this.entries.filter((e) => e.hasTotp).length,
   });
+
+  setSort(sort: Sort) {
+    this.sort = sort;
+    writeJson(SORT_KEY, sort);
+  }
+
+  /** Back to every login: no search, no filter. */
+  clearSearch() {
+    this.query = "";
+    this.filter = "all";
+  }
 
   readonly folders = $derived([...new Set(this.entries.map((e) => e.folder).filter(Boolean))].sort());
 
@@ -390,7 +441,7 @@ class PasswordsState {
     if (this.status !== "unlocked") return;
     this.status = "locked";
     this.entries = [];
-    this.revealed = {};
+    this.#hideAll();
     this.icons = {};
     this.#askedIcons.clear();
     this.panel = { kind: "none" };
@@ -402,28 +453,55 @@ class PasswordsState {
     await api.setAutoLock(minutes).catch((error) => toast.error(message(error)));
   }
 
+  /** Hides a shown password (and forgets its timer). */
+  hide(id: string) {
+    clearTimeout(this.#revealTimers.get(id));
+    this.#revealTimers.delete(id);
+    if (this.revealed[id] === undefined) return;
+    const { [id]: _hidden, ...rest } = this.revealed;
+    this.revealed = rest;
+  }
+
+  #hideAll() {
+    for (const timer of this.#revealTimers.values()) clearTimeout(timer);
+    this.#revealTimers.clear();
+    this.revealed = {};
+  }
+
   async toggleReveal(id: string) {
     if (this.revealed[id] !== undefined) {
-      const { [id]: _hidden, ...rest } = this.revealed;
-      this.revealed = rest;
+      this.hide(id);
       return;
     }
     try {
-      this.revealed = { ...this.revealed, [id]: await api.reveal(id) };
+      const password = await api.reveal(id);
+      if (this.status !== "unlocked") return;
+      this.revealed = { ...this.revealed, [id]: password };
       // Hidden again after a while: a shown password is not left on screen.
-      setTimeout(() => {
-        if (this.revealed[id] === undefined) return;
-        const { [id]: _hidden, ...rest } = this.revealed;
-        this.revealed = rest;
-      }, 30_000);
+      // Its own timer, so one shown, hidden and shown again gets the full time.
+      clearTimeout(this.#revealTimers.get(id));
+      this.#revealTimers.set(
+        id,
+        setTimeout(() => this.hide(id), 30_000),
+      );
     } catch (error) {
       toast.error(message(error));
     }
   }
 
+  /** Marks a Copy button as done for a moment. */
+  #markCopied(key: string) {
+    clearTimeout(this.#copiedTimer);
+    this.copied = key;
+    this.#copiedTimer = setTimeout(() => {
+      if (this.copied === key) this.copied = null;
+    }, COPIED_FOR);
+  }
+
   async copy(id: string, field: "password" | "username" | "totp") {
     try {
       await api.copy(id, field);
+      this.#markCopied(`${id}:${field}`);
       toast.success(
         field === "password"
           ? "Password copied. The clipboard clears in 30 seconds."
@@ -439,6 +517,7 @@ class PasswordsState {
   async copyText(text: string) {
     try {
       await api.copyText(text);
+      this.#markCopied("text");
       toast.success("Copied. The clipboard clears in 30 seconds.");
     } catch (error) {
       toast.error(message(error));
@@ -448,8 +527,7 @@ class PasswordsState {
   async save(entry: EntryInput) {
     try {
       const id = await api.save(entry);
-      const { [id]: _stale, ...rest } = this.revealed;
-      this.revealed = rest;
+      this.hide(id);
       await this.refresh();
       this.#syncSoon();
       this.panel = { kind: "view", id };

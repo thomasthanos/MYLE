@@ -1,5 +1,6 @@
 <script lang="ts">
   import AppWindow from "@lucide/svelte/icons/app-window";
+  import Check from "@lucide/svelte/icons/check";
   import Copy from "@lucide/svelte/icons/copy";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Eye from "@lucide/svelte/icons/eye";
@@ -31,6 +32,21 @@
   function when(seconds: number) {
     return new Date(seconds * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   }
+
+  /** "today", "3 days ago", "2 months ago"…, then the date itself after a year. */
+  function ago(seconds: number) {
+    const days = Math.floor((Date.now() / 1000 - seconds) / 86400);
+    if (days < 1) return "today";
+    if (days < 2) return "yesterday";
+    if (days < 30) return `${days} days ago`;
+    if (days < 365) {
+      const months = Math.max(1, Math.round(days / 30));
+      return months === 1 ? "a month ago" : `${months} months ago`;
+    }
+    return `on ${when(seconds)}`;
+  }
+
+  const copied = (field: string) => p.copied === `${id}:${field}`;
 
   async function toggleHistory() {
     clearTimeout(hideHistory);
@@ -82,7 +98,9 @@
         <div class="row">
           <dt>User name</dt>
           <dd class="selectable">{entry.username}</dd>
-          <button class="icon-btn" title="Copy" aria-label="Copy user name" onclick={() => p.copy(id, "username")}><Copy size={14} /></button>
+          <button class="icon-btn" class:done={copied("username")} title="Copy" aria-label="Copy user name" onclick={() => p.copy(id, "username")}>
+            {#if copied("username")}<Check size={14} />{:else}<Copy size={14} />{/if}
+          </button>
         </div>
       {/if}
       {#if entry.hasPassword}
@@ -92,7 +110,9 @@
           <button class="icon-btn" title={shown ? "Hide" : "Show"} aria-label={shown ? "Hide password" : "Show password"} onclick={() => p.toggleReveal(id)}>
             {#if shown !== undefined}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
           </button>
-          <button class="icon-btn" title="Copy" aria-label="Copy password" onclick={() => p.copy(id, "password")}><Copy size={14} /></button>
+          <button class="icon-btn" class:done={copied("password")} title="Copy (the clipboard clears in 30 seconds)" aria-label="Copy password" onclick={() => p.copy(id, "password")}>
+            {#if copied("password")}<Check size={14} />{:else}<Copy size={14} />{/if}
+          </button>
         </div>
         <div class="row meta">
           <dt></dt>
@@ -154,7 +174,7 @@
     {/if}
 
     <footer>
-      <span class="updated">Changed {when(entry.updatedAt)}</span>
+      <span class="updated" title={when(entry.updatedAt)}>Changed {ago(entry.updatedAt)}</span>
       <button class="btn ghost small danger-text" onclick={() => p.remove(id)}><Trash2 size={13} /> Delete</button>
       <button class="btn small" onclick={() => (p.panel = { kind: "edit", id })}><Pencil size={13} /> Edit</button>
     </footer>
@@ -162,6 +182,10 @@
 {/if}
 
 <style>
+  .icon-btn.done {
+    color: var(--ok);
+  }
+
   /* A readable width however wide the window: the buttons stay by their values. */
   .view {
     display: grid;

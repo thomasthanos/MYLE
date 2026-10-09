@@ -110,12 +110,22 @@ export interface EntryInput {
 }
 
 export interface GeneratorOptions {
+  /** Random characters, or random words (older apps know only the first). */
+  kind?: "password" | "passphrase";
   length: number;
   lower: boolean;
   upper: boolean;
   digits: boolean;
   symbols: boolean;
   avoidAmbiguous: boolean;
+  /** Passphrases: 3 to 12 words. */
+  words?: number;
+  /** Passphrases: up to 3 characters between the words. */
+  separator?: string;
+  /** Passphrases: every word starts with a capital. */
+  capitalize?: boolean;
+  /** Passphrases: one word gets a digit after it. */
+  number?: boolean;
 }
 
 /** What a sync with the account did. */
@@ -459,6 +469,17 @@ function previewApi(): PasswordsApi {
       items = items.filter((i) => i.id !== id);
     },
     async generate(o) {
+      if (o.kind === "passphrase") {
+        const sample = ["river", "copper", "lantern", "orbit", "maple", "quartz", "harbor", "velvet", "summit", "pebble", "meadow", "falcon"];
+        const pick = () => sample[crypto.getRandomValues(new Uint32Array(1))[0] % sample.length];
+        const count = Math.min(12, Math.max(3, o.words ?? 5));
+        const digitAt = o.number ? crypto.getRandomValues(new Uint32Array(1))[0] % count : -1;
+        return Array.from({ length: count }, (_, i) => {
+          const word = pick();
+          const shown = o.capitalize ? word[0].toUpperCase() + word.slice(1) : word;
+          return i === digitAt ? `${shown}${crypto.getRandomValues(new Uint32Array(1))[0] % 10}` : shown;
+        }).join(o.separator ?? "-");
+      }
       const sets = [o.lower && "abcdefghjkmnpqrstuvwxyz", o.upper && "ABCDEFGHJKLMNPQRSTUVWXYZ", o.digits && "23456789", o.symbols && "!@#$%^&*-_=+?"].filter(Boolean).join("");
       return Array.from(crypto.getRandomValues(new Uint32Array(o.length)), (n) => sets[n % sets.length]).join("");
     },

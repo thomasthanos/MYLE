@@ -10,12 +10,14 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Star from "@lucide/svelte/icons/star";
   import X from "@lucide/svelte/icons/x";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Popover from "../../../lib/components/Popover.svelte";
+  import { confirm } from "../../../lib/confirm.svelte";
   import { MOBILE } from "../../../lib/platform";
   import { scanner } from "../../../mobile/camera.svelte";
   import { passwordsApi as api, type AppLink, type Strength, type TotpInfo } from "./api";
   import Generator from "./Generator.svelte";
-  import { passwords as p } from "./state.svelte";
+  import { iconHost, passwords as p } from "./state.svelte";
   import StrengthMeter from "./StrengthMeter.svelte";
 
   let { id }: { id: string | null } = $props();
@@ -49,12 +51,60 @@
   let totpError = $state<string | null>(null);
   let scanning = $state(false);
   let checkTimer: ReturnType<typeof setTimeout> | undefined;
+  let form = $state<HTMLFormElement>();
+  /** The saved password, as loaded: changing it is a change. */
+  let loadedPassword = $state<string | null>(null);
+
+  /** What the form says, to tell whether anything was changed. */
+  const snapshot = () =>
+    JSON.stringify({ title: title.trim(), username, urls: urls.map((u) => u.trim()).filter(Boolean), apps, notes, folder, favorite });
+  const initial = untrack(snapshot);
+  const dirty = $derived(
+    snapshot() !== initial || (password ?? "") !== (loadedPassword ?? "") || !!totpText.trim() || totpRemoved,
+  );
+
+  /** Another login with this user name for the same website, if there is one. */
+  const duplicate = $derived.by(() => {
+    const user = username.trim().toLowerCase();
+    const hosts = urls.map(iconHost).filter((h): h is string => !!h);
+    if (!user || !hosts.length) return null;
+    return (
+      p.entries.find(
+        (e) => e.id !== id && e.username.trim().toLowerCase() === user && e.urls.some((u) => hosts.includes(iconHost(u) ?? "")),
+      ) ?? null
+    );
+  });
 
   onMount(async () => {
     // A phone's keyboard would cover the entry being edited.
     if (!MOBILE || !id) titleInput?.focus();
-    if (id && existing?.hasPassword) password = await api.reveal(id).catch(() => null);
+    if (id && existing?.hasPassword) {
+      const saved = await api.reveal(id).catch(() => null);
+      // Only if nothing was typed meanwhile.
+      if (password === null) {
+        password = saved;
+        loadedPassword = saved;
+      }
+    }
   });
+
+  /** A new login named after its website, when it has no name yet. */
+  function nameFromSite(url: string) {
+    if (title.trim()) return;
+    const host = iconHost(url.trim());
+    if (host) title = host;
+  }
+
+  /** Esc leaves (asking first if something changed), Ctrl+S saves. */
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && !generatorOpen && !e.defaultPrevented) {
+      e.preventDefault();
+      void cancel();
+    } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      form?.requestSubmit();
+    }
+  }
 
   $effect(() => {
     const value = password ?? "";
@@ -151,12 +201,24 @@
     }
   }
 
-  function cancel() {
+  async function cancel() {
+    if (
+      dirty &&
+      !(await confirm({
+        title: "Discard your changes?",
+        message: id ? "This login stays as it was saved." : "This new login is not added.",
+        confirmLabel: "Discard",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     p.panel = id ? { kind: "view", id } : { kind: "none" };
   }
 </script>
 
-<form class="editor" onsubmit={submit}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<form class="editor" onsubmit={submit} onkeydown={onKeydown} bind:this={form}>
   <header>
     <h2>{id ? "Edit entry" : "New entry"}</h2>
     <button
@@ -179,6 +241,9 @@
   <label class="field user">
     <span>Email or user name</span>
     <input class="input" bind:value={username} autocomplete="off" spellcheck="false" />
+    {#if duplicate}
+      <small class="duplicate"><TriangleAlert size={12} /> “{duplicate.title}” already has this user name for this website.</small>
+    {/if}
   </label>
 
   <div class="field password">
@@ -271,7 +336,7 @@
     <span>Websites</span>
     {#each urls as _, i (i)}
       <div class="row">
-        <input class="input" bind:value={urls[i]} placeholder="https://example.com" spellcheck="false" />
+        <input class="input" bind:value={urls[i]} placeholder="https://example.com" spellcheck="false" onblur={() => i === 0 && nameFromSite(urls[0])} />
         {#if urls.length > 1}
           <button type="button" class="icon-btn" aria-label="Remove website" onclick={() => (urls = urls.filter((_, j) => j !== i))}><X size={14} /></button>
         {/if}
@@ -326,6 +391,7 @@
   </div>
 
   <footer>
+    {#if !MOBILE}<span class="keys">Ctrl+S saves · Esc cancels</span>{/if}
     <button type="button" class="btn ghost" onclick={cancel}>Cancel</button>
     <button type="submit" class="btn primary" disabled={!title.trim() || saving || totpBlocks}>{id ? "Save" : "Add to vault"}</button>
   </footer>
@@ -417,6 +483,22 @@
 
   .mono {
     font-family: var(--font-mono);
+  }
+
+  .field .duplicate {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    color: #ffd18f;
+    font-size: 11.5px;
+  }
+
+  footer .keys {
+    margin-right: auto;
+    align-self: center;
+    color: var(--text-3);
+    font-size: 11px;
   }
 
   /* A phone's narrow row: the generator by its icon only. */
