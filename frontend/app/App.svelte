@@ -153,6 +153,6 @@
   }
 
   :global(:root.solid) .shell {
-    background: linear-gradient(180deg, rgb(15 19 29 / 0.98), rgb(10 13 20 / 0.98));
+    background: var(--shell-fill);
   }
 </style>

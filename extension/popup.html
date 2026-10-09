@@ -19,15 +19,20 @@
         <circle cx="12" cy="10.7" r="1.7" fill="#6b5cf2" />
         <path d="M11.2 11.9h1.6l.45 2.7h-2.5z" fill="#6b5cf2" />
       </svg>
-      <div>
+      <div class="titles">
         <strong>MYLE Passwords</strong>
         <small id="site">…</small>
       </div>
+      <span class="count" id="count" hidden></span>
     </header>
     <div class="search" id="search-row" hidden>
-      <input id="search" type="search" placeholder="Search logins" autocomplete="off" spellcheck="false" aria-label="Search logins" />
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      <input id="search" type="search" placeholder="Search logins  ( / )" autocomplete="off" spellcheck="false" aria-label="Search logins" />
     </div>
-    <main id="content"><p class="note">Checking…</p></main>
+    <main id="content" aria-live="polite">
+      <div class="skeleton" aria-hidden="true"><i></i><i></i><i></i></div>
+    </main>
+    <p class="toast" id="toast" role="status" hidden></p>
     <footer>
       <button id="scan" type="button" title="Read the site's 2FA QR code on this page, and keep its key in MYLE">2FA from a QR code</button>
       <button id="open" type="button">Open MYLE</button>

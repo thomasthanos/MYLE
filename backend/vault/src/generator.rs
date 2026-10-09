@@ -1,5 +1,10 @@
-//! Strong passwords from the operating system's random source, and a rough
-//! strength rating for the ones already saved.
+//! Strong passwords and passphrases from the operating system's random
+//! source, and a rough strength rating for the ones already saved.
+//!
+//! Passphrases use the EFF's large wordlist (7,776 words, CC BY 3.0 US,
+//! https://www.eff.org/dice): its four hyphenated words are written without
+//! the hyphen, and "yoyo" appears once, so 7,775 words of about 12.9 bits
+//! each.
 
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use serde::{Deserialize, Serialize};
@@ -11,10 +16,24 @@ const DIGITS: &str = "0123456789";
 const SYMBOLS: &str = "!@#$%^&*()-_=+[]{};:,.?/~";
 /// Easy to mistake for one another when read or typed by hand.
 const AMBIGUOUS: &str = "Il1O0o|`'\";:,.";
+const WORDLIST: &str = include_str!("eff_large_wordlist.txt");
+
+/// What kind of secret to make.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// Random characters.
+    #[default]
+    Password,
+    /// Random words, easier to read out and type.
+    Passphrase,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Options {
+    #[serde(default)]
+    pub kind: Kind,
     pub length: usize,
     pub lower: bool,
     pub upper: bool,
@@ -22,6 +41,48 @@ pub struct Options {
     pub symbols: bool,
     #[serde(default)]
     pub avoid_ambiguous: bool,
+    /// Passphrases: how many words (3 to 12).
+    #[serde(default = "default_words")]
+    pub words: usize,
+    /// Passphrases: what goes between the words (up to 3 characters).
+    #[serde(default = "default_separator")]
+    pub separator: String,
+    /// Passphrases: every word starts with a capital.
+    #[serde(default)]
+    pub capitalize: bool,
+    /// Passphrases: one word gets a digit after it.
+    #[serde(default)]
+    pub number: bool,
+}
+
+fn default_words() -> usize {
+    5
+}
+
+fn default_separator() -> String {
+    "-".into()
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            kind: Kind::Password,
+            length: 20,
+            lower: true,
+            upper: true,
+            digits: true,
+            symbols: true,
+            avoid_ambiguous: false,
+            words: default_words(),
+            separator: default_separator(),
+            capitalize: false,
+            number: false,
+        }
+    }
+}
+
+fn words() -> impl Iterator<Item = &'static str> {
+    WORDLIST.lines().map(str::trim).filter(|word| !word.is_empty())
 }
 
 /// A uniformly random number below `bound`, without modulo bias.
@@ -37,6 +98,48 @@ fn below(bound: usize) -> usize {
 }
 
 pub fn generate(options: &Options) -> Result<Zeroizing<String>, String> {
+    match options.kind {
+        Kind::Password => password(options),
+        Kind::Passphrase => passphrase(options),
+    }
+}
+
+/// Words from the list, joined by the separator.
+fn passphrase(options: &Options) -> Result<Zeroizing<String>, String> {
+    let list: Vec<&str> = words().collect();
+    let count = options.words.clamp(3, 12);
+    // Up to 3 characters, and none that would be hard to type or see
+    // (spaces, which some sites trim, included).
+    let separator: String = options
+        .separator
+        .chars()
+        .filter(|c| !c.is_control() && !c.is_whitespace() && !c.is_alphanumeric())
+        .take(3)
+        .collect();
+    let with_number = options.number.then(|| below(count));
+    let mut phrase = Zeroizing::new(String::new());
+    for i in 0..count {
+        if i > 0 {
+            phrase.push_str(&separator);
+        }
+        let word = list[below(list.len())];
+        if options.capitalize {
+            let mut chars = word.chars();
+            if let Some(first) = chars.next() {
+                phrase.extend(first.to_uppercase());
+                phrase.push_str(chars.as_str());
+            }
+        } else {
+            phrase.push_str(word);
+        }
+        if with_number == Some(i) {
+            phrase.push(char::from(b'0' + below(10) as u8));
+        }
+    }
+    Ok(phrase)
+}
+
+fn password(options: &Options) -> Result<Zeroizing<String>, String> {
     let length = options.length.clamp(8, 128);
     let keep = |set: &str| -> Vec<char> {
         set.chars()
@@ -189,12 +292,74 @@ mod tests {
     fn options(length: usize) -> Options {
         Options {
             length,
-            lower: true,
-            upper: true,
-            digits: true,
-            symbols: true,
-            avoid_ambiguous: false,
+            ..Options::default()
         }
+    }
+
+    fn phrase(words: usize) -> Options {
+        Options {
+            kind: Kind::Passphrase,
+            words,
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn the_wordlist_has_7775_distinct_plain_words() {
+        let list: Vec<&str> = words().collect();
+        assert_eq!(list.len(), 7775);
+        assert!(list.iter().all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase())));
+        let distinct: std::collections::HashSet<&&str> = list.iter().collect();
+        assert_eq!(distinct.len(), list.len());
+    }
+
+    #[test]
+    fn passphrases_have_the_asked_words_separator_and_options() {
+        let list: std::collections::HashSet<&str> = words().collect();
+        for _ in 0..100 {
+            let plain = generate(&phrase(5)).unwrap();
+            let parts: Vec<&str> = plain.split('-').collect();
+            assert_eq!(parts.len(), 5, "{}", plain.as_str());
+            assert!(parts.iter().all(|w| list.contains(w)));
+        }
+        assert_eq!(generate(&phrase(1)).unwrap().split('-').count(), 3, "at least 3 words");
+        assert_eq!(generate(&phrase(40)).unwrap().split('-').count(), 12, "at most 12 words");
+
+        let fancy = Options {
+            separator: " . ".into(),
+            capitalize: true,
+            number: true,
+            ..phrase(4)
+        };
+        for _ in 0..100 {
+            let value = generate(&fancy).unwrap();
+            // Spaces and letters are dropped from the separator: only "." stays.
+            let parts: Vec<&str> = value.split('.').collect();
+            assert_eq!(parts.len(), 4, "{}", value.as_str());
+            assert!(parts.iter().all(|w| w.chars().next().unwrap().is_ascii_uppercase()));
+            assert_eq!(parts.iter().filter(|w| w.ends_with(|c: char| c.is_ascii_digit())).count(), 1);
+            assert_ne!(strength(&value), Strength::Weak);
+        }
+        let joined = Options {
+            separator: String::new(),
+            ..phrase(3)
+        };
+        assert!(generate(&joined).unwrap().chars().all(|c| c.is_ascii_lowercase()));
+    }
+
+    #[test]
+    fn options_from_older_pages_still_make_passwords() {
+        let old: Options = serde_json::from_str(
+            r#"{"length":16,"lower":true,"upper":true,"digits":true,"symbols":false,"avoidAmbiguous":true}"#,
+        )
+        .unwrap();
+        assert_eq!(old.kind, Kind::Password);
+        assert_eq!(generate(&old).unwrap().chars().count(), 16);
+        let new: Options = serde_json::from_str(
+            r#"{"kind":"passphrase","length":16,"lower":true,"upper":true,"digits":true,"symbols":false,"words":6,"separator":"_","capitalize":false,"number":false}"#,
+        )
+        .unwrap();
+        assert_eq!(generate(&new).unwrap().split('_').count(), 6);
     }
 
     #[test]

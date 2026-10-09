@@ -1,6 +1,7 @@
 <script lang="ts">
   // A login's 2FA code, counting down to the next one. The key stays in the
   // app; only the code comes here, asked again when it runs out.
+  import Check from "@lucide/svelte/icons/check";
   import Copy from "@lucide/svelte/icons/copy";
   import { onDestroy, onMount } from "svelte";
   import { passwordsApi as api, type TotpCode } from "./api";
@@ -49,10 +50,16 @@
     <svg viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8" /><circle class="left" cx="10" cy="10" r="8" style:stroke-dashoffset={50.27 * (1 - fraction)} /></svg>
     <small>{Math.max(0, left)}</small>
   </span>
-  <button class="icon-btn" title="Copy" aria-label="Copy 2FA code" disabled={!current} onclick={() => p.copy(id, "totp")}><Copy size={14} /></button>
+  <button class="icon-btn" class:done={p.copied === `${id}:totp`} title="Copy" aria-label="Copy 2FA code" disabled={!current} onclick={() => p.copy(id, "totp")}>
+    {#if p.copied === `${id}:totp`}<Check size={14} />{:else}<Copy size={14} />{/if}
+  </button>
 </div>
 
 <style>
+  .icon-btn.done {
+    color: var(--ok);
+  }
+
   /* Lays out like the entry's other rows (EntryView's .row). */
   .row {
     display: grid;

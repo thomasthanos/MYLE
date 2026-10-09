@@ -618,6 +618,10 @@ enum Request {
     TotpFromPixels { width: usize, height: usize, pixels: String },
     Known { url: String, username: String, password: String },
     Save { url: String, username: String, password: String },
+    /// A login's user name, password or 2FA code onto the clipboard (marked
+    /// secret and cleared after 30 seconds), from the toolbar popup at the
+    /// user's click. The text itself never goes back to the browser.
+    Copy { id: String, url: String, field: String },
     /// A strong new password, for a sign-up or password-change form.
     Generate,
     /// The passkeys a page may use (never their keys): for MYLE's prompt.
@@ -760,6 +764,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
             digits: true,
             symbols: true,
             avoid_ambiguous: true,
+            ..Default::default()
         };
         return match super::generator::generate(&options) {
             Ok(password) => json!({ "ok": true, "password": password.as_str() }),
@@ -768,6 +773,15 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     }
     if status != Status::Unlocked {
         return json!({ "ok": false, "error": if status == Status::New { "noVault" } else { "locked" } });
+    }
+    if let Request::Copy { id, url, field } = &request {
+        // Read under the vault's lock; copied after it, so the clipboard's
+        // retries never hold the vault.
+        let text = state.with_quiet(|vault| copy_text(vault, id, url, field));
+        return match text.and_then(|text| super::clipboard::copy_secret(&text)) {
+            Ok(()) => json!({ "ok": true }),
+            Err(error) => json!({ "ok": false, "error": error }),
+        };
     }
     let result = state.with_quiet(|vault| match &request {
         Request::Logins { url } => {
@@ -792,7 +806,12 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
                     })
                 })
                 .collect();
-            logins.sort_by(|a, b| b.exact.cmp(&a.exact).then(a.title.cmp(&b.title)));
+            logins.sort_by(|a, b| {
+                b.exact
+                    .cmp(&a.exact)
+                    .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                    .then_with(|| a.username.to_lowercase().cmp(&b.username.to_lowercase()))
+            });
             // Only what the app already has: the browser never makes it fetch.
             if vault.prefs().website_icons {
                 let cache = vault.icons()?;
@@ -938,6 +957,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         }
         Request::Status
         | Request::Open
+        | Request::Copy { .. }
         | Request::Generate
         | Request::TotpFromImage { .. }
         | Request::TotpFromPixels { .. } => unreachable!("answered above"),
@@ -949,6 +969,29 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         let _ = app.emit(super::CHANGED_EVENT, ());
     }
     result.unwrap_or_else(|error| json!({ "ok": false, "error": error }))
+}
+
+/// What `Request::Copy` puts on the clipboard: only for a login saved for
+/// the page's site, by the same rule as filling it.
+fn copy_text(vault: &mut super::vault::Vault, id: &str, url: &str, field: &str) -> Result<Zeroizing<String>, String> {
+    let host = page_host(url).ok_or("insecure")?;
+    let entry = vault
+        .summaries()?
+        .into_iter()
+        .find(|e| e.id == id)
+        .ok_or("notFound")?;
+    if !entry.urls.iter().any(|u| fits(u, &host).is_some()) {
+        return Err("wrongSite".to_string());
+    }
+    let text = match field {
+        "username" if !entry.username.is_empty() => Zeroizing::new(entry.username),
+        "password" if entry.has_password => vault.password(id)?,
+        "totp" if entry.has_totp => Zeroizing::new(vault.totp(id).map_err(|_| "noTotp".to_string())?.now().code),
+        "username" | "password" | "totp" => return Err("empty".to_string()),
+        _ => return Err("badRequest".to_string()),
+    };
+    vault.touch();
+    Ok(text)
 }
 
 /// Passkeys. Using one may ask the user to confirm with Windows Hello, so

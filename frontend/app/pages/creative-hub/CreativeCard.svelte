@@ -148,7 +148,7 @@
 
 <style>
   /* 3D glass card: lit top edge, inner depth, and a lift on hover.
-     No backdrop-filter here — it sits inside the glass content panel. */
+     No backdrop-filter here: it sits inside the content panel. */
   .card {
     position: relative;
     display: flex;

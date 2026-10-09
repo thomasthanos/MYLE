@@ -5,6 +5,7 @@
   --text-3: #8d95b8;
   --accent: #848ede;
   --warn: #f2c27a;
+  --ok: #5fd99a;
 }
 
 * {
@@ -12,7 +13,7 @@
 }
 
 body {
-  width: 340px;
+  width: 360px;
   margin: 0;
   background: #12151e;
   color: var(--text-1);
@@ -28,9 +29,23 @@ header {
   background: linear-gradient(180deg, #1a1f2d, #151924);
 }
 
-header div {
+header .titles {
   display: grid;
+  flex: 1;
   min-width: 0;
+}
+
+.count {
+  flex: none;
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgb(132 142 222 / 0.16);
+  color: #c9cefa;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 header strong {
@@ -52,12 +67,28 @@ header small {
 }
 
 .search {
+  position: relative;
   padding: 8px 10px 2px;
+}
+
+.search svg {
+  position: absolute;
+  top: 50%;
+  left: 20px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
 }
 
 .search input {
   width: 100%;
-  padding: 7px 10px;
+  padding: 7px 10px 7px 30px;
   border: 1px solid rgb(255 255 255 / 0.09);
   border-radius: 8px;
   outline: none;
@@ -169,15 +200,67 @@ button:disabled {
   cursor: default;
 }
 
-.login button,
+.actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Copy buttons: quiet until the row is pointed at or has the keyboard. */
+button.copy {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+
+.login:hover button.copy,
+.login:focus-within button.copy {
+  opacity: 1;
+}
+
+button.copy:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--text-1);
+}
+
+button.copy:focus-visible {
+  opacity: 1;
+}
+
+button.copy.done {
+  opacity: 1;
+  color: var(--ok);
+}
+
+button.copy svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.login > button,
+button.fill,
 button.primary {
+  margin-left: 4px;
   padding: 6px 12px;
   background: var(--accent);
   color: #fff;
   font-weight: 600;
 }
 
-.login button:hover,
+.login > button:hover,
+button.fill:hover,
 button.primary:hover {
   background: #969fe6;
 }
@@ -249,4 +332,51 @@ footer button {
 .new-login {
   margin: 4px;
   padding: 8px;
+}
+
+/* Before the answer comes: three quiet rows instead of a word. */
+.skeleton {
+  display: grid;
+  gap: 6px;
+  padding: 4px;
+}
+
+.skeleton i {
+  height: 40px;
+  border-radius: 9px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton i {
+    animation: none;
+  }
+}
+
+.toast {
+  margin: 0 10px 6px;
+  padding: 7px 10px;
+  border: 1px solid rgb(95 217 154 / 0.25);
+  border-radius: 8px;
+  background: rgb(95 217 154 / 0.08);
+  color: #b9f0d2;
+  font-size: 11.5px;
+}
+
+.toast.bad {
+  border-color: rgb(255 183 104 / 0.25);
+  background: rgb(255 183 104 / 0.08);
+  color: #ffd5a2;
 }

@@ -129,7 +129,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgb(4 6 12 / 0.58);
+    background: var(--scrim);
   }
 
   /* The form scrolls, not the glass element (see BiosRestartDialog). */

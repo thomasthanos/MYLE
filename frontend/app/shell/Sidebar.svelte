@@ -27,7 +27,7 @@
     y: number;
   }
 
-  // Rendered outside the glass panel: backdrop-filter would clip a fixed child.
+  // Rendered outside the sidebar panel, so nothing in it can clip the tooltip.
   let tip = $state<Tip | null>(null);
   let tipTimer: ReturnType<typeof setTimeout> | undefined;
   let sidebar = $state<HTMLElement>();
@@ -488,7 +488,7 @@
     padding: 7px 10px 8px;
     border: 1px solid rgb(255 255 255 / 0.1);
     border-radius: var(--radius-sm);
-    background: rgb(32 37 54 / 0.97);
+    background: var(--tooltip-bg);
     box-shadow: var(--elev-1);
     font-size: 12.5px;
     pointer-events: none;

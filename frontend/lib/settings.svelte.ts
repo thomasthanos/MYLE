@@ -1,35 +1,44 @@
 import { readFlag, writeFlag } from "./storage";
 
-const GLASS_KEY = "myle.glass";
+const DARK_KEY = "myle.dark";
+/** The old "Glass effects" switch: gone, so whatever it saved is dropped. */
+const OLD_GLASS_KEY = "myle.glass";
 
 /**
  * Visual preferences that apply to the whole document.
  *
- * Solid panels are the design; "Glass effects" turns on the translucent,
- * blurred look instead. `:root.solid` is set whenever glass is off, and the
- * splash and the setup window always use it.
+ * Panels are always solid (`:root.solid`; the splash and the setup window
+ * set it too). "Dark theme" swaps the blue-tinted surfaces for charcoal
+ * grey-black ones (`:root.dark`, tokens.css); the accent stays the same.
  */
 class Settings {
-  glass = $state(readFlag(GLASS_KEY, false));
+  dark = $state(readFlag(DARK_KEY, false));
 
   constructor() {
+    try {
+      localStorage.removeItem(OLD_GLASS_KEY);
+    } catch {
+      // Storage blocked: nothing to clean up.
+    }
     this.apply();
   }
 
   /** Re-reads the saved value (after account sync replaced it). */
   reload() {
-    this.glass = readFlag(GLASS_KEY, this.glass);
+    this.dark = readFlag(DARK_KEY, this.dark);
     this.apply();
   }
 
-  setGlass(value: boolean) {
-    this.glass = value;
-    writeFlag(GLASS_KEY, value);
+  setDark(value: boolean) {
+    this.dark = value;
+    writeFlag(DARK_KEY, value);
     this.apply();
   }
 
   private apply() {
-    document.documentElement.classList.toggle("solid", !this.glass);
+    const root = document.documentElement;
+    root.classList.add("solid");
+    root.classList.toggle("dark", this.dark);
   }
 }
 

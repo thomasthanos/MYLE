@@ -243,7 +243,7 @@
     position: sticky;
     top: -18px;
     z-index: 18;
-    background: linear-gradient(180deg, rgb(27 32 47 / 0.96), rgb(16 20 31 / 0.97));
+    background: var(--bar-fill);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.055), 0 14px 26px -22px rgb(0 0 0 / 0.94);
   }
 

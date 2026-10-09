@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import AppWindow from "@lucide/svelte/icons/app-window";
+  import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Check from "@lucide/svelte/icons/check";
+  import Clock from "@lucide/svelte/icons/clock";
+  import Copy from "@lucide/svelte/icons/copy";
+  import KeySquare from "@lucide/svelte/icons/key-square";
+  import X from "@lucide/svelte/icons/x";
   import Image from "@lucide/svelte/icons/image";
   import Globe from "@lucide/svelte/icons/globe";
   import CloudAlert from "@lucide/svelte/icons/cloud-alert";
@@ -35,6 +41,8 @@
   import VaultDialog, { type DialogKind } from "./VaultDialog.svelte";
 
   let dialog = $state<DialogKind | null>(null);
+  let searchInput = $state<HTMLInputElement>();
+  let listEl = $state<HTMLElement>();
   let browserOpen = $state(false);
   /** The hotkey for Windows programs; null when taken, undefined until known. */
   let windowsHotkey = $state<string | null | undefined>(undefined);
@@ -44,12 +52,83 @@
     void api.windowsHotkey().then((label) => (windowsHotkey = label)).catch(() => (windowsHotkey = null));
   });
 
-  const filters: { id: Filter; label: string }[] = [
+  const filters: { id: Filter; label: string; title?: string }[] = [
     { id: "all", label: "All" },
     { id: "favorites", label: "Favorites" },
-    { id: "weak", label: "Weak" },
-    { id: "reused", label: "Reused" },
+    { id: "weak", label: "Weak", title: "Passwords that are easy to guess" },
+    { id: "reused", label: "Reused", title: "Passwords used for more than one login" },
+    { id: "totp", label: "2FA", title: "Logins with 2FA codes" },
   ];
+  /** A filter with nothing in it is left out, unless it is the one chosen. */
+  const shownFilters = $derived(filters.filter((f) => f.id === "all" || f.id === "favorites" || p.counts[f.id] > 0 || p.filter === f.id));
+
+  /** Something else has the keyboard: a dialog, or a field being typed in. */
+  function busyElsewhere(target: EventTarget | null) {
+    if (dialog || browserOpen || document.querySelector('[aria-modal="true"], dialog[open], [role="alertdialog"]')) return true;
+    const el = target as HTMLElement | null;
+    return !!el?.closest?.("input, textarea, select, [contenteditable='true']");
+  }
+
+  /** Ctrl+F or / searches, Ctrl+N adds a login. */
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.defaultPrevented || e.altKey) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && !e.shiftKey && e.key.toLowerCase() === "f") {
+      if (dialog || browserOpen || document.querySelector('[aria-modal="true"], dialog[open]')) return;
+      e.preventDefault();
+      searchInput?.focus();
+      searchInput?.select();
+    } else if (!ctrl && !e.shiftKey && e.key === "/" && !busyElsewhere(e.target)) {
+      e.preventDefault();
+      searchInput?.focus();
+    } else if (ctrl && !e.shiftKey && e.key.toLowerCase() === "n" && !busyElsewhere(e.target)) {
+      e.preventDefault();
+      p.panel = { kind: "edit", id: null };
+    }
+  }
+
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && p.query) {
+      e.preventDefault();
+      e.stopPropagation();
+      p.query = "";
+    } else if (e.key === "ArrowDown" || (e.key === "Enter" && p.visible.length)) {
+      // Into the list: the first login, opened.
+      const first = p.visible[0];
+      if (!first) return;
+      e.preventDefault();
+      p.panel = { kind: "view", id: first.id };
+      focusRow(first.id);
+    }
+  }
+
+  function focusRow(id: string) {
+    requestAnimationFrame(() => listEl?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"] .item-main`)?.focus());
+  }
+
+  /** Up and down move through the list and open each login; Home and End too. */
+  function onListKeydown(e: KeyboardEvent) {
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(e.key) || !(e.target as HTMLElement).classList.contains("item-main")) return;
+    const list = p.visible;
+    if (!list.length) return;
+    const current = (e.target as HTMLElement).closest<HTMLElement>("[data-id]")?.dataset.id;
+    const at = list.findIndex((entry) => entry.id === current);
+    let next = at;
+    if (e.key === "ArrowDown") next = Math.min(list.length - 1, at + 1);
+    else if (e.key === "ArrowUp") next = at - 1;
+    else if (e.key === "Home") next = 0;
+    else next = list.length - 1;
+    e.preventDefault();
+    if (next < 0) {
+      searchInput?.focus();
+      return;
+    }
+    p.panel = { kind: "view", id: list[next].id };
+    focusRow(list[next].id);
+  }
+
+  const isCopied = (id: string, field: string) => p.copied === `${id}:${field}`;
   const lockTimes = [1, 5, 15, 60, 0];
 
   async function startImport() {
@@ -72,13 +151,27 @@
   const selectedId = $derived(p.panel.kind === "view" || p.panel.kind === "edit" ? p.panel.id : null);
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <div class="vault">
   <div class="toolbar">
     <label class="search">
       <Search size={15} />
-      <input placeholder="Search names, user names, sites…" bind:value={p.query} spellcheck="false" />
+      <input
+        type="text"
+        placeholder={MOBILE ? "Search logins" : "Search names, user names, sites…  (Ctrl+F)"}
+        aria-label="Search logins"
+        bind:value={p.query}
+        bind:this={searchInput}
+        onkeydown={onSearchKeydown}
+        spellcheck="false"
+        autocomplete="off"
+      />
+      {#if p.query}
+        <button type="button" class="clear" title="Clear the search (Esc)" aria-label="Clear the search" onclick={() => ((p.query = ""), searchInput?.focus())}><X size={14} /></button>
+      {/if}
     </label>
-    <button class="btn primary" title="New login" onclick={() => (p.panel = { kind: "edit", id: null })}><Plus size={15} /> <span class="label">New</span></button>
+    <button class="btn primary" title={MOBILE ? "New login" : "New login (Ctrl+N)"} onclick={() => (p.panel = { kind: "edit", id: null })}><Plus size={15} /> <span class="label">New</span></button>
     <Popover align="end">
       {#snippet trigger({ toggle })}
         <button class="btn" title="Password generator" onclick={toggle}><Sparkles size={14} /> <span class="label">Generator</span></button>
@@ -155,8 +248,8 @@
   {/if}
 
   <div class="filters">
-    {#each filters as f (f.id)}
-      <button class="chip" class:active={p.filter === f.id} aria-pressed={p.filter === f.id} onclick={() => (p.filter = f.id)}>
+    {#each shownFilters as f (f.id)}
+      <button class="chip" class:active={p.filter === f.id} aria-pressed={p.filter === f.id} title={f.title} onclick={() => (p.filter = f.id)}>
         {f.label} <span class="count">{p.counts[f.id]}</span>
       </button>
     {/each}
@@ -170,37 +263,70 @@
           <h2>Saved logins</h2>
           <span>{p.visible.length === p.entries.length ? `${p.entries.length} in your vault` : `${p.visible.length} of ${p.entries.length} shown`}</span>
         </div>
-        <KeyRound size={17} aria-hidden="true" />
+        <button
+          class="sort"
+          title={p.sort === "name" ? "Sorted by name, favorites first. Click for the most recently changed first." : "Most recently changed first. Click to sort by name."}
+          onclick={() => p.setSort(p.sort === "name" ? "recent" : "name")}
+        >
+          {#if p.sort === "name"}<ArrowDownAZ size={14} /> Name{:else}<Clock size={14} /> Recent{/if}
+        </button>
       </div>
-      <div class="list-scroll" role="listbox" aria-label="Saved logins">
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <ul class="list-scroll" aria-label="Saved logins" bind:this={listEl} onkeydown={onListKeydown}>
         {#each p.visible as entry (entry.id)}
-          <button
-            class="item"
-            class:selected={selectedId === entry.id}
-            role="option"
-            aria-selected={selectedId === entry.id}
-            onclick={() => (p.panel = { kind: "view", id: entry.id })}
-          >
-            <Favicon title={entry.title} urls={entry.urls} size={36} />
-            <span class="text">
-              <strong>{entry.title}</strong>
-              <small>{entry.username || (entry.urls[0] ? host(entry.urls[0]) : "No user name")}</small>
-            </span>
-            <span class="marks">
-              {#if entry.apps.length}<span title="Linked to a Windows program"><AppWindow size={13} /></span>{/if}
-              {#if entry.hasTotp}<span title="Has 2FA codes"><ShieldCheck size={13} /></span>{/if}
-              {#if entry.passkeys.length}<span title="Has a passkey"><UserKey size={13} /></span>{/if}
-              {#if entry.favorite}<span class="fav" title="Favorite"><Star size={13} /></span>{/if}
-              {#if entry.hasPassword}<StrengthMeter strength={entry.strength} compact />{/if}
-            </span>
-          </button>
+          <li class="item" class:selected={selectedId === entry.id} data-id={entry.id}>
+            <button
+              class="item-main"
+              aria-current={selectedId === entry.id ? "true" : undefined}
+              onclick={() => (p.panel = { kind: "view", id: entry.id })}
+            >
+              <Favicon title={entry.title} urls={entry.urls} size={36} />
+              <span class="text">
+                <strong>{entry.title}</strong>
+                <small>{entry.username || (entry.urls[0] ? host(entry.urls[0]) : "No user name")}</small>
+              </span>
+              <span class="marks">
+                {#if entry.apps.length}<span title="Linked to a Windows program"><AppWindow size={13} /></span>{/if}
+                {#if entry.hasTotp}<span title="Has 2FA codes"><ShieldCheck size={13} /></span>{/if}
+                {#if entry.passkeys.length}<span title="Has a passkey"><UserKey size={13} /></span>{/if}
+                {#if entry.favorite}<span class="fav" title="Favorite"><Star size={13} /></span>{/if}
+                {#if entry.hasPassword}<StrengthMeter strength={entry.strength} compact />{/if}
+              </span>
+            </button>
+            {#if !MOBILE && (entry.username || entry.hasPassword)}
+              <span class="quick">
+                {#if entry.username}
+                  <button
+                    class="quick-btn"
+                    class:done={isCopied(entry.id, "username")}
+                    title="Copy the user name"
+                    aria-label="Copy the user name of {entry.title}"
+                    onclick={() => p.copy(entry.id, "username")}
+                  >
+                    {#if isCopied(entry.id, "username")}<Check size={13} />{:else}<Copy size={13} />{/if}
+                  </button>
+                {/if}
+                {#if entry.hasPassword}
+                  <button
+                    class="quick-btn"
+                    class:done={isCopied(entry.id, "password")}
+                    title="Copy the password (the clipboard clears in 30 seconds)"
+                    aria-label="Copy the password of {entry.title}"
+                    onclick={() => p.copy(entry.id, "password")}
+                  >
+                    {#if isCopied(entry.id, "password")}<Check size={13} />{:else}<KeySquare size={13} />{/if}
+                  </button>
+                {/if}
+              </span>
+            {/if}
+          </li>
         {:else}
-          <div class="empty">
+          <li class="empty">
             {#if p.entries.length}
               <Search size={22} aria-hidden="true" />
               <strong>No matching logins</strong>
               <span>Try a different search or choose another filter.</span>
-              <button class="btn small" onclick={() => ((p.query = ""), (p.filter = "all"))}>Clear search and filters</button>
+              <button class="btn small" onclick={() => p.clearSearch()}>Clear search and filters</button>
             {:else}
               <KeyRound size={24} aria-hidden="true" />
               <strong>Your vault is empty</strong>
@@ -212,9 +338,9 @@
                 <button class="btn small" onclick={startImport}><Download size={13} /> Import passwords</button>
               {/if}
             {/if}
-          </div>
+          </li>
         {/each}
-      </div>
+      </ul>
     </div>
 
     <div class="panel glass">
@@ -314,6 +440,22 @@
 
   .search:focus-within {
     border-color: rgb(var(--accent-rgb) / 0.55);
+  }
+
+  .search .clear {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    margin-right: -6px;
+    border-radius: 6px;
+    color: var(--text-3);
+  }
+
+  .search .clear:hover {
+    background: var(--hover);
+    color: var(--text-1);
   }
 
   .search input {
@@ -451,6 +593,24 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 8px;
+    color: var(--text-2);
+    font-size: 11.5px;
+    transition: background var(--dur-fast), color var(--dur-fast);
+  }
+
+  .sort:hover {
+    background: var(--hover);
+    color: var(--text-1);
+  }
+
   .list-scroll,
   .panel-scroll {
     flex: 1;
@@ -464,19 +624,17 @@
     display: grid;
     align-content: start;
     gap: 2px;
+    margin: 0;
     padding: 8px;
+    list-style: none;
   }
 
   .item {
     display: flex;
     align-items: center;
-    gap: 11px;
-    width: 100%;
-    min-height: 59px;
-    padding: 9px 12px;
+    min-width: 0;
     border: 1px solid transparent;
     border-radius: 10px;
-    text-align: left;
     transition: background var(--dur-fast), border-color var(--dur-fast);
   }
 
@@ -489,7 +647,62 @@
     background: rgb(var(--accent-rgb) / 0.13);
   }
 
-  .item:focus-visible {
+  .item-main {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    min-height: 59px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    text-align: left;
+  }
+
+  .item-main:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
+    outline-offset: -2px;
+  }
+
+  /* Copy buttons take the marks' place while the row is pointed at or
+     has the keyboard. */
+  .quick {
+    display: none;
+    flex: none;
+    gap: 2px;
+    padding-right: 8px;
+  }
+
+  .item:hover .quick,
+  .item:focus-within .quick {
+    display: flex;
+  }
+
+  .item:hover .marks,
+  .item:focus-within .marks {
+    display: none;
+  }
+
+  .quick-btn {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    color: var(--text-2);
+    transition: background var(--dur-fast), color var(--dur-fast);
+  }
+
+  .quick-btn:hover {
+    background: var(--press);
+    color: var(--text-1);
+  }
+
+  .quick-btn.done {
+    color: var(--ok);
+  }
+
+  .quick-btn:focus-visible {
     outline: 2px solid rgb(var(--accent-rgb) / 0.75);
     outline-offset: -2px;
   }
@@ -791,7 +1004,7 @@
     font-size: 15px;
   }
 
-  :global(html.mobile) .item {
+  :global(html.mobile) .item-main {
     min-height: 62px;
     padding: 9px 12px;
   }
@@ -816,7 +1029,7 @@
 
   /* Last, so it wins over the rules above: a big screen gets roomier rows. */
   @container vault (min-width: 1700px) {
-    .item {
+    .item-main {
       min-height: 64px;
     }
 
@@ -856,7 +1069,7 @@
       padding: 6px;
     }
 
-    .item {
+    .item-main {
       min-height: 50px;
       padding: 6px 10px;
     }
@@ -882,7 +1095,7 @@
       padding: 6px 14px;
     }
 
-    .item {
+    .item-main {
       min-height: 46px;
       padding: 5px 10px;
     }

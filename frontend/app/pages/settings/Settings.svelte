@@ -8,6 +8,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
+  import Moon from "@lucide/svelte/icons/moon";
   import PanelBottomClose from "@lucide/svelte/icons/panel-bottom-close";
   import Palette from "@lucide/svelte/icons/palette";
   import Power from "@lucide/svelte/icons/power";
@@ -144,16 +145,16 @@
       </header>
 
       <label class="row">
-        <span class="row-icon"><Sparkles size={15} /></span>
+        <span class="row-icon"><Moon size={15} /></span>
         <span class="text">
-          <strong>Glass effects</strong>
-          <small>Translucent, blurred panels with glow and motion. Uses more graphics power.</small>
+          <strong>Dark theme</strong>
+          <small>Charcoal grey-black panels instead of the blue-tinted ones. The accent colour stays the same.</small>
         </span>
         <input
           type="checkbox"
           class="switch"
-          checked={settings.glass}
-          onchange={(e) => settings.setGlass(e.currentTarget.checked)}
+          checked={settings.dark}
+          onchange={(e) => settings.setDark(e.currentTarget.checked)}
         />
       </label>
 

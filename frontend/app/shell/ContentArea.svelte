@@ -1,9 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
-  import { cubicOut } from "svelte/easing";
-  import { fly } from "svelte/transition";
   import { nav } from "../../lib/nav.svelte";
-  import { settings } from "../../lib/settings.svelte";
   import { account } from "../account/account.svelte";
   import { canOpen, pages } from "../pages/registry";
 
@@ -44,10 +41,6 @@
     for (const page of pages) if (page.load && canOpen(page, true)) idle(() => load(page.id, page.load!));
   });
   const Page = $derived(def.component ?? loaded[def.id]);
-  // A short slide-in; none at all in the lighter mode or with reduced motion,
-  // so a slow machine spends its first frames on the page, not the animation.
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const enter = $derived(!settings.glass || reducedMotion ? 0 : 160);
   let scroller = $state<HTMLDivElement>();
   // Ignore the scroll events caused by swapping pages.
   let restoring = false;
@@ -69,7 +62,7 @@
 <main class="content glass">
   <div class="scroller" class:fill={def.fill} bind:this={scroller} onscroll={onScroll}>
     {#key nav.current}
-      <div class="page" class:fill={def.fill} in:fly={{ y: 8, duration: enter, easing: cubicOut }}>
+      <div class="page" class:fill={def.fill}>
         {#if Page}
           <Page />
         {:else if loadError}

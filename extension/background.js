@@ -235,6 +235,29 @@ async function fillTab(tabId, frameId, id) {
   }
 }
 
+/**
+ * Has the app copy a login's user name, password or 2FA code for a frame of
+ * the tab (the popup's Copy buttons). The app checks the login is saved for
+ * that frame's site, puts the text on the clipboard itself (marked secret,
+ * cleared after 30 seconds) and answers only whether it did: the text never
+ * comes through the browser.
+ */
+async function copyTab(tabId, frameId, id, field) {
+  if (!Number.isInteger(frameId) || !text(id, 100) || !["username", "password", "totp"].includes(field)) return refused;
+  let frames;
+  try {
+    frames = await framesFor(tabId);
+  } catch {
+    return { ok: false, error: "pageChanged" };
+  }
+  const frame = frames?.find((item) => item.frameId === frameId);
+  if (!frame) return { ok: false, error: "pageChanged" };
+  const answer = await ask({ type: "copy", id, url: frame.url, field });
+  // A MYLE older than this extension does not know the request.
+  if (answer?.ok === false && answer.error === "badRequest") return { ok: false, error: "oldApp" };
+  return answer;
+}
+
 // --- Offering to save ------------------------------------------------------------
 //
 // A login the user typed and sent is kept in the browser's memory (never on
@@ -482,6 +505,8 @@ async function handle(message, sender) {
         return loginsForTab(message.tabId);
       case "fillTab":
         return fillTab(message.tabId, message.frameId, message.id);
+      case "copyTab":
+        return copyTab(message.tabId, message.frameId, message.id, message.field);
       case "scanTab":
         return scanTab(message.tabId);
       case "saveTotpTab": {

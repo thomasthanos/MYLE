@@ -1,6 +1,7 @@
 /*
- * Static ambient backdrop behind the glass. It never animates, so Chromium
- * rasterizes it once and the backdrop-filter on the panels stays cheap.
+ * Static ambient backdrop behind the panels. It never animates, so Chromium
+ * rasterizes it once. A soft glow of the accent around the window, never
+ * colour showing through: the panels are opaque.
  */
 .app-backdrop {
   position: fixed;
@@ -9,11 +10,10 @@
   pointer-events: none;
   contain: strict;
   background:
-    radial-gradient(42% 52% at 10% 8%, rgb(92 108 255 / 0.42), transparent 72%),
-    radial-gradient(34% 42% at 92% 10%, rgb(48 196 232 / 0.31), transparent 72%),
-    radial-gradient(50% 56% at 76% 102%, rgb(150 88 255 / 0.24), transparent 72%),
-    radial-gradient(30% 36% at 26% 84%, rgb(56 112 255 / 0.18), transparent 72%),
-    linear-gradient(180deg, #0c0f17 0%, #090b10 100%);
+    radial-gradient(46% 56% at 8% 4%, rgb(var(--accent-rgb) / 0.16), transparent 72%),
+    radial-gradient(36% 44% at 94% 8%, rgb(106 170 196 / 0.1), transparent 72%),
+    radial-gradient(52% 58% at 78% 104%, rgb(122 108 200 / 0.09), transparent 72%),
+    linear-gradient(180deg, #0c0f16 0%, #090b10 100%);
 }
 
 /* Film grain removes gradient banding on 8-bit panels. */
@@ -25,12 +25,13 @@
   opacity: 0.035;
 }
 
-/* Solid look (the default): the same light, far quieter, so it reads as a
-   soft glow around the window instead of colour showing through. */
-:root.solid .app-backdrop {
+/* Dark theme: charcoal, with only a whisper of the accent in one corner. */
+:root.dark .app-backdrop {
   background:
-    radial-gradient(46% 56% at 8% 4%, rgb(var(--accent-rgb) / 0.16), transparent 72%),
-    radial-gradient(36% 44% at 94% 8%, rgb(106 170 196 / 0.1), transparent 72%),
-    radial-gradient(52% 58% at 78% 104%, rgb(122 108 200 / 0.09), transparent 72%),
-    linear-gradient(180deg, #0c0f16 0%, #090b10 100%);
+    radial-gradient(44% 52% at 8% 4%, rgb(var(--accent-rgb) / 0.07), transparent 72%),
+    linear-gradient(180deg, #111112 0%, #0b0b0c 100%);
+}
+
+:root.dark .app-backdrop::after {
+  opacity: 0.025;
 }

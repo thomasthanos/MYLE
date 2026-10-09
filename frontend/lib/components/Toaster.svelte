@@ -53,7 +53,7 @@
     padding: 11px 12px;
     border: 1px solid rgb(255 255 255 / 0.1);
     border-radius: var(--radius-md);
-    background: rgb(28 32 46 / 0.97);
+    background: var(--toast-bg);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), var(--elev-2);
     pointer-events: auto;
   }
