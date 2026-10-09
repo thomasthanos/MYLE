@@ -87,6 +87,27 @@ pub fn unb64(text: &str) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(text).or_else(|_| URL_SAFE.decode(text)).ok()
 }
 
+/// Whether two credential ids name the same passkey: sites hand ids back in
+/// base64url with or without padding, and some in plain base64, so the bytes
+/// are compared, not the text.
+pub fn same_credential(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    let bytes = |text: &str| {
+        let text = text.trim().replace('+', "-").replace('/', "_");
+        unb64(&text)
+    };
+    matches!((bytes(a), bytes(b)), (Some(a), Some(b)) if !a.is_empty() && a == b)
+}
+
+/// Whether two relying party ids are the same site's (case, a trailing dot
+/// and spaces aside).
+pub fn same_rp(a: &str, b: &str) -> bool {
+    let clean = |text: &str| text.trim().trim_end_matches('.').to_ascii_lowercase();
+    clean(a) == clean(b)
+}
+
 /// The relying party a page on `host` may use: `asked` (the page's
 /// `rp.id`/`rpId`) or the host itself. It must be the host or a domain
 /// above it, never a public suffix or an IP address; `localhost` is allowed
@@ -329,6 +350,17 @@ mod tests {
     }
 
     #[test]
+    fn credential_ids_match_however_the_site_writes_them() {
+        let id = b64(&[0xfb, 0xff, 0x01, 0x02, 0x03]);
+        assert!(same_credential(&id, &id));
+        assert!(same_credential(&URL_SAFE.encode([0xfb, 0xff, 0x01, 0x02, 0x03]), &id), "padded");
+        assert!(same_credential(&id.replace('-', "+").replace('_', "/"), &id), "plain base64");
+        assert!(!same_credential(&b64(&[1, 2, 3]), &id));
+        assert!(same_rp("Google.com.", "google.com"));
+        assert!(!same_rp("accounts.google.com", "google.com"));
+    }
+
+    #[test]
     fn a_page_uses_only_its_own_site_and_never_a_public_suffix() {
         assert_eq!(rp_id_for("github.com", None).unwrap(), "github.com");
         assert_eq!(rp_id_for("login.example.com", Some("example.com")).unwrap(), "example.com");
@@ -340,6 +372,7 @@ mod tests {
         assert!(rp_id_for("attacker.github.io", Some("github.io")).is_err(), "a public suffix");
         assert!(rp_id_for("shop.example.co.uk", Some("co.uk")).is_err());
         assert!(rp_id_for("127.0.0.1", None).is_err(), "no IP addresses");
+        assert_eq!(rp_id_for("accounts.google.com", Some("google.com")).unwrap(), "google.com");
         assert_eq!(origin_of("https://example.com:8443/login?x=1").as_deref(), Some("https://example.com:8443"));
         assert_eq!(origin_of("https://example.com/login").as_deref(), Some("https://example.com"));
     }

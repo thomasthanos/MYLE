@@ -37,6 +37,14 @@
     { id: "startMenu", label: "Start Menu", icon: LayoutGrid },
     { id: "tools", label: "Tools", icon: Wrench },
   ];
+  /** What each tab is for, under the page's title. */
+  const tabHints: Record<Tab, string> = {
+    quick: "A faster, quieter, more private Windows in three steps. Everything can be undone.",
+    settings: "Every setting MYLE can change, by topic, with what each one does.",
+    apps: "Preinstalled apps you may not need. Pick them, then review and remove them together.",
+    startMenu: "How the Start menu looks: alignment, layout, folders and pins.",
+    tools: "Sign in to Windows by itself, or restart straight into the BIOS.",
+  };
   /** Choices waiting on a tab, shown next to its name. */
   const waiting = $derived<Partial<Record<Tab, number>>>({
     settings: debloat.pending.on.length + debloat.pending.off.length,
@@ -75,7 +83,10 @@
   <div class="top">
     <div class="title">
       <span class="title-icon"><Gauge size={17} /></span>
-      <h1>Windows Optimization</h1>
+      <div class="title-text">
+        <h1>Windows Optimization</h1>
+        <p>{tabHints[debloat.tab]}</p>
+      </div>
     </div>
     <div class="tabs" role="tablist" aria-label="Windows Optimization">
       {#each tabs as tab (tab.id)}
@@ -252,12 +263,14 @@
   .tab { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 8px; color: var(--text-2); font-size: 12.5px; font-weight: 560; transition: background var(--dur-fast), color var(--dur-fast); }
   .waiting { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .tab:hover { color: var(--text-1); background: var(--hover); }
-  .tab.active { color: #fff; background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.42), rgb(var(--accent-rgb) / 0.2)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1); }
+  .tab.active { color: var(--text-1); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent-rgb) / 0.18)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
   .tab:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: 1px; }
   .panel { container: optimization-page / inline-size; margin-top: 12px; }
   .top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; }
-  .title { display: flex; align-items: center; gap: 10px; }
-  .title-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: 10px; background: rgb(121 138 255 / 0.1); color: rgb(176 188 255 / 0.95); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
+  .title { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .title-text { display: grid; gap: 2px; min-width: 0; }
+  .title-text p { color: var(--text-2); font-size: 12px; }
+  .title-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: 11px; background: rgb(var(--accent-rgb) / 0.1); color: rgb(var(--accent-soft-rgb)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
   h1 { font-size: 21px; }
   .warning, .error-banner, .lock-banner { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 10px 12px; color: rgb(229 218 176 / 0.78); font-size: 11.5px; }
   .warning :global(svg) { color: rgb(241 187 84 / 0.9); flex: none; }

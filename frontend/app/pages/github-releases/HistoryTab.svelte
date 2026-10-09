@@ -435,7 +435,6 @@
     min-height: 0;
     padding: 12px 16px 16px;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   .bar,

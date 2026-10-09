@@ -30,7 +30,7 @@
 {/if}
 
 <style>
-  .review-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px 10px 9px 12px; border-color: rgb(var(--accent-rgb) / 0.32); background: #1a1f2d; box-shadow: 0 -10px 24px -14px rgb(0 0 0 / 0.8); }
+  .review-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px 10px 9px 12px; border-color: rgb(var(--accent-rgb) / 0.32); background: var(--float-bg); box-shadow: 0 -10px 24px -14px rgb(0 0 0 / 0.8); }
   .count { display: grid; place-items: center; flex: none; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 9px; background: var(--accent-grad); color: #fff; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .summary { display: grid; flex: 1; gap: 1px; min-width: 0; }
   strong { color: var(--text-1); font-size: 12.5px; font-weight: 600; }

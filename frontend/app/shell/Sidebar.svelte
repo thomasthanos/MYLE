@@ -218,8 +218,6 @@
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgb(255 255 255 / 0.14) transparent;
     --fade-top: 0px;
     --fade-bottom: 0px;
     mask-image: linear-gradient(

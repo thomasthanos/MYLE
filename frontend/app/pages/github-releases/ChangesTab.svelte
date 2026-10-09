@@ -381,7 +381,6 @@
     min-height: 0;
     padding: 12px;
     overflow-y: auto;
-    scrollbar-width: thin;
     container: changes / inline-size;
   }
 
@@ -480,7 +479,6 @@
     min-height: 120px;
     padding: 4px;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   .file {

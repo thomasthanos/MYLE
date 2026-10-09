@@ -132,10 +132,10 @@
   .scroller::-webkit-scrollbar-thumb {
     border: 3px solid transparent;
     border-radius: 999px;
-    background: rgb(210 220 245 / 0.13) padding-box;
+    background: var(--scroll-thumb) padding-box;
   }
 
   .scroller::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(210 220 245 / 0.24);
+    background-color: var(--scroll-thumb-hover);
   }
 </style>

@@ -591,7 +591,6 @@
     min-height: 0;
     padding-right: 4px;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   .lead {

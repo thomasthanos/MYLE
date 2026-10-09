@@ -3,6 +3,10 @@
   // and apply from the bar below. Settings and Apps hold the same choices.
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
+  import History from "@lucide/svelte/icons/history";
+  import ListChecks from "@lucide/svelte/icons/list-checks";
+  import MousePointerClick from "@lucide/svelte/icons/mouse-pointer-click";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import X from "@lucide/svelte/icons/x";
@@ -37,6 +41,14 @@
   const plans = $derived(Object.fromEntries(cards.map((card) => [card.profile, profilePlan(debloat.tweaks, apps, card.profile)])));
   const available = $derived(debloat.tweaks.filter((tweak) => tweak.state !== "unavailable"));
   const applied = $derived(available.filter((tweak) => tweak.state === "applied").length);
+  /** Where the user is: 1 pick, 2 review, 3 apply (running or done). */
+  const step = $derived(debloat.busy || debloat.outcome ? 3 : debloat.pendingCount ? 2 : 1);
+  const steps = [
+    { n: 1, icon: MousePointerClick, title: "Pick", text: "A profile below, or your own settings and apps" },
+    { n: 2, icon: ListChecks, title: "Review", text: "See every change before anything happens" },
+    { n: 3, icon: ShieldCheck, title: "Apply", text: "A restore point comes first; undo any time" },
+  ];
+  const share = $derived(available.length ? Math.round((applied / available.length) * 100) : 0);
   const settingChanges = $derived([
     ...debloat.pending.on.map((tweak) => ({ id: tweak.id, title: tweak.title, on: true })),
     ...debloat.pending.off.map((tweak) => ({ id: tweak.id, title: tweak.title, on: false })),
@@ -44,9 +56,15 @@
 </script>
 
 <div class="optimization-ui quick">
-  <p class="lead">
-    Pick how far to go. Nothing changes until you review and apply: a restore point comes first, and every change can be undone.
-  </p>
+  <ol class="steps" aria-label="How Quick setup works">
+    {#each steps as item (item.n)}
+      {@const Icon = item.icon}
+      <li class:current={step === item.n} class:done={step > item.n}>
+        <span class="step-icon">{#if step > item.n}<Check size={14} />{:else}<Icon size={14} />{/if}</span>
+        <span class="step-text"><b>{item.n}. {item.title}</b><small>{item.text}</small></span>
+      </li>
+    {/each}
+  </ol>
 
   <div class="profiles" role="group" aria-label="Quick setup profiles">
     {#each cards as card (card.profile)}
@@ -108,21 +126,41 @@
 
   {#if debloat.status}
     <footer class="pc-state">
-      <span>{debloat.status.windows.name}</span>
-      <span aria-hidden="true">·</span>
-      <span>{applied} of {available.length} settings already on</span>
-      {#if debloat.undoable.length}
-        <button type="button" class="link" disabled={debloat.locked} onclick={() => debloat.undo(debloat.undoable)}>
-          <Undo2 size={12} /> Undo everything MYLE changed ({debloat.undoable.length})
-        </button>
-      {/if}
+      <div class="tile">
+        <small>This PC</small>
+        <strong>{debloat.status.windows.name}</strong>
+      </div>
+      <div class="tile">
+        <small>Already optimized</small>
+        <strong>{applied} of {available.length} settings</strong>
+        <span class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={share} aria-label="Settings already on"><span style:width="{share}%"></span></span>
+      </div>
+      <div class="tile">
+        <small>Undo</small>
+        {#if debloat.undoable.length}
+          <button type="button" class="link" disabled={debloat.locked} onclick={() => debloat.undo(debloat.undoable)}>
+            <Undo2 size={12} /> Undo all MYLE changes ({debloat.undoable.length})
+          </button>
+        {:else}
+          <strong class="quiet"><History size={13} /> Nothing to undo yet</strong>
+        {/if}
+      </div>
     </footer>
   {/if}
 </div>
 
 <style>
   .quick { gap: 12px; }
-  .lead { max-width: 90ch; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .steps li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 11px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 11px; background: rgb(0 0 0 / 0.14); color: var(--text-2); transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .steps li.current { border-color: rgb(var(--accent-rgb) / 0.4); background: rgb(var(--accent-rgb) / 0.08); color: var(--text-1); }
+  .step-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: rgb(255 255 255 / 0.05); color: var(--text-2); }
+  .current .step-icon { background: rgb(var(--accent-rgb) / 0.2); color: rgb(var(--accent-soft-rgb)); }
+  .done .step-icon { background: rgb(62 207 142 / 0.14); color: var(--ok); }
+  .step-text { display: grid; min-width: 0; }
+  .step-text b { font-size: 12.5px; font-weight: 600; }
+  .step-text small { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  @container optimization-page (max-width: 600px) { .steps { grid-template-columns: minmax(0, 1fr); } }
   .profiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   @container optimization-page (max-width: 600px) { .profiles { grid-template-columns: minmax(0, 1fr); } }
 
@@ -149,6 +187,13 @@
   .link:hover:not(:disabled) { background: var(--hover); color: var(--text-1); }
   .link:disabled { opacity: 0.45; }
 
-  .pc-state { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-3); font-size: 11.5px; }
-  .pc-state .link { margin-left: auto; }
+  .pc-state { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tile { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid rgb(255 255 255 / 0.05); border-radius: 11px; background: rgb(0 0 0 / 0.12); }
+  .tile small { color: var(--text-3); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .tile strong { overflow: hidden; color: var(--text-1); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .tile strong.quiet { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-weight: 500; }
+  .tile .link { justify-self: start; margin-left: -6px; }
+  .meter { height: 4px; overflow: hidden; border-radius: 999px; background: rgb(255 255 255 / 0.06); }
+  .meter span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--ok), rgb(110 225 175)); transition: width var(--dur-med) var(--ease-out); }
+  @container optimization-page (max-width: 600px) { .pc-state { grid-template-columns: minmax(0, 1fr); } }
 </style>

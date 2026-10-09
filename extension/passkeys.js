@@ -9,7 +9,12 @@
 // a page can only ask, as it always could; the user's click on MYLE's prompt
 // and the address the browser reports decide the rest.
 (() => {
-  if (window !== window.top || typeof CredentialsContainer !== "function" || typeof PublicKeyCredential !== "function") {
+  if (typeof CredentialsContainer !== "function" || typeof PublicKeyCredential !== "function") return;
+  if (window !== window.top) {
+    // A frame of the page's own origin (an empty helper frame a sign-in page
+    // makes, as Google's does) asks the page itself, so MYLE answers there
+    // too. Frames of any other origin keep the browser's own passkeys.
+    delegateToTop();
     return;
   }
   // Two copies installed (the store's, and one from a folder): one wraps.
@@ -99,6 +104,9 @@
       allow: Array.isArray(publicKey.allowCredentials) ?
         publicKey.allowCredentials.filter((item) => isBuffer(item?.id)).map((item) => b64(item.id)) : [],
       userVerification: String(publicKey.userVerification ?? "preferred"),
+      // A site that still knows its old U2F keys asks for them by "appid":
+      // a MYLE passkey never is one, which the answer says, as browsers do.
+      appid: typeof publicKey.extensions?.appid === "string",
     };
   }
 
@@ -106,7 +114,7 @@
   const method = (fn) => ({ value: fn });
 
   /** A PublicKeyCredential the page can use like the browser's own. */
-  function credential(made, kind, credProps) {
+  function credential(made, kind, extensionsAsked) {
     const r = made.response;
     const clientDataJSON = unb64(r.clientDataJSON);
     const authenticatorData = unb64(r.authenticatorData);
@@ -144,7 +152,9 @@
         })),
       });
     }
-    const extensions = kind === "create" && credProps ? { credProps: { rk: true } } : {};
+    const extensions = {};
+    if (kind === "create" && extensionsAsked?.credProps) extensions.credProps = { rk: true };
+    if (kind === "get" && extensionsAsked?.appid) extensions.appid = false;
     return Object.create(PublicKeyCredential.prototype, {
       id: value(made.id),
       rawId: value(unb64(made.rawId)),
@@ -165,8 +175,8 @@
 
   /** MYLE's answer as the page expects it: a credential, an error, or the
    *  browser's own passkeys. */
-  function settle(answer, kind, credProps, native) {
-    if (answer?.result === "credential") return credential(answer.credential, kind, credProps);
+  function settle(answer, kind, extensionsAsked, native) {
+    if (answer?.result === "credential") return credential(answer.credential, kind, extensionsAsked);
     if (answer?.result === "error") {
       throw new DOMException(answer.message || "The operation either timed out or was not allowed.", answer.name || "NotAllowedError");
     }
@@ -181,8 +191,9 @@
     const outer = options.signal;
     if (outer?.aborted) throw aborted(outer);
     listen.call(outer ?? new EventTarget(), "abort", () => controller.abort(outer.reason), { once: true });
-    const ours = ask("conditional", forGet(options.publicKey), controller.signal).then((answer) =>
-      answer?.result === "credential" ? credential(answer.credential, "get", false) : new Promise(() => {}));
+    const details = forGet(options.publicKey);
+    const ours = ask("conditional", details, controller.signal).then((answer) =>
+      answer?.result === "credential" ? credential(answer.credential, "get", details) : new Promise(() => {}));
     // The browser's own: if it cannot offer any, MYLE's still can.
     const theirs = callNative({ ...options, signal: controller.signal }).catch((error) => {
       if (controller.signal.aborted) throw error;
@@ -206,7 +217,7 @@
         if (kind === "get" && options.mediation === "conditional") return conditional(options, callNative);
         const details = kind === "create" ? forCreate(publicKey) : forGet(publicKey);
         return ask(kind, details, options.signal).then((answer) =>
-          settle(answer, kind, kind === "create" && details.credProps, callNative));
+          settle(answer, kind, details, callNative));
       },
     }[name];
     Object.defineProperty(proto, name, { value: wrapped, writable: true, configurable: true, enumerable: true });
@@ -214,4 +225,33 @@
 
   wrap("create", nativeCreate, "create");
   wrap("get", nativeGet, "get");
+
+  /** In a same-origin frame: navigator.credentials calls with publicKey go
+   *  to the top page's (which MYLE wraps); everything else stays native. */
+  function delegateToTop() {
+    let top;
+    try {
+      top = window.top;
+      // Exactly the same origin: not one merely reachable by document.domain.
+      if (self.origin === "null" || self.origin !== top.origin || !top.navigator.credentials) return;
+    } catch {
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(window, "__mylePasskeys")) return;
+    Object.defineProperty(window, "__mylePasskeys", { value: true });
+    const proto = CredentialsContainer.prototype;
+    for (const name of ["create", "get"]) {
+      const native = proto[name];
+      const wrapped = {
+        [name](options) {
+          if (this !== navigator.credentials || !options?.publicKey || typeof options.publicKey !== "object") {
+            return native.call(this, options);
+          }
+          const container = top.navigator.credentials;
+          return container[name](options);
+        },
+      }[name];
+      Object.defineProperty(proto, name, { value: wrapped, writable: true, configurable: true, enumerable: true });
+    }
+  }
 })();

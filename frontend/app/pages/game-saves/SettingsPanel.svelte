@@ -482,7 +482,6 @@
     margin: 0;
     padding: 0 3px 0 0;
     list-style: none;
-    scrollbar-width: thin;
     overscroll-behavior: contain;
   }
   .root { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 9px 10px; border: 1px solid rgb(255 255 255 / 0.045); border-radius: 8px; background: rgb(255 255 255 / 0.02); }
@@ -499,7 +498,7 @@
   .add-root { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
   .custom-add { width: 100%; color: var(--settings-muted); }
 
-  .custom-games { display: grid; gap: 7px; max-height: 170px; overflow: auto; padding-top: 14px; border-top: 1px solid rgb(255 255 255 / 0.065); scrollbar-width: thin; }
+  .custom-games { display: grid; gap: 7px; max-height: 170px; overflow: auto; padding-top: 14px; border-top: 1px solid rgb(255 255 255 / 0.065); }
   .custom-game { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; padding: 8px; border-radius: 8px; background: rgb(255 255 255 / 0.02); }
   .custom-game > span { display: grid; gap: 3px; min-width: 0; }
   .custom-game strong { overflow-wrap: anywhere; color: var(--text-1); font-size: 12px; font-weight: 500; }

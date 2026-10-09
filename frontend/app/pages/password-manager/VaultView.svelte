@@ -616,8 +616,6 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    scrollbar-color: rgb(210 220 245 / 0.2) transparent;
-    scrollbar-width: thin;
   }
 
   .list-scroll {

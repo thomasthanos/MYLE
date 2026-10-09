@@ -22,6 +22,13 @@
   } = $props();
 
   const icons = { light: Feather, recommended: ShieldCheck, maximum: Rocket } as const;
+  /** How safe it is, in a word and a line. */
+  const safety = {
+    light: { tone: "safe", word: "Safe", line: "Nothing you use stops working" },
+    recommended: { tone: "safe", word: "Safe", line: "Fine for almost every PC" },
+    maximum: { tone: "advanced", word: "Advanced", line: "Some Windows features turn off" },
+  } as const;
+  const safe = $derived(safety[profile]);
   const Icon = $derived(icons[profile]);
   const done = $derived(settings === 0 && apps === 0);
 </script>
@@ -36,6 +43,7 @@
     <span class="mark" aria-hidden="true">{#if selected}<CircleCheck size={18} />{/if}</span>
   </span>
   <span class="text">{text}</span>
+  <span class="safety {safe.tone}"><i aria-hidden="true"></i><b>{safe.word}</b> · {safe.line}</span>
   <span class="counts">
     {#if done}
       <CircleCheck size={13} /> Already done on this PC
@@ -60,6 +68,11 @@
   .names > span { color: var(--text-2); font-size: 11.5px; }
   .mark { display: grid; place-items: center; flex: none; width: 20px; color: var(--accent); }
   .text { color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
+  .safety { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 11px; }
+  .safety i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok-glow); }
+  .safety b { font-weight: 650; color: rgb(110 225 175); }
+  .safety.advanced i { background: #e8ad55; box-shadow: 0 0 6px rgb(232 173 85 / 0.45); }
+  .safety.advanced b { color: #efc38a; }
   .counts { display: flex; align-items: center; gap: 5px; margin-top: auto; padding-top: 8px; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .counts b { color: var(--text-1); font-weight: 650; }
   .counts :global(svg) { color: var(--ok); }

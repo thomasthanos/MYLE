@@ -641,7 +641,11 @@ impl Vault {
                 entry
                     .passkeys
                     .iter()
-                    .filter(|key| key.rp_id == rp_id && (allow.is_empty() || allow.contains(&key.credential_id)))
+                    .filter(|key| {
+                        super::passkeys::same_rp(&key.rp_id, rp_id)
+                            && (allow.is_empty()
+                                || allow.iter().any(|id| super::passkeys::same_credential(id, &key.credential_id)))
+                    })
                     .map(|key| (id.clone(), entry.title.clone(), key.clone()))
             })
             .collect();

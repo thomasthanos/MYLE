@@ -551,7 +551,6 @@
     min-height: 0;
     padding: 7px;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   .item {
