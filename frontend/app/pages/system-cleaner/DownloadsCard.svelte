@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke, isTauri } from "@tauri-apps/api/core";
+  import { isTauri } from "@tauri-apps/api/core";
   import FolderDown from "@lucide/svelte/icons/folder-down";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -8,13 +8,10 @@
   import { toast } from "../../../lib/toast.svelte";
   import { formatSize } from "./api";
 
-  type Item = { path: string; name: string; isDir: boolean; size: number; changed: number };
-  type Preview = { folder: string; items: Item[]; total: number; kept: number };
-  type Outcome = { deleted: number; freed: number; skipped: string[] };
+  import { AUTO_KEY, ENABLED_KEY, deleteDownloads, previewDownloads, type Kept, type Preview } from "./downloads";
 
-  const KEY = "myle.cleaner.downloads";
-  /** Off until the user turns it on. */
-  let enabled = $state(readFlag(KEY, false));
+  let enabled = $state(readFlag(ENABLED_KEY, true));
+  let auto = $state(readFlag(AUTO_KEY, false));
   let busy = $state(false);
   let preview = $state<Preview | null>(null);
   /** Unticked in the list: kept this time. */
@@ -25,7 +22,7 @@
 
   function setEnabled(value: boolean) {
     enabled = value;
-    writeFlag(KEY, value);
+    writeFlag(ENABLED_KEY, value);
     if (!value) preview = null;
   }
 
@@ -35,7 +32,7 @@
     if (!isTauri()) return toast.error("The Downloads cleaner runs only in the app.");
     busy = true;
     try {
-      preview = await invoke<Preview>("cleaner_downloads_preview");
+      preview = await previewDownloads();
       skip = {};
     } catch (error) {
       toast.error(message(error));
@@ -58,7 +55,7 @@
     if (!ok) return;
     busy = true;
     try {
-      const outcome = await invoke<Outcome>("cleaner_downloads_delete", { paths: chosen.map((item) => item.path) });
+      const outcome = await deleteDownloads(chosen.map((item) => item.path));
       const left = outcome.skipped.length;
       toast.success(
         `Deleted ${outcome.deleted} item${outcome.deleted === 1 ? "" : "s"}, ${formatSize(outcome.freed)} freed.` +
@@ -73,6 +70,13 @@
   }
 
   const when = (seconds: number) => new Date(seconds * 1000).toLocaleDateString();
+  const why = (k: Kept) =>
+    k.reason === "document" ? "Document" : k.reason === "recent" ? `Modified ${when(k.changed)}, in the last 7 days` : "Link or junction";
+
+  function setAuto(value: boolean) {
+    auto = value;
+    writeFlag(AUTO_KEY, value);
+  }
 </script>
 
 <section class="downloads surface">
@@ -91,7 +95,7 @@
         {#if busy}<LoaderCircle size={13} class="spin" />{/if} {preview ? "Scan again" : "Show what would go"}
       </button>
       {#if preview}
-        <span class="sum">{chosen.length} of {preview.items.length} · {formatSize(chosenSize)} · {preview.kept} kept</span>
+        <span class="sum">{chosen.length} of {preview.items.length} · {formatSize(chosenSize)} · {preview.kept.length} kept</span>
         <button class="btn small danger" disabled={busy || !chosen.length} onclick={remove}>
           <Trash2 size={13} /> Delete permanently
         </button>
@@ -114,7 +118,21 @@
       {:else}
         <p class="none">Nothing to delete in {preview.folder}.</p>
       {/if}
+      {#if preview.kept.length}
+        <details class="kept">
+          <summary>{preview.kept.length} kept, and why</summary>
+          <ul class="list">
+            {#each preview.kept as k (k.name)}
+              <li><span class="row"><span class="name">{k.name}{k.isDir ? "\\" : ""}</span><span class="date">{why(k)}</span></span></li>
+            {/each}
+          </ul>
+        </details>
+      {/if}
     {/if}
+    <label class="auto">
+      <input type="checkbox" class="switch" checked={auto} onchange={(e) => setAuto(e.currentTarget.checked)} />
+      <span><b>Clean Downloads automatically</b><small>When MYLE starts, at most once a day, with the same rules and without asking. Deleted permanently.</small></span>
+    </label>
   {/if}
 </section>
 
@@ -195,6 +213,42 @@
 
   .list label:hover {
     background: var(--hover);
+  }
+
+  .row {
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+
+  .kept summary {
+    color: var(--text-2);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .kept .list {
+    margin-top: 6px;
+  }
+
+  .auto {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }
+
+  .auto span {
+    display: grid;
+    gap: 1px;
+    font-size: 12px;
+  }
+
+  .auto small {
+    color: var(--text-3);
+    font-size: 11px;
   }
 
   .name {

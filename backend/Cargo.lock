@@ -2704,7 +2704,7 @@ dependencies = [
 
 [[package]]
 name = "make-your-life-easier"
-version = "9.14.0"
+version = "9.14.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",

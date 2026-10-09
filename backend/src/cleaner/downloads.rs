@@ -2,8 +2,11 @@
 //!
 //! The folder is Windows' own Downloads (the known folder, wherever the user
 //! moved it). Kept: documents by their extension, and anything changed or
-//! created in the last seven days. Folders go only when nothing inside them
-//! is kept. Links and junctions are never followed or removed. Deleting is
+//! modified in the last seven days (Date modified, as Explorer shows it; not
+//! created or accessed, which copying, unpacking and scanning reset). A
+//! folder is judged by its own date, like in Explorer. Hidden and system
+//! files (desktop.ini) are left out. Links and junctions are never followed
+//! or removed. Deleting is
 //! permanent, and only what the preview listed and still qualifies goes:
 //! every path is checked again just before it is removed.
 
@@ -16,7 +19,7 @@ use serde::Serialize;
 const DOCUMENTS: &[&str] = &[
     "pdf", "doc", "docx", "docm", "dot", "dotx", "xls", "xlsx", "xlsm", "xlsb", "ppt", "pptx", "pptm", "pps",
     "ppsx", "odt", "ods", "odp", "odg", "txt", "rtf", "csv", "tsv", "md", "markdown", "epub", "mobi", "azw3",
-    "djvu", "xps", "oxps", "pages", "numbers", "key", "tex", "log", "json", "xml", "html", "htm", "one", "vsdx",
+    "djvu", "xps", "oxps", "pages", "numbers", "key", "tex", "one", "vsdx",
     "pub", "wpd", "wps", "ott", "ots", "otp", "fb2", "cbz", "cbr",
 ];
 
@@ -32,7 +35,17 @@ pub struct Item {
     name: String,
     is_dir: bool,
     size: u64,
-    /// Seconds since 1970: the newest of modified and created.
+    /// Date modified, seconds since 1970.
+    changed: u64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Kept {
+    name: String,
+    is_dir: bool,
+    /// "document", "recent" or "link".
+    reason: &'static str,
     changed: u64,
 }
 
@@ -42,8 +55,8 @@ pub struct Preview {
     folder: String,
     items: Vec<Item>,
     total: u64,
-    /// Entries left alone: documents, recent ones, links.
-    kept: usize,
+    /// Entries left alone, and why.
+    kept: Vec<Kept>,
 }
 
 #[derive(Serialize)]
@@ -82,9 +95,25 @@ fn is_document(path: &Path) -> bool {
 }
 
 fn changed(meta: &std::fs::Metadata) -> SystemTime {
-    let modified = meta.modified().unwrap_or(SystemTime::now());
-    let created = meta.created().unwrap_or(modified);
-    modified.max(created)
+    meta.modified().unwrap_or(SystemTime::now())
+}
+
+/// desktop.ini and the like: never listed, never touched.
+fn is_hidden(meta: &std::fs::Metadata, name: &str) -> bool {
+    if name.eq_ignore_ascii_case("desktop.ini") || name.eq_ignore_ascii_case("thumbs.db") {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        meta.file_attributes() & HIDDEN_OR_SYSTEM != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = meta;
+        name.starts_with('.')
+    }
 }
 
 fn recent(meta: &std::fs::Metadata, now: SystemTime) -> bool {
@@ -105,23 +134,48 @@ fn is_link(meta: &std::fs::Metadata) -> bool {
     }
 }
 
-/// The entry's size if all of it may go; `None` when something in it stays.
-fn removable(path: &Path, now: SystemTime, depth: usize) -> Option<u64> {
-    let meta = std::fs::symlink_metadata(path).ok()?;
-    if is_link(&meta) || recent(&meta, now) {
-        return None;
+/// Why an entry directly in Downloads stays, or `None` when it may go.
+fn keep_reason(path: &Path, meta: &std::fs::Metadata, now: SystemTime) -> Option<&'static str> {
+    if is_link(meta) || !(meta.is_file() || meta.is_dir()) {
+        Some("link")
+    } else if recent(meta, now) {
+        Some("recent")
+    } else if meta.is_file() && is_document(path) {
+        Some("document")
+    } else {
+        None
     }
+}
+
+/// Bytes in a file or folder; links inside are not followed.
+fn size_of(path: &Path, meta: &std::fs::Metadata, depth: usize) -> u64 {
     if meta.is_file() {
-        return (!is_document(path)).then_some(meta.len());
+        return meta.len();
     }
-    if !meta.is_dir() || depth >= MAX_DEPTH {
+    if is_link(meta) || !meta.is_dir() || depth > MAX_DEPTH {
+        return 0;
+    }
+    std::fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| {
+                    let path = entry.path();
+                    std::fs::symlink_metadata(&path).ok().map(|meta| size_of(&path, &meta, depth + 1))
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// The size of an entry of Downloads if it may go now.
+fn removable(path: &Path, now: SystemTime) -> Option<u64> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let name = path.file_name()?.to_string_lossy();
+    if is_hidden(&meta, &name) || keep_reason(path, &meta, now).is_some() {
         return None;
     }
-    let mut total = 0u64;
-    for entry in std::fs::read_dir(path).ok()? {
-        total += removable(&entry.ok()?.path(), now, depth + 1)?;
-    }
-    Some(total)
+    Some(size_of(path, &meta, 0))
 }
 
 fn epoch(time: SystemTime) -> u64 {
@@ -130,25 +184,29 @@ fn epoch(time: SystemTime) -> u64 {
 
 fn preview_in(folder: &Path, now: SystemTime) -> Result<Preview, String> {
     let mut items = Vec::new();
-    let mut kept = 0;
+    let mut kept = Vec::new();
     for entry in std::fs::read_dir(folder).map_err(|e| format!("Could not read {}: {e}", folder.display()))? {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
-        match removable(&path, now, 0) {
-            Some(size) => {
-                let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-                items.push(Item {
-                    name: entry.file_name().to_string_lossy().into_owned(),
-                    path: path.to_string_lossy().into_owned(),
-                    is_dir: meta.is_dir(),
-                    size,
-                    changed: epoch(changed(&meta)),
-                });
-            }
-            None => kept += 1,
+        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_hidden(&meta, &name) {
+            continue;
+        }
+        let changed = epoch(changed(&meta));
+        match keep_reason(&path, &meta, now) {
+            Some(reason) => kept.push(Kept { name, is_dir: meta.is_dir(), reason, changed }),
+            None => items.push(Item {
+                size: size_of(&path, &meta, 0),
+                path: path.to_string_lossy().into_owned(),
+                name,
+                is_dir: meta.is_dir(),
+                changed,
+            }),
         }
     }
     items.sort_by_key(|item| std::cmp::Reverse(item.size));
+    kept.sort_by_key(|item| std::cmp::Reverse(item.changed));
     let total = items.iter().map(|item| item.size).sum();
     Ok(Preview { folder: folder.to_string_lossy().into_owned(), items, total, kept })
 }
@@ -159,7 +217,7 @@ fn delete_in(folder: &Path, paths: &[String], now: SystemTime) -> Outcome {
         let path = PathBuf::from(text);
         // Only entries directly in Downloads, as listed, and still removable.
         let direct = path.parent().is_some_and(|parent| parent == folder) && path.file_name().is_some();
-        let size = direct.then(|| removable(&path, now, 0)).flatten();
+        let size = direct.then(|| removable(&path, now)).flatten();
         let Some(size) = size else {
             outcome.skipped.push(text.clone());
             continue;
@@ -210,16 +268,21 @@ mod tests {
         std::fs::write(root.join("report.PDF"), b"1").unwrap();
         std::fs::write(root.join("setup-folder").join("a.bin"), b"123").unwrap();
         std::fs::write(root.join("mixed").join("notes.docx"), b"1").unwrap();
+        std::fs::write(root.join("desktop.ini"), b"[x]").unwrap();
         // "Now" a month ahead: everything counts as old.
         let later = SystemTime::now() + Duration::from_secs(30 * 24 * 3600);
         let preview = preview_in(&root, later).unwrap();
         let mut names: Vec<_> = preview.items.iter().map(|i| i.name.as_str()).collect();
         names.sort();
-        assert_eq!(names, ["installer.exe", "setup-folder"]);
-        assert_eq!(preview.kept, 2);
-        assert_eq!(preview.total, 8);
+        // A folder goes by its own date, whatever is inside.
+        assert_eq!(names, ["installer.exe", "mixed", "setup-folder"]);
+        assert_eq!(preview.kept.len(), 1);
+        assert_eq!(preview.kept[0].reason, "document");
+        assert_eq!(preview.total, 9);
         // Today: all of it is new, so nothing goes.
-        assert!(preview_in(&root, SystemTime::now()).unwrap().items.is_empty());
+        let today = preview_in(&root, SystemTime::now()).unwrap();
+        assert!(today.items.is_empty());
+        assert!(today.kept.iter().all(|k| k.reason == "recent" && k.name != "desktop.ini"));
         // Deleting checks again: a document, or a path outside, is skipped.
         let outside = std::env::temp_dir().join("elsewhere.exe").to_string_lossy().into_owned();
         let asked = vec![
