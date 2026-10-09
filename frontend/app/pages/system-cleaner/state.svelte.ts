@@ -10,7 +10,7 @@ import { confirm } from "../../../lib/confirm.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { cleanerApi, formatSize, type CleanerCategory } from "./api";
-import { DOWNLOADS, DOWNLOADS_CATEGORY, deleteDownloads, previewDownloads, type Preview } from "./downloads";
+import { DOWNLOADS, DOWNLOADS_CATEGORY, type Preview } from "./downloads";
 
 const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned" };
 
@@ -226,7 +226,7 @@ class CleanerState {
 
   async #measureDownloads() {
     try {
-      this.downloads = await previewDownloads();
+      this.downloads = await cleanerApi.downloadsPreview();
       this.sizes[DOWNLOADS] = { bytes: this.downloads.total, files: this.downloads.items.length, locked: false };
     } catch (err) {
       this.downloads = null;
@@ -237,7 +237,7 @@ class CleanerState {
   /** Deletes the Downloads items the scan listed (each checked again). */
   async #cleanDownloads(): Promise<{ freed: number; skipped: number }> {
     const items = this.downloads?.items ?? [];
-    const outcome = await deleteDownloads(items.map((item) => item.path));
+    const outcome = await cleanerApi.downloadsDelete(items.map((item) => item.path));
     const skippedBytes = items.reduce((sum, item) => sum + item.size, 0) - outcome.freed;
     this.#applyCleaned({
       id: DOWNLOADS,

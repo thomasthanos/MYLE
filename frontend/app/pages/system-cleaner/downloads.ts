@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 
 export type Item = { path: string; name: string; isDir: boolean; size: number; changed: number };
 export type Kept = { name: string; isDir: boolean; reason: "document" | "recent" | "link"; changed: number };
@@ -16,6 +15,3 @@ export const DOWNLOADS_CATEGORY = {
   icon: "downloads",
   mayNeedAdmin: false,
 };
-
-export const previewDownloads = () => invoke<Preview>("cleaner_downloads_preview");
-export const deleteDownloads = (paths: string[]) => invoke<Outcome>("cleaner_downloads_delete", { paths });
