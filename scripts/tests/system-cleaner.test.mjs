@@ -92,6 +92,8 @@ async function scanAll() {
     return { bytes: 0, locked: [] };
   };
   cleanerApi.adminReady = async () => true;
+  cleanerApi.downloadsPreview = async () => ({ folder: "D:\\Downloads", items: [], total: 0, kept: [] });
+  cleanerApi.downloadsDelete = async () => ({ deleted: 0, freed: 0, skipped: [] });
   await state.load();
   await state.scan();
 }
@@ -125,7 +127,7 @@ test.afterEach(() => {
 test("a scan ticks everything it found, so one click is left to do", async () => {
   await scanAll();
   assert.equal(state.scanned, true);
-  assert.deepEqual([...state.selected].sort(), ["prefetch", "recycle-bin", "temp"]);
+  assert.deepEqual([...state.selected].sort(), ["downloads", "prefetch", "recycle-bin", "temp"]);
   assert.equal(state.autoSelected, true);
   assert.equal(state.allSelected, true, "the button offers to deselect");
   assert.equal(state.selectedBytes, 7_000);
@@ -135,7 +137,7 @@ test("a scan ticks everything it found, so one click is left to do", async () =>
 test("a scan leaves a tick the user made before it alone", async () => {
   state.selected.add("recycle-bin");
   await scanAll();
-  assert.deepEqual([...state.selected].sort(), ["prefetch", "recycle-bin", "temp"]);
+  assert.deepEqual([...state.selected].sort(), ["downloads", "prefetch", "recycle-bin", "temp"]);
   // The point of the feature: one Clean click after any scan.
   state.toggle("prefetch");
   assert.equal(state.selected.has("prefetch"), false, "unticking takes it out of the run");
@@ -187,7 +189,7 @@ test("what stays in use is told in bytes, without counting the admin pass twice"
   assert.equal(state.sizes.prefetch.bytes, 0);
   assert.equal(state.outcome.temp.skippedBytes, 400, "and it is told in bytes, not twice over");
   assert.equal(state.selected.size, 0, "the cleaned categories are unticked");
-  assert.equal(state.cleaned.size, 3);
+  assert.equal(state.cleaned.size, 4);
   assert.equal(state.lastCleaned !== null, true);
   assert.equal(
     toast.visible[0].message,
@@ -278,5 +280,5 @@ test("a category emptied since the scan is offered again", async () => {
   assert.equal(state.cleaned.has("temp"), true);
   assert.equal(state.toggleAll.length >= 0, true);
   state.cleaned.clear();
-  assert.equal(state.selectable.length, 3, "every category can be ticked again");
+  assert.equal(state.selectable.length, 4, "every category can be ticked again");
 });

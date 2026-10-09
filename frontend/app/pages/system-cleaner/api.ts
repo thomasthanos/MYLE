@@ -59,6 +59,8 @@ function channel<T>(onEvent: (e: T) => void): Channel<T> {
 }
 
 export const cleanerApi = {
+  downloadsPreview: () => invoke<import("./downloads").Preview>("cleaner_downloads_preview"),
+  downloadsDelete: (paths: string[]) => invoke<import("./downloads").Outcome>("cleaner_downloads_delete", { paths }),
   categories: () => invoke<CleanerCategory[]>("cleaner_categories"),
   scan: (onEvent: (e: ScanEvent) => void) => invoke<ScanSummary>("cleaner_scan", { onEvent: channel(onEvent) }),
   /** The administrator helper approved during a scan is still running. */
