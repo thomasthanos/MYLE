@@ -935,8 +935,9 @@
   }
 
   /** Whether MYLE takes part for this site; else the browser's own passkeys.
-   *  With MYLE locked (or closed, when it has a passkey for this site), the
-   *  user is asked to unlock it, and the request goes on by itself after. */
+   *  With MYLE closed or locked the user is asked to open it, and the request
+   *  goes on by itself after: the vault may hold this site's passkey, and not
+   *  asking at all is what makes it look like MYLE has none. */
   async function passkeysHere(id, options, retry) {
     const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [] });
     debug("MYLE's list", listed?.ok ?
@@ -946,13 +947,21 @@
     if (listed?.ok && Array.isArray(listed.passkeys)) return listed;
     const site = options.rpId || siteName;
     const closed = listed?.error === "notRunning";
-    if (listed?.error === "locked" || (closed && listed?.known)) {
-      const title = listed.known ? `Your passkey for ${site} is in MYLE` : "Your MYLE vault is locked";
-      const line = closed ?
-        "MYLE is not running. Open it and unlock your vault: the sign-in carries on by itself." :
-        listed.known ?
-          "Unlock your vault in MYLE: the sign-in carries on by itself once it is open." :
-          "Unlock it in MYLE to use a passkey saved there: this carries on by itself once it is open.";
+    const locked = listed?.error === "locked";
+    if (locked || closed) {
+      // Asked before MYLE knows this site: "there may be one" is enough. It is
+      // the answer, not the question, that has to be accurate: MYLE leaves the
+      // sign-in to the browser when it turns out to have nothing.
+      const title = listed?.known
+        ? `Your passkey for ${site} is in MYLE`
+        : closed
+          ? "Open MYLE to use your passkey"
+          : "Your MYLE vault is locked";
+      const line = closed
+        ? "MYLE is not running. Open it and unlock your vault: the sign-in carries on by itself."
+        : listed?.known
+          ? "Unlock your vault in MYLE: the sign-in carries on by itself once it is open."
+          : "A passkey saved in MYLE is used from here. Unlock your vault: this carries on by itself once it is open.";
       let waiting = false;
       const text = prompt(id, title, line, [
         anotherDevice(id),

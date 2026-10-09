@@ -470,25 +470,82 @@ fn write_message(output: &mut impl Write, value: &Value) -> std::io::Result<()> 
     output.flush()
 }
 
+/// How long the host waits for the app it started to answer, before it tells
+/// the browser the app is not running after all.
+const APP_START_WAIT: Duration = Duration::from_secs(25);
+/// How often it looks for the app's pipe while it waits.
+const APP_START_POLL: Duration = Duration::from_millis(250);
+
 /// Passes each message from the browser to the app and back, saying which
 /// browser it came from.
 fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
     while let Some(message) = read_message(&mut input)? {
-        let reply = if message.get("type").and_then(Value::as_str) == Some("open") && !app_running() {
-            // The app is not running: start it; it shows the vault.
-            let started = std::env::current_exe()
-                .and_then(|exe| std::process::Command::new(exe).arg("--open-passwords").spawn())
-                .is_ok();
-            json!({ "ok": started })
-        } else {
-            ask_app(&json!({ "browser": browser, "copy": copy, "request": message }))
+        let running = app_running();
+        let reply = if running {
+            ask_app(&request_from(browser, copy, &message))
                 .unwrap_or_else(|| json!({ "ok": false, "error": "notRunning" }))
+        } else if !wants_the_app(&message) {
+            // The extension's own "open": start it (it shows the vault), or
+            // say it is already up, which for the user is the same thing.
+            json!({ "ok": start_app() })
+        } else {
+            // The browser asked while MYLE was closed. The app is started and
+            // this same host waits for it, so the request is answered here
+            // instead of the page hearing "MYLE is not running" and giving up:
+            // the sign-in the user just started carries on by itself.
+            if start_app() {
+                wait_for_app(APP_START_WAIT);
+            }
+            match app_running().then(|| ask_app(&request_from(browser, copy, &message))).flatten() {
+                Some(answer) => answer,
+                None => json!({ "ok": false, "error": "notRunning" }),
+            }
         };
         write_message(&mut output, &reply)?;
     }
     Ok(())
+}
+
+fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
+    json!({ "browser": browser, "copy": copy, "request": message })
+}
+
+/// Whether the host starts MYLE for this request when it is closed.
+///
+/// Only for passkeys. A passkey request means the user has just started a
+/// sign-in with one, or a sign-in page has offered them (conditional
+/// mediation): either way MYLE is what they are reaching for, and starting it
+/// is what makes the click carry on instead of hearing "not running". Filling
+/// in a login is not started here: the extension's menu has its own Open MYLE
+/// button, and a page must not bring the app up by itself.
+fn wants_the_app(message: &Value) -> bool {
+    matches!(
+        message.get("type").and_then(Value::as_str),
+        Some("passkeyList") | Some("passkeyGet") | Some("passkeyCreate")
+    )
+}
+
+/// Starts MYLE on the Password Manager page. The browser is the parent of the
+/// copy the app starts; that is how the extension's Open button already
+/// brings it up.
+fn start_app() -> bool {
+    std::env::current_exe()
+        .and_then(|exe| std::process::Command::new(exe).arg("--open-passwords").spawn())
+        .is_ok()
+}
+
+/// Waits, up to `limit`, for the app to answer on its pipe. Milliseconds
+/// count: the app's window and vault come up in a couple of seconds.
+fn wait_for_app(limit: Duration) {
+    let until = Instant::now() + limit;
+    while Instant::now() < until {
+        if app_running() {
+            return;
+        }
+        std::thread::sleep(APP_START_POLL);
+    }
 }
 
 fn app_running() -> bool {
@@ -1300,6 +1357,39 @@ mod tests {
         assert!(!started_by_our_extension(&args(&["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"])));
         assert!(!started_by_our_extension(&args(&["chrome-extension://mifjffbnaeeljjfboiglbcoaokgdilca/x"])));
         assert!(!started_by_our_extension(&args(&[r"C:\x\firefox.json", "evil@example.com"])));
+    }
+
+    #[test]
+    fn a_closed_app_is_started_for_a_passkey_and_left_alone_for_the_rest() {
+        // A passkey request is the user reaching for MYLE: it is started, so
+        // the click they already made carries on instead of hearing "not
+        // running" and making MYLE look as if it had no passkey at all.
+        for message in [
+            json!({ "type": "passkeyList", "url": "https://accounts.google.com/" }),
+            json!({ "type": "passkeyGet", "url": "https://x.com/", "challenge": "Y2g", "credentialId": "a" }),
+            json!({ "type": "passkeyCreate", "url": "https://x.com/", "rpName": "X" }),
+        ] {
+            assert!(wants_the_app(&message), "{message} starts the app");
+        }
+        // Filling in a login does not: the menu has its own Open MYLE button,
+        // and a page must never bring the app up by itself. The extension's own
+        // "open" starts it through the host's other path.
+        for message in [
+            json!({ "type": "logins", "url": "https://x.com/" }),
+            json!({ "type": "fill", "id": "1" }),
+            json!({ "type": "open" }),
+            json!({ "type": "status" }),
+        ] {
+            assert!(!wants_the_app(&message), "{message} leaves it closed");
+        }
+    }
+
+    #[test]
+    fn a_request_to_the_app_carries_the_browser_and_the_copy() {
+        let envelope = request_from("Edge", "folder", &json!({ "type": "status" }));
+        assert_eq!(envelope["browser"], "Edge");
+        assert_eq!(envelope["copy"], "folder");
+        assert_eq!(envelope["request"]["type"], "status");
     }
 
     #[test]

@@ -35,9 +35,17 @@ function hostProblem(detail) {
   return "noHost";
 }
 
+/** How long an answer may take. MYLE is started by the host when it is closed,
+ *  which takes a few seconds; past this, the browser is told it is not there,
+ *  so a page is never left waiting on a call that will not come back. */
+const ANSWER_LIMIT = 30_000;
+
 async function ask(message) {
   try {
-    return await ext.runtime.sendNativeMessage(HOST, message);
+    return await Promise.race([
+      ext.runtime.sendNativeMessage(HOST, message),
+      new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: "noHost", detail: "no answer in time" }), ANSWER_LIMIT)),
+    ]);
   } catch (error) {
     const detail = String(error?.message ?? error);
     return { ok: false, error: hostProblem(detail), detail };
@@ -317,7 +325,9 @@ async function submitted(message, sender) {
 }
 
 /** Waits (two minutes at most) for the user to unlock the vault in MYLE;
- *  `stopped()` ends the wait early (the page no longer needs it). */
+ *  `stopped()` ends the wait early (the page no longer needs it). The wait
+ *  covers MYLE being started here too, so a page that asked while it was
+ *  closed carries on by itself once it is open and unlocked. */
 async function whenUnlocked(stopped = () => false) {
   const until = Date.now() + 120_000;
   while (Date.now() < until && !stopped()) {
