@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { crc32, deflateRawSync } from "node:zlib";
+import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 
 const source = new URL("../extension/", import.meta.url);
 const firefox = new URL("../extension/firefox/", import.meta.url);
@@ -100,12 +100,41 @@ const chromeManifestBuf = Buffer.from(`${JSON.stringify(chromeManifest, null, 2)
 const firefoxManifestBuf = await readFile(new URL("manifest.json", firefox));
 
 await rm(new URL("extension.zip", source), { force: true });
-await writeFile(
-  new URL("myle-passwords-chrome.zip", source),
-  buildZip([{ name: "manifest.json", data: chromeManifestBuf }, ...loadedShared]),
-);
-await writeFile(
-  new URL("myle-passwords-firefox.zip", source),
-  buildZip([{ name: "manifest.json", data: firefoxManifestBuf }, ...loadedShared]),
-);
+const chromeZip = buildZip([{ name: "manifest.json", data: chromeManifestBuf }, ...loadedShared]);
+const firefoxZip = buildZip([{ name: "manifest.json", data: firefoxManifestBuf }, ...loadedShared]);
+await writeFile(new URL("myle-passwords-chrome.zip", source), chromeZip);
+await writeFile(new URL("myle-passwords-firefox.zip", source), firefoxZip);
+
+/**
+ * The manifest a package carries, read back out of the zip. The bytes are
+ * deflated, so the check below cannot simply look for a string in them.
+ */
+function packedManifest(zip) {
+  const local = zip.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04])); // the first entry is the manifest
+  if (local < 0) throw new Error("the package has no entries");
+  const at = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+  const size = zip.readUInt32LE(local + 18);
+  return JSON.parse(inflateRawSync(zip.subarray(at, at + size)).toString("utf8"));
+}
+
+/**
+ * What is uploaded must not carry the unpacked `key`: Chrome Web Store and
+ * Edge Add-ons answer "the key field does not match the current item", since
+ * that key makes the package claim the extension id of the folder copy (the
+ * one the app whitelists for "Load unpacked") instead of the listing's own.
+ *
+ * Checked here rather than trusted, so a package that would be refused on
+ * upload never leaves a build: the failure is a line at build time instead of
+ * a store error that is hard to place.
+ */
+for (const [label, expected, zip] of [
+  ["chrome", chromeManifest, chromeZip],
+  ["firefox", JSON.parse(firefoxManifestBuf.toString("utf8")), firefoxZip],
+]) {
+  const packed = packedManifest(zip);
+  if ("key" in packed) throw new Error(`the ${label} package still has a "key": the stores refuse that on upload`);
+  if (packed.version !== expected.version) {
+    throw new Error(`the ${label} package names version ${packed.version}, not ${expected.version}`);
+  }
+}
 
