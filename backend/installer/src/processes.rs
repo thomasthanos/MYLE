@@ -20,7 +20,7 @@ use windows_sys::Win32::System::Threading::{
     QueryFullProcessImageNameW, SetEvent, TerminateProcess, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
+    EnumWindows, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
 };
 
 use crate::shell;
@@ -158,42 +158,10 @@ fn ask_to_close(pids: &[u32]) {
 
 /// Waits until `pid` has a window on screen, for at most `timeout`. The
 /// app's windows show themselves only once they have painted, so this is the
-/// moment it can be seen. False if it never did, or exited first.
+/// moment it can be seen. False if it never did, or exited first. Tao's
+/// hidden helper windows do not count (see `shown_window`).
 pub fn wait_for_window(pid: u32, timeout: Duration) -> bool {
-    let Some(process) = Process::open(pid) else {
-        return false;
-    };
-    let deadline = Instant::now() + timeout;
-    loop {
-        if has_visible_window(pid) {
-            return true;
-        }
-        if Instant::now() >= deadline || process.wait(Duration::from_millis(50)) {
-            return false;
-        }
-    }
-}
-
-fn has_visible_window(pid: u32) -> bool {
-    struct Search {
-        pid: u32,
-        found: bool,
-    }
-    unsafe extern "system" fn visit(window: HWND, search: LPARAM) -> i32 {
-        // SAFETY: `search` is the struct passed to EnumWindows below.
-        let search = unsafe { &mut *(search as *mut Search) };
-        let mut pid = 0u32;
-        unsafe { GetWindowThreadProcessId(window, &mut pid) };
-        if pid == search.pid && unsafe { IsWindowVisible(window) } != 0 {
-            search.found = true;
-            return 0; // stop
-        }
-        1
-    }
-    let mut search = Search { pid, found: false };
-    // SAFETY: `search` outlives the synchronous enumeration.
-    unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
-    search.found
+    crate::shown_window::wait_for_window(pid, timeout) == crate::shown_window::Wait::Shown
 }
 
 fn wait_exit(pid: u32, timeout: Duration) -> bool {

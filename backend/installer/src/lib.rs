@@ -16,6 +16,8 @@ mod product;
 mod registry;
 mod relocate;
 mod shell;
+#[path = "../../src/shown_window.rs"]
+mod shown_window;
 mod ui;
 mod webview2;
 #[path = "../../src/webview_policy.rs"]
@@ -112,7 +114,7 @@ fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
     match engine::install(payload, &options, &mut |_| {}) {
         Ok(installed) => {
             if cli.relaunch && !live {
-                let _ = shell::launch(&installed.exe);
+                let _ = shell::launch(&installed.exe, cli.update);
             }
             0
         }

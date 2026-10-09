@@ -32,6 +32,7 @@
     | { state: "available"; latest: string; asset: UpdateAsset }
     | { state: "downloading"; latest: string; progress: number | null; detail: string }
     | { state: "installing" }
+    | { state: "restarting"; version: string }
     | { state: "error"; message: string };
 
   let version = $state("");
@@ -106,6 +107,9 @@
           };
         } else if (event.event === "installing") {
           update = { state: "installing" };
+        } else if (event.event === "restarting") {
+          // This window stays until the new version's is on screen.
+          update = { state: "restarting", version: event.data.version || latest };
         }
       });
     } catch (error) {
@@ -246,6 +250,10 @@
           {:else if update.state === "installing"}
             <span class="status">
               <LoaderCircle size={14} class="spin" /> Installing; the app will restart by itself.
+            </span>
+          {:else if update.state === "restarting"}
+            <span class="status">
+              <LoaderCircle size={14} class="spin" /> Opening v{update.version}…
             </span>
           {:else if update.state === "error"}
             <span class="status error" title={update.message}>{update.message}</span>

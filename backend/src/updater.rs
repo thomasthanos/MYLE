@@ -18,6 +18,7 @@ use tauri::{AppHandle, State};
 
 use crate::apps::Jobs;
 use crate::download::{self, err, parse_sha256_digest};
+use crate::shown_window;
 
 /// GitHub repository ("owner/name") whose Releases are checked.
 /// It also holds the releases of the old Electron app (v4.x); this rewrite
@@ -196,11 +197,36 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateCheck, String> {
     let client = download::http_client(USER_AGENT)?;
     // R2 first: no rate limit, unlike GitHub's 60 anonymous calls an hour per
     // address. GitHub is the fallback while the feed is unreachable or broken.
-    match check_feed(&client, &current).await {
-        Ok(check) => return Ok(check),
-        Err(error) => eprintln!("update feed unavailable, asking GitHub: {error}"),
-    }
-    check_github(&client, &current).await
+    let check = match check_feed(&client, &current).await {
+        Ok(check) => check,
+        Err(error) => {
+            log(&format!("update feed unavailable, asking GitHub: {error}"));
+            check_github(&client, &current).await?
+        }
+    };
+    remember_offer(&check);
+    Ok(check)
+}
+
+/// The installer the last check offered. `install_update` takes its asset
+/// from the page, so it only installs exactly this one: the page cannot
+/// point the updater at some other file, even one with a matching hash.
+static OFFERED: std::sync::Mutex<Option<UpdateAsset>> = std::sync::Mutex::new(None);
+
+fn remember_offer(check: &UpdateCheck) {
+    let offer = match check {
+        UpdateCheck::Available { asset, .. } => Some(asset.clone()),
+        _ => None,
+    };
+    *OFFERED.lock().unwrap_or_else(|p| p.into_inner()) = offer;
+}
+
+fn was_offered(asset: &UpdateAsset) -> bool {
+    OFFERED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .is_some_and(|offered| offered == asset)
 }
 
 async fn check_feed(client: &reqwest::Client, current: &Version) -> Result<UpdateCheck, String> {
@@ -282,6 +308,9 @@ pub async fn install_update(
         return demo::install(&on_event).await;
     }
 
+    if !was_offered(&asset) {
+        return Err("this update was not offered by the last update check; check for updates again".into());
+    }
     let expected = asset
         .digest
         .as_deref()
@@ -335,7 +364,7 @@ pub async fn install_update(
                 });
                 return hand_over(&app, &exe).await;
             }
-            Err(error) => eprintln!("live update failed, using the setup window: {error}"),
+            Err(error) => log(&format!("live update failed, using the setup window: {error}")),
         }
     }
 
@@ -351,10 +380,11 @@ pub async fn install_update(
     // Stay on screen until the setup's window is up, so there is never a
     // moment with neither; the setup waits for us to quit before it copies.
     let pid = setup.id();
-    let shown = tokio::task::spawn_blocking(move || wait_for_window(pid, Duration::from_secs(10)))
+    let waited = tokio::task::spawn_blocking(move || shown_window::wait_for_window(pid, Duration::from_secs(10)))
         .await
-        .unwrap_or(false);
-    if !shown {
+        .unwrap_or(shown_window::Wait::TimedOut);
+    log(&format!("setup window: {waited:?}"));
+    if waited != shown_window::Wait::Shown {
         tokio::time::sleep(Duration::from_millis(600)).await;
     }
     app.exit(0);
@@ -383,6 +413,7 @@ async fn live_install(setup: &std::path::Path) -> Result<(), String> {
         .map_err(err)?
         .map_err(err)?;
     if status.success() {
+        log("live update installed");
         Ok(())
     } else {
         Err(format!("the setup exited with {status}"))
@@ -436,6 +467,11 @@ fn asset_version(name: &str) -> String {
 /// Starts the new version and quits once its window is on screen, so one of
 /// the two is always visible. The single-instance lock goes first, or the new
 /// version would just hand its arguments to us and exit.
+///
+/// "On screen" means a real, painted window (`shown_window`): not the hidden
+/// helper window Tauri makes at once, which used to end this wait before the
+/// new version had anything to show. Should the new version exit without a
+/// window, this one stays open and says so instead of leaving nothing.
 async fn hand_over(app: &AppHandle, exe: &std::path::Path) -> Result<(), String> {
     let (done, released) = tokio::sync::oneshot::channel();
     let handle = app.clone();
@@ -446,62 +482,51 @@ async fn hand_over(app: &AppHandle, exe: &std::path::Path) -> Result<(), String>
     .map_err(err)?;
     let _ = released.await;
 
+    let started = std::time::Instant::now();
     let child = std::process::Command::new(exe)
         .arg(JUST_UPDATED_ARG)
         .current_dir(exe.parent().unwrap_or(exe))
         .spawn()
         .map_err(|e| format!("the new version could not be started: {e}"))?;
     let pid = child.id();
-    let _ = tokio::task::spawn_blocking(move || wait_for_window(pid, Duration::from_secs(15))).await;
+    let waited = tokio::task::spawn_blocking(move || shown_window::wait_for_window(pid, HAND_OVER_WAIT))
+        .await
+        .unwrap_or(shown_window::Wait::TimedOut);
+    log(&format!("hand-over: {waited:?} after {} ms", started.elapsed().as_millis()));
+    if waited == shown_window::Wait::Exited {
+        return Err("the new version closed before its window opened. Restart MYLE to use it.".into());
+    }
     app.exit(0);
     Ok(())
 }
 
-/// Waits until `pid` has a visible window, for at most `timeout`. False if it
-/// never did, or exited first.
-fn wait_for_window(pid: u32, timeout: Duration) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
-    };
+/// How long the previous version waits for the new one's window. A cold
+/// WebView2 start on a slow PC takes a few seconds; past this, it quits anyway.
+const HAND_OVER_WAIT: Duration = Duration::from_secs(20);
 
-    struct Search {
-        pid: u32,
-        found: bool,
-    }
-    unsafe extern "system" fn visit(window: HWND, search: LPARAM) -> i32 {
-        // SAFETY: `search` is the struct passed to EnumWindows below.
-        let search = unsafe { &mut *(search as *mut Search) };
-        let mut pid = 0u32;
-        unsafe { GetWindowThreadProcessId(window, &mut pid) };
-        if pid == search.pid && unsafe { IsWindowVisible(window) } != 0 {
-            search.found = true;
-            return 0;
-        }
-        1
-    }
-
-    // SAFETY: the handle is closed before returning.
-    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-    if process.is_null() {
-        return false;
-    }
-    let deadline = std::time::Instant::now() + timeout;
-    let shown = loop {
-        let mut search = Search { pid, found: false };
-        // SAFETY: `search` outlives the synchronous enumeration.
-        unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
-        if search.found {
-            break true;
-        }
-        let exited = unsafe { WaitForSingleObject(process, 50) } == WAIT_OBJECT_0;
-        if exited || std::time::Instant::now() >= deadline {
-            break false;
-        }
+/// A short record of each update in `update.log` (the app's local data
+/// folder), so a gap or a fallback to the setup window can be explained
+/// afterwards. No URLs with secrets or personal data go in: only versions,
+/// outcomes and timings.
+pub(crate) fn log(line: &str) {
+    const MAX_BYTES: u64 = 64 * 1024;
+    let Ok(dir) = crate::storage::local_dir() else {
+        return;
     };
-    unsafe { CloseHandle(process) };
-    shown
+    let path = dir.join("update.log");
+    // Keep it small: start over once it grows past the cap.
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > MAX_BYTES) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let entry = format!("{seconds} v{} {line}\n", env!("CARGO_PKG_VERSION"));
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = file.write_all(entry.as_bytes());
+    }
 }
 
 /// Clears the flag however `install_update` ends.
@@ -779,6 +804,38 @@ mod tests {
         assert!(evaluate_feed(&current, feed("7.1.0", "https://evil.example/x.exe", SHA)).is_err());
         assert!(evaluate_feed(&current, feed("7.1.0", good, "not-a-hash")).is_err());
         assert!(evaluate_feed(&current, feed("latest", good, SHA)).is_err());
+    }
+
+    #[test]
+    fn only_the_installer_the_last_check_offered_is_installed() {
+        let asset = UpdateAsset {
+            name: "MYLE.exe".into(),
+            version: Some("9.10.0".into()),
+            url: "https://downloads.thomast.uk/MYLE.exe".into(),
+            size: 13_606_875,
+            digest: Some(format!("sha256:{SHA}")),
+        };
+        assert!(!was_offered(&asset), "nothing was offered yet");
+        remember_offer(&UpdateCheck::Available {
+            current: "9.9.0".into(),
+            latest: "9.10.0".into(),
+            notes: String::new(),
+            asset: asset.clone(),
+        });
+        assert!(was_offered(&asset));
+        // Another file on an allowed host, even with the same hash, is refused.
+        let mut elsewhere = asset.clone();
+        elsewhere.url = "https://github.com/someone/else/releases/download/v1/MYLE.exe".into();
+        assert!(!was_offered(&elsewhere));
+        let mut other_hash = asset.clone();
+        other_hash.digest = Some(format!("sha256:{}", "0".repeat(64)));
+        assert!(!was_offered(&other_hash));
+        // A later check that finds nothing withdraws the offer.
+        remember_offer(&UpdateCheck::UpToDate {
+            current: "9.10.0".into(),
+            latest: "9.10.0".into(),
+        });
+        assert!(!was_offered(&asset));
     }
 
     #[test]

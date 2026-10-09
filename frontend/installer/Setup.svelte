@@ -50,8 +50,8 @@
 
   /** Passive mode: how long "Updated to …" shows, then how long the setup
    *  stays once the app's window is on screen (`launch` waits for it). */
-  const PASSIVE_SHOW_MS = 700;
-  const PASSIVE_HANDOVER_MS = 500;
+  const PASSIVE_SHOW_MS = 250;
+  const PASSIVE_HANDOVER_MS = 300;
 
   let api: SetupApi | null = null;
   let info = $state<SetupState | null>(null);

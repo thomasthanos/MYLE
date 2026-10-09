@@ -312,7 +312,7 @@ async fn setup_launch(context: State<'_, Context>) -> Result<(), String> {
         .unwrap_or_else(|p| p.into_inner())
         .clone()
         .ok_or("Nothing was installed yet.")?;
-    let pid = shell::launch(&exe)?;
+    let pid = shell::launch(&exe, context.cli.update)?;
     let _ = tauri::async_runtime::spawn_blocking(move || {
         processes::wait_for_window(pid, Duration::from_secs(12))
     })

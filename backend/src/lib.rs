@@ -11,6 +11,7 @@ pub mod github_releases;
 pub mod project_backups;
 mod maintenance;
 mod passwords;
+mod shown_window;
 mod spotify_hub;
 mod startup;
 mod storage;

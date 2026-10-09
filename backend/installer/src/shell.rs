@@ -480,10 +480,16 @@ pub fn open_url(url: &str) -> Result<(), String> {
     }
 }
 
-/// Starts the installed app, detached from this process.
-/// Starts the app and returns its process ID.
-pub fn launch(exe: &Path) -> Result<u32, String> {
+/// The argument the app reads as "an update just put me here": its splash
+/// then skips asking the network for a newer version, and opens sooner
+/// (`JUST_UPDATED_ARG` in the app's `updater.rs`).
+pub const JUST_UPDATED_ARG: &str = "--just-updated";
+
+/// Starts the installed app, detached from this process, and returns its
+/// process ID. `updated`: this run was an update (`/UPDATE`).
+pub fn launch(exe: &Path, updated: bool) -> Result<u32, String> {
     std::process::Command::new(exe)
+        .args(updated.then_some(JUST_UPDATED_ARG))
         .current_dir(exe.parent().unwrap_or(exe))
         .spawn()
         .map(|child| child.id())
