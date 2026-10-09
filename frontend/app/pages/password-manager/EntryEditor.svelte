@@ -562,7 +562,7 @@
     margin: 0 -10px -6px;
     padding: 10px 10px 6px;
     border-top: 1px solid rgb(255 255 255 / 0.06);
-    background: linear-gradient(180deg, rgb(19 23 34 / 0.86), rgb(16 20 30 / 0.96));
+    background: var(--solid-fill-bottom);
     border-radius: 0 0 12px 12px;
   }
 

@@ -221,7 +221,7 @@
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: rgb(4 6 12 / 0.58); }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
   .dialog { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100vh - 48px); border-radius: var(--radius-xl); }
   form { display: grid; gap: 14px; min-height: 0; padding: 20px; overflow: auto; border-radius: inherit; }
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

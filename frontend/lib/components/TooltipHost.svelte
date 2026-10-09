@@ -161,7 +161,7 @@
     padding: 6px 10px;
     border: 1px solid rgb(255 255 255 / 0.1);
     border-radius: var(--radius-sm);
-    background: rgb(32 37 54 / 0.97);
+    background: var(--tooltip-bg);
     box-shadow: var(--elev-1);
     color: var(--text-1);
     font-size: 12px;

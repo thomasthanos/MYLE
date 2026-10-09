@@ -102,10 +102,10 @@
     bottom: -2px;
     width: 11px;
     height: 11px;
-    border: 2px solid #171b27;
+    border: 2px solid var(--solid-fill-top);
   }
 
   .dot.missing {
-    background: #171b27;
+    background: var(--solid-fill-top);
   }
 </style>

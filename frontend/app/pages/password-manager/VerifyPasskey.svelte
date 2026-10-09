@@ -91,7 +91,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgb(4 6 12 / 0.58);
+    background: var(--scrim);
   }
 
   .dialog {

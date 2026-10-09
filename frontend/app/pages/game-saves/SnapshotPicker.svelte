@@ -123,7 +123,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgb(4 6 12 / 0.58);
+    background: var(--scrim);
   }
 
   /* The game list scrolls, not the glass element: an overflow on it clips

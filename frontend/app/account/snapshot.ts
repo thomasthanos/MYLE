@@ -13,7 +13,7 @@ import { cleanerState } from "../pages/system-cleaner/state.svelte";
 import { maintenanceState } from "../pages/system-maintenance/state.svelte";
 
 export const SYNCED_KEYS = [
-  "myle.glass",
+  "myle.dark",
   "myle.sidebar.collapsed",
   "myle.apps.view",
   "myle.apps.filter",

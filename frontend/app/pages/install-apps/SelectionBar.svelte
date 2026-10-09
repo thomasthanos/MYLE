@@ -79,7 +79,7 @@
     border: 1px solid transparent;
     border-radius: 16px;
     background:
-      linear-gradient(180deg, rgb(27 32 47 / 0.98), rgb(16 20 31 / 0.99)) padding-box,
+      var(--bar-fill) padding-box,
       linear-gradient(110deg, rgb(151 161 255 / 0.3), rgb(255 255 255 / 0.09) 48%, rgb(79 209 232 / 0.2)) border-box;
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.065),

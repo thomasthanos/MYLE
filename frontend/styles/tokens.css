@@ -12,7 +12,7 @@
   /* Surfaces */
   --bg-0: #0a0c12;
   --bg-1: #0e1119;
-  /* Solid panels (the default look; "Glass effects" off). */
+  /* Panels: always solid (glass.css). */
   --solid-fill-top: #171b27;
   --solid-fill-bottom: #12151e;
   --bg-solid-panel: linear-gradient(180deg, var(--solid-fill-top), var(--solid-fill-bottom));
@@ -40,13 +40,9 @@
   --update-glow: rgb(77 163 255 / 0.5);
   --idle: rgb(255 255 255 / 0.28);
 
-  /* Glass */
-  --glass-fill-top: rgb(200 210 255 / 0.07);
-  --glass-fill-bottom: rgb(200 210 255 / 0.025);
+  /* Panels */
   --glass-border: rgb(255 255 255 / 0.065);
-  --glass-rim: rgb(255 255 255 / 0.24); /* top-edge highlight */
-  --glass-blur: 22px;
-  --glass-saturate: 1.5;
+  --panel-rim: rgb(255 255 255 / 0.13); /* top-edge highlight */
   /* Grayscale grain tiles (rasterized once). --noise is opaque, --grain is a 4% veil. */
   --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 .04'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -66,6 +62,14 @@
     0 4px 10px -8px rgb(0 0 0 / 0.92);
   --titlebar-fill: linear-gradient(180deg, rgb(24 30 45 / 0.54), rgb(13 18 29 / 0.34));
   --titlebar-divider: rgb(217 226 255 / 0.07);
+  --shell-fill: linear-gradient(180deg, rgb(15 19 29 / 0.98), rgb(10 13 20 / 0.98));
+
+  /* Floating surfaces: menus, tooltips, toasts, bars over a page */
+  --float-bg: rgb(26 30 43 / 0.98);
+  --tooltip-bg: rgb(32 37 54 / 0.97);
+  --toast-bg: rgb(28 32 46 / 0.97);
+  --bar-fill: linear-gradient(180deg, rgb(27 32 47 / 0.98), rgb(16 20 31 / 0.99));
+  --scrim: rgb(4 6 12 / 0.58);
 
   /* Shape */
   --radius-sm: 8px;
@@ -94,4 +98,39 @@
   --sidebar-w: 232px;
   --sidebar-w-collapsed: 68px;
   --gap: 10px;
+}
+
+/*
+ * Dark theme (Settings → Appearance): charcoal grey-black surfaces with
+ * neutral text, instead of the blue-tinted ones. The accent, the status
+ * colours and every size stay as they are.
+ */
+:root.dark {
+  --bg-0: #0b0b0c;
+  --bg-1: #111112;
+  --solid-fill-top: #1c1c1e;
+  --solid-fill-bottom: #161618;
+
+  --text-1: rgb(242 242 244 / 0.94);
+  --text-2: rgb(228 228 232 / 0.64);
+  --text-3: rgb(220 220 226 / 0.42);
+
+  --glass-border: rgb(255 255 255 / 0.06);
+  --panel-rim: rgb(255 255 255 / 0.1);
+
+  --hover: rgb(255 255 255 / 0.055);
+  --press: rgb(255 255 255 / 0.09);
+
+  --window-fill-top: rgb(18 18 19 / 0.98);
+  --window-fill-bottom: rgb(12 12 13 / 0.98);
+  --window-border: #050505;
+  --titlebar-fill: linear-gradient(180deg, rgb(30 30 32 / 0.6), rgb(20 20 22 / 0.4));
+  --titlebar-divider: rgb(255 255 255 / 0.06);
+  --shell-fill: linear-gradient(180deg, rgb(18 18 19 / 0.99), rgb(12 12 13 / 0.99));
+
+  --float-bg: rgb(30 30 32 / 0.98);
+  --tooltip-bg: rgb(36 36 39 / 0.97);
+  --toast-bg: rgb(32 32 35 / 0.97);
+  --bar-fill: linear-gradient(180deg, rgb(32 32 35 / 0.98), rgb(22 22 24 / 0.99));
+  --scrim: rgb(0 0 0 / 0.6);
 }

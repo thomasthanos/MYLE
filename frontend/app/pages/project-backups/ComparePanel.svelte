@@ -324,7 +324,7 @@
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: rgb(4 6 12 / 0.58); }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
   .dialog {
     display: flex; flex-direction: column; gap: 12px; width: min(1180px, 100%); height: min(780px, calc(100vh - 48px));
     padding: 18px 20px; border-radius: var(--radius-xl);

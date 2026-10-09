@@ -286,7 +286,7 @@
     display: grid;
     place-items: center;
     padding: clamp(12px, 3vh, 24px);
-    background: rgb(4 6 12 / 0.58);
+    background: var(--scrim);
   }
 
   /* Never set overflow on a .glass element: .glass::before sits at inset: -1px

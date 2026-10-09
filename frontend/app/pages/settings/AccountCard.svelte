@@ -314,7 +314,7 @@
     place-items: center;
     width: 22px;
     height: 22px;
-    border: 2px solid rgb(18 21 34);
+    border: 2px solid var(--solid-fill-bottom);
     border-radius: 50%;
   }
 

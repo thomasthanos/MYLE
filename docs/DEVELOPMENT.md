@@ -70,7 +70,7 @@ frontend/                     frontend (Svelte 5 + TS), Vite root
   installer/                  the setup/uninstaller window (Svelte)
   splash/                     updater screen (animated logo, status, progress)
   lib/                        shared: toast, confirm, updater, brand, components/
-  styles/                     tokens.css (colors, sizes, motion), glass.css
+  styles/                     tokens.css (colors, sizes, motion, the dark theme), glass.css (raised panels)
   public/                     static files shipped with the app (icons/)
 backend/                      backend (Rust + Tauri)
   src/lib.rs                  startup, splash → main
@@ -94,7 +94,7 @@ Not in git: `node_modules/` (npm) and `backend/target/`, where **every** build g
 2. Add one line to `registry.ts`: `{ id: "my-page", label: "My page", icon: SomeIcon, component: MyPage }`.
 
 Icons come from [Lucide](https://lucide.dev/icons), e.g. `import Star from "@lucide/svelte/icons/star"`.
-For cards inside a page, use the `.surface` class, not `.glass`: blur inside blur is costly.
+For cards inside a page, use the `.surface` class; `.glass` is for the big raised panels (always solid). Colours come from `tokens.css`, so they follow the dark theme (`:root.dark`).
 
 ## The "Install Apps" page
 
