@@ -10,10 +10,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-close",
-    {
-      "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
-    }
+    "core:window:allow-close"
   ]
 }

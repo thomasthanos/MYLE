@@ -500,6 +500,12 @@ pub(crate) fn upload_base(upload_url: &str) -> &str {
     upload_url.split('{').next().unwrap_or(upload_url)
 }
 
+/// The token only ever goes to GitHub's own upload host, whatever address a
+/// release record (from the API, or saved for a resumed release) carries.
+fn is_github_upload(url: &str) -> bool {
+    url.starts_with("https://uploads.github.com/")
+}
+
 fn content_type(name: &str) -> &'static str {
     let lower = name.to_lowercase();
     if lower.ends_with(".zip") {
@@ -559,6 +565,9 @@ pub(crate) async fn upload_asset(
             Ok::<_, std::io::Error>(chunk)
         }
     });
+    if !is_github_upload(upload_base(upload_url)) {
+        return Err(format!("{name}: GitHub gave an unexpected upload address, so nothing was sent."));
+    }
     let url = format!("{}?name={}", upload_base(upload_url), encode(name));
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -733,6 +742,11 @@ mod tests {
             upload_base("https://uploads.github.com/repos/o/r/releases/1/assets{?name,label}"),
             "https://uploads.github.com/repos/o/r/releases/1/assets"
         );
+        assert!(is_github_upload("https://uploads.github.com/repos/o/r/releases/1/assets"));
+        assert!(!is_github_upload("https://uploads.github.com.evil.example/repos/o/r"));
+        assert!(!is_github_upload("http://uploads.github.com/repos/o/r"));
+        assert!(!is_github_upload("https://api.github.com/repos/o/r"));
+        assert!(!is_github_upload(""));
         assert_eq!(encode("backup_projects-v2.0.7"), "backup_projects-v2.0.7");
         assert_eq!(encode("My App 1.0.exe"), "My%20App%201.0.exe");
     }

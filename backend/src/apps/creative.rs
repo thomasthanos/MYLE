@@ -307,7 +307,7 @@ async fn run(
             .await
             .map_err(err)??;
             // Show the user where it landed.
-            let _ = hidden("explorer").arg(&dest).spawn();
+            let _ = hidden(super::process::explorer()).arg(&dest).spawn();
             return Ok(JobOutcome::Done {
                 note: Some(format!("Saved to {}", dest.display())),
             });

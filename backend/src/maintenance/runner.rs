@@ -172,11 +172,11 @@ fn powershell_args(script: &str) -> Vec<String> {
 }
 
 async fn elevate(script: String) -> Result<i32, String> {
-    run_elevated("powershell.exe", &powershell_args(&script), true).await
+    run_elevated(&crate::apps::process::powershell().to_string_lossy(), &powershell_args(&script), true).await
 }
 
 async fn run_hidden(script: String) -> Result<i32, String> {
-    let status = hidden("powershell.exe")
+    let status = hidden(crate::apps::process::powershell())
         .args(powershell_args(&script))
         .stdin(Stdio::null())
         .stderr(Stdio::null())

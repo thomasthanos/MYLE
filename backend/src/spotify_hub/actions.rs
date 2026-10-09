@@ -679,7 +679,7 @@ async fn reset_update_acl(paths: &KnownPaths, reporter: &Reporter<'_>) {
         ));
         return;
     }
-    let output = crate::apps::process::hidden("icacls.exe")
+    let output = crate::apps::process::hidden(crate::apps::process::system32("icacls.exe"))
         .arg(&update)
         .args(["/reset", "/T", "/C", "/Q"])
         .output()

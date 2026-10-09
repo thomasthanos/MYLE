@@ -608,7 +608,7 @@ async fn close_program(exe: &str) {
     }
     let own = format!("PID ne {}", std::process::id());
     let run = |force: bool| {
-        let mut command = crate::apps::process::hidden("taskkill.exe");
+        let mut command = crate::apps::process::hidden(crate::apps::process::system32("taskkill.exe"));
         if force {
             command.arg("/F");
         }

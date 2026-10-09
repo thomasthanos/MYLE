@@ -393,7 +393,7 @@ fn spawn_reader<R>(
 
 pub async fn stop_spotify_processes(reporter: &Reporter<'_>) {
     for image in ["Spotify.exe", "spicetify.exe"] {
-        let output = hidden("taskkill.exe")
+        let output = hidden(crate::apps::process::system32("taskkill.exe"))
             .args(["/IM", image, "/T", "/F"])
             .stdin(Stdio::null())
             .output()

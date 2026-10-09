@@ -205,7 +205,7 @@ pub(crate) async fn run(
         request.dir.display()
     ));
 
-    let mut cmd = hidden("cmd.exe");
+    let mut cmd = hidden(crate::apps::process::system32("cmd.exe"));
     cmd.raw_arg(format!("/d /s /c \"{}\"", request.command))
         .current_dir(request.dir)
         .env("FORCE_COLOR", "0")

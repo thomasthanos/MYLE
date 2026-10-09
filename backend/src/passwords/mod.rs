@@ -412,7 +412,7 @@ pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) ->
 #[tauri::command(async)]
 pub fn passwords_open_extension_dir(app: AppHandle) -> Result<(), String> {
     let dir = extension_dir(&app).ok_or("The extension's folder was not found.")?;
-    std::process::Command::new("explorer.exe")
+    std::process::Command::new(crate::apps::process::explorer())
         .arg(&dir)
         .spawn()
         .map(|_| ())

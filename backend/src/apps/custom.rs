@@ -668,7 +668,7 @@ async fn verify_authenticode(path: &Path, publisher: &str) -> Result<(), String>
         quote(&path.to_string_lossy()),
         quote(publisher),
     );
-    let output = hidden("powershell.exe")
+    let output = hidden(super::process::powershell())
         .args([
             "-NoProfile",
             "-NonInteractive",

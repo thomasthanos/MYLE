@@ -1513,14 +1513,14 @@ async fn configure_scheduled_task(
     weekday: ScheduleWeekday,
 ) -> Result<(), String> {
     if schedule == BackupSchedule::Off {
-        let deletion = crate::apps::process::hidden("schtasks.exe")
+        let deletion = crate::apps::process::hidden(crate::apps::process::system32("schtasks.exe"))
             .args(["/Delete", "/TN", TASK_NAME, "/F"])
             .stdin(Stdio::null())
             .output()
             .await
             .map_err(|error| error.to_string())?;
         if !deletion.status.success() {
-            let query = crate::apps::process::hidden("schtasks.exe")
+            let query = crate::apps::process::hidden(crate::apps::process::system32("schtasks.exe"))
                 .args(["/Query", "/TN", TASK_NAME])
                 .stdin(Stdio::null())
                 .output()
@@ -1535,7 +1535,7 @@ async fn configure_scheduled_task(
 
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let script = scheduled_task_script(schedule, time, weekday, &executable);
-    let output = crate::apps::process::hidden("powershell.exe")
+    let output = crate::apps::process::hidden(crate::apps::process::powershell())
         .args([
             "-NoProfile",
             "-NonInteractive",
