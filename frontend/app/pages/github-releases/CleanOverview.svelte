@@ -174,7 +174,6 @@
     gap: 14px;
     min-height: 0;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   .hero,

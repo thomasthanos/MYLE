@@ -202,7 +202,6 @@
     border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 10px;
     background: rgb(0 0 0 / 0.18);
-    scrollbar-width: thin;
   }
 
   .problem {
@@ -258,7 +257,6 @@
     font-family: var(--font-mono);
     font-size: 11.5px;
     line-height: 1.55;
-    scrollbar-width: thin;
   }
 
   .line {

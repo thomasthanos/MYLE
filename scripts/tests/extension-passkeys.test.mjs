@@ -177,3 +177,55 @@ test("a sign-in form waits for MYLE's menu and the browser's own at once", async
   assert.equal((await pending).native, "conditional");
   assert.equal(posted.at(-1).kind, "abort");
 });
+
+test("a site asking for its old U2F keys (appid) hears that a MYLE passkey is not one", async () => {
+  const { context, posted, answer } = page();
+  const pending = context.navigator.credentials.get({
+    publicKey: { challenge: new Uint8Array([3]), rpId: "google.com", extensions: { appid: "https://www.gstatic.com/securitykey/origins.json" } },
+  });
+  assert.equal(posted[0].options.appid, true);
+  answer({
+    result: "credential",
+    credential: { ...made, response: { clientDataJSON: made.response.clientDataJSON, authenticatorData: b64([1]), signature: b64([2]) } },
+  });
+  const credential = await pending;
+  assert.deepEqual({ ...credential.getClientExtensionResults() }, { appid: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(credential)).clientExtensionResults, { appid: false });
+});
+
+test("an empty helper frame of the page's own origin asks MYLE through the page", async () => {
+  const parent = page();
+  class CredentialsContainer {
+    get(options) {
+      return Promise.resolve({ native: "frame", options });
+    }
+    create(options) {
+      return Promise.resolve({ native: "frame", options });
+    }
+  }
+  const frame = (origin) => {
+    const window = new EventTarget();
+    window.top = { origin: "https://example.com", navigator: parent.context.navigator };
+    const context = vm.createContext({
+      window,
+      self: { origin },
+      navigator: { credentials: new CredentialsContainer() },
+      CredentialsContainer,
+      PublicKeyCredential: class {},
+      Object,
+    });
+    vm.runInContext(source, context, { filename: "passkeys.js" });
+    return context;
+  };
+  const same = frame("https://example.com");
+  const pending = same.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]), rpId: "example.com" } });
+  assert.equal(parent.posted.at(-1).kind, "get", "the page's MYLE part was asked");
+  parent.answer({ result: "native" });
+  assert.equal((await pending).native, "get", "and the page's answer came back");
+  // Passwords and the like stay the frame's own.
+  assert.equal((await same.navigator.credentials.get({ password: true })).native, "frame");
+
+  // Another origin: the browser's own, untouched.
+  const other = frame("https://evil.example");
+  assert.equal((await other.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } })).native, "frame");
+});

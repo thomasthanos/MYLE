@@ -52,6 +52,19 @@
   --press: rgb(255 255 255 / 0.1);
   --selected: rgb(var(--accent-rgb) / 0.14);
 
+  /* Buttons (controls.css): the plain ones, the main action, a switch's knob */
+  --btn-fill: rgb(255 255 255 / 0.05);
+  --btn-fill-hover: rgb(255 255 255 / 0.09);
+  --btn-fill-press: rgb(255 255 255 / 0.12);
+  --btn-border: rgb(255 255 255 / 0.08);
+  --btn-sheen: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --btn-primary: var(--accent-grad);
+  --knob: linear-gradient(180deg, #fff, #d9ddf0);
+
+  /* Scrollbars (base.css): every scrolling area, slim, no arrow buttons */
+  --scroll-thumb: rgb(255 255 255 / 0.14);
+  --scroll-thumb-hover: rgb(255 255 255 / 0.26);
+
   /* Custom window chrome */
   --window-fill-top: rgb(15 20 31 / 0.76);
   --window-fill-bottom: rgb(8 11 18 / 0.62);
@@ -133,4 +146,18 @@
   --toast-bg: rgb(32 32 35 / 0.97);
   --bar-fill: linear-gradient(180deg, rgb(32 32 35 / 0.98), rgb(22 22 24 / 0.99));
   --scrim: rgb(0 0 0 / 0.6);
+
+  /* Buttons: solid charcoal, and a deeper accent for the main action, so
+     nothing stands out light against the dark panels. */
+  --accent-grad: linear-gradient(135deg, #7c85cf 0%, #6a73c0 50%, #5a8ea2 100%);
+  --btn-fill: #232326;
+  --btn-fill-hover: #2b2b2f;
+  --btn-fill-press: #313136;
+  --btn-border: rgb(255 255 255 / 0.085);
+  --btn-sheen: inset 0 1px 0 rgb(255 255 255 / 0.035);
+  --btn-primary: linear-gradient(180deg, #6f78c6, #5b63b0);
+  --knob: linear-gradient(180deg, #f1f1f3, #cfcfd4);
+
+  --scroll-thumb: rgb(255 255 255 / 0.13);
+  --scroll-thumb-hover: rgb(255 255 255 / 0.24);
 }

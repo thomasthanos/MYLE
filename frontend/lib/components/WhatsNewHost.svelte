@@ -132,7 +132,6 @@
   .body {
     padding: 14px 22px;
     overflow-y: auto;
-    scrollbar-width: thin;
   }
 
   section + section {

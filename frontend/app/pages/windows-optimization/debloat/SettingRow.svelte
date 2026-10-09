@@ -69,14 +69,17 @@
         onchange(want);
       }}
     />
-    <span class="title">{title}{#if subtitle}<small>{subtitle}</small>{/if}</span>
+    <span class="label">
+      <span class="title">{title}{#if subtitle}<small>{subtitle}</small>{/if}</span>
+      {#if summary && !open}<span class="summary">{summary}</span>{/if}
+    </span>
   </label>
   <span class="tags">
     {#if pending}<span class="tag pending">Pending</span>{/if}
     {#if keep}<span class="tag keep" title={keep}>Keep?</span>{/if}
     {#if partial}<span class="tag partial" title="Part of it is in place already.">Partly</span>{/if}
     {#if recommended}<span class="tag star" title="Recommended for most people."><Star size={10} /></span>{/if}
-    {#if caution}<span class="tag caution" title="Read what it does before you turn it on."><TriangleAlert size={11} /></span>{/if}
+    {#if caution}<span class="tag caution" title="Read what it does before you turn it on."><TriangleAlert size={11} /> Read first</span>{/if}
     {#if restart}<span class="tag restart" title="Takes full effect after Windows restarts."><RotateCcw size={10} /></span>{/if}
   </span>
   {@render aside?.()}
@@ -118,6 +121,8 @@
 
   .main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 0; cursor: pointer; }
   .main:has(input:disabled) { cursor: default; }
+  .label { display: grid; gap: 1px; min-width: 0; }
+  .summary { overflow: hidden; color: var(--text-3); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
   .title { overflow: hidden; color: var(--text-1); font-size: 12.5px; font-weight: 520; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
   .title small { margin-left: 7px; color: var(--text-3); font-size: 11.5px; font-weight: 400; }
 
@@ -127,7 +132,7 @@
   .tag.partial { background: rgb(245 188 95 / 0.09); color: #efc38a; }
   .tag.keep { background: rgb(245 188 95 / 0.09); color: #efc38a; cursor: help; }
   .tag.star { padding: 0 4px; color: rgb(var(--accent-soft-rgb)); }
-  .tag.caution { padding: 0 4px; color: #efc38a; }
+  .tag.caution { padding: 0 5px; background: rgb(245 188 95 / 0.09); color: #efc38a; }
   .tag.restart { padding: 0 4px; color: var(--text-3); }
 
   .more { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-3); }

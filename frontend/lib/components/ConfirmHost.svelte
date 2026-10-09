@@ -80,7 +80,6 @@
     max-height: min(52vh, 420px);
     overflow-y: auto;
     overflow-wrap: anywhere;
-    scrollbar-width: thin;
     white-space: pre-line;
   }
 

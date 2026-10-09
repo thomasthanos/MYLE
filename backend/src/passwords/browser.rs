@@ -624,6 +624,10 @@ enum Request {
     Copy { id: String, url: String, field: String },
     /// A strong new password, for a sign-up or password-change form.
     Generate,
+    /// The sites (relying parties) the vault has passkeys for, never the
+    /// passkeys: the extension remembers them (salted and hashed) so that a
+    /// locked or closed MYLE can still be offered on those sites.
+    PasskeySites,
     /// The passkeys a page may use (never their keys): for MYLE's prompt.
     PasskeyList {
         url: String,
@@ -725,7 +729,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         return json!({ "ok": false, "error": "disabled" });
     }
     let within_limit = match request {
-        Request::Logins { .. } | Request::TotpKnown { .. } | Request::TotpFromPixels { .. } => {
+        Request::Logins { .. } | Request::TotpKnown { .. } | Request::TotpFromPixels { .. } | Request::PasskeySites => {
             allow(&LOOKUPS, LOOKUPS_PER_MINUTE)
         }
         _ => allow(&SENSITIVE, SENSITIVE_PER_MINUTE),
@@ -828,6 +832,17 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
                 }
             }
             Ok(json!({ "ok": true, "logins": logins }))
+        }
+        Request::PasskeySites => {
+            let mut sites: Vec<String> = vault
+                .summaries()?
+                .into_iter()
+                .flat_map(|entry| entry.passkeys.into_iter().map(|key| key.rp_id.trim().trim_end_matches('.').to_lowercase()))
+                .filter(|site| !site.is_empty())
+                .collect();
+            sites.sort();
+            sites.dedup();
+            Ok(json!({ "ok": true, "sites": sites }))
         }
         Request::Fill { id, url } => {
             let host = page_host(url).ok_or("insecure")?;

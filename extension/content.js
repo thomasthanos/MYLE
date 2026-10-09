@@ -83,6 +83,8 @@
 
   function isLoginField(field) {
     if (!usable(field)) return false;
+    // The site offers passkeys on it (autocomplete="username webauthn").
+    if (marked(field, "webauthn")) return true;
     const passwords = passwordFields();
     return passwords.includes(field) || passwords.some((p) => usernameFor(p) === field) ||
       (passwords.length === 0 && isUsernameOnly(field));
@@ -282,7 +284,16 @@
     .bar button:disabled { opacity: .6; cursor: default; }
     .bar .keys { display: grid; gap: 4px; margin: -4px 0 12px; }
     .bar .keys .item { padding: 7px 8px; background: rgba(255,255,255,.04); color: inherit; font-weight: 400; }
-    .bar .keys .item:hover { background: rgba(132,142,222,.16); }`;
+    .bar .keys .item:hover { background: rgba(132,142,222,.16); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-button { display: none; }
+    ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px;
+      background: rgba(255,255,255,.14) padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,.26); }
+    @supports not selector(::-webkit-scrollbar) {
+      .panel { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+    }`;
 
   // A random tag name: a page cannot define it before the menu is made.
   const host = document.createElement(`myle-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`);
@@ -617,12 +628,26 @@
     return button;
   }
 
-  function openButton(label, glyphName) {
-    const button = item(label, "Opens MYLE on this PC", glyphAvatar(glyphName));
-    button.addEventListener("click", (event) => {
+  /** Opens MYLE; with `field`, the menu comes back on its own, with the
+   *  logins (and passkeys), as soon as the vault is unlocked. */
+  function openButton(label, glyphName, field = null) {
+    const button = item(label, field ? "Opens MYLE · this menu comes back once it is unlocked" : "Opens MYLE on this PC",
+      glyphAvatar(glyphName));
+    button.addEventListener("click", async (event) => {
       if (!genuine(event, panel, button)) return;
+      const target = field ?? anchor;
       hidePanel();
       void send({ type: "open" });
+      if (!field || !target?.isConnected) return;
+      showNote(target, "Unlock your vault in MYLE: your logins show here as soon as it opens.");
+      const waited = await send({ type: "waitUnlocked" });
+      if (!target.isConnected) return;
+      if (waited?.unlocked) {
+        target.focus();
+        void showFor(target);
+      } else if (anchor === target) {
+        hidePanel();
+      }
     });
     return button;
   }
@@ -661,7 +686,8 @@
   async function showFor(field) {
     anchor = field;
     const fresh = newPasswordFields(field);
-    const [answer, passkeys] = await Promise.all([send({ type: "logins" }), passkeyChoices()]);
+    const [answer, choices] = await Promise.all([send({ type: "logins" }), passkeyChoices()]);
+    const { items: passkeys, locked: passkeyLocked } = choices;
     if (anchor !== field || !field.isConnected) return;
     const items = [...passkeys];
     if (answer?.ok) {
@@ -685,11 +711,11 @@
       if (suggestion && !fresh.marked) items.push(suggestion);
       if (!items.length) items.push(note(`No saved login for ${siteName}. Add this website to a login in MYLE.`));
     } else if (answer?.error === "locked") {
-      items.push(openButton("Unlock your vault in MYLE", "lock"));
+      items.push(openButton(passkeyLocked ? "Unlock MYLE to use your passkey" : "Unlock your vault in MYLE", "lock", field));
     } else if (answer?.error === "noVault") {
       items.push(openButton("Create your vault in MYLE", "lock"));
     } else if (answer?.error === "notRunning") {
-      items.push(openButton("Open MYLE to fill in", "open"));
+      items.push(openButton(passkeyLocked ? "Open MYLE to use your passkey" : "Open MYLE to fill in", "open", field));
     } else if (answer?.error === "disabled") {
       items.push(note("Browser filling is off in MYLE. Turn it on: Password Manager → ⋯ → Browser filling."));
     } else if (answer?.error === "hostMissing") {
@@ -830,6 +856,7 @@
   function closePrompt() {
     prompted = null;
     hide(bar);
+    void send({ type: "stopWaiting" });
   }
 
   /** MYLE's prompt: a title, a line, what goes between, then the buttons
@@ -876,17 +903,53 @@
     setTimeout(() => prompted === id && closePrompt(), 2600);
   }
 
-  /** Whether MYLE takes part for this site; else the browser's own passkeys. */
+  /** Waits for the vault to be unlocked while prompt `id` is up, then
+   *  carries on with `retry`: the user only has to unlock MYLE. */
+  async function carryOnWhenUnlocked(id, text, retry) {
+    const waited = await send({ type: "waitUnlocked" });
+    if (prompted !== id) return;
+    if (waited?.unlocked) {
+      text.textContent = "MYLE is unlocked. Looking for your passkey…";
+      return retry();
+    }
+    text.textContent = "MYLE is still locked. Unlock it, then press Try again.";
+  }
+
+  /** Whether MYLE takes part for this site; else the browser's own passkeys.
+   *  With MYLE locked (or closed, when it has a passkey for this site), the
+   *  user is asked to unlock it, and the request goes on by itself after. */
   async function passkeysHere(id, options, retry) {
     const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [] });
     if (prompted !== id) return null;
     if (listed?.ok && Array.isArray(listed.passkeys)) return listed;
-    if (listed?.error === "locked") {
-      prompt(id, "Your MYLE vault is locked", "Unlock it in MYLE, then press Try again, to use the passkeys saved there.", [
+    const site = options.rpId || siteName;
+    const closed = listed?.error === "notRunning";
+    if (listed?.error === "locked" || (closed && listed?.known)) {
+      const title = listed.known ? `Your passkey for ${site} is in MYLE` : "Your MYLE vault is locked";
+      const line = closed ?
+        "MYLE is not running. Open it and unlock your vault: the sign-in carries on by itself." :
+        listed.known ?
+          "Unlock your vault in MYLE: the sign-in carries on by itself once it is open." :
+          "Unlock it in MYLE to use a passkey saved there: this carries on by itself once it is open.";
+      let waiting = false;
+      const text = prompt(id, title, line, [
         anotherDevice(id),
-        ["Open MYLE", false, () => send({ type: "open" })],
-        ["Try again", true, () => retry()],
+        ["Try again", false, () => retry()],
+        [closed ? "Open MYLE" : "Unlock in MYLE", true, (button, shown) => {
+          button.disabled = true;
+          shown.textContent = closed ? "Opening MYLE… Unlock your vault there." : "Unlock your vault in the MYLE window.";
+          void send({ type: "open" });
+          if (!waiting) {
+            waiting = true;
+            void carryOnWhenUnlocked(id, shown, retry);
+          }
+        }],
       ]);
+      // Already waiting: unlocking MYLE by hand carries on too.
+      if (!closed) {
+        waiting = true;
+        void carryOnWhenUnlocked(id, text, retry);
+      }
     } else {
       prompted = null;
       if (listed?.error === "rpMismatch") refuse(id, "rpMismatch");
@@ -975,11 +1038,16 @@
   /** For the menu on a sign-in field: the passkeys a waiting sign-in form
    *  (mediation: "conditional") can use. */
   async function passkeyChoices() {
+    const none = { items: [], locked: false };
     const waiting = waitingPasskey;
-    if (!waiting) return [];
+    if (!waiting) return none;
     const listed = await send({ type: "passkeyList", rpId: waiting.options.rpId, allow: waiting.options.allow ?? [] });
-    if (!listed?.ok || !Array.isArray(listed.passkeys) || waitingPasskey !== waiting) return [];
-    return listed.passkeys.slice(0, 4).map((key) => {
+    if (waitingPasskey !== waiting) return none;
+    // MYLE has a passkey here but is locked or closed: the menu's own
+    // "Unlock MYLE" says so, and shows it once the vault opens.
+    if (!listed?.ok) return { items: [], locked: listed?.known === true };
+    if (!Array.isArray(listed.passkeys)) return none;
+    const items = listed.passkeys.slice(0, 4).map((key) => {
       const button = item(key.userName || key.userDisplayName || "Passkey", `Passkey · ${listed.rpId}`, glyphAvatar("key"));
       button.addEventListener("click", async (event) => {
         if (!genuine(event, panel, button)) return;
@@ -996,6 +1064,7 @@
       });
       return button;
     });
+    return { items, locked: false };
   }
 
   if (window === window.top) {

@@ -230,6 +230,14 @@
     box-shadow: 0 8px 22px -14px rgb(255 255 255 / 0.5);
   }
 
+  /* Dark theme: Google's own dark button, nothing light on the charcoal. */
+  :global(:root.dark) .provider.google {
+    border-color: rgb(255 255 255 / 0.12);
+    background: linear-gradient(180deg, #2c2c2f, #232326);
+    color: #ececef;
+    box-shadow: 0 8px 22px -14px rgb(0 0 0 / 0.8);
+  }
+
   .waiting {
     display: flex;
     align-items: center;

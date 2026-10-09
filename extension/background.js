@@ -316,15 +316,30 @@ async function submitted(message, sender) {
   return { ok: true };
 }
 
-/** Waits (two minutes at most) for the user to unlock the vault in MYLE. */
-async function whenUnlocked() {
+/** Waits (two minutes at most) for the user to unlock the vault in MYLE;
+ *  `stopped()` ends the wait early (the page no longer needs it). */
+async function whenUnlocked(stopped = () => false) {
   const until = Date.now() + 120_000;
-  while (Date.now() < until) {
+  while (Date.now() < until && !stopped()) {
     const status = await ask({ type: "status" });
     if (status?.ok && status.state === "unlocked") return true;
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
   return false;
+}
+
+/** A page waiting for the vault to open, by tab: one wait each, and a new
+ *  one (or the page saying it is done) ends the one before. */
+const unlockWaits = new Map();
+
+async function waitForUnlock(sender) {
+  const tabId = sender.tab.id;
+  const token = {};
+  unlockWaits.set(tabId, token);
+  const unlocked = await whenUnlocked(() => unlockWaits.get(tabId) !== token);
+  if (unlockWaits.get(tabId) === token) unlockWaits.delete(tabId);
+  if (unlocked) void syncPasskeySites();
+  return { ok: true, unlocked };
 }
 
 async function offer(sender) {
@@ -439,6 +454,7 @@ async function saveTotpFor(url, id, secret) {
 }
 
 ext.tabs.onRemoved.addListener((tabId) => {
+  unlockWaits.delete(tabId);
   void ext.storage.session.remove([pendingKey(tabId), suggestedKey(tabId)]);
 });
 
@@ -450,6 +466,76 @@ ext.tabs.onRemoved.addListener((tabId) => {
 
 const list = (value) => Array.isArray(value) && value.length <= 64 && value.every((item) => text(item, 1400));
 
+// Which sites have a passkey in MYLE, remembered from the vault's answers so
+// that a locked (or closed) MYLE can still be offered on those sites: kept
+// as salted hashes of the site's name, never the names or the passkeys.
+const PASSKEY_SITES = "passkeySites";
+const PASSKEY_SALT = "passkeySalt";
+
+async function passkeySiteKey(rpId) {
+  let salt = (await ext.storage.local.get(PASSKEY_SALT))[PASSKEY_SALT];
+  if (typeof salt !== "string") {
+    salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    await ext.storage.local.set({ [PASSKEY_SALT]: salt });
+  }
+  const bytes = new TextEncoder().encode(`${salt}|${rpId.toLowerCase().replace(/\.$/, "")}`);
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(hash.slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function passkeySites() {
+  const found = (await ext.storage.local.get(PASSKEY_SITES))[PASSKEY_SITES];
+  return Array.isArray(found) ? found : [];
+}
+
+async function rememberPasskeySite(rpId, has) {
+  if (!text(rpId, 253) || !rpId) return;
+  const key = await passkeySiteKey(rpId);
+  const sites = await passkeySites();
+  const listed = sites.includes(key);
+  if (has && !listed) await ext.storage.local.set({ [PASSKEY_SITES]: [...sites, key].slice(-500) });
+  if (!has && listed) await ext.storage.local.set({ [PASSKEY_SITES]: sites.filter((item) => item !== key) });
+}
+
+let sitesSynced = 0;
+
+/** Learns every site the vault has passkeys for (at most every five
+ *  minutes, while it is unlocked), so that a closed or locked MYLE is
+ *  offered on them even before a passkey was used here. */
+async function syncPasskeySites() {
+  if (Date.now() - sitesSynced < 5 * 60_000) return;
+  sitesSynced = Date.now();
+  const answer = await ask({ type: "passkeySites" });
+  // An older MYLE does not know the request: what was learned stays.
+  if (!answer?.ok || !Array.isArray(answer.sites)) return;
+  const keys = [];
+  for (const site of answer.sites.slice(0, 500)) if (text(site, 253) && site) keys.push(await passkeySiteKey(site));
+  await ext.storage.local.set({ [PASSKEY_SITES]: keys });
+}
+
+/** Whether MYLE had a passkey for `rpId` (or the page's host) last time. */
+async function passkeySiteKnown(rpId, sender) {
+  const site = rpId || hostOf(sender.url) && new URL(sender.url).hostname;
+  return text(site, 253) && !!site && (await passkeySites()).includes(await passkeySiteKey(site));
+}
+
+async function listPasskeys(message, sender, rpId) {
+  const allow = list(message.allow) ? message.allow : [];
+  const answer = await ask({ type: "passkeyList", url: sender.url, rpId, allow });
+  if (answer?.ok && Array.isArray(answer.passkeys)) {
+    void syncPasskeySites();
+    // Only a full list says the site has none; a short "allow" list may
+    // just name another account's.
+    if (answer.passkeys.length || !allow.length) await rememberPasskeySite(answer.rpId, answer.passkeys.length > 0);
+    return answer;
+  }
+  // MYLE locked, or not running: whether it is worth asking the user to open it.
+  if (answer?.error === "locked" || answer?.error === "notRunning") {
+    return { ...answer, known: await passkeySiteKnown(rpId, sender) };
+  }
+  return answer;
+}
+
 function passkey(message, sender) {
   if (sender.frameId !== 0) return refused;
   const rpId = message.rpId ?? null;
@@ -457,7 +543,7 @@ function passkey(message, sender) {
   const verification = text(message.userVerification, 20) ? message.userVerification : "preferred";
   switch (message.type) {
     case "passkeyList":
-      return ask({ type: "passkeyList", url: sender.url, rpId, allow: list(message.allow) ? message.allow : [] });
+      return listPasskeys(message, sender, rpId);
     case "passkeyGet":
       if (!text(message.challenge, 1400) || !text(message.credentialId, 1400)) return refused;
       return ask({
@@ -472,7 +558,7 @@ function passkey(message, sender) {
       const algorithms = Array.isArray(message.algorithms) && message.algorithms.length <= 32 &&
         message.algorithms.every(Number.isInteger) ? message.algorithms : [];
       if (!text(message.challenge, 1400) || !text(message.userId, 100) || !list(message.exclude ?? [])) return refused;
-      return ask({
+      return createPasskey({
         type: "passkeyCreate",
         url: sender.url,
         rpId,
@@ -491,14 +577,26 @@ function passkey(message, sender) {
   }
 }
 
+async function createPasskey(request) {
+  const answer = await ask(request);
+  if (answer?.ok) {
+    const rpId = request.rpId || hostOf(request.url) && new URL(request.url).hostname;
+    await rememberPasskeySite(rpId, true);
+  }
+  return answer;
+}
+
 // --- Requests ---------------------------------------------------------------------
 
 async function handle(message, sender) {
   if (typeof message?.type !== "string") return refused;
   if (fromPopup(sender)) {
     switch (message.type) {
-      case "status":
-        return ask({ type: "status" });
+      case "status": {
+        const status = await ask({ type: "status" });
+        if (status?.ok && status.state === "unlocked") void syncPasskeySites();
+        return status;
+      }
       case "open":
         return openApp();
       case "tabLogins":
@@ -527,13 +625,23 @@ async function handle(message, sender) {
   switch (message.type) {
     case "open":
       return openApp();
+    case "waitUnlocked":
+      // While MYLE's prompt on the page waits for the vault to open.
+      return sender.frameId === 0 || !(await embeddedIn(sender)) ? waitForUnlock(sender) : refused;
+    case "stopWaiting":
+      if (unlockWaits.has(sender.tab.id)) unlockWaits.delete(sender.tab.id);
+      return { ok: true };
     case "logins":
     case "fill":
     case "totp":
     case "generate": {
       const top = await embeddedIn(sender);
       if (top) return { ok: false, error: "embedded", site: hostOf(sender.url), top };
-      if (message.type === "logins") return ask({ type: "logins", url: sender.url });
+      if (message.type === "logins") {
+        const answer = await ask({ type: "logins", url: sender.url });
+        if (answer?.ok) void syncPasskeySites();
+        return answer;
+      }
       if (message.type === "generate") return suggest(sender);
       return text(message.id, 100) ? ask({ type: message.type, id: message.id, url: sender.url }) : refused;
     }

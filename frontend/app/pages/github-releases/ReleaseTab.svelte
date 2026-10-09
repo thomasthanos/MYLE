@@ -583,7 +583,6 @@
     min-height: 0;
     padding: 14px 16px 18px;
     overflow: auto;
-    scrollbar-width: thin;
   }
 
   section {

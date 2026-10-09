@@ -1,6 +1,9 @@
 <script lang="ts">
   // Every setting MYLE can change, one line each. A switch only records the
   // choice; the bar below applies the choices together.
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Star from "@lucide/svelte/icons/star";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import CategoryCard from "./CategoryCard.svelte";
   import CategoryGrid from "./CategoryGrid.svelte";
@@ -41,6 +44,15 @@
       <Undo2 size={14} /> Undo MYLE changes{debloat.undoable.length ? ` (${debloat.undoable.length})` : ""}
     </button>
   </ListToolbar>
+
+  <p class="legend">
+    <span>A switch only marks your choice; nothing changes until you review and apply below.</span>
+    <span class="keys">
+      <span><Star size={11} class="star" /> Recommended</span>
+      <span><TriangleAlert size={11} class="warn" /> Read first: something stops working or works differently</span>
+      <span><RotateCcw size={11} /> Needs a restart</span>
+    </span>
+  </p>
 
   {#if !debloat.status}
     <div class="empty-state"><strong>{debloat.error ? "Could not load the settings" : "Checking this PC…"}</strong></div>
@@ -87,6 +99,11 @@
 
 <style>
   .rows { display: grid; gap: 1px; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; color: var(--text-3); font-size: 11.5px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .keys > span { display: inline-flex; align-items: center; gap: 5px; }
+  .keys :global(.star) { color: rgb(var(--accent-soft-rgb)); }
+  .keys :global(.warn) { color: #efc38a; }
   .link-btn { padding: 3px 8px; border-radius: 6px; color: rgb(var(--accent-soft-rgb)); font-size: 11px; font-weight: 550; }
   .link-btn:hover:not(:disabled) { background: var(--hover); color: var(--text-1); }
   .link-btn:disabled { opacity: 0.45; }

@@ -105,3 +105,14 @@ test("the 9.11.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Password Manager")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
+
+test("the 9.12.0 notes read cleanly", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const md = await readFile(new URL("../../docs/release-notes/9.12.0.md", import.meta.url), "utf8");
+  const blocks = parseMarkdown(md);
+  assert.ok(text(blocks[0].c).startsWith("Passkeys that show up"));
+  assert.ok(blocks.some((b) => b.t === "table"));
+  assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Passkeys")));
+  assert.ok(JSON.stringify(blocks).includes("Wand Enhancer"));
+  assert.ok(!JSON.stringify(blocks).includes("<"));
+});
