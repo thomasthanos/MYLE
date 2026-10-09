@@ -397,6 +397,8 @@ pub fn run() {
             cleaner::cleaner_admin_ready,
             cleaner::cleaner_clean,
             cleaner::cleaner_clean_elevated,
+            cleaner::downloads::cleaner_downloads_preview,
+            cleaner::downloads::cleaner_downloads_delete,
             debloat::debloat_status,
             debloat::debloat_restore_point,
             debloat::debloat_run,

@@ -62,10 +62,16 @@ impl Cleanup {
     }
 
     /// Deletes what it can; anything still locked stays on the list for next time.
+    /// MYLE's own download folders go as a whole too, so a file a job did not
+    /// put on the list (or one left by a crash) does not stay behind.
     pub fn run(&self) {
         let mut state = self.lock();
         state.paths.retain(|path| !remove(path));
         Self::save(&state);
+        drop(state);
+        for dir in work_dirs() {
+            remove(&dir);
+        }
     }
 
     fn save(state: &CleanupState) {
@@ -82,6 +88,18 @@ impl Cleanup {
     fn lock(&self) -> std::sync::MutexGuard<'_, CleanupState> {
         self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
+}
+
+/// The folders MYLE downloads and unpacks into, and nothing else: app
+/// installers, and Spotify Hub's staging. Only folders named for MYLE, under
+/// the temporary folder and Local AppData. The update folder is left to the
+/// next start (the installer runs from it while the app closes).
+pub fn work_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![std::env::temp_dir().join(crate::storage::FOLDER).join("apps")];
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        dirs.push(PathBuf::from(local).join(crate::storage::FOLDER).join("spotify-hub"));
+    }
+    dirs
 }
 
 /// True when the path is gone (deleted now, or never there).

@@ -136,3 +136,13 @@ test("the 9.13.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Browser extension (1.5.0)")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
+
+test("the 9.14.0 notes read cleanly", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const md = await readFile(new URL("../../docs/release-notes/9.14.0.md", import.meta.url), "utf8");
+  const blocks = parseMarkdown(md);
+  assert.ok(text(blocks[0].c).startsWith("A tidier PC"));
+  assert.ok(blocks.some((b) => b.t === "table"));
+  assert.ok(JSON.stringify(blocks).includes("Delete permanently"));
+  assert.ok(!JSON.stringify(blocks).includes("<"));
+});

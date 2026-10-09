@@ -8,13 +8,10 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
-  import Info from "@lucide/svelte/icons/info";
   import Moon from "@lucide/svelte/icons/moon";
   import Search from "@lucide/svelte/icons/search";
-  import UserRound from "@lucide/svelte/icons/user-round";
   import X from "@lucide/svelte/icons/x";
   import PanelBottomClose from "@lucide/svelte/icons/panel-bottom-close";
-  import Palette from "@lucide/svelte/icons/palette";
   import Power from "@lucide/svelte/icons/power";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Rocket from "@lucide/svelte/icons/rocket";
@@ -126,13 +123,6 @@
   // --- Sections, the side navigation and the search ---------------------
 
   type SectionId = "account" | "appearance" | "startup" | "updates" | "about";
-  const sections: { id: SectionId; label: string; hint: string; icon: typeof Palette }[] = [
-    { id: "account", label: "Account & sync", hint: "Sign in, and what follows you to other PCs", icon: UserRound },
-    { id: "appearance", label: "Appearance", hint: "The theme of every window", icon: Palette },
-    { id: "startup", label: "Startup & tray", hint: "How MYLE starts and keeps running", icon: Power },
-    { id: "updates", label: "Updates", hint: "Your version, and new ones", icon: Rocket },
-    { id: "about", label: "About", hint: "Links, release notes", icon: Info },
-  ];
 
   /** The words each setting is found by, beyond its title. */
   const words: Record<string, string> = {
@@ -146,7 +136,6 @@
   };
 
   let query = $state("");
-  let active = $state<SectionId>("account");
   const terms = $derived(query.toLowerCase().split(/\s+/).filter(Boolean));
 
   /** Whether a setting shows for the search (always, with none). */
@@ -174,24 +163,7 @@
   });
   const nothingFound = $derived(terms.length > 0 && !Object.values(sectionShown).some(Boolean));
 
-  const TAB_KEY = "myle.settings.tab";
-  /** One section at a time (the tab), all that match while searching. */
-  function goTo(id: SectionId) {
-    active = id;
-    query = "";
-    try {
-      localStorage.setItem(TAB_KEY, id);
-    } catch {
-      // Private storage off: the tab is just not remembered.
-    }
-  }
-  try {
-    const saved = localStorage.getItem(TAB_KEY);
-    if (saved && sections.some((section) => section.id === saved)) active = saved as SectionId;
-  } catch {
-    // As above.
-  }
-  const hiddenSection = (id: SectionId) => (terms.length ? !sectionShown[id] : active !== id);
+  const hiddenSection = (id: SectionId) => !sectionShown[id];
 
   function onKey(event: KeyboardEvent) {
     // Ctrl+F (or "/") searches the settings.
@@ -230,24 +202,6 @@
       {/if}
     </label>
 
-    <ul>
-      {#each sections as section (section.id)}
-        {@const Icon = section.icon}
-        <li>
-          <button
-            class="nav-item"
-            class:active={active === section.id && !terms.length}
-            disabled={terms.length > 0 && !sectionShown[section.id]}
-            title={section.hint}
-            aria-current={active === section.id && !terms.length ? "page" : undefined}
-            onclick={() => goTo(section.id)}
-          >
-            <span class="nav-icon"><Icon size={14} /></span>
-            <span class="nav-text"><b>{section.label}</b></span>
-          </button>
-        </li>
-      {/each}
-    </ul>
   </nav>
 
   <div class="content">
@@ -538,70 +492,14 @@
     color: var(--text-1);
   }
 
-  .side ul {
-    display: grid;
-    gap: 3px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
 
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 9px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    color: var(--text-2);
-    text-align: left;
-    transition:
-      background var(--dur-fast),
-      border-color var(--dur-fast),
-      color var(--dur-fast);
-  }
 
-  .nav-item:hover:not(:disabled) {
-    background: var(--hover);
-    color: var(--text-1);
-  }
 
-  .nav-item.active {
-    border-color: rgb(var(--accent-rgb) / 0.22);
-    background: var(--selected);
-    color: var(--text-1);
-  }
 
-  .nav-item:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
 
-  .nav-icon {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    flex: none;
-    border-radius: 8px;
-    background: rgb(255 255 255 / 0.04);
-    color: rgb(var(--accent-soft-rgb) / 0.9);
-  }
 
-  .nav-item.active .nav-icon {
-    background: rgb(var(--accent-rgb) / 0.16);
-  }
 
-  .nav-text {
-    display: grid;
-    min-width: 0;
-  }
 
-  .nav-text b {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
 
 
   /* --- Sections --- */
@@ -977,14 +875,7 @@
       position: static;
     }
 
-    .side ul {
-      display: flex;
-      flex-wrap: wrap;
-    }
 
-    .nav-item {
-      width: auto;
-    }
   }
 
   /* --- Compact: tabs across the top, one section at a time --- */
@@ -1002,17 +893,6 @@
     gap: 8px;
   }
 
-  .side ul {
-    display: flex;
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-    gap: 2px;
-    order: 1;
-    padding: 3px;
-    border: 1px solid var(--btn-border);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.18);
-  }
 
   .search {
     order: 2;
@@ -1023,23 +903,8 @@
     margin-left: auto;
   }
 
-  .nav-item {
-    width: auto;
-    gap: 6px;
-    padding: 5px 10px;
-    border-radius: 7px;
-  }
 
-  .nav-icon {
-    width: 20px;
-    height: 20px;
-    background: transparent;
-  }
 
-  .nav-text b {
-    font-size: 12px;
-    white-space: nowrap;
-  }
 
   .content {
     gap: 14px;
@@ -1125,5 +990,42 @@
 
   .more[open] > summary {
     margin-bottom: 10px;
+  }
+
+  /* --- All settings on one page, dense: two columns when there is room --- */
+
+  .side {
+    justify-content: flex-end;
+  }
+
+  .content {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    align-items: start;
+    gap: 12px 16px;
+  }
+
+  .content > .empty {
+    grid-column: 1 / -1;
+  }
+
+  .group-head h2 {
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .group-head p {
+    display: none;
+  }
+
+  .group {
+    gap: 6px;
+  }
+
+  .panel {
+    padding: 10px;
   }
 </style>

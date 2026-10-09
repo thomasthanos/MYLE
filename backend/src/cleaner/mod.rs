@@ -3,6 +3,7 @@
 //! The page sends category ids only. Paths, patterns and the elevated script
 //! all come from the fixed table in `targets.rs`.
 
+pub mod downloads;
 mod elevated;
 mod recycle_bin;
 mod targets;
