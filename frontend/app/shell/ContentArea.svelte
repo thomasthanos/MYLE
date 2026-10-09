@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fly } from "svelte/transition";
   import { nav } from "../../lib/nav.svelte";
@@ -15,7 +16,34 @@
   $effect(() => {
     if (!allowed && account.accessKnown) nav.go(pages[0].id);
   });
-  const Page = $derived(def.component);
+  // The owner-only pages load the first time they are needed: fetched while
+  // idle once the owner is known, so they still open at once for the owner,
+  // and never fetched for anyone else.
+  let loaded = $state.raw<Record<string, Component>>({});
+  let loadError = $state<string | null>(null);
+  function load(id: string, module: NonNullable<(typeof pages)[number]["load"]>) {
+    if (loaded[id]) return;
+    module()
+      .then((m) => {
+        loaded = { ...loaded, [id]: m.default };
+        loadError = null;
+      })
+      .catch((error) => {
+        if (nav.current === id) loadError = error instanceof Error ? error.message : String(error);
+      });
+  }
+  $effect(() => {
+    if (!def.load) return;
+    loadError = null;
+    load(def.id, def.load);
+  });
+  $effect(() => {
+    if (!account.owner) return;
+    const idle = (work: () => void) =>
+      "requestIdleCallback" in window ? requestIdleCallback(work, { timeout: 3000 }) : setTimeout(work, 1500);
+    for (const page of pages) if (page.load && canOpen(page, true)) idle(() => load(page.id, page.load!));
+  });
+  const Page = $derived(def.component ?? loaded[def.id]);
   // A short slide-in; none at all in the lighter mode or with reduced motion,
   // so a slow machine spends its first frames on the page, not the animation.
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -42,13 +70,25 @@
   <div class="scroller" class:fill={def.fill} bind:this={scroller} onscroll={onScroll}>
     {#key nav.current}
       <div class="page" class:fill={def.fill} in:fly={{ y: 8, duration: enter, easing: cubicOut }}>
-        <Page />
+        {#if Page}
+          <Page />
+        {:else if loadError}
+          <p class="page-state" role="alert">This page could not be loaded: {loadError}</p>
+        {:else}
+          <p class="page-state" aria-busy="true">Loading {def.label}…</p>
+        {/if}
       </div>
     {/key}
   </div>
 </main>
 
 <style>
+  .page-state {
+    margin: 48px auto;
+    color: var(--text-3);
+    font-size: 13px;
+  }
+
   .content {
     grid-area: main;
     min-width: 0;
