@@ -98,7 +98,8 @@
 
     <p class="fine">
       <LockKeyhole size={12} />
-      You sign in on Discord's or Google's own page in your browser, so the app never sees your password. The session is kept encrypted for your Windows account on this PC.
+      You sign in on Discord's or Google's own page in your browser, so the app never sees your password. The session
+      is kept encrypted for your Windows account on this PC.
     </p>
   {/if}
 </section>

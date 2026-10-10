@@ -26,7 +26,8 @@
     <Popover placement="top" align="end">
       {#snippet trigger({ toggle, open })}
         <button class="btn more" class:open disabled={appsState.externallyLocked} aria-haspopup="menu" aria-expanded={open} onclick={toggle}>
-          More<ChevronUp size={14} />
+          More
+          <ChevronUp size={14} />
         </button>
       {/snippet}
       {#snippet children({ close })}

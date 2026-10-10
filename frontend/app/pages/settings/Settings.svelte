@@ -62,10 +62,18 @@
       startupBusy = false;
     }
   }
-  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-  const check = () => settingsUpdater.check();
+  function message(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  function check() {
+    return settingsUpdater.check();
+  }
+
   /** Same path as the splash: download, verify, run the installer, restart. */
-  const install = (latest: string, asset: UpdateAsset) => settingsUpdater.install(latest, asset);
+  function install(latest: string, asset: UpdateAsset) {
+    return settingsUpdater.install(latest, asset);
+  }
   // --- Sections, the side navigation and the search ---------------------
   type SectionId = "account" | "appearance" | "startup" | "updates" | "about";
   /** The words each setting is found by, beyond its title. */
@@ -113,7 +121,9 @@
       document.getElementById("settings-search")?.focus();
     }
   }
-  const open = (url: string) => void openUrl(url).catch((error) => toast.error(`Could not open the link: ${message(error)}`));
+  function open(url: string) {
+    void openUrl(url).catch((error) => toast.error(`Could not open the link: ${message(error)}`));
+  }
 </script>
 <svelte:window onkeydown={onKey} />
 <div class="frame">

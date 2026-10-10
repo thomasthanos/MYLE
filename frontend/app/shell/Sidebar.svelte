@@ -44,18 +44,18 @@
 
   function place(target: HTMLElement): { x: number; y: number } {
     const item = target.getBoundingClientRect();
-    return { x: (sidebar?.getBoundingClientRect().right ?? item.right) + 10, y: item.top + item.height / 2 };
+    const edge = sidebar?.getBoundingClientRect().right ?? item.right;
+    return { x: edge + 10, y: item.top + item.height / 2 };
   }
 
   function showTip(target: HTMLElement, content: Omit<Tip, "x" | "y">, immediate: boolean) {
     clearTimeout(tipTimer);
     const open = () => (tip = { ...content, ...place(target) });
-    if (immediate) {
-      open();
-      return;
+    if (immediate) open();
+    else {
+      tip = null;
+      tipTimer = setTimeout(open, TIP_DELAY_MS);
     }
-    tip = null;
-    tipTimer = setTimeout(open, TIP_DELAY_MS);
   }
 
   function hideTip() {
@@ -64,8 +64,13 @@
   }
 
   /** The page's shortcut; the toggle's is App.svelte's Ctrl+B. */
-  const shortcutFor = (page: PageDef): string | null => (page.id === COLLAPSE ? "Ctrl+B" : shortcutOf(shown, page.id));
-  const pageTip = (page: PageDef) => ({ title: page.label, description: page.description, shortcut: shortcutFor(page), owner: page.ownerOnly ?? false });
+  function shortcutFor(page: PageDef): string | null {
+    return page.id === COLLAPSE ? "Ctrl+B" : shortcutOf(shown, page.id);
+  }
+
+  function pageTip(page: PageDef) {
+    return { title: page.label, description: page.description, shortcut: shortcutFor(page), owner: page.ownerOnly ?? false };
+  }
 
   function toggle() {
     hideTip();
@@ -87,7 +92,9 @@
   }
 
   /** Keyboard focus shows the tooltip at once; a click's focus does not. */
-  const focusedByKeyboard = (event: FocusEvent): boolean => (event.currentTarget as HTMLElement).matches(":focus-visible");
+  function focusedByKeyboard(event: FocusEvent): boolean {
+    return (event.currentTarget as HTMLElement).matches(":focus-visible");
+  }
 </script>
 
 {#snippet item(page: PageDef, active: boolean, onclick: () => void, badge = 0)}
