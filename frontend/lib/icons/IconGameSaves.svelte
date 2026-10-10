@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- Game Saves: Sculpted DualSense Gamepad with D-Pad & Action Gems -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-fill" x1="3" y1="5" x2="21" y2="20" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#C4B5FD" stop-opacity="0.28" />
@@ -46,4 +39,4 @@
   <!-- Right Action Buttons -->
   <circle cx="15.4" cy="11.7" r="1.05" fill="#38BDF8" />
   <circle cx="17.7" cy="9.9" r="1.05" fill="#F472B6" />
-</svg>
+</IconCanvas>

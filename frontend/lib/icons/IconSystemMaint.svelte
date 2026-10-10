@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- System Maintenance: Precision Engineering Wrench with Duotone Handle -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-fill" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#93C5FD" stop-opacity="0.28" />
@@ -37,4 +30,4 @@
 
   <!-- Handle Grip Dot Accent -->
   <circle cx="5.25" cy="18.75" r="0.85" fill="#E0F2FE" />
-</svg>
+</IconCanvas>

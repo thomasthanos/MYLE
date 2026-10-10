@@ -233,7 +233,7 @@
   :global(:root.dark) .card {
     border-color: var(--glass-border);
     background: var(--surface-fill);
-    box-shadow: none;
+    box-shadow: var(--surface-depth);
   }
 
   :global(:root.dark) .rim {

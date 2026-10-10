@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- Creative Suite: 3D Floating Isometric Layered Stack -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-top-fill" x1="3" y1="3" x2="21" y2="12" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#F5D0FE" stop-opacity="0.38" />
@@ -73,4 +66,4 @@
     stroke-linecap="round"
     stroke-linejoin="round"
   />
-</svg>
+</IconCanvas>

@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- Spotify Hub: Acoustic Wave Emblem in Emerald & Mint Gradient -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-disc" x1="3" y1="2.5" x2="21" y2="21.5" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#34D399" stop-opacity="0.26" />
@@ -51,4 +44,4 @@
     stroke-width="1.45"
     stroke-linecap="round"
   />
-</svg>
+</IconCanvas>

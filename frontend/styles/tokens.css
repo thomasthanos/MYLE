@@ -112,6 +112,9 @@
   --elev-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 16px -6px rgb(0 0 0 / 0.4);
   --elev-2: 0 2px 4px rgb(0 0 0 / 0.32), 0 16px 40px -12px rgb(0 0 0 / 0.6);
   --elev-3: 0 4px 10px rgb(0 0 0 / 0.38), 0 28px 70px -16px rgb(0 0 0 / 0.72);
+  --panel-edge: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.28);
+  --panel-depth: var(--panel-edge), var(--elev-1);
+  --surface-depth: inset 0 1px 0 rgb(255 255 255 / 0.08), inset 0 -1px 0 rgb(0 0 0 / 0.2), 0 3px 6px -5px rgb(0 0 0 / 0.45);
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -135,11 +138,11 @@
 :root.dark {
   --bg-0: #141820;
   --bg-1: #1b202b;
-  --solid-fill-top: #1b202b;
+  --solid-fill-top: #202738;
   --solid-fill-bottom: #1b202b;
-  --bg-solid-panel: #1b202b;
-  --sidebar-fill: #141820;
-  --surface-fill: #242a37;
+  --bg-solid-panel: linear-gradient(180deg, var(--solid-fill-top), var(--solid-fill-bottom) 72%);
+  --sidebar-fill: linear-gradient(180deg, #191f2b, #141820 72%);
+  --surface-fill: linear-gradient(180deg, #2b3344, #242a37 78%);
   --input-fill: #171c26;
 
   --text-1: #f2f3f5;

@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- GitHub Releases: a release tag on a git branch -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-fill" x1="9" y1="9" x2="21" y2="21" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#C4B5FD" stop-opacity="0.3" />
@@ -39,4 +32,4 @@
     stroke-linejoin="round"
   />
   <circle cx="13.6" cy="12.3" r="1.05" fill="#6EE7B7" />
-</svg>
+</IconCanvas>

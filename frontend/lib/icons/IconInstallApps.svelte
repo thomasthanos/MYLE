@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- Install Apps: Isometric 3D Package Cube with glowing '+' badge -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-top" x1="3.5" y1="2.5" x2="20.5" y2="12" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#E0F2FE" stop-opacity="0.42" />
@@ -68,4 +61,4 @@
     stroke-width="1.75"
     stroke-linecap="round"
   />
-</svg>
+</IconCanvas>

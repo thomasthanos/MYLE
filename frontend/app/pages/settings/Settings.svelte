@@ -320,7 +320,7 @@
               <span class="preview matte" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="theme-text">
                 <b>Dark</b>
-                <small>Navy surfaces, subtle glass controls</small>
+                <small>Navy surfaces, subtle glass depth</small>
               </span>
               <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
             </button>
@@ -661,7 +661,8 @@
   }
 
   .preview.matte i {
-    background: #242a37;
+    background: linear-gradient(180deg, #2b3344, #242a37);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
   }
 
   .preview.matte i:first-child {
@@ -693,7 +694,7 @@
 
   :global(:root.dark) .panel {
     background: var(--surface-fill);
-    box-shadow: none;
+    box-shadow: var(--surface-depth);
   }
 
   :global(:root.dark) .search {

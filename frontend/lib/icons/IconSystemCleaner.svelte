@@ -1,18 +1,11 @@
 <script lang="ts">
+  import IconCanvas from "./IconCanvas.svelte";
   let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
   const uid = $props.id();
 </script>
 
 <!-- System Cleaner: 3-Star Sparkle Constellation (matching Sparkle.svg) -->
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width={size}
-  height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  class="custom-nav-icon {cls}"
-  aria-hidden="true"
->
+<IconCanvas {size} class={cls}>
   <defs>
     <linearGradient id="{uid}-main" x1="10.5" y1="3" x2="10.5" y2="20" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#E8FBFF" />
@@ -49,4 +42,4 @@
     d="M17.5 15.8C17.68 17.3 18.3 17.92 19.8 18.1C18.3 18.28 17.68 18.9 17.5 20.4C17.32 18.9 16.7 18.28 15.2 18.1C16.7 17.92 17.32 17.3 17.5 15.8Z"
     fill="#A5F3FC"
   />
-</svg>
+</IconCanvas>

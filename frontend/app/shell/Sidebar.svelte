@@ -128,7 +128,7 @@
     onblur={hideTip}
   >
     <span class="icon">
-      <page.icon size={20} strokeWidth={1.75} />
+      <span class="glyph"><page.icon size={22} strokeWidth={1.75} /></span>
       {#if badge}<i class="dot" aria-hidden="true">{badge > 9 ? "9+" : badge}</i>{/if}
       {#if page.ownerOnly}<i class="lock" aria-hidden="true"><ShieldCheck size={9} strokeWidth={2.5} /></i>{/if}
     </span>
@@ -282,7 +282,7 @@
     background: var(--selected);
     color: var(--text-1);
     font-weight: 600;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    box-shadow: var(--btn-sheen);
   }
 
   /* Glowing accent pill on the active item */
@@ -325,29 +325,21 @@
     width: 48px;
   }
 
-  .icon :global(.custom-nav-icon) {
-    opacity: 0.78;
-    filter: saturate(0.72);
-    transition:
-      opacity var(--dur-fast),
-      filter var(--dur-fast),
-      transform var(--dur-fast) var(--ease-out);
+  .glyph {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
   }
 
-  .item:hover .icon :global(.custom-nav-icon),
-  .item.active .icon :global(.custom-nav-icon) {
-    opacity: 1;
-    filter: saturate(1) drop-shadow(0 2px 6px rgb(var(--accent-rgb) / 0.3));
-  }
-
-  .item.active .icon :global(.custom-nav-icon) {
-    transform: scale(1.05);
+  .glyph :global(.custom-nav-icon) {
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35));
   }
 
   /* A small shield on the icon's lower corner marks an owner-only page. */
   .lock {
     position: absolute;
-    bottom: -5px;
+    bottom: -2px;
     left: 29px;
     display: grid;
     place-items: center;
@@ -387,8 +379,8 @@
      on icons look everywhere else, instead of a dot lying over the glyph. */
   .dot {
     position: absolute;
-    top: 4px;
-    left: 28px;
+    top: -2px;
+    left: 30px;
     display: grid;
     place-items: center;
     min-width: 15px;
