@@ -529,18 +529,15 @@ fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
     json!({ "browser": browser, "copy": copy, "version": version, "request": message })
 }
 
-/// Whether the host starts MYLE for this request when it is closed.
-///
-/// Only for passkeys. A passkey request means the user has just started a
-/// sign-in with one, or a sign-in page has offered them (conditional
-/// mediation): either way MYLE is what they are reaching for, and starting it
-/// is what makes the click carry on instead of hearing "not running". Filling
-/// in a login is not started here: the extension's menu has its own Open MYLE
-/// button, and a page must not bring the app up by itself.
+/// Whether the host starts MYLE for this request when it is closed: passkeys
+/// only. A passkey request means the user is reaching for MYLE (a sign-in with
+/// one, or a page offering one), so starting it is what makes the click carry
+/// on instead of hearing "not running". Filling in a login is not started here:
+/// the extension's menu has its own Open MYLE button.
 fn wants_the_app(message: &Value) -> bool {
     match message.get("type").and_then(Value::as_str) {
-        Some("passkeyList") => message.get("wake").and_then(Value::as_bool) == Some(true),
         Some("passkeyGet") | Some("passkeyCreate") => true,
+        Some("passkeyList") => message.get("wake").and_then(Value::as_bool) == Some(true),
         _ => false,
     }
 }
@@ -557,24 +554,20 @@ const PROTOCOL: &str = "myle";
 
 /// Starts MYLE on the Password Manager page, and says how.
 ///
-/// A program the browser starts lives in the browser's job: what it starts
-/// in turn can be ended with it, and it holds the browser's pipes. So the
-/// app is started on its own (no console, no inherited handles, out of the
-/// job when the job allows it), and if it is still not up after a moment,
-/// through Windows' shell with MYLE's `myle:` link, which starts it from
-/// Explorer like a click on its shortcut.
+/// A program the browser starts lives in the browser's job: what it starts can
+/// be ended with it, and it holds the browser's pipes. So the app is started on
+/// its own (no console, no inherited handles, out of the job when allowed), and
+/// if it is still not up after a moment, through Windows' shell with MYLE's
+/// `myle:` link, which starts it from Explorer like a click on its shortcut.
 fn launch_app(browser: &str, copy: &str) -> Option<&'static str> {
-    if spawn_detached() {
-        let status = request_from(browser, copy, &json!({ "type": "status" }));
-        if wait_for_app(&status, Duration::from_secs(6)).is_ok() {
-            return Some("started");
-        }
-        if open_link() {
-            return Some("started, then asked Windows to open MYLE");
-        }
+    if !spawn_detached() {
+        return open_link().then_some("asked Windows to open MYLE");
+    }
+    let status = request_from(browser, copy, &json!({ "type": "status" }));
+    if wait_for_app(&status, Duration::from_secs(6)).is_ok() {
         return Some("started");
     }
-    open_link().then_some("asked Windows to open MYLE")
+    Some(if open_link() { "started, then asked Windows to open MYLE" } else { "started" })
 }
 
 fn spawn_detached() -> bool {
@@ -583,9 +576,7 @@ fn spawn_detached() -> bool {
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-    let Ok(exe) = std::env::current_exe() else {
-        return false;
-    };
+    let Ok(exe) = std::env::current_exe() else { return false };
     let start = |flags: u32| {
         Command::new(&exe)
             .arg(OPEN_FLAG)
@@ -598,8 +589,7 @@ fn spawn_detached() -> bool {
             .is_ok()
     };
     // Breaking away is refused in a job that does not allow it: then as is.
-    start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)
-        || start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+    start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB) || start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
 }
 
 /// Opens `myle://passwords` through Explorer: the copy it starts is

@@ -3,35 +3,18 @@ import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 
 const source = new URL("../extension/", import.meta.url);
 const firefox = new URL("../extension/firefox/", import.meta.url);
-
-const sharedFiles = [
-  "psl.js",
-  "background.js",
-  "content.js",
-  "passkeys.js",
-  "popup.html",
-  "popup.css",
-  "popup.js",
-  "icons/32.png",
-  "icons/128.png",
-];
+const sharedFiles = ["psl.js", "background.js", "content.js", "passkeys.js", "popup.html", "popup.css", "popup.js", "icons/32.png", "icons/128.png"];
 
 await mkdir(new URL("icons/", firefox), { recursive: true });
-
-for (const file of sharedFiles) {
-  await copyFile(new URL(file, source), new URL(file, firefox));
-}
+for (const file of sharedFiles) await copyFile(new URL(file, source), new URL(file, firefox));
 
 function buildZip(entries) {
-  const localParts = [];
-  const centralParts = [];
+  const localParts = [], centralParts = [];
   let offset = 0;
-
   for (const { name, data } of entries) {
     const nameBuf = Buffer.from(name, "utf8");
     const compressed = deflateRawSync(data, { level: 9 });
     const sum = crc32(data);
-
     const local = Buffer.alloc(30 + nameBuf.length);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
@@ -45,7 +28,6 @@ function buildZip(entries) {
     local.writeUInt16LE(nameBuf.length, 26);
     local.writeUInt16LE(0, 28);
     nameBuf.copy(local, 30);
-
     const central = Buffer.alloc(46 + nameBuf.length);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4);
@@ -65,12 +47,10 @@ function buildZip(entries) {
     central.writeUInt32LE(0, 38);
     central.writeUInt32LE(offset, 42);
     nameBuf.copy(central, 46);
-
     localParts.push(local, compressed);
     centralParts.push(central);
     offset += local.length + compressed.length;
   }
-
   const centralSize = centralParts.reduce((n, b) => n + b.length, 0);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
@@ -81,60 +61,33 @@ function buildZip(entries) {
   end.writeUInt32LE(centralSize, 12);
   end.writeUInt32LE(offset, 16);
   end.writeUInt16LE(0, 20);
-
   return Buffer.concat([...localParts, ...centralParts, end]);
 }
 
-const loadedShared = await Promise.all(
-  sharedFiles.map(async (name) => ({
-    name,
-    data: await readFile(new URL(name, source)),
-  })),
-);
-
+const loadedShared = await Promise.all(sharedFiles.map(async (name) => ({ name, data: await readFile(new URL(name, source)) })));
 // Chrome Web Store & Edge Add-ons reject the unpacked `key` field on upload.
 const chromeManifest = JSON.parse(await readFile(new URL("manifest.json", source), "utf8"));
 delete chromeManifest.key;
 const chromeManifestBuf = Buffer.from(`${JSON.stringify(chromeManifest, null, 2)}\n`, "utf8");
-
 const firefoxManifestBuf = await readFile(new URL("manifest.json", firefox));
-
 await rm(new URL("extension.zip", source), { force: true });
 const chromeZip = buildZip([{ name: "manifest.json", data: chromeManifestBuf }, ...loadedShared]);
 const firefoxZip = buildZip([{ name: "manifest.json", data: firefoxManifestBuf }, ...loadedShared]);
 await writeFile(new URL("myle-passwords-chrome.zip", source), chromeZip);
 await writeFile(new URL("myle-passwords-firefox.zip", source), firefoxZip);
 
-/**
- * The manifest a package carries, read back out of the zip. The bytes are
- * deflated, so the check below cannot simply look for a string in them.
- */
+/** The manifest a package carries: deflated, so it is read back out of the zip. */
 function packedManifest(zip) {
   const local = zip.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04])); // the first entry is the manifest
   if (local < 0) throw new Error("the package has no entries");
   const at = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
-  const size = zip.readUInt32LE(local + 18);
-  return JSON.parse(inflateRawSync(zip.subarray(at, at + size)).toString("utf8"));
+  return JSON.parse(inflateRawSync(zip.subarray(at, at + zip.readUInt32LE(local + 18))).toString("utf8"));
 }
 
-/**
- * What is uploaded must not carry the unpacked `key`: Chrome Web Store and
- * Edge Add-ons answer "the key field does not match the current item", since
- * that key makes the package claim the extension id of the folder copy (the
- * one the app whitelists for "Load unpacked") instead of the listing's own.
- *
- * Checked here rather than trusted, so a package that would be refused on
- * upload never leaves a build: the failure is a line at build time instead of
- * a store error that is hard to place.
- */
-for (const [label, expected, zip] of [
-  ["chrome", chromeManifest, chromeZip],
-  ["firefox", JSON.parse(firefoxManifestBuf.toString("utf8")), firefoxZip],
-]) {
+// What is uploaded must not carry the unpacked `key` (the stores answer "the key
+// field does not match the current item"); checked, so it fails at build time.
+for (const [label, expected, zip] of [["chrome", chromeManifest, chromeZip], ["firefox", JSON.parse(firefoxManifestBuf.toString("utf8")), firefoxZip]]) {
   const packed = packedManifest(zip);
   if ("key" in packed) throw new Error(`the ${label} package still has a "key": the stores refuse that on upload`);
-  if (packed.version !== expected.version) {
-    throw new Error(`the ${label} package names version ${packed.version}, not ${expected.version}`);
-  }
+  if (packed.version !== expected.version) throw new Error(`the ${label} package names version ${packed.version}, not ${expected.version}`);
 }
-

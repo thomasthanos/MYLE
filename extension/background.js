@@ -343,13 +343,11 @@ async function whenUnlocked(stopped = () => false, limit = 120_000) {
   return (await untilUnlocked(stopped, limit)).unlocked;
 }
 
-/** Polls MYLE until its vault is open, `stopped()` or `limit` ms.
- *
- *  Answers with the last thing seen. `unlocked` only when MYLE said so; when
- *  MYLE answered a status but named no vault state the wait ends at once
- *  instead of polling for two minutes and then telling the user their vault is
- *  still locked: that answer means a copy of MYLE this extension does not
- *  understand, not a vault to unlock. */
+/** Polls MYLE until its vault is open, `stopped()` or `limit` ms, answering
+ *  with the last thing seen. `unlocked` only when MYLE said so; a status that
+ *  names no vault state ends the wait at once instead of polling for two
+ *  minutes and then blaming the vault: that answer means a copy of MYLE this
+ *  extension does not understand. */
 async function untilUnlocked(stopped, limit) {
   const until = Date.now() + limit;
   let state = "unknown";
@@ -357,17 +355,18 @@ async function untilUnlocked(stopped, limit) {
   while (Date.now() < until && !stopped()) {
     const status = await ask({ type: "status" });
     if (stopped()) return { unlocked: false, state, detail };
-    if (status?.ok) {
-      state = typeof status.state === "string" && status.state ? status.state : "noState";
-      detail = JSON.stringify(status);
-      if (state === "new") return { unlocked: false, state: "noVault", detail };
-      if (status.enabled === false) return { unlocked: false, state: "disabled", detail };
-      if (state === "unlocked") return { unlocked: true, state, detail };
-      if (state === "noState") return { unlocked: false, state, detail };
-    } else {
+    const answer = (value, note = "") => ({ unlocked: false, state: value, detail: note });
+    if (!status?.ok) {
       state = String(status?.error ?? "noHost");
       detail = String(status?.detail ?? "");
-      if (state === "disabled" || state === "noVault") return { unlocked: false, state, detail };
+      if (state === "disabled" || state === "noVault") return answer(state, detail);
+    } else {
+      detail = JSON.stringify(status);
+      state = typeof status.state === "string" && status.state ? status.state : "noState";
+      if (state === "new") return answer("noVault", detail);
+      if (status.enabled === false) return answer("disabled", detail);
+      if (state === "unlocked") return { unlocked: true, state, detail };
+      if (state === "noState") return answer(state, detail);
     }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }

@@ -150,22 +150,10 @@
   }
 
   const step = $derived(pb.operation ? stageStep(pb.operation.stage) : null);
-
   const providers: BackupProvider[] = ["googleDrive", "dropbox"];
-
   /** One tile per provider: its folders found on this PC, or a prompt to choose one. */
-  const tiles = $derived(
-    providers.map((provider) => ({
-      provider,
-      folders: pb.page.clouds.filter((cloud) => cloud.provider === provider),
-    })),
-  );
-
-  const progress = $derived(
-    pb.operation?.totalBytes
-      ? Math.max(0, Math.min(1, pb.operation.doneBytes / pb.operation.totalBytes))
-      : null,
-  );
+  const tiles = $derived(providers.map((provider) => ({ provider, folders: pb.page.clouds.filter((cloud) => cloud.provider === provider) })));
+  const progress = $derived(pb.operation?.totalBytes ? Math.max(0, Math.min(1, pb.operation.doneBytes / pb.operation.totalBytes)) : null);
 
   let now = $state(Date.now());
   $effect(() => {
@@ -199,12 +187,8 @@
   });
 
   const filters: { id: "all" | Group["key"]; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "attention", label: "Did not finish" },
-    { id: "never", label: "Not backed up" },
-    { id: "stale", label: "Getting old" },
-    { id: "ok", label: "Up to date" },
-    { id: "missing", label: "Folder missing" },
+    { id: "all", label: "All" }, { id: "attention", label: "Did not finish" }, { id: "never", label: "Not backed up" },
+    { id: "stale", label: "Getting old" }, { id: "ok", label: "Up to date" }, { id: "missing", label: "Folder missing" },
   ];
 
   /** How many projects each filter would show. */
@@ -244,23 +228,10 @@
   {#if !pb.loading}
     <section class="summary surface" aria-label="Project backup summary">
       <div class="stats">
-        <StatTile
-          label={summary.projects === 1 ? "project" : "projects"}
-          value={String(summary.projects)}
-          tone="accent"
-        />
+        <StatTile label={summary.projects === 1 ? "project" : "projects"} value={String(summary.projects)} tone="accent" />
         <StatTile label="up to date" value={String(summary.ok)} tone={summary.ok ? "ok" : "quiet"} />
-        <StatTile
-          label="want a look"
-          value={String(summary.attention)}
-          tone={summary.attention ? (summary.missing ? "danger" : "warn") : "quiet"}
-        />
-        <StatTile
-          label="in latest backups"
-          value={summary.knownSizes ? formatBytes(summary.backupBytes) : "—"}
-          icon={Database}
-          title="Each project's latest zip, together (older backups are not counted)"
-        />
+        <StatTile label="want a look" value={String(summary.attention)} tone={summary.attention ? (summary.missing ? "danger" : "warn") : "quiet"} />
+        <StatTile label="in latest backups" value={summary.knownSizes ? formatBytes(summary.backupBytes) : "—"} icon={Database} title="Each project's latest zip, together (older backups are not counted)" />
         <StatTile
           label="last backup"
           value={summary.newest === null ? "never" : pb.ago(summary.newest)}
@@ -268,13 +239,10 @@
           title={summary.oldest === null ? "No backup yet" : `The project backed up longest ago: ${pb.ago(summary.oldest)}`}
         />
       </div>
-      <p class="headline" class:good={summary.attention === 0 && !!pb.projects.length && hasDestination}>
-        {headline}
-      </p>
+      <p class="headline" class:good={summary.attention === 0 && !!pb.projects.length && hasDestination}>{headline}</p>
       {#if hasDestination}
         <button class="root-chip" title={pb.page.backupRoot ?? ""} onclick={() => pb.open("root")}>
-          <FolderOpen size={13} />
-          <span class="selectable">{pb.page.backupRoot ?? "Backups folder"}</span>
+          <FolderOpen size={13} /><span class="selectable">{pb.page.backupRoot ?? "Backups folder"}</span>
         </button>
       {/if}
     </section>
@@ -289,22 +257,14 @@
       {#each tiles as tile (tile.provider)}
         {@const selected = inUse(tile.provider)}
         <button
-          class="cloud-tile"
-          class:found={tile.folders.length > 0}
-          class:in-use={selected}
-          aria-pressed={selected}
-          disabled={pb.locked}
-          title={tile.folders.length
-            ? `Backups go to ${tile.folders[0].path}\\Projects Backup`
-            : `${providerNames[tile.provider]} was not found on this PC. Choose its folder.`}
+          class="cloud-tile" class:found={tile.folders.length > 0} class:in-use={selected} aria-pressed={selected} disabled={pb.locked}
+          title={tile.folders.length ? `Backups go to ${tile.folders[0].path}\\Projects Backup` : `${providerNames[tile.provider]} was not found on this PC. Choose its folder.`}
           onclick={() => chooseTile(tile.provider)}
         >
           <span class="cloud-logo"><CloudLogo provider={tile.provider} size={20} /></span>
           <span class="cloud-text">
             <strong>{providerNames[tile.provider]}</strong>
-            <small>
-              {#if selected}Selected{:else if tile.folders.length > 1}{tile.folders.length} folders found{:else if tile.folders.length}Found on this PC{:else}Browse…{/if}
-            </small>
+            <small>{#if selected}Selected{:else if tile.folders.length > 1}{tile.folders.length} folders found{:else if tile.folders.length}Found on this PC{:else}Browse…{/if}</small>
           </span>
           {#if selected}<Check size={14} class="cloud-check" />{/if}
         </button>
@@ -315,8 +275,7 @@
         <div class="folder-choices" aria-label={`${providerNames[tile.provider]} folders`}>
           {#each tile.folders as folder (folder.path)}
             {@const current = !!pb.page.settings.cloudFolder && samePath(folder.path, pb.page.settings.cloudFolder)}
-            <button class="chip" class:active={current} disabled={pb.locked} title={folder.path}
-              onclick={() => pb.useCloud(tile.provider, folder.path)}>
+            <button class="chip" class:active={current} disabled={pb.locked} title={folder.path} onclick={() => pb.useCloud(tile.provider, folder.path)}>
               {folder.label || providerNames[tile.provider]} · {folder.path}
             </button>
           {/each}
@@ -335,8 +294,7 @@
 
   {#if pb.error}
     <div class="banner error surface" role="alert">
-      <CircleAlert size={18} />
-      <span>{pb.error}</span>
+      <CircleAlert size={18} /><span>{pb.error}</span>
       <button class="btn small ghost" onclick={() => pb.refresh()}><RefreshCw size={13} /> Try again</button>
     </div>
   {/if}
@@ -354,9 +312,7 @@
               <span class="selectable">{failure.error}</span>
               <span class="failure-actions">
                 {#each actionsFor(failure) as action (action.label)}
-                  <button class="btn small" class:primary={action.primary} disabled={pb.locked} onclick={action.run}>
-                    <action.icon size={13} /> {action.label}
-                  </button>
+                  <button class="btn small" class:primary={action.primary} disabled={pb.locked} onclick={action.run}><action.icon size={13} /> {action.label}</button>
                 {/each}
               </span>
             </li>
@@ -393,9 +349,7 @@
             <strong>Add a project folder</strong>
             <small>Build output, dependencies and caches (node_modules, target, .venv, bin/obj and more) are left out by themselves; .env files are kept.</small>
           </span>
-          {#if !pb.projects.length}
-            <button class="btn small" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={13} /> Add</button>
-          {/if}
+          {#if !pb.projects.length}<button class="btn small" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={13} /> Add</button>{/if}
         </li>
         <li class:done={hasBackup}>
           <span class="step-mark">{#if hasBackup}<Check size={12} />{:else}3{/if}</span>
@@ -404,9 +358,7 @@
             <small>Each zip is checked twice (after zipping and after the copy) before it is kept. Compare any two backups later.</small>
           </span>
           {#if hasDestination && pb.projects.length && !hasBackup}
-            <button class="btn small primary" disabled={pb.locked} onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
-              <CloudUpload size={13} /> Back up now
-            </button>
+            <button class="btn small primary" disabled={pb.locked} onclick={() => pb.backup(pb.projects.map((project) => project.id))}><CloudUpload size={13} /> Back up now</button>
           {/if}
         </li>
       </ol>
@@ -420,26 +372,21 @@
         onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
         <CloudUpload size={15} /> Back up all
       </button>
-      <button class="btn" disabled={pb.locked || !pb.changedIds.length}
-        title="Backs up only the projects whose folders changed since their last backup"
-        onclick={() => pb.backup(pb.changedIds)}>
+      <button class="btn" disabled={pb.locked || !pb.changedIds.length} title="Backs up only the projects whose folders changed since their last backup" onclick={() => pb.backup(pb.changedIds)}>
         <CloudUpload size={15} /> Back up changed{pb.changedIds.length ? ` (${pb.changedIds.length})` : ""}
       </button>
-      <button class="icon-btn" title="Check every project folder for changes now" aria-label="Check for changes"
-        disabled={pb.checking.length > 0} onclick={() => pb.checkChanges(undefined, true)}>
+      <button class="icon-btn" title="Check every project folder for changes now" aria-label="Check for changes" disabled={pb.checking.length > 0} onclick={() => pb.checkChanges(undefined, true)}>
         <RefreshCw size={14} class={pb.checking.length ? "spin" : ""} />
       </button>
       <button class="btn" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={15} /> Add project</button>
       {#if pb.projects.length > 1}
         <label class="search">
           <Search size={13} />
-          <input bind:this={searchInput} bind:value={pb.query} class="input" type="search" placeholder="Search projects  /"
-            aria-label="Search projects" aria-keyshortcuts="/ Control+F" />
+          <input bind:this={searchInput} bind:value={pb.query} class="input" type="search" placeholder="Search projects  /" aria-label="Search projects" aria-keyshortcuts="/ Control+F" />
         </label>
       {/if}
       <span class="spacer"></span>
-      <button class="btn ghost" disabled={pb.locked} title="Bring in the projects of the Backup Projects app"
-        onclick={() => pb.importProjects()}>
+      <button class="btn ghost" disabled={pb.locked} title="Bring in the projects of the Backup Projects app" onclick={() => pb.importProjects()}>
         <Download size={14} /> Import from Backup Projects
       </button>
     </div>
@@ -447,14 +394,8 @@
     {#if pb.projects.length > 1}
       <div class="filters" role="group" aria-label="Show projects by state">
         {#each filters as filter (filter.id)}
-          <button
-            class="chip small"
-            class:active={pb.filter === filter.id}
-            onclick={() => pb.setFilter(filter.id)}
-            disabled={filter.id !== "all" && !counts[filter.id]}
-          >
-            {filter.label}
-            <span class="count">{counts[filter.id] ?? 0}</span>
+          <button class="chip small" class:active={pb.filter === filter.id} onclick={() => pb.setFilter(filter.id)} disabled={filter.id !== "all" && !counts[filter.id]}>
+            {filter.label}<span class="count">{counts[filter.id] ?? 0}</span>
           </button>
         {/each}
       </div>
@@ -472,19 +413,13 @@
           </span>
           <small class="hint-line">{operation.note ?? stageHints[operation.stage]}</small>
         </span>
-        {#if operation.totalFiles}
-          <span class="numbers">{operation.doneFiles.toLocaleString()} / {operation.totalFiles.toLocaleString()} files</span>
-        {/if}
+        {#if operation.totalFiles}<span class="numbers">{operation.doneFiles.toLocaleString()} / {operation.totalFiles.toLocaleString()} files</span>{/if}
         {#if operation.totalBytes}
           <span class="numbers">{formatBytes(operation.doneBytes)} / {formatBytes(operation.totalBytes)}{progress !== null ? ` · ${Math.floor(progress * 100)}%` : ""}</span>
         {/if}
         {#if elapsed >= 2}<span class="numbers">{formatElapsed(elapsed)}</span>{/if}
-        <button class="btn small" disabled={pb.cancelling} onclick={() => pb.cancel()}>
-          {pb.cancelling ? "Cancelling…" : "Cancel"}
-        </button>
-        <div class="operation-bar">
-          <ProgressBar value={progress} label="Backup progress" />
-        </div>
+        <button class="btn small" disabled={pb.cancelling} onclick={() => pb.cancel()}>{pb.cancelling ? "Cancelling…" : "Cancel"}</button>
+        <div class="operation-bar"><ProgressBar value={progress} label="Backup progress" /></div>
       </div>
     {/if}
 
@@ -539,607 +474,103 @@
 {#if pb.compare}<ComparePanel />{/if}
 
 <style>
-  .page-root {
-    container-type: inline-size;
-  }
-
-  .top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-
-  .top :global(header) {
-    margin-bottom: 14px;
-  }
-
-  .top-right {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 3px;
-  }
-
-  .settings-button.active {
-    border-color: rgb(var(--accent-rgb) / 0.25);
-    background: var(--selected);
-  }
-
-  /* The summary: the numbers, one line about where the page stands, and the
-     folder everything goes to. */
-  .summary {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 9px 14px;
-    margin-bottom: 12px;
-    padding: 12px 13px;
-  }
-
-  /* The numbers take the whole first line; the line about the page and the
-     folder follow under them. */
-  .stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    flex: 1 0 100%;
-  }
-
-  .stats > :global(*) {
-    flex: 1 1 150px;
-  }
-
-  .headline {
-    color: var(--text-2);
-    font-size: 12px;
-  }
-
-  .headline.good {
-    color: #98dfbd;
-  }
-
-  .root-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-width: 0;
-    max-width: 100%;
-    height: 27px;
-    padding: 0 10px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.025);
-    color: var(--text-3);
-    font-size: 10.75px;
-  }
-
-  .root-chip:hover {
-    background: var(--hover);
-    color: var(--text-2);
-  }
-
-  .root-chip span {
-    overflow: hidden;
-    font-family: var(--font-mono);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .destination {
-    display: grid;
-    gap: 10px;
-    margin-bottom: 12px;
-    padding: 12px 13px;
-  }
-
-  .destination-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .destination-head h2 {
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .needed {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgb(245 176 65 / 0.1);
-    color: rgb(245 188 95 / 0.9);
-    font-size: 10px;
-  }
-
-  .cloud-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
+  .page-root { container-type: inline-size; }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .top :global(header) { margin-bottom: 14px; }
+  .top-right { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 3px; }
+  .settings-button.active { border-color: rgb(var(--accent-rgb) / 0.25); background: var(--selected); }
+  /* The summary: the numbers, one line about where the page stands, and the folder everything goes to. */
+  .summary { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 14px; margin-bottom: 12px; padding: 12px 13px; }
+  /* The numbers take the whole first line; the line about the page follows under them. */
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 0 100%; }
+  .stats > :global(*) { flex: 1 1 150px; }
+  .headline { color: var(--text-2); font-size: 12px; }
+  .headline.good { color: #98dfbd; }
+  .root-chip { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; height: 27px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 999px; background: rgb(255 255 255 / 0.025); color: var(--text-3); font-size: 10.75px; }
+  .root-chip:hover { background: var(--hover); color: var(--text-2); }
+  .root-chip span { overflow: hidden; font-family: var(--font-mono); white-space: nowrap; text-overflow: ellipsis; }
+  .destination { display: grid; gap: 10px; margin-bottom: 12px; padding: 12px 13px; }
+  .destination-head { display: flex; align-items: center; gap: 10px; }
+  .destination-head h2 { color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .needed { padding: 1px 7px; border-radius: 999px; background: rgb(245 176 65 / 0.1); color: rgb(245 188 95 / 0.9); font-size: 10px; }
+  .cloud-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .cloud-tile {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-width: 0;
-    min-height: 52px;
-    padding: 9px 10px;
-    border: 1px dashed rgb(255 255 255 / 0.12);
-    border-radius: 9px;
-    background: rgb(0 0 0 / 0.06);
-    text-align: left;
-    transition:
-      background 140ms,
-      border-color 140ms;
-  }
-
-  .cloud-tile.found {
-    border-style: solid;
-    border-color: rgb(255 255 255 / 0.09);
-    background: rgb(255 255 255 / 0.025);
-  }
-
-  .cloud-tile:hover:not(:disabled) {
-    border-color: rgb(var(--accent-rgb) / 0.45);
-    background: rgb(var(--accent-rgb) / 0.08);
-  }
-
-  .cloud-tile.in-use {
-    border-style: solid;
-    border-color: rgb(62 207 142 / 0.32);
-    background: rgb(62 207 142 / 0.07);
-  }
-
-  .cloud-logo {
-    display: grid;
-    place-items: center;
-    flex: none;
-  }
-
-  .cloud-tile:not(.found) .cloud-logo {
-    opacity: 0.65;
-  }
-
-  .cloud-text {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .cloud-text strong {
-    overflow: hidden;
-    color: var(--text-1);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .cloud-text small {
-    color: var(--text-3);
-    font-size: 10.5px;
-  }
-
-  .cloud-tile.in-use small {
-    color: #98dfbd;
-  }
-
-  .cloud-tile :global(.cloud-check) {
-    flex: none;
-    margin-left: auto;
-    color: #98dfbd;
-  }
-
-  .folder-choices {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .helper {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-3);
-    font-size: 11px;
-  }
-
-  .banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin-bottom: 12px;
-    padding: 11px 13px;
-    font-size: 12px;
-  }
-
-  .banner.inline {
-    align-items: center;
-    margin: 4px 0 0;
-    padding: 9px 11px;
-    background: rgb(245 176 65 / 0.05);
-  }
-
-  .banner.warning {
-    border-color: rgb(245 176 65 / 0.22);
-    color: rgb(245 188 95 / 0.85);
-  }
-
-  .banner.error {
-    border-color: rgb(229 72 77 / 0.28);
-    color: rgb(255 145 145 / 0.82);
-  }
-
-  .banner > span {
-    flex: 1;
-  }
-
-  .failures-body {
-    display: grid;
-    flex: 1;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .failures ul {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0 0 0 10px;
-    border-left: 2px solid rgb(255 255 255 / 0.08);
-    list-style: none;
-  }
-
-  .failures li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-    font-size: 11.5px;
-    line-height: 1.45;
-  }
-
-  .failures li b {
-    color: var(--text-1);
-    font-weight: 600;
-  }
-
-  .failures li span {
-    overflow-wrap: anywhere;
-  }
-
-  .banner-actions {
-    display: flex;
-    flex: none;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .failure-actions {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  .failures li .failure-actions {
-    flex-basis: 100%;
-  }
-
-  .guide {
-    display: grid;
-    gap: 9px;
-    margin-bottom: 12px;
-    padding: 12px 13px;
-  }
-
-  .guide-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .guide-head h2 {
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .guide ol {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .guide li {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    padding: 7px 9px;
-    border-radius: 9px;
-    background: rgb(0 0 0 / 0.1);
-  }
-
-  .guide li.done {
-    opacity: 0.62;
-  }
-
-  .step-mark {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 21px;
-    height: 21px;
-    border-radius: 999px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.3);
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .guide li.done .step-mark {
-    border-color: rgb(62 207 142 / 0.35);
-    color: #98dfbd;
-  }
-
-  .step-text {
-    display: grid;
-    flex: 1;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .step-text strong {
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .step-text small {
-    color: var(--text-3);
-    font-size: 10.75px;
-    line-height: 1.45;
-  }
-
-  /* The list lives in one panel, so the page reads as: summary, destination,
-     then the projects. */
-  .projects {
-    display: grid;
-    gap: 7px;
-    padding: 12px 13px;
-    background:
-      var(--grain),
-      linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.012));
-  }
-
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-3);
-  }
-
-  .search input {
-    width: 210px;
-    height: 30px;
-    font-size: 12px;
-  }
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .spacer {
-    flex: 1;
-  }
-
-  .filters {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding-bottom: 9px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.055);
-  }
-
-  .chip.small {
-    height: 26px;
-    padding: 0 10px;
-    font-size: 11.5px;
-  }
-
-  .chip .count {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .group-head {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-top: 6px;
-    padding: 2px 2px 4px;
-  }
-
-  .group-head h3 {
-    flex: none;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-1);
-  }
-
-  .group-note {
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 10.75px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .group-count {
-    margin-left: auto;
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.05);
-    color: var(--text-3);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .group-head + :global(article) {
-    margin-top: 0;
-  }
-
-  .operation {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    padding: 8px 8px 10px;
-    border-radius: 9px;
-    background: rgb(var(--accent-rgb) / 0.045);
-    color: var(--accent);
-  }
-
-  .operation-text {
-    display: grid;
-    flex: 1;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .operation-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .operation-text strong {
-    font-size: 11.5px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .hint-line {
-    color: var(--text-3);
-  }
-
-  .operation-text small {
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 10.5px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .numbers {
-    margin-left: auto;
-    color: var(--text-2);
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .numbers + .numbers {
-    margin-left: 0;
-  }
-
-  .operation-bar {
-    position: absolute;
-    right: 8px;
-    bottom: 4px;
-    left: 8px;
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 180px;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
-
-  .empty {
-    display: grid;
-    justify-items: center;
-    gap: 7px;
-    padding: 42px 20px;
-    text-align: center;
-  }
-
-  .empty.small {
-    padding: 26px 20px;
-  }
-
-  .empty-icon {
-    display: grid;
-    place-items: center;
-    width: 50px;
-    height: 50px;
-    margin-bottom: 2px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.12);
-    border-radius: 15px;
-    background: rgb(var(--accent-rgb) / 0.045);
-    color: rgb(169 179 255 / 0.7);
-  }
-
-  .empty strong {
-    font-size: 13.5px;
-  }
-
-  .empty p {
-    max-width: 440px;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
-
-  .empty-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-  }
-
-  @container (max-width: 860px) {
-    .stats > :global(*) {
-      flex-basis: 132px;
-    }
-  }
-
+    display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 52px; padding: 9px 10px; border: 1px dashed rgb(255 255 255 / 0.12);
+    border-radius: 9px; background: rgb(0 0 0 / 0.06); text-align: left; transition: background 140ms, border-color 140ms;
+  }
+  .cloud-tile.found { border-style: solid; border-color: rgb(255 255 255 / 0.09); background: rgb(255 255 255 / 0.025); }
+  .cloud-tile:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.45); background: rgb(var(--accent-rgb) / 0.08); }
+  .cloud-tile.in-use { border-style: solid; border-color: rgb(62 207 142 / 0.32); background: rgb(62 207 142 / 0.07); }
+  .cloud-logo { display: grid; place-items: center; flex: none; }
+  .cloud-tile:not(.found) .cloud-logo { opacity: 0.65; }
+  .cloud-text { display: grid; gap: 2px; min-width: 0; }
+  .cloud-text strong { overflow: hidden; color: var(--text-1); font-size: 12px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+  .cloud-text small { color: var(--text-3); font-size: 10.5px; }
+  .cloud-tile.in-use small { color: #98dfbd; }
+  .cloud-tile :global(.cloud-check) { flex: none; margin-left: auto; color: #98dfbd; }
+  .folder-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+  .helper { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 11px; }
+  .banner { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 11px 13px; font-size: 12px; }
+  .banner.inline { align-items: center; margin: 4px 0 0; padding: 9px 11px; background: rgb(245 176 65 / 0.05); }
+  .banner.warning { border-color: rgb(245 176 65 / 0.22); color: rgb(245 188 95 / 0.85); }
+  .banner.error { border-color: rgb(229 72 77 / 0.28); color: rgb(255 145 145 / 0.82); }
+  .banner > span { flex: 1; }
+  .failures-body { display: grid; flex: 1; gap: 6px; min-width: 0; }
+  .failures ul { display: grid; gap: 6px; margin: 0; padding: 0 0 0 10px; border-left: 2px solid rgb(255 255 255 / 0.08); list-style: none; }
+  .failures li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 11.5px; line-height: 1.45; }
+  .failures li b { color: var(--text-1); font-weight: 600; }
+  .failures li span { overflow-wrap: anywhere; }
+  .banner-actions { display: flex; flex: none; flex-wrap: wrap; gap: 6px; }
+  .failure-actions { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .failures li .failure-actions { flex-basis: 100%; }
+  .guide { display: grid; gap: 9px; margin-bottom: 12px; padding: 12px 13px; }
+  .guide-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .guide-head h2 { color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .guide ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .guide li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 9px; border-radius: 9px; background: rgb(0 0 0 / 0.1); }
+  .guide li.done { opacity: 0.62; }
+  .step-mark { display: grid; place-items: center; flex: none; width: 21px; height: 21px; border-radius: 999px; border: 1px solid rgb(var(--accent-rgb) / 0.3); color: var(--accent); font-size: 11px; font-weight: 700; }
+  .guide li.done .step-mark { border-color: rgb(62 207 142 / 0.35); color: #98dfbd; }
+  .step-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .step-text strong { font-size: 12px; font-weight: 600; }
+  .step-text small { color: var(--text-3); font-size: 10.75px; line-height: 1.45; }
+  /* The list lives in one panel, so the page reads as: summary, destination, then the projects. */
+  .projects { display: grid; gap: 7px; padding: 12px 13px; background: var(--grain), linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.012)); }
+  .search { display: flex; align-items: center; gap: 6px; color: var(--text-3); }
+  .search input { width: 210px; height: 30px; font-size: 12px; }
+  .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .spacer { flex: 1; }
+  .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-bottom: 9px; border-bottom: 1px solid rgb(255 255 255 / 0.055); }
+  .chip.small { height: 26px; padding: 0 10px; font-size: 11.5px; }
+  .chip .count { font-variant-numeric: tabular-nums; }
+  .group-head { display: flex; align-items: center; gap: 9px; margin-top: 6px; padding: 2px 2px 4px; }
+  .group-head h3 { flex: none; font-size: 12px; font-weight: 600; color: var(--text-1); }
+  .group-note { overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
+  .group-count { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .group-head + :global(article) { margin-top: 0; }
+  .operation { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 8px 10px; border-radius: 9px; background: rgb(var(--accent-rgb) / 0.045); color: var(--accent); }
+  .operation-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .operation-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; }
+  .operation-text strong { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .hint-line { color: var(--text-3); }
+  .operation-text small { overflow: hidden; color: var(--text-3); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
+  .numbers { margin-left: auto; color: var(--text-2); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .numbers + .numbers { margin-left: 0; }
+  .operation-bar { position: absolute; right: 8px; bottom: 4px; left: 8px; }
+  .loading { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 180px; color: var(--text-3); font-size: 12.5px; }
+  .empty { display: grid; justify-items: center; gap: 7px; padding: 42px 20px; text-align: center; }
+  .empty.small { padding: 26px 20px; }
+  .empty-icon { display: grid; place-items: center; width: 50px; height: 50px; margin-bottom: 2px; border: 1px solid rgb(var(--accent-rgb) / 0.12); border-radius: 15px; background: rgb(var(--accent-rgb) / 0.045); color: rgb(169 179 255 / 0.7); }
+  .empty strong { font-size: 13.5px; }
+  .empty p { max-width: 440px; color: var(--text-3); font-size: 11.5px; }
+  .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+  @container (max-width: 860px) { .stats > :global(*) { flex-basis: 132px; } }
   @container (max-width: 620px) {
-    .cloud-list {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .search input {
-      width: 150px;
-    }
-
-    .operation {
-      flex-wrap: wrap;
-    }
-
-    .group-note {
-      display: none;
-    }
+    .cloud-list { grid-template-columns: minmax(0, 1fr); }
+    .search input { width: 150px; }
+    .operation { flex-wrap: wrap; }
+    .group-note { display: none; }
   }
-
-  @container (max-width: 400px) {
-    .settings-button {
-      width: 100%;
-    }
-  }
+  @container (max-width: 400px) { .settings-button { width: 100%; } }
 </style>
