@@ -377,9 +377,9 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     min-height: 0;
-    padding: 12px;
+    padding: 14px 18px;
     overflow-y: auto;
     container: changes / inline-size;
   }
@@ -393,7 +393,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 9px 12px;
+    padding: 9px 14px;
     border: 1px solid rgb(127 216 255 / 0.28);
     border-radius: 10px;
     background: rgb(127 216 255 / 0.07);
@@ -409,8 +409,8 @@
   .grid {
     display: grid;
     flex: 1;
-    grid-template-columns: minmax(250px, 340px) minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: minmax(290px, 380px) minmax(0, 1fr);
+    gap: 12px;
     min-height: 0;
   }
 
@@ -424,7 +424,7 @@
     }
 
     .file-list {
-      max-height: 220px;
+      max-height: 240px;
     }
 
     .diff {
@@ -438,37 +438,39 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    border: 1px solid rgb(255 255 255 / 0.06);
+    border: 1px solid rgb(255 255 255 / 0.07);
     border-radius: 12px;
-    background: rgb(0 0 0 / 0.14);
+    background: rgb(0 0 0 / 0.15);
   }
 
   .files-head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px 11px;
+    gap: 10px;
+    padding: 11px 14px;
     border-bottom: 1px solid rgb(255 255 255 / 0.06);
-    font-size: 12.3px;
+    font-size: 12.5px;
+    font-weight: 550;
   }
 
   .all {
     display: flex;
     flex: 1;
     align-items: center;
-    gap: 9px;
+    gap: 10px;
   }
 
   .picked {
     color: var(--text-3);
     font-size: 11.5px;
+    font-weight: 400;
   }
 
   .only {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 11px;
+    padding: 8px 14px;
     border-bottom: 1px solid rgb(255 255 255 / 0.06);
     color: var(--text-2);
     font-size: 11.8px;
@@ -477,16 +479,20 @@
   .file-list {
     flex: 1;
     min-height: 120px;
-    padding: 4px;
+    padding: 6px;
     overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .file {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 2px 6px 2px 7px;
-    border-radius: 7px;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    transition: background 0.15s ease;
   }
 
   .file:hover {
@@ -494,19 +500,22 @@
   }
 
   .file.selected {
-    background: rgb(var(--accent-rgb) / 0.14);
+    background: rgb(var(--accent-rgb) / 0.18);
   }
 
   .file-name {
     display: flex;
     flex: 1;
     align-items: baseline;
-    gap: 7px;
+    gap: 8px;
     min-width: 0;
-    padding: 5px 0;
+    padding: 2px 0;
     overflow: hidden;
     text-align: left;
     white-space: nowrap;
+    background: none;
+    border: none;
+    cursor: pointer;
   }
 
   .name {
@@ -514,7 +523,8 @@
     max-width: 100%;
     overflow: hidden;
     color: var(--text-1);
-    font-size: 12.3px;
+    font-size: 12.8px;
+    font-weight: 500;
     text-overflow: ellipsis;
   }
 
@@ -524,55 +534,66 @@
     color: var(--text-3);
     font-size: 11px;
     text-overflow: ellipsis;
-    direction: rtl;
+    direction: ltr;
     text-align: left;
+    opacity: 0.8;
   }
 
   .kind {
     flex: none;
-    width: 18px;
-    color: var(--text-3);
+    padding: 1px 6px;
+    border-radius: 4px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
     text-align: center;
+    line-height: 1.4;
   }
 
   .k-added,
   .k-untracked {
+    background: rgb(111 219 165 / 0.14);
     color: #6fdba5;
   }
 
   .k-modified,
   .k-typeChanged {
+    background: rgb(255 198 107 / 0.14);
     color: #ffc66b;
   }
 
   .k-deleted {
+    background: rgb(255 143 143 / 0.14);
     color: #ff8f8f;
   }
 
   .k-renamed,
   .k-copied {
+    background: rgb(159 180 255 / 0.14);
     color: #9fb4ff;
   }
 
   .k-conflicted {
+    background: rgb(255 107 107 / 0.2);
     color: #ff6b6b;
   }
 
   .composer {
     display: grid;
-    gap: 8px;
-    padding: 10px;
-    border-top: 1px solid rgb(255 255 255 / 0.06);
+    gap: 10px;
+    padding: 12px;
+    border-top: 1px solid rgb(255 255 255 / 0.07);
+    background: rgb(0 0 0 / 0.1);
+    border-radius: 0 0 12px 12px;
   }
 
   textarea {
-    min-height: 74px;
+    min-height: 78px;
     resize: vertical;
     font-size: 12.5px;
     line-height: 1.45;
+    padding: 10px 12px;
+    border-radius: 8px;
   }
 
   .ai-row {
@@ -593,25 +614,36 @@
   .commit-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 10px;
+  }
+
+  .commit-row .btn {
+    height: 36px;
+    font-weight: 550;
+    border-radius: 8px;
   }
 
   .diff-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 8px 7px 12px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.06);
+    gap: 12px;
+    padding: 9px 14px;
+    border-bottom: 1px solid rgb(255 255 255 / 0.07);
+    background: rgb(0 0 0 / 0.1);
+    border-radius: 12px 12px 0 0;
   }
 
   .diff-head code {
     flex: 1;
     overflow: hidden;
-    color: var(--text-2);
+    color: var(--text-1);
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgb(255 255 255 / 0.04);
   }
 
   .modes {
@@ -627,7 +659,7 @@
   .diff-body {
     flex: 1;
     min-height: 0;
-    padding: 10px;
+    padding: 12px;
     overflow: auto;
   }
 

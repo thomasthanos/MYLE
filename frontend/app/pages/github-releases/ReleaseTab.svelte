@@ -3,12 +3,13 @@
   // (AI from the commits), checks, then build → commit → push → tag →
   // release and upload, or the tag's GitHub Actions workflow.
   import { onMount, untrack } from "svelte";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Circle from "@lucide/svelte/icons/circle";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import CircleDashed from "@lucide/svelte/icons/circle-dashed";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
@@ -62,6 +63,7 @@
   let commitsOpen = $state(false);
   let found = $state<Artifact[] | null>(null);
   let finding = $state(false);
+  let stopping = $state(false);
 
   let branches = $state<string[] | null>(null);
   const branchOptions = $derived<SelectOption<string>[]>([
@@ -277,6 +279,7 @@
       s.outcome = null;
       gr.showProblem(problemOf(error), repoId);
     } finally {
+      stopping = false;
       s.running = false;
       await gr.refresh(repoId);
       await gr.loadRemote(repoId);
@@ -285,6 +288,7 @@
   }
 
   function finish(outcome: ReleaseOutcome) {
+    stopping = false;
     s.outcome = outcome;
     if (outcome.ok) {
       s.touched = false;
@@ -304,6 +308,7 @@
     if (!resumeState || s.running) return;
     const before = s.outcome;
     s.start();
+    stopping = false;
     try {
       const outcome = await api.resume(entry.id, resumeState, (event) => s.apply(event));
       finish({ ...outcome, version: outcome.version || before?.version || "", tag: outcome.tag || before?.tag || "" });
@@ -311,6 +316,7 @@
       s.outcome = before;
       gr.showProblem(problemOf(error), repoId);
     } finally {
+      stopping = false;
       s.running = false;
       void gr.loadRemote(repoId);
     }
@@ -321,21 +327,30 @@
     if (!commit || s.running) return;
     const before = s.outcome;
     s.running = true;
+    stopping = false;
     try {
       const run = await api.watch(entry.id, commit, before?.tag ?? null, (event) => s.apply(event));
       if (before) s.outcome = { ...before, run, ok: runState(run) === "ok", problem: runState(run) === "ok" ? null : before.problem };
     } catch (error) {
       gr.showProblem(problemOf(error), repoId);
     } finally {
+      stopping = false;
       s.running = false;
       void gr.loadRemote(repoId);
     }
   }
 
   async function cancel() {
-    await api.cancel(repoId);
-    if (s.run?.id) {
-      void api.cancelCi(repoId, s.run.id).catch(() => {});
+    if (stopping) return;
+    stopping = true;
+    try {
+      await api.cancel(repoId);
+      if (s.run?.id) {
+        void api.cancelCi(repoId, s.run.id).catch(() => {});
+      }
+    } catch (error) {
+      toast.error(messageOf(error));
+      stopping = false;
     }
   }
 
@@ -556,19 +571,54 @@
   {:else}
     <!-- The run -->
     <section class="run">
-      <div class="notes-head">
-        <h3>{s.running ? "Releasing" : s.outcome?.ok ? "Released" : s.outcome?.cancelled ? "Cancelled" : "Stopped"} {s.outcome?.tag ?? tag}</h3>
+      <div class="notes-head run-head">
+        <div class="run-title">
+          {#if s.running && stopping}
+            <LoaderCircle size={18} class="spin stopping-icon" />
+            <h3>Stopping release {tag}…</h3>
+            <span class="run-badge warn">Rolling back</span>
+          {:else if s.running}
+            <LoaderCircle size={18} class="spin running-icon" />
+            <h3>Releasing {tag}</h3>
+            <span class="run-badge info">In progress</span>
+          {:else if s.outcome?.ok}
+            <CircleCheck size={18} class="ok-icon" />
+            <h3>Released {s.outcome?.tag ?? tag}</h3>
+            <span class="run-badge success">Published</span>
+          {:else if s.outcome?.cancelled}
+            <CircleSlash size={18} class="cancel-icon" />
+            <h3>Cancelled {s.outcome?.tag ?? tag}</h3>
+            <span class="run-badge neutral">Cancelled</span>
+          {:else}
+            <CircleX size={18} class="fail-icon" />
+            <h3>Stopped {s.outcome?.tag ?? tag}</h3>
+            <span class="run-badge danger">Failed</span>
+          {/if}
+        </div>
         {#if s.running}
-          <button class="btn small danger" onclick={() => void cancel()}><Square size={12} /> Cancel</button>
+          <button class="btn small danger" disabled={stopping} onclick={() => void cancel()}>
+            {#if stopping}
+              <LoaderCircle size={12} class="spin" /> Stopping…
+            {:else}
+              <Square size={12} /> Stop release
+            {/if}
+          </button>
         {/if}
       </div>
       <ol class="steps">
         {#each steps as id (id)}
           {@const state = stepIcon(id)}
-          <li class="s-{state ?? 'waiting'}">
-            {#if state === "running"}<LoaderCircle size={15} class="spin" />{:else if state === "done"}<CircleCheck size={15} />{:else if state === "failed"}<CircleX size={15} />{:else if state === "skipped"}<CircleDashed size={15} />{:else}<Circle size={15} />{/if}
-            <span class="label">{stepLabels[id]}</span>
-            {#if s.steps[id]?.message}<span class="msg">{s.steps[id]?.message}</span>{/if}
+          <li class="step s-{state ?? 'waiting'}" class:active={state === "running"}>
+            <div class="step-icon">
+              {#if state === "running"}<LoaderCircle size={15} class="spin" />{:else if state === "done"}<CircleCheck size={15} />{:else if state === "failed"}<CircleX size={15} />{:else if state === "skipped"}<CircleDashed size={15} />{:else}<Circle size={15} />{/if}
+            </div>
+            <div class="step-content">
+              <span class="label">{stepLabels[id]}</span>
+              {#if s.steps[id]?.message}<span class="msg">{s.steps[id]?.message}</span>{/if}
+            </div>
+            {#if state}
+              <span class="step-tag tag-{state}">{state === "running" ? "running" : state === "done" ? "done" : state === "failed" ? "failed" : "skipped"}</span>
+            {/if}
           </li>
           {#if id === "upload" && s.upload && state === "running"}
             <li class="upload">
@@ -632,28 +682,54 @@
       {#if s.outcome && !s.running}
         {#if s.outcome.ok}
           <div class="result ok">
-            <CircleCheck size={18} />
-            <span><strong>{s.outcome.tag}</strong> is {s.outcome.release?.draft ? "a draft on GitHub" : "published"}.</span>
-            {#if s.outcome.release}<button class="btn small" onclick={() => void openUrl(s.outcome!.release!.htmlUrl)}><ExternalLink size={13} /> Open the release</button>{/if}
-            {#if s.outcome.run}<button class="btn small" onclick={() => void openUrl(s.outcome!.run!.htmlUrl)}><ExternalLink size={13} /> Open the run</button>{/if}
+            <CircleCheck size={20} />
+            <div class="result-body">
+              <strong>{s.outcome.tag} is published</strong>
+              <span>{s.outcome.release?.draft ? "Draft saved on GitHub." : "Release is live and available on GitHub."}</span>
+            </div>
+            <div class="result-actions">
+              {#if s.outcome.release}<button class="btn small" onclick={() => void openUrl(s.outcome!.release!.htmlUrl)}><ExternalLink size={13} /> Open the release</button>{/if}
+              {#if s.outcome.run}<button class="btn small" onclick={() => void openUrl(s.outcome!.run!.htmlUrl)}><ExternalLink size={13} /> Open the run</button>{/if}
+            </div>
+          </div>
+        {:else if s.outcome.cancelled}
+          <div class="result cancelled">
+            <CircleSlash size={20} />
+            <div class="result-body">
+              <strong>Release cancelled</strong>
+              <span>
+                {s.outcome.problem?.message ?? "The release was cancelled."}
+                {#if s.outcome.rolledBack}<em>Nothing was pushed: the version files and commit were put back.</em>{/if}
+              </span>
+            </div>
+            <div class="result-actions">
+              {#if s.outcome.run}<button class="btn small" onclick={() => void openUrl(s.outcome!.run!.htmlUrl)}><ExternalLink size={13} /> Open the run</button>{/if}
+            </div>
           </div>
         {:else}
           <div class="result bad">
-            <CircleX size={18} />
-            <span>
-              {s.outcome.problem?.message ?? "The release stopped."}
-              {#if s.outcome.rolledBack}<em>Nothing was pushed: the version files and commit were put back.</em>{/if}
-            </span>
-            {#if s.outcome.resume}
-              <button class="btn small primary" disabled={!!busy} onclick={() => void resume()}><RotateCcw size={13} /> Resume</button>
-            {/if}
-            {#if s.outcome.commit && s.mode === "actions" && !s.outcome.resume}
-              <button class="btn small" disabled={!!busy} onclick={() => void watchAgain()}><RefreshCw size={13} /> Follow the run</button>
-            {/if}
-            {#if s.outcome.run}<button class="btn small" onclick={() => void openUrl(s.outcome!.run!.htmlUrl)}><ExternalLink size={13} /> Open the run</button>{/if}
+            <CircleX size={20} />
+            <div class="result-body">
+              <strong>Release stopped</strong>
+              <span>
+                {s.outcome.problem?.message ?? "The release stopped."}
+                {#if s.outcome.rolledBack}<em>Nothing was pushed: the version files and commit were put back.</em>{/if}
+              </span>
+            </div>
+            <div class="result-actions">
+              {#if s.outcome.resume}
+                <button class="btn small primary" disabled={!!busy} onclick={() => void resume()}><RotateCcw size={13} /> Resume</button>
+              {/if}
+              {#if s.outcome.commit && s.mode === "actions" && !s.outcome.resume}
+                <button class="btn small" disabled={!!busy} onclick={() => void watchAgain()}><RefreshCw size={13} /> Follow the run</button>
+              {/if}
+              {#if s.outcome.run}<button class="btn small" onclick={() => void openUrl(s.outcome!.run!.htmlUrl)}><ExternalLink size={13} /> Open the run</button>{/if}
+            </div>
           </div>
         {/if}
-        <button class="btn small ghost new" onclick={() => (s.outcome = null)}><ChevronDown size={13} /> {s.outcome.ok ? "Start the next release" : "Back to the form"}</button>
+        <button class="btn small ghost new-btn" onclick={() => (s.outcome = null)}>
+          <ArrowLeft size={13} /> {s.outcome.ok ? "Start the next release" : "Back to the form"}
+        </button>
       {/if}
     </section>
   {/if}
@@ -971,43 +1047,188 @@
     font-size: 13.5px;
   }
 
+  .run {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px 20px;
+    background: rgb(0 0 0 / 0.14);
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: 12px;
+  }
+
+  .run-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgb(255 255 255 / 0.07);
+  }
+
+  .run-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .run-title h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .run-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .run-badge.info {
+    background: rgb(159 211 255 / 0.14);
+    color: #9fd3ff;
+  }
+
+  .run-badge.warn {
+    background: rgb(255 184 77 / 0.14);
+    color: #ffb84d;
+  }
+
+  .run-badge.success {
+    background: rgb(62 207 142 / 0.14);
+    color: #3ecf8e;
+  }
+
+  .run-badge.neutral {
+    background: rgb(255 255 255 / 0.08);
+    color: var(--text-2);
+  }
+
+  .run-badge.danger {
+    background: rgb(255 123 123 / 0.14);
+    color: #ff7b7b;
+  }
+
+  .stopping-icon {
+    color: #ffb84d;
+  }
+
+  .running-icon {
+    color: #9fd3ff;
+  }
+
+  .ok-icon {
+    color: #3ecf8e;
+  }
+
+  .cancel-icon {
+    color: #ffb84d;
+  }
+
+  .fail-icon {
+    color: #ff7b7b;
+  }
+
   .steps {
-    display: grid;
-    gap: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  .steps li {
+  .step {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 2px;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.02);
+    border: 1px solid transparent;
     color: var(--text-3);
-    font-size: 12.5px;
+    font-size: 12.8px;
+    transition: all 0.2s ease;
   }
 
-  .steps .label {
-    min-width: 110px;
+  .step.active {
+    background: rgb(var(--accent-rgb) / 0.09);
+    border-color: rgb(var(--accent-rgb) / 0.3);
+    color: var(--text-1);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+  }
+
+  .step-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 20px;
+  }
+
+  .step-content {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .step .label {
+    min-width: 120px;
+    font-weight: 550;
     color: var(--text-2);
   }
 
-  .steps .msg {
+  .step.active .label {
+    color: var(--text-1);
+  }
+
+  .step .msg {
+    flex: 1;
     min-width: 0;
     overflow: hidden;
     color: var(--text-3);
-    font-size: 11.5px;
+    font-size: 11.8px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .s-running {
-    color: #9fd3ff !important;
+  .step-tag {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: capitalize;
   }
 
-  .s-running .label {
-    color: var(--text-1) !important;
+  .tag-running {
+    background: rgb(159 211 255 / 0.14);
+    color: #9fd3ff;
+  }
+
+  .tag-done {
+    background: rgb(62 207 142 / 0.12);
+    color: #3ecf8e;
+  }
+
+  .tag-failed {
+    background: rgb(255 123 123 / 0.12);
+    color: #ff7b7b;
+  }
+
+  .tag-skipped {
+    background: rgb(255 255 255 / 0.05);
+    color: var(--text-3);
+  }
+
+  .s-running {
+    color: #9fd3ff !important;
   }
 
   .s-done {
@@ -1022,7 +1243,9 @@
   li.jobs {
     display: grid !important;
     gap: 5px;
-    padding: 2px 0 6px 25px !important;
+    padding: 4px 12px 8px 42px !important;
+    background: rgb(255 255 255 / 0.015);
+    border-radius: 8px;
   }
 
   .upload .progress {
@@ -1099,22 +1322,45 @@
 
   .result {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 11px 13px;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
     border-radius: 10px;
-    font-size: 12.5px;
+    font-size: 13px;
   }
 
-  .result span {
+  .result-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
     flex: 1;
+    min-width: 0;
+  }
+
+  .result-body strong {
+    font-size: 13.5px;
+    font-weight: 600;
     color: var(--text-1);
   }
 
-  .result em {
+  .result-body span {
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .result-body em {
     display: block;
+    margin-top: 2px;
     color: var(--text-3);
     font-style: normal;
+  }
+
+  .result-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
   }
 
   .result.ok {
@@ -1123,14 +1369,22 @@
     color: #3ecf8e;
   }
 
+  .result.cancelled {
+    border: 1px solid rgb(255 184 77 / 0.3);
+    background: rgb(255 184 77 / 0.08);
+    color: #ffb84d;
+  }
+
   .result.bad {
     border: 1px solid rgb(229 72 77 / 0.3);
     background: rgb(229 72 77 / 0.08);
     color: #ff7b7b;
   }
 
-  .new {
-    justify-self: start;
+  .new-btn {
+    align-self: flex-start;
+    margin-top: 4px;
+    gap: 6px;
   }
 
   .quiet {

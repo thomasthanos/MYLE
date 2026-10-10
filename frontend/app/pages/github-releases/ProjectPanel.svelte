@@ -552,23 +552,23 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px 2px;
+    gap: 6px;
     margin: 0 18px 12px;
-    padding: 3px;
-    border: 1px solid rgb(255 255 255 / 0.06);
+    padding: 4px 6px;
+    border: 1px solid rgb(255 255 255 / 0.07);
     border-radius: 10px;
-    background: rgb(0 0 0 / 0.12);
+    background: rgb(0 0 0 / 0.16);
   }
 
   .fact {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 26px;
-    padding: 0 9px;
+    gap: 7px;
+    height: 28px;
+    padding: 0 10px;
     border-radius: 7px;
     color: var(--text-1);
-    font-size: 11.8px;
+    font-size: 12px;
     white-space: nowrap;
   }
 
@@ -608,8 +608,8 @@
   }
 
   .fact.ci-wrapper {
-    padding: 0 4px 0 9px;
-    gap: 6px;
+    padding: 0 4px 0 10px;
+    gap: 8px;
   }
 
   .ci-btn {
@@ -633,14 +633,14 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    height: 19px;
-    padding: 0 6px;
-    border-radius: 4px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 5px;
     background: rgb(255 100 100 / 0.15);
     border: 1px solid rgb(255 100 100 / 0.3);
     color: #ff9d9d;
     font-size: 10.5px;
-    font-weight: 500;
+    font-weight: 550;
     cursor: pointer;
     line-height: 1;
     transition: all 0.15s ease;
@@ -660,36 +660,37 @@
   .kinds {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     margin-left: auto;
     padding-right: 4px;
   }
 
   .kinds span {
-    padding: 0 7px;
+    padding: 0 8px;
     border-radius: 6px;
     background: rgb(var(--accent-rgb) / 0.12);
     color: #c3c9f7;
-    font-size: 10.5px;
-    line-height: 20px;
+    font-size: 11px;
+    line-height: 21px;
   }
 
   .tabs {
     display: flex;
-    gap: 2px;
-    padding: 0 12px;
+    gap: 4px;
+    padding: 0 18px;
     border-bottom: 1px solid rgb(255 255 255 / 0.07);
   }
 
   .tab {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     margin-bottom: -1px;
-    padding: 9px 12px;
+    padding: 10px 14px;
     border-bottom: 2px solid transparent;
     color: var(--text-2);
-    font-size: 12.8px;
+    font-size: 13px;
+    transition: all 0.15s ease;
   }
 
   .tab:hover {
