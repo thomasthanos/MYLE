@@ -6,6 +6,7 @@
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import FileDiff from "@lucide/svelte/icons/file-diff";
@@ -16,6 +17,7 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Rocket from "@lucide/svelte/icons/rocket";
+  import Square from "@lucide/svelte/icons/square";
   import Tag from "@lucide/svelte/icons/tag";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -42,6 +44,39 @@
   const ci = $derived(runState(run));
   const busy = $derived(gr.running(repoId));
   let menuOpen = $state(false);
+  let cancellingCi = $state(false);
+
+  // Poll remote while CI is running so the status updates to passed/failed/cancelled
+  // automatically as soon as the run finishes on GitHub.
+  $effect(() => {
+    if (ci === "running" && repoId) {
+      const interval = setInterval(() => {
+        void gr.loadRemote(repoId);
+      }, 10_000);
+      return () => clearInterval(interval);
+    }
+  });
+
+  async function cancelCiRun() {
+    if (!run || cancellingCi) return;
+    const ok = await confirm({
+      title: `Cancel ${run.name ?? "CI"} run?`,
+      message: `Stop the GitHub Actions workflow run #${run.id} currently running on GitHub?`,
+      confirmLabel: "Cancel run",
+      danger: true,
+    });
+    if (!ok) return;
+    cancellingCi = true;
+    try {
+      await api.cancelCi(repoId, run.id);
+      toast.info(`Cancellation requested for ${run.name ?? "CI"} run.`);
+      await gr.loadRemote(repoId);
+    } catch (error) {
+      toast.error(messageOf(error));
+    } finally {
+      cancellingCi = false;
+    }
+  }
 
   const tabs: { id: Tab; label: string; icon: typeof Hammer }[] = [
     { id: "changes", label: "Changes", icon: FileDiff },
@@ -202,10 +237,23 @@
       <FileDiff size={13} /> {changeCount ? `${changeCount} changed ${changeCount === 1 ? "file" : "files"}` : "No changes"}
     </span>
     {#if run}
-      <button class="fact link ci-{ci}" onclick={() => void openUrl(run.htmlUrl)} title={run.displayTitle ?? run.name ?? "Last Actions run"}>
-        {#if ci === "running"}<LoaderCircle size={13} class="spin" />{:else if ci === "ok"}<CircleCheck size={13} />{:else}<CircleX size={13} />{/if}
-        {run.name ?? "CI"} <em>{ci === "running" ? "running" : ci === "ok" ? "passed" : ci === "cancelled" ? "cancelled" : "failed"} · {formatRelative(run.updatedAt ?? run.createdAt)}</em>
-      </button>
+      <div class="fact ci-wrapper ci-{ci}">
+        <button class="ci-btn" onclick={() => void openUrl(run.htmlUrl)} title="{run.displayTitle ?? run.name ?? 'Last Actions run'} (open in GitHub)">
+          {#if ci === "running"}<LoaderCircle size={13} class="spin" />{:else if ci === "ok"}<CircleCheck size={13} />{:else if ci === "cancelled"}<CircleSlash size={13} />{:else}<CircleX size={13} />{/if}
+          {run.name ?? "CI"} <em>{ci === "running" ? "running" : ci === "ok" ? "passed" : ci === "cancelled" ? "cancelled" : "failed"} · {formatRelative(run.updatedAt ?? run.createdAt)}</em>
+        </button>
+        {#if ci === "running"}
+          <button
+            class="ci-cancel-btn"
+            title="Cancel this CI run on GitHub"
+            disabled={cancellingCi}
+            onclick={(e) => { e.stopPropagation(); void cancelCiRun(); }}
+          >
+            {#if cancellingCi}<LoaderCircle size={10} class="spin" />{:else}<Square size={9} />{/if}
+            <span>Cancel</span>
+          </button>
+        {/if}
+      </div>
     {/if}
     {#if entry?.buildKinds.length}
       <span class="kinds">{#each entry.buildKinds as kind (kind)}<span>{buildKindLabels[kind]}</span>{/each}</span>
@@ -551,8 +599,62 @@
     color: #ff9d9d;
   }
 
+  .fact.ci-cancelled {
+    color: var(--text-3);
+  }
+
   .fact.ci-running {
     color: #9fd3ff;
+  }
+
+  .fact.ci-wrapper {
+    padding: 0 4px 0 9px;
+    gap: 6px;
+  }
+
+  .ci-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    color: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .ci-btn:hover {
+    text-decoration: underline;
+  }
+
+  .ci-cancel-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 19px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: rgb(255 100 100 / 0.15);
+    border: 1px solid rgb(255 100 100 / 0.3);
+    color: #ff9d9d;
+    font-size: 10.5px;
+    font-weight: 500;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s ease;
+  }
+
+  .ci-cancel-btn:hover:not(:disabled) {
+    background: rgb(255 100 100 / 0.28);
+    border-color: rgb(255 100 100 / 0.5);
+    color: #ffbebe;
+  }
+
+  .ci-cancel-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .kinds {

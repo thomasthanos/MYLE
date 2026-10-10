@@ -1605,7 +1605,7 @@ async fn watch(
         if run.cancelled() {
             return Err(Problem::new(
                 "CANCELLED",
-                "Stopped watching. The workflow goes on on GitHub.",
+                "Cancelled before the workflow started on GitHub.",
             )
             .into());
         }
@@ -1654,9 +1654,10 @@ async fn watch(
             return Ok(current);
         }
         if run.cancelled() {
+            let _ = github::cancel_run(token, owner, repo, current.id).await;
             return Err(Problem::new(
                 "CANCELLED",
-                "Stopped watching. The workflow goes on on GitHub.",
+                "Cancelled. The workflow run was stopped on GitHub.",
             )
             .into());
         }

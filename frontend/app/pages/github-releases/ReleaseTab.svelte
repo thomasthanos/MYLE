@@ -279,7 +279,7 @@
     } finally {
       s.running = false;
       await gr.refresh(repoId);
-      void gr.loadRemote(repoId);
+      await gr.loadRemote(repoId);
       void load();
     }
   }
@@ -334,6 +334,9 @@
 
   async function cancel() {
     await api.cancel(repoId);
+    if (s.run?.id) {
+      void api.cancelCi(repoId, s.run.id).catch(() => {});
+    }
   }
 
   function stepIcon(id: StepId) {

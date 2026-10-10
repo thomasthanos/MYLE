@@ -745,6 +745,19 @@ pub(crate) async fn run(token: &str, owner: &str, repo: &str, run_id: u64) -> Re
     .await
 }
 
+/// Cancels a running workflow run on GitHub.
+pub(crate) async fn cancel_run(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    run_id: u64,
+) -> Result<(), String> {
+    let url = format!("{API}/repos/{owner}/{repo}/actions/runs/{run_id}/cancel");
+    let builder = request(&client()?, reqwest::Method::POST, &url, token);
+    send(builder).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

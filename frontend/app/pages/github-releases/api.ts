@@ -590,6 +590,7 @@ export const githubReleasesApi = {
   push: (repoId: string, on: (e: GitEvent) => void) => invoke<NetOutcome>("github_releases_push", { repoId, onEvent: channel(on) }),
   pull: (repoId: string, on: (e: GitEvent) => void) => invoke<NetOutcome>("github_releases_pull", { repoId, onEvent: channel(on) }),
   cancel: (repoId: string) => invoke<boolean>("github_releases_cancel", { repoId }),
+  cancelCi: (repoId: string, runId: number) => invoke<void>("github_releases_cancel_ci", { repoId, runId }),
   aiCommitMessage: (repoId: string, provider: ProviderId | null) =>
     invoke<Answer>("github_releases_ai_commit_message", { repoId, provider }),
 

@@ -659,6 +659,21 @@ pub async fn github_releases_remote(repo_id: String) -> Result<RemoteInfo, Strin
     Ok(info)
 }
 
+#[tauri::command]
+pub async fn github_releases_cancel_ci(repo_id: String, run_id: u64) -> Result<(), String> {
+    let status = repo_status(&repo_id).await?;
+    let Some(remote) = status.remote else {
+        return Err("No remote configured for this repository.".into());
+    };
+    let (Some(owner), Some(repo)) = (remote.owner, remote.repo) else {
+        return Err("Remote repository owner or name missing.".into());
+    };
+    let Some(token) = secrets::token() else {
+        return Err("Connect your GitHub account first.".into());
+    };
+    github::cancel_run(&token, &owner, &repo, run_id).await
+}
+
 // ─── Changes ───────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]

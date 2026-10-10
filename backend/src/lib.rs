@@ -480,6 +480,7 @@ pub fn run() {
             github_releases::commands::github_releases_push,
             github_releases::commands::github_releases_pull,
             github_releases::commands::github_releases_cancel,
+            github_releases::commands::github_releases_cancel_ci,
             github_releases::commands::github_releases_cancel_scan,
             github_releases::commands::github_releases_ai_commit_message,
             github_releases::commands::github_releases_build_info,
