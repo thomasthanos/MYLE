@@ -218,16 +218,16 @@
 
   .provider.discord {
     border: 1px solid rgb(255 255 255 / 0.14);
-    background: linear-gradient(180deg, #6875f5, #5865f2);
+    background: #5865f2;
     color: #fff;
-    box-shadow: 0 8px 22px -12px rgb(88 101 242 / 0.9);
+    box-shadow: none;
   }
 
   .provider.google {
     border: 1px solid rgb(0 0 0 / 0.08);
-    background: linear-gradient(180deg, #ffffff, #eef0f5);
+    background: #f5f6fa;
     color: #1f2330;
-    box-shadow: 0 8px 22px -14px rgb(255 255 255 / 0.5);
+    box-shadow: none;
   }
 
   :global(:root.dark) .card {

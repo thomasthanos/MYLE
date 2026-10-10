@@ -263,7 +263,7 @@
   .tab { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 8px; color: var(--text-2); font-size: 12.5px; font-weight: 560; transition: background var(--dur-fast), color var(--dur-fast); }
   .waiting { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .tab:hover { color: var(--text-1); background: var(--hover); }
-  .tab.active { color: var(--text-1); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent-rgb) / 0.18)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
+  .tab.active { color: var(--text-1); background: var(--selected); }
   .tab:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: 1px; }
   .panel { container: optimization-page / inline-size; margin-top: 12px; }
   .top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; }

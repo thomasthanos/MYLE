@@ -53,12 +53,21 @@
   --selected: rgb(var(--accent-rgb) / 0.14);
 
   /* Buttons (controls.css): the plain ones, the main action, a switch's knob */
-  --btn-fill: rgb(255 255 255 / 0.05);
-  --btn-fill-hover: rgb(255 255 255 / 0.09);
-  --btn-fill-press: rgb(255 255 255 / 0.12);
-  --btn-border: rgb(255 255 255 / 0.08);
-  --btn-sheen: inset 0 1px 0 rgb(255 255 255 / 0.05);
-  --btn-primary: var(--accent-grad);
+  --btn-fill: rgb(189 205 246 / 0.09);
+  --btn-fill-hover: rgb(189 205 246 / 0.15);
+  --btn-fill-press: rgb(189 205 246 / 0.065);
+  --btn-border: rgb(189 205 246 / 0.19);
+  --btn-sheen:
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 -1px 0 rgb(0 0 0 / 0.22),
+    0 2px 5px rgb(0 0 0 / 0.2);
+  --btn-sheen-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    inset 0 -1px 0 rgb(0 0 0 / 0.24),
+    0 3px 8px rgb(0 0 0 / 0.23);
+  --btn-primary: rgb(101 115 195 / 0.86);
+  --btn-primary-hover: rgb(88 102 176 / 0.96);
+  --btn-primary-press: rgb(76 89 156 / 0.96);
   --btn-primary-text: #fff;
   --chip-fill: rgb(255 255 255 / 0.03);
   --chip-fill-hover: rgb(255 255 255 / 0.07);
@@ -88,7 +97,7 @@
   --float-bg: rgb(26 30 43 / 0.98);
   --tooltip-bg: rgb(32 37 54 / 0.97);
   --toast-bg: rgb(28 32 46 / 0.97);
-  --bar-fill: linear-gradient(180deg, rgb(27 32 47 / 0.98), rgb(16 20 31 / 0.99));
+  --bar-fill: #1b202b;
   --scrim: rgb(4 6 12 / 0.58);
 
   /* Shape */
@@ -121,57 +130,51 @@
 }
 
 /*
- * Dark theme: Discord-inspired matte layers. The darker navigation and
- * brighter content have distinct roles; blurple is reserved for actions.
+ * Dark theme: matte navy layers, with lightly raised translucent controls.
  */
 :root.dark {
-  --bg-0: #121214;
-  --bg-1: #1a1a1e;
-  --solid-fill-top: #1a1a1e;
-  --solid-fill-bottom: #1a1a1e;
-  --bg-solid-panel: #1a1a1e;
-  --sidebar-fill: #121214;
-  --surface-fill: #222226;
-  --input-fill: #161619;
+  --bg-0: #141820;
+  --bg-1: #1b202b;
+  --solid-fill-top: #1b202b;
+  --solid-fill-bottom: #1b202b;
+  --bg-solid-panel: #1b202b;
+  --sidebar-fill: #141820;
+  --surface-fill: #242a37;
+  --input-fill: #171c26;
 
   --text-1: #f2f3f5;
-  --text-2: #b5b7c0;
-  --text-3: #93959f;
-  --accent-rgb: 139 151 255;
-  --accent-soft-rgb: 188 196 255;
-  --accent-2: #8b97ff;
-  --accent-grad: linear-gradient(135deg, #8b97ff, #5865f2);
+  --text-2: #b7c0d3;
+  --text-3: #919db3;
+  --accent-rgb: 145 158 230;
+  --accent-soft-rgb: 193 202 248;
+  --accent-2: #919ee6;
+  --accent-grad: linear-gradient(135deg, #919ee6, #6573c3);
   --accent-glow: rgb(88 101 242 / 0.18);
 
-  --glass-border: #2b2b31;
-  --panel-rim: #2b2b31;
+  --glass-border: #303847;
+  --panel-rim: #303847;
 
-  --hover: #27272d;
-  --press: #303037;
-  --selected: #2b2d42;
+  --hover: #2b3241;
+  --press: #343d4e;
+  --selected: #303a55;
 
-  --window-fill-top: #121214;
-  --window-fill-bottom: #121214;
-  --window-border: #303035;
-  --titlebar-fill: #121214;
-  --titlebar-divider: #252529;
-  --shell-fill: #121214;
+  --window-fill-top: #141820;
+  --window-fill-bottom: #141820;
+  --window-border: #303847;
+  --titlebar-fill: #141820;
+  --titlebar-divider: #2a3240;
+  --shell-fill: #141820;
 
-  --float-bg: #242429;
-  --tooltip-bg: #2b2b31;
-  --toast-bg: #242429;
-  /* Used as an image layer above the selection bar's border gradient. */
-  --bar-fill: linear-gradient(#222226, #222226);
+  --float-bg: #242b39;
+  --tooltip-bg: #303847;
+  --toast-bg: #242b39;
+  --bar-fill: #202633;
   --scrim: rgb(8 8 10 / 0.72);
 
-  --btn-fill: #2b2b31;
-  --btn-fill-hover: #36363e;
-  --btn-fill-press: #232329;
-  --btn-border: #414149;
-  --btn-sheen: 0 1px 2px rgb(0 0 0 / 0.16);
-  --btn-primary: #5865f2;
-  --btn-primary-hover: #4752c4;
-  --btn-primary-press: #3c45a5;
+  --btn-fill: rgb(164 183 230 / 0.11);
+  --btn-fill-hover: rgb(164 183 230 / 0.18);
+  --btn-fill-press: rgb(164 183 230 / 0.075);
+  --btn-border: rgb(181 201 248 / 0.19);
   --chip-fill: var(--btn-fill);
   --chip-fill-hover: var(--btn-fill-hover);
   --chip-fill-press: var(--btn-fill-press);

@@ -57,7 +57,7 @@
   .profile { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 13px; border-radius: 12px; text-align: left; transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast) var(--ease-out); }
   .profile:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.3); transform: translateY(-1px); }
   .profile:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.8); outline-offset: 2px; }
-  .profile.selected { border-color: rgb(var(--accent-rgb) / 0.55); background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.05)); }
+  .profile.selected { border-color: rgb(var(--accent-rgb) / 0.55); background: var(--selected); }
   .profile:disabled { opacity: 0.55; cursor: default; }
   .head { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: 9px; background: rgb(var(--accent-rgb) / 0.1); color: var(--accent); }

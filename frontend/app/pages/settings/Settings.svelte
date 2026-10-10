@@ -320,7 +320,7 @@
               <span class="preview matte" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="theme-text">
                 <b>Dark</b>
-                <small>Matte surfaces, blurple accents</small>
+                <small>Navy surfaces, subtle glass controls</small>
               </span>
               <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
             </button>
@@ -657,15 +657,15 @@
   }
 
   .preview.matte {
-    background: #1a1a1e;
+    background: #1b202b;
   }
 
   .preview.matte i {
-    background: #222226;
+    background: #242a37;
   }
 
   .preview.matte i:first-child {
-    background: #121214;
+    background: #141820;
   }
 
   .preview i:last-child {
@@ -684,11 +684,11 @@
   }
 
   .preview.default i:last-child::after {
-    background: linear-gradient(135deg, #9ba3e2, #7f8ad6, #6aa9bf);
+    background: #6573c3;
   }
 
   .preview.matte i:last-child::after {
-    background: #5865f2;
+    background: #6573c3;
   }
 
   :global(:root.dark) .panel {

@@ -1,8 +1,6 @@
 <script lang="ts">
   /**
-   * A round, glassy window button (minimize, maximize, close), used by the
-   * app's and the setup's title bars: a colored orb lit from above, with a
-   * dark inner ring and the glyph set under the glass.
+   * Colored window controls with quiet depth, shared by both title bars.
    */
   type Kind = "minimize" | "maximize" | "close";
 
@@ -38,10 +36,7 @@
 
 <style>
   .wb {
-    /* light, body and deep: the orb's color from its lit top to its base */
-    --light: #ff9a8f;
     --body: #f5433f;
-    --deep: #a3161b;
     --ink: #6e0d10;
     display: grid;
     place-items: center;
@@ -54,16 +49,12 @@
   }
 
   .minimize {
-    --light: #ffe39a;
     --body: #fbb325;
-    --deep: #b36f00;
     --ink: #613c00;
   }
 
   .maximize {
-    --light: #9ff0a2;
     --body: #2fc147;
-    --deep: #137a26;
     --ink: #074216;
   }
 
@@ -74,50 +65,20 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background:
-      radial-gradient(circle at 50% 118%, rgb(255 255 255 / 0.38), transparent 46%),
-      radial-gradient(circle at 50% 32%, var(--light), var(--body) 52%, var(--deep) 100%);
+    background: var(--body);
     box-shadow:
-      inset 0 -1.5px 2px rgb(0 0 0 / 0.32),
-      inset 0 0.75px 0.5px rgb(255 255 255 / 0.55),
-      0 0 0 0.75px rgb(0 0 0 / 0.55),
-      0 2px 4px -1px rgb(0 0 0 / 0.6),
-      0 0 10px -2px color-mix(in srgb, var(--body) 55%, transparent);
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      inset 0 -1px 0 rgb(0 0 0 / 0.2),
+      0 1px 3px rgb(0 0 0 / 0.25);
     transition:
       transform var(--dur-fast) var(--ease-out),
       box-shadow var(--dur-fast),
       filter var(--dur-fast);
   }
 
-  /* The dark inner ring. */
-  .orb::before {
-    content: "";
-    position: absolute;
-    inset: 2.2px;
-    border: 1.05px solid rgb(0 0 0 / 0.62);
-    border-radius: 50%;
-    box-shadow: 0 0.5px 0 rgb(255 255 255 / 0.28);
-  }
-
-  /* The specular highlight, over the glyph: it sits under the glass. */
-  .orb::after {
-    content: "";
-    position: absolute;
-    top: 1.1px;
-    left: 50%;
-    z-index: 1;
-    width: 10px;
-    height: 6px;
-    border-radius: 50%;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.85), rgb(255 255 255 / 0.05));
-    transform: translateX(-50%);
-    pointer-events: none;
-  }
-
   svg {
     width: 16px;
     height: 16px;
-    filter: drop-shadow(0 0.6px 0 rgb(255 255 255 / 0.35));
   }
 
   .stroke {
@@ -132,33 +93,16 @@
   }
 
   .wb:hover .orb {
-    transform: translateY(-0.5px) scale(1.1);
-    filter: brightness(1.08) saturate(1.1);
-    box-shadow:
-      inset 0 -1.5px 2px rgb(0 0 0 / 0.3),
-      inset 0 0.75px 0.5px rgb(255 255 255 / 0.6),
-      0 0 0 0.75px rgb(0 0 0 / 0.55),
-      0 3px 6px -1px rgb(0 0 0 / 0.6),
-      0 0 14px -1px color-mix(in srgb, var(--body) 75%, transparent);
+    filter: brightness(1.12);
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 0.12);
   }
 
-  /* Held down: the orb sinks, loses its glow and its highlight dims. */
+  /* A subtle pressed state without glossy highlights. */
   .wb:active .orb {
     transform: translateY(1px) scale(0.86);
-    filter: brightness(0.82) saturate(1.15);
-    box-shadow:
-      inset 0 2px 3.5px rgb(0 0 0 / 0.55),
-      0 0 0 0.75px rgb(0 0 0 / 0.65),
-      0 0.5px 1px rgb(0 0 0 / 0.5);
+    filter: brightness(0.88);
+    box-shadow: none;
     transition-duration: 50ms;
-  }
-
-  .orb::after {
-    transition: opacity var(--dur-fast);
-  }
-
-  .wb:active .orb::after {
-    opacity: 0.4;
   }
 
   .wb:focus-visible {

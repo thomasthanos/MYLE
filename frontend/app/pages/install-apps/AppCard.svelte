@@ -90,7 +90,7 @@
 
   .card.selected {
     border-color: rgb(var(--accent-rgb) / 0.45);
-    background: linear-gradient(180deg, rgb(var(--accent-rgb) / 0.12), rgb(var(--accent-rgb) / 0.04));
+    background: var(--selected);
   }
 
   /* Grid: checkbox top-right, action bottom-right. */

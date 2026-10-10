@@ -295,8 +295,7 @@
     height: 18px;
     margin-top: -9px;
     border-radius: 0 3px 3px 0;
-    background: var(--accent-grad);
-    box-shadow: 0 0 10px var(--accent-glow);
+    background: var(--accent);
   }
 
   /* The owner's pages: the same items with a faint warm tint, so they read
@@ -306,12 +305,11 @@
   }
 
   .item.owner.active {
-    background: linear-gradient(90deg, rgb(var(--owner-rgb) / 0.13), rgb(var(--accent-rgb) / 0.1));
+    background: rgb(var(--owner-rgb) / 0.13);
   }
 
   .item.owner.active::before {
-    background: linear-gradient(180deg, rgb(var(--owner-rgb)), rgb(var(--owner-rgb) / 0.7));
-    box-shadow: 0 0 10px rgb(var(--owner-rgb) / 0.3);
+    background: rgb(var(--owner-rgb));
   }
 
   .item.owner:focus-visible {

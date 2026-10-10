@@ -76,15 +76,10 @@
     gap: 12px;
     margin-top: 28px;
     padding: 7px;
-    border: 1px solid transparent;
+    border: 1px solid var(--btn-border);
     border-radius: 16px;
-    background:
-      var(--bar-fill) padding-box,
-      linear-gradient(110deg, rgb(151 161 255 / 0.3), rgb(255 255 255 / 0.09) 48%, rgb(79 209 232 / 0.2)) border-box;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.065),
-      0 10px 26px -16px rgb(0 0 0 / 0.9),
-      0 0 24px -20px var(--accent-glow);
+    background: var(--bar-fill);
+    box-shadow: 0 10px 26px -16px rgb(0 0 0 / 0.6);
   }
 
   .summary {
