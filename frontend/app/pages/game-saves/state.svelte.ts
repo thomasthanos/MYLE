@@ -202,19 +202,10 @@ class GameSavesState {
     try {
       this.page = await gameSavesApi.getState();
       if (this.page.activeOperation) {
-        this.operation = {
-          startedAt: Date.now(),
-          kind: this.page.activeOperation,
-          stage: "preparing",
-          done: 0,
-          total: 0,
-          current: null,
-          note: "An existing Game Saves operation is still running.",
-        };
+        this.operation = { startedAt: Date.now(), kind: this.page.activeOperation, stage: "preparing", done: 0, total: 0, current: null, note: "An existing Game Saves operation is still running." };
         void this.#waitForAdopted();
       } else if (this.page.engineAvailable) {
-        // The saved list shows at once; only the games on it are re-checked
-        // (seconds). Without one, the full scan is the only way in.
+        // The saved list shows at once; only the games on it are re-checked (seconds). Without one, the full scan is the only way in.
         if (!this.scanResult && this.page.cachedScan) this.#applyScan(this.page.cachedScan);
         this.loading = false;
         if (this.scanResult) await this.refresh();
@@ -222,14 +213,13 @@ class GameSavesState {
       }
     } catch (error) {
       this.error = message(error);
-      // Let the next visit try again instead of showing an empty page for good.
-      this.#initialized = false;
+      this.#initialized = false; // let the next visit try again instead of an empty page for good
     } finally {
       this.loading = false;
     }
   }
-  /** The page was reloaded while an operation ran: its result cannot reach
-   *  this page any more, so wait until the backend is idle and rescan. */
+  /** The page was reloaded while an operation ran: its result cannot reach this
+   *  page any more, so wait until the backend is idle and rescan. */
   async #waitForAdopted() {
     const adopted = this.operation;
     while (this.operation === adopted) {
@@ -450,16 +440,14 @@ class GameSavesState {
     await running;
   }
   /**
-   * Starts the background check that notices saves changed by playing:
-   * shortly after launch, every ten minutes, and on coming back to the window.
+   * Starts the background check that notices saves changed by playing: shortly
+   * after launch, every ten minutes, and on coming back to the window.
    */
   startWatcher() {
     if (this.#watching || !isTauri()) return;
     this.#watching = true;
     const check = () => void this.#backgroundCheck();
-    const onFocus = () => {
-      if (Date.now() - this.#lastRefresh > FOCUS_CHECK_MS) check();
-    };
+    const onFocus = () => { if (Date.now() - this.#lastRefresh > FOCUS_CHECK_MS) check() };
     const first = setTimeout(check, WATCH_FIRST_MS);
     const every = setInterval(check, WATCH_EVERY_MS);
     window.addEventListener("focus", onFocus);
@@ -471,8 +459,8 @@ class GameSavesState {
     };
   }
   /** Ends the watcher: on a hot reload in development, the old copy of this
-   *  module would otherwise go on scanning next to the new one, one more
-   *  after every reload. */
+   *  module would otherwise go on scanning next to the new one, one more after
+   *  every reload. */
   stopWatcher() {
     this.#stopWatching?.();
     this.#stopWatching = null;
@@ -482,8 +470,7 @@ class GameSavesState {
     if (this.busy || this.discovering || this.settingsBusy) return;
     try {
       if (!this.scanResult) {
-        // The page has not been opened yet: start from the saved list. With
-        // none, the user has not set Game Saves up, and nothing is scanned.
+        // The page has not been opened yet: start from the saved list. With none, the user has not set Game Saves up, and nothing is scanned.
         const page = await gameSavesApi.getState();
         if (!page.cachedScan || page.activeOperation || !page.engineAvailable) return;
         if (!this.scanResult) {
@@ -509,11 +496,7 @@ class GameSavesState {
     if (this.#announced !== null && changed > this.#announced && nav.current !== "game-saves") {
       toast.info(`${changed} game ${changed === 1 ? "save has" : "saves have"} changed since the last backup.`, {
         label: "Review",
-        run: () => {
-          this.setTab("pc");
-          this.setFilter("changed");
-          nav.go("game-saves");
-        },
+        run: () => { this.setTab("pc"); this.setFilter("changed"); nav.go("game-saves") },
       });
     }
     this.#announced = changed;
@@ -521,12 +504,7 @@ class GameSavesState {
   /** A scan can re-detect launcher folders; show the settings it used. */
   #reloadPage() {
     const revision = this.#settingsRevision;
-    void gameSavesApi
-      .getState()
-      .then((page) => {
-        if (revision === this.#settingsRevision && !this.settingsBusy) this.page = page;
-      })
-      .catch(() => {});
+    void gameSavesApi.getState().then((page) => { if (revision === this.#settingsRevision && !this.settingsBusy) this.page = page }).catch(() => {});
   }
   async updateDatabase() {
     if (this.locked) return;
