@@ -125,3 +125,38 @@ test("an older MYLE that does not know Copy is told apart", async () => {
   const answer = await context.handle({ type: "copyTab", tabId: 7, frameId: 0, id: "abc", field: "totp" }, popup);
   assert.equal(answer.error, "oldApp");
 });
+
+// A page's prompt waits on this one; a copy of MYLE the extension cannot read
+// must not leave it polling for two minutes and then blaming the vault.
+const page = { url: "https://accounts.google.com/signin", id: "test", tab: { id: 7, active: true }, frameId: 0 };
+
+test("a status reply with no vault state ends the wait at once, not in two minutes", async () => {
+  // What MYLE answered in the field: a status, but no "state" it understands.
+  const { context, asked } = await backgroundWithTab({ ok: true, enabled: true, vault: "unlocked" });
+  const answer = await Promise.race([
+    context.handle({ type: "waitUnlocked", seconds: 30 }, page),
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 2500)),
+  ]);
+  assert.equal(answer.timedOut, undefined, "it gave up instead of polling");
+  assert.equal(answer.unlocked, false);
+  assert.equal(answer.state, "noState");
+  assert.equal(asked.length, 1, "one status is enough to know");
+});
+
+test("an open vault carries the page on", async () => {
+  const { context } = await backgroundWithTab({ ok: true, enabled: true, state: "unlocked" });
+  const answer = await context.handle({ type: "waitUnlocked", seconds: 30 }, page);
+  assert.equal(answer.unlocked, true);
+  assert.equal(answer.state, "unlocked");
+});
+
+test("browser filling off in MYLE is said, not waited out", async () => {
+  const { context } = await backgroundWithTab({ ok: false, error: "disabled" });
+  const answer = await Promise.race([
+    context.handle({ type: "waitUnlocked", seconds: 30 }, page),
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 2500)),
+  ]);
+  assert.equal(answer.timedOut, undefined);
+  assert.equal(answer.state, "disabled");
+  assert.equal(answer.unlocked, false);
+});

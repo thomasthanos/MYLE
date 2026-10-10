@@ -332,18 +332,32 @@ async function whenUnlocked(stopped = () => false, limit = 120_000) {
   return (await untilUnlocked(stopped, limit)).unlocked;
 }
 
-/** Polls MYLE until its vault is open, `stopped()` or `limit` ms; with the
- *  last state seen ("notRunning", "locked", ...), for the page's prompt. */
+/** Polls MYLE until its vault is open, `stopped()` or `limit` ms.
+ *
+ *  Answers with the last thing seen. `unlocked` only when MYLE said so; when
+ *  MYLE answered a status but named no vault state the wait ends at once
+ *  instead of polling for two minutes and then telling the user their vault is
+ *  still locked: that answer means a copy of MYLE this extension does not
+ *  understand, not a vault to unlock. */
 async function untilUnlocked(stopped, limit) {
   const until = Date.now() + limit;
   let state = "unknown";
+  let detail = "";
   while (Date.now() < until && !stopped()) {
     const status = await ask({ type: "status" });
-    state = status?.ok ? String(status.state) : String(status?.error ?? "noHost");
-    if (state === "unlocked") return { unlocked: true, state };
+    if (status?.ok) {
+      state = typeof status.state === "string" && status.state ? status.state : "noState";
+      detail = JSON.stringify(status);
+      if (state === "unlocked") return { unlocked: true, state, detail };
+      if (state === "noState") return { unlocked: false, state, detail };
+    } else {
+      state = String(status?.error ?? "noHost");
+      detail = String(status?.detail ?? "");
+      if (state === "disabled" || state === "noVault") return { unlocked: false, state, detail };
+    }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
-  return { unlocked: false, state };
+  return { unlocked: false, state, detail };
 }
 
 /** A page waiting for the vault to open, by tab: one wait each, and a new
@@ -357,10 +371,10 @@ async function waitForUnlock(sender, seconds) {
   const token = {};
   unlockWaits.set(tabId, token);
   const limit = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 2), 30) * 1000 : 120_000;
-  const { unlocked, state } = await untilUnlocked(() => unlockWaits.get(tabId) !== token, limit);
+  const { unlocked, state, detail } = await untilUnlocked(() => unlockWaits.get(tabId) !== token, limit);
   if (unlockWaits.get(tabId) === token) unlockWaits.delete(tabId);
   if (unlocked) void syncPasskeySites();
-  return { ok: true, unlocked, state };
+  return { ok: true, unlocked, state, detail };
 }
 
 async function offer(sender) {

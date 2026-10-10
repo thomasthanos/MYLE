@@ -937,12 +937,32 @@
       if (left <= 0) break;
       const waited = await send({ type: "waitUnlocked", seconds: Math.min(left, 6) });
       if (prompted !== id) return;
-      debug("waiting for MYLE", { state: waited?.state ?? "none", unlocked: waited?.unlocked === true });
+      debug("waiting for MYLE", {
+        state: waited?.state ?? "none",
+        unlocked: waited?.unlocked === true,
+        reply: waited?.detail ?? "",
+      });
       if (waited?.unlocked) {
         text.textContent = "MYLE is unlocked. Signing you in…";
         return retry();
       }
       const state = waited?.state;
+      if (state === "noState") {
+        // MYLE answered, but not the way this extension knows: a copy of MYLE
+        // older than the extension. Saying "still locked" would send the user
+        // to unlock a vault that is open, so say what is really wrong.
+        debug("MYLE answered without a vault state; it is older than this extension", waited?.detail ?? "");
+        text.textContent = "This MYLE is older than the extension. Update MYLE, then try again.";
+        return;
+      }
+      if (state === "disabled") {
+        text.textContent = "Browser filling is off in MYLE: turn it on in Password Manager → ⋯ → Browser filling.";
+        return;
+      }
+      if (state === "noVault") {
+        text.textContent = "MYLE has no vault on this PC yet. Make one, then try again.";
+        return;
+      }
       if (state === "notRunning" && !opened && Date.now() - started > 8000) {
         // Still not up: start it once more (the first try may have lost).
         opened = true;
