@@ -27,7 +27,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -680,16 +680,27 @@ fn ask_app(message: &Value) -> Option<Value> {
 // ---------------------------------------------------------------------------
 // The app's side
 
+async fn browser_listener(name: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    loop {
+        match ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(name) {
+            Ok(server) => return Ok(server),
+            // A live update starts this copy while the previous one still
+            // owns the pipe. Keep exclusive ownership and take over once it
+            // exits, instead of disabling browser filling for this whole run.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                tokio::time::sleep(APP_START_POLL).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Answers the host while the app runs. `filling`: browser filling is on.
 pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
     tauri::async_runtime::spawn(async move {
         let name = pipe_name();
-        let Ok(mut server) = ServerOptions::new()
-            .first_pipe_instance(true)
-            .reject_remote_clients(true)
-            .create(&name)
-        else {
-            // Another copy of the app already answers.
+        let Ok(mut server) = browser_listener(&name).await else {
+            // A creation error other than the previous copy holding the pipe.
             return;
         };
         // This copy answers: the browsers start this program as the host (or,
@@ -729,7 +740,7 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
                             let _ = app.emit(CONTACT_EVENT, last_contact());
                         }
                         if request.is_passkey() {
-                            passkey_reply(&app, &state, request)
+                            passkey_reply(&app, &state, &browser, &copy, request)
                                 .await
                                 .unwrap_or_else(|error| json!({ "ok": false, "error": error }))
                         } else {
@@ -801,6 +812,8 @@ enum Request {
     },
     /// A new passkey, for the page's `navigator.credentials.create()`.
     PasskeyCreate {
+        #[serde(default)]
+        operation_id: Option<String>,
         url: String,
         rp_id: Option<String>,
         #[serde(default)]
@@ -820,6 +833,8 @@ enum Request {
     },
     /// Signing in with a passkey, for the page's `navigator.credentials.get()`.
     PasskeyGet {
+        #[serde(default)]
+        operation_id: Option<String>,
         url: String,
         rp_id: Option<String>,
         challenge: String,
@@ -827,11 +842,13 @@ enum Request {
         #[serde(default)]
         user_verification: String,
     },
+    /// Withdraws this browser copy's operation for exactly this origin.
+    PasskeyCancel { url: String, operation_id: String },
 }
 
 impl Request {
     fn is_passkey(&self) -> bool {
-        matches!(self, Self::PasskeyList { .. } | Self::PasskeyCreate { .. } | Self::PasskeyGet { .. })
+        matches!(self, Self::PasskeyList { .. } | Self::PasskeyCreate { .. } | Self::PasskeyGet { .. } | Self::PasskeyCancel { .. })
     }
 }
 
@@ -1145,7 +1162,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         | Request::Generate
         | Request::TotpFromImage { .. }
         | Request::TotpFromPixels { .. } => unreachable!("answered above"),
-        Request::PasskeyList { .. } | Request::PasskeyCreate { .. } | Request::PasskeyGet { .. } => {
+        Request::PasskeyList { .. } | Request::PasskeyCreate { .. } | Request::PasskeyGet { .. } | Request::PasskeyCancel { .. } => {
             unreachable!("answered by passkey_reply")
         }
     });
@@ -1178,9 +1195,141 @@ fn copy_text(vault: &mut super::vault::Vault, id: &str, url: &str, field: &str) 
     Ok(text)
 }
 
+const PASSKEY_VERIFY_WAIT: Duration = Duration::from_secs(120);
+const OPERATION_KEEP: Duration = Duration::from_secs(300);
+const OPERATIONS_MAX: usize = 128;
+
+#[derive(Clone, PartialEq, Eq)]
+struct OperationKey {
+    browser: String,
+    copy: String,
+    origin: String,
+    id: String,
+}
+
+impl OperationKey {
+    fn new(browser: &str, copy: &str, url: &str, id: &str) -> Result<Self, String> {
+        if id.is_empty() || id.len() > 80 || page_host(url).is_none() {
+            return Err("badRequest".into());
+        }
+        let origin = passkeys::origin_of(url).ok_or("insecure")?;
+        Ok(Self { browser: browser.into(), copy: copy.into(), origin, id: id.into() })
+    }
+}
+
+struct PasskeyOperation {
+    until: Instant,
+    keep_until: Instant,
+    cancelled: Mutex<bool>,
+    changed: tokio::sync::Notify,
+}
+
+impl PasskeyOperation {
+    fn new(now: Instant) -> Self {
+        Self {
+            until: now + PASSKEY_VERIFY_WAIT,
+            keep_until: now + OPERATION_KEEP,
+            cancelled: Mutex::new(false),
+            changed: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn cancel(&self) {
+        *self.cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
+        self.changed.notify_waiters();
+    }
+
+    // Cancellation and the final vault commit share this lock. Verification
+    // never holds it: once cancellation is accepted there can be no save.
+    fn commit<T>(&self, run: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let cancelled = self.cancelled.lock().unwrap_or_else(|p| p.into_inner());
+        if *cancelled || Instant::now() >= self.until {
+            return Err("cancelled".into());
+        }
+        run()
+    }
+
+    async fn verify<T>(&self, verification: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+        let changed = self.changed.notified();
+        tokio::pin!(changed);
+        changed.as_mut().enable();
+        self.commit(|| Ok(()))?;
+        tokio::select! {
+            biased;
+            _ = &mut changed => Err("cancelled".into()),
+            answer = tokio::time::timeout_at(self.until.into(), verification) => {
+                answer.map_err(|_| "cancelled".to_string())?
+            }
+        }
+    }
+}
+
+struct OperationRegistry(Vec<(OperationKey, Arc<PasskeyOperation>)>);
+
+impl OperationRegistry {
+    fn prune(&mut self, now: Instant) {
+        self.0.retain(|(_, operation)| now < operation.keep_until);
+    }
+
+    fn start(&mut self, key: OperationKey, now: Instant) -> Result<OperationGuard, String> {
+        self.prune(now);
+        // A pre-arrived cancellation is a tombstone; reusing a consumed ID
+        // must never restart the same request after its page withdrew it.
+        if self.0.iter().any(|(found, _)| found == &key) {
+            return Err("cancelled".into());
+        }
+        if self.0.len() >= OPERATIONS_MAX {
+            return Err("busy".into());
+        }
+        let operation = Arc::new(PasskeyOperation::new(now));
+        self.0.push((key, operation.clone()));
+        Ok(OperationGuard(operation))
+    }
+
+    fn cancel(&mut self, key: OperationKey, now: Instant) -> Result<(), String> {
+        self.prune(now);
+        if let Some((_, operation)) = self.0.iter().find(|(found, _)| found == &key) {
+            operation.cancel();
+        } else {
+            if self.0.len() >= OPERATIONS_MAX {
+                return Err("busy".into());
+            }
+            let operation = Arc::new(PasskeyOperation::new(now));
+            operation.cancel();
+            self.0.push((key, operation));
+        }
+        Ok(())
+    }
+}
+
+static OPERATIONS: Mutex<OperationRegistry> = Mutex::new(OperationRegistry(Vec::new()));
+
+struct OperationGuard(Arc<PasskeyOperation>);
+
+impl std::ops::Deref for OperationGuard {
+    type Target = PasskeyOperation;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl Drop for OperationGuard {
+    fn drop(&mut self) { self.0.cancel(); }
+}
+
+fn start_operation(browser: &str, copy: &str, url: &str, id: Option<String>) -> Result<OperationGuard, String> {
+    // Older extensions have no operation ID; their verification still expires.
+    let id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let key = OperationKey::new(browser, copy, url, &id)?;
+    OPERATIONS.lock().unwrap_or_else(|p| p.into_inner()).start(key, Instant::now())
+}
+
 /// Passkeys. Using one may ask the user to confirm with Windows Hello, so
 /// the vault is not held while that prompt shows.
-async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request) -> Result<Value, String> {
+async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, copy: &str, request: Request) -> Result<Value, String> {
+    if let Request::PasskeyCancel { url, operation_id } = &request {
+        let key = OperationKey::new(browser, copy, url, operation_id)?;
+        OPERATIONS.lock().unwrap_or_else(|p| p.into_inner()).cancel(key, Instant::now())?;
+        return Ok(json!({ "ok": true }));
+    }
     let (enabled, status) = state.with_quiet(|vault| Ok((vault.prefs().browser_filling, vault.status())))?;
     if !enabled {
         return Err("disabled".into());
@@ -1237,6 +1386,7 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
             Ok(json!({ "ok": true, "rpId": rp_id, "passkeys": list, "unlisted": unlisted.len(), "unlistedIds": unlisted }))
         }
         Request::PasskeyCreate {
+            operation_id,
             url,
             rp_id,
             rp_name,
@@ -1261,23 +1411,24 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
             if !exclude.is_empty() && !state.with_quiet(|vault| vault.passkeys_for(&rp_id, &exclude))?.is_empty() {
                 return Err("excluded".into());
             }
-            let verified = verify_user(app, &user_verification, &rp_id).await?;
+            let operation = start_operation(browser, copy, &url, operation_id)?;
+            let verified = operation.verify(verify_user(app, &user_verification, &rp_id)).await?;
             let user = passkeys::User { handle: user_id, name: user_name, display_name: user_display_name };
             let (passkey, credential) =
                 passkeys::create(&rp_id, &rp_name, &user, &challenge, &origin, verified, super::vault::now())?;
             let title = if rp_name.trim().is_empty() { rp_id.clone() } else { rp_name.trim().to_string() };
-            state.with_quiet(|vault| {
+            operation.commit(|| state.with_quiet(|vault| {
                 // The login of that account on this site, if there is one.
                 let same = same_login(vault, &host, &passkey.user_name)?;
                 let target = same.exact.or_else(|| same.same_site.first().cloned());
                 vault.add_passkey(target.as_deref(), passkey, &title, &format!("https://{rp_id}"))?;
                 vault.touch();
                 Ok(())
-            })?;
+            }))?;
             let _ = app.emit(super::CHANGED_EVENT, ());
             Ok(json!({ "ok": true, "credential": credential }))
         }
-        Request::PasskeyGet { url, rp_id, challenge, credential_id, user_verification } => {
+        Request::PasskeyGet { url, rp_id, challenge, credential_id, user_verification, operation_id } => {
             let host = page_host(&url).ok_or("insecure")?;
             let origin = passkeys::origin_of(&url).ok_or("insecure")?;
             let rp_id = passkeys::rp_id_for(&host, rp_id.as_deref())?;
@@ -1287,12 +1438,15 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, request: Request
                 .map(|(_, _, key)| key)
                 .next()
                 .ok_or("notFound")?;
-            let verified = verify_user(app, &user_verification, &rp_id).await?;
+            let operation = start_operation(browser, copy, &url, operation_id)?;
+            let verified = operation.verify(verify_user(app, &user_verification, &rp_id)).await?;
             let credential = passkeys::sign_in(&passkey, &challenge, &origin, verified)?;
-            let _ = state.with_quiet(|vault| {
-                vault.touch();
-                Ok(())
-            });
+            operation.commit(|| {
+                state.with_quiet(|vault| {
+                    vault.touch();
+                    Ok(())
+                })
+            })?;
             Ok(json!({ "ok": true, "credential": credential }))
         }
         _ => Err("badRequest".into()),
@@ -1426,6 +1580,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn passkey_cancel_request_is_supported() {
+        let request: Request = serde_json::from_value(json!({
+            "type": "passkeyCancel", "url": "https://example.com/", "operationId": "operation"
+        })).expect("native passkey cancellation must be accepted");
+        assert!(request.is_passkey());
+    }
+
+    fn operation_key(id: &str) -> OperationKey {
+        OperationKey::new("Edge", "folder", "https://example.com/", id).unwrap()
+    }
+
+    #[tokio::test]
+    async fn passkey_cancellation_interrupts_verification_before_commit() {
+        let mut registry = OperationRegistry(Vec::new());
+        let key = operation_key("pending");
+        let operation = registry.start(key.clone(), Instant::now()).unwrap();
+        let (reply, answer) = tokio::sync::oneshot::channel::<bool>();
+        let verification = operation.verify(async { Ok(answer.await.unwrap()) });
+        tokio::pin!(verification);
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut verification).await.is_err());
+        registry.cancel(key, Instant::now()).unwrap();
+        assert_eq!(verification.await.unwrap_err(), "cancelled");
+        assert!(reply.send(true).is_err(), "the obsolete verification no longer has a waiting consumer");
+        let mut committed = false;
+        assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
+        assert!(!committed);
+    }
+
+    #[tokio::test]
+    async fn passkey_cancellation_after_verification_still_prevents_commit() {
+        let mut registry = OperationRegistry(Vec::new());
+        let key = operation_key("ready");
+        let operation = registry.start(key.clone(), Instant::now()).unwrap();
+        assert!(operation.verify(async { Ok(true) }).await.unwrap());
+        registry.cancel(key, Instant::now()).unwrap();
+        let mut committed = false;
+        assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
+        assert!(!committed);
+    }
+
+    #[tokio::test]
+    async fn passkey_verification_expires_before_it_can_commit() {
+        let operation = PasskeyOperation {
+            until: Instant::now() + Duration::from_millis(10),
+            ..PasskeyOperation::new(Instant::now())
+        };
+        assert_eq!(operation.verify(std::future::pending::<Result<bool, String>>()).await.unwrap_err(), "cancelled");
+        let mut committed = false;
+        assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
+        assert!(!committed);
+    }
+
+    #[test]
+    fn passkey_cancellation_tombstones_are_scoped_bounded_and_expire() {
+        let mut registry = OperationRegistry(Vec::new());
+        let now = Instant::now();
+        let key = operation_key("first");
+        registry.cancel(key.clone(), now).unwrap();
+        assert!(registry.start(key.clone(), now).is_err(), "an abort can reach native before its create/get");
+        for key in [
+            OperationKey::new("Chrome", "folder", "https://example.com/", "first").unwrap(),
+            OperationKey::new("Edge", "store", "https://example.com/", "first").unwrap(),
+            OperationKey::new("Edge", "folder", "https://other.com/", "first").unwrap(),
+            operation_key("another-tab"),
+        ] {
+            let operation = registry.start(key, now).unwrap();
+            assert!(operation.commit(|| Ok(())).is_ok(), "another browser, copy, origin or operation is unaffected");
+        }
+        while registry.0.len() < OPERATIONS_MAX {
+            registry.cancel(operation_key(&format!("id-{}", registry.0.len())), now).unwrap();
+        }
+        assert!(registry.start(operation_key("full"), now).is_err());
+        assert_eq!(registry.0.len(), OPERATIONS_MAX);
+        assert!(registry.start(key, now + OPERATION_KEEP).is_ok());
+        assert_eq!(registry.0.len(), 1);
+    }
+
+    #[test]
     fn only_https_pages_and_this_pc_are_filled() {
         assert_eq!(page_host("https://Accounts.Google.com/signin?x=1").as_deref(), Some("accounts.google.com"));
         assert_eq!(page_host("http://localhost:5173/login").as_deref(), Some("localhost"));
@@ -1453,6 +1685,20 @@ mod tests {
         assert!(read_message(&mut reader).unwrap().is_none());
         let too_big = (MAX_MESSAGE + 1).to_le_bytes();
         assert!(read_message(&mut &too_big[..]).is_err());
+    }
+
+    #[tokio::test]
+    async fn browser_listener_takes_over_after_the_previous_version_exits() {
+        let name = format!(r"\\.\pipe\myle-browser-update-test-{}", uuid::Uuid::new_v4());
+        let previous = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
+        let listener = browser_listener(&name);
+        tokio::pin!(listener);
+        // Updates deliberately overlap the two app processes. The new one
+        // must wait without joining the previous version's pipe.
+        assert!(tokio::time::timeout(Duration::from_millis(50), &mut listener).await.is_err());
+        drop(previous);
+        let server = tokio::time::timeout(Duration::from_secs(2), listener).await.unwrap().unwrap();
+        drop(server);
     }
 
     #[test]

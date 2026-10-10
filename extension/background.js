@@ -39,16 +39,23 @@ function hostProblem(detail) {
  *  which takes a few seconds; past this, the browser is told it is not there,
  *  so a page is never left waiting on a call that will not come back. */
 const ANSWER_LIMIT = 30_000;
+// Native verification has a total 120s deadline, plus time to start MYLE.
+const PASSKEY_ANSWER_LIMIT = 150_000;
 
-async function ask(message) {
+async function ask(message, limit = ANSWER_LIMIT) {
+  let deadline;
   try {
     return await Promise.race([
       ext.runtime.sendNativeMessage(HOST, message),
-      new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: "noHost", detail: "no answer in time" }), ANSWER_LIMIT)),
+      new Promise((resolve) => {
+        deadline = setTimeout(() => resolve({ ok: false, error: "noHost", detail: "no answer in time" }), limit);
+      }),
     ]);
   } catch (error) {
     const detail = String(error?.message ?? error);
     return { ok: false, error: hostProblem(detail), detail };
+  } finally {
+    clearTimeout(deadline);
   }
 }
 
@@ -277,6 +284,8 @@ const pendingKey = (tabId) => `pending:${tabId}`;
 /** Sent logins still being checked with the app, by tab: a fast next page
  *  waits for them before it asks for an offer. */
 const checking = new Map();
+/** Saves waiting on an unlock; dismissing or replacing an offer cancels them. */
+const saveWaits = new Map();
 const suggestedKey = (tabId) => `suggested:${tabId}`;
 
 async function readPending(tabId) {
@@ -309,6 +318,7 @@ async function submitted(message, sender) {
   // saving waits for the unlock, and skips a login the vault already has.
   const locked = !known?.ok && known?.error === "locked";
   if ((known?.ok && !known.known) || locked) {
+    saveWaits.delete(tabId);
     await ext.storage.session.set({
       [pendingKey(tabId)]: {
         url: sender.url,
@@ -345,9 +355,12 @@ async function untilUnlocked(stopped, limit) {
   let detail = "";
   while (Date.now() < until && !stopped()) {
     const status = await ask({ type: "status" });
+    if (stopped()) return { unlocked: false, state, detail };
     if (status?.ok) {
       state = typeof status.state === "string" && status.state ? status.state : "noState";
       detail = JSON.stringify(status);
+      if (state === "new") return { unlocked: false, state: "noVault", detail };
+      if (status.enabled === false) return { unlocked: false, state: "disabled", detail };
       if (state === "unlocked") return { unlocked: true, state, detail };
       if (state === "noState") return { unlocked: false, state, detail };
     } else {
@@ -414,19 +427,32 @@ async function answerOffer(message, sender, save) {
   if (!found?.shownAt || found.nonce !== message.nonce || !sameSite(found.url, sender.url)) {
     return { ok: false, error: "expired" };
   }
+  const tabId = sender.tab.id;
+  if (!save) saveWaits.delete(tabId);
   let answer = { ok: true };
   if (save) {
+    const token = {};
+    saveWaits.set(tabId, token);
+    const stopped = () => saveWaits.get(tabId) !== token;
     const login = { url: found.url, username: found.username, password: found.password };
-    answer = await ask({ type: "save", ...login });
-    if (answer?.error === "locked") {
-      // MYLE comes forward; the login is saved once the vault is open.
-      void openApp();
-      if (!(await whenUnlocked())) return { ok: false, error: "locked" };
-      const known = await ask({ type: "known", ...login });
-      answer = known?.ok && known.known ? { ok: true, already: true } : await ask({ type: "save", ...login });
+    try {
+      answer = await ask({ type: "save", ...login });
+      if (stopped()) return { ok: false, error: "expired" };
+      if (answer?.error === "locked") {
+        // MYLE comes forward; the login is saved once the vault is open,
+        // only while the user still wants this offer saved.
+        void openApp();
+        if (!(await whenUnlocked(stopped))) return { ok: false, error: stopped() ? "expired" : "locked" };
+        const known = await ask({ type: "known", ...login });
+        if (stopped()) return { ok: false, error: "expired" };
+        answer = known?.ok && known.known ? { ok: true, already: true } : await ask({ type: "save", ...login });
+      }
+      if (stopped()) return { ok: false, error: "expired" };
+      // Still not saved: the offer stays, to try again.
+      if (!answer?.ok) return answer;
+    } finally {
+      if (!stopped()) saveWaits.delete(tabId);
     }
-    // Still not saved: the offer stays, to try again.
-    if (!answer?.ok) return answer;
   }
   await ext.storage.session.remove([pendingKey(sender.tab.id), suggestedKey(sender.tab.id)]);
   return { ok: true, already: answer.already === true, updated: answer.updated === true };
@@ -490,6 +516,12 @@ async function saveTotpFor(url, id, secret) {
 
 ext.tabs.onRemoved.addListener((tabId) => {
   unlockWaits.delete(tabId);
+  saveWaits.delete(tabId);
+  for (const [key, operation] of passkeyOperations) {
+    if (operation.tabId !== tabId) continue;
+    passkeyOperations.delete(key);
+    void ask({ type: "passkeyCancel", url: operation.url, operationId: operation.id });
+  }
   void ext.storage.session.remove([pendingKey(tabId), suggestedKey(tabId)]);
 });
 
@@ -500,6 +532,51 @@ ext.tabs.onRemoved.addListener((tabId) => {
 // shape here, and judged in the app.
 
 const list = (value) => Array.isArray(value) && value.length <= 64 && value.every((item) => text(item, 1400));
+const passkeyOperations = new Map();
+const passkeyOperationKey = (sender, requestId) =>
+  `${sender.tab.id}:${sender.frameId}:${sender.documentId ?? new URL(sender.url).origin}:${requestId}`;
+
+// A departing document may disappear before its pagehide message reaches us.
+// Preserve requests already made by the newly committed document.
+ext.webNavigation?.onCommitted?.addListener((navigation) => {
+  for (const [key, operation] of passkeyOperations) {
+    if (operation.tabId !== navigation.tabId || operation.frameId !== navigation.frameId) continue;
+    if (navigation.documentId && operation.documentId === navigation.documentId) continue;
+    if (Number.isFinite(navigation.timeStamp) && operation.at > navigation.timeStamp) continue;
+    passkeyOperations.delete(key);
+    void ask({ type: "passkeyCancel", url: operation.url, operationId: operation.id });
+  }
+});
+
+function cancelPasskey(message, sender) {
+  if (sender.frameId !== 0 || !text(message.requestId, 80) || !message.requestId) return refused;
+  const key = passkeyOperationKey(sender, message.requestId);
+  const operation = passkeyOperations.get(key);
+  if (!operation) return { ok: true };
+  passkeyOperations.delete(key);
+  return ask({ type: "passkeyCancel", url: operation.url, operationId: operation.id });
+}
+
+async function runPasskey(request, sender, requestId) {
+  if (requestId !== undefined && (!text(requestId, 80) || !requestId)) return refused;
+  const key = passkeyOperationKey(sender, requestId ?? crypto.randomUUID());
+  const previous = passkeyOperations.get(key);
+  if (previous) return { ok: false, error: "busy" };
+  const operation = {
+    id: crypto.randomUUID(), url: sender.url, tabId: sender.tab.id,
+    frameId: sender.frameId, documentId: sender.documentId, at: Date.now(),
+  };
+  passkeyOperations.set(key, operation);
+  try {
+    const answer = await ask({ ...request, operationId: operation.id }, PASSKEY_ANSWER_LIMIT);
+    if (answer?.error === "noHost" || answer?.error === "hostExited") {
+      void ask({ type: "passkeyCancel", url: operation.url, operationId: operation.id });
+    }
+    return answer;
+  } finally {
+    if (passkeyOperations.get(key) === operation) passkeyOperations.delete(key);
+  }
+}
 
 // Which sites have a passkey in MYLE, remembered from the vault's answers so
 // that a locked (or closed) MYLE can still be offered on those sites: kept
@@ -581,14 +658,14 @@ function passkey(message, sender) {
       return listPasskeys(message, sender, rpId);
     case "passkeyGet":
       if (!text(message.challenge, 1400) || !text(message.credentialId, 1400)) return refused;
-      return ask({
+      return runPasskey({
         type: "passkeyGet",
         url: sender.url,
         rpId,
         challenge: message.challenge,
         credentialId: message.credentialId,
         userVerification: verification,
-      });
+      }, sender, message.requestId);
     case "passkeyCreate": {
       const algorithms = Array.isArray(message.algorithms) && message.algorithms.length <= 32 &&
         message.algorithms.every(Number.isInteger) ? message.algorithms : [];
@@ -605,15 +682,15 @@ function passkey(message, sender) {
         algorithms,
         exclude: message.exclude ?? [],
         userVerification: verification,
-      });
+      }, sender, message.requestId);
     }
     default:
       return refused;
   }
 }
 
-async function createPasskey(request) {
-  const answer = await ask(request);
+async function createPasskey(request, sender, requestId) {
+  const answer = await runPasskey(request, sender, requestId);
   if (answer?.ok) {
     const rpId = request.rpId || hostOf(request.url) && new URL(request.url).hostname;
     await rememberPasskeySite(rpId, true);
@@ -707,6 +784,8 @@ async function handle(message, sender) {
     case "passkeyGet":
     case "passkeyCreate":
       return passkey(message, sender);
+    case "passkeyCancel":
+      return cancelPasskey(message, sender);
     case "saveTotp":
       // A key the page shows, kept at the user's click in MYLE's bar.
       return (await embeddedIn(sender)) ? refused : saveTotpFor(sender.url, message.id ?? null, message.secret);

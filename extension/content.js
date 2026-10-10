@@ -818,6 +818,11 @@
   addEventListener("scroll", () => !panel.hidden && anchor && place(anchor), true);
   addEventListener("resize", () => !panel.hidden && anchor && place(anchor));
   addEventListener("pagehide", () => {
+    const requests = new Set([prompted, waitingPasskey?.id].filter(Boolean));
+    prompted = null;
+    waitingPasskey = null;
+    for (const requestId of requests) void send({ type: "passkeyCancel", requestId });
+    void send({ type: "stopWaiting" });
     hidePanel();
     hide(bar);
   });
@@ -873,8 +878,10 @@
   }
 
   function closePrompt() {
+    const requestId = prompted;
     prompted = null;
     hide(bar);
+    if (requestId) void send({ type: "passkeyCancel", requestId });
     void send({ type: "stopWaiting" });
   }
 
@@ -938,10 +945,14 @@
       const waited = await send({ type: "waitUnlocked", seconds: Math.min(left, 6) });
       if (prompted !== id) return;
       debug("waiting for MYLE", {
-        state: waited?.state ?? "none",
+        state: waited?.state ?? waited?.error ?? "noHost",
         unlocked: waited?.unlocked === true,
         reply: waited?.detail ?? "",
       });
+      if (!waited?.ok || typeof waited.state !== "string" || !waited.state) {
+        text.textContent = problems[waited?.error] ?? "The MYLE extension could not check your vault. Reload the extension and this page, then try again.";
+        return;
+      }
       if (waited?.unlocked) {
         text.textContent = "MYLE is unlocked. Signing you in…";
         return retry();
@@ -1052,6 +1063,7 @@
           text.textContent = `Saving… ${busyLine}`;
           const answer = await send({
             type: "passkeyCreate",
+            requestId: id,
             rpId: options.rpId,
             rpName: options.rpName,
             userId: options.userId,
@@ -1077,8 +1089,9 @@
       ]);
   }
 
-  const usePasskey = (options, credentialId) => send({
+  const usePasskey = (options, credentialId, requestId) => send({
     type: "passkeyGet",
+    requestId,
     rpId: options.rpId,
     challenge: options.challenge,
     credentialId,
@@ -1105,7 +1118,7 @@
         if (prompted !== id || button.disabled || !genuine(event, bar, button)) return;
         for (const other of keys.querySelectorAll("button")) other.disabled = true;
         text.textContent = `Signing in… ${busyLine}`;
-        const answer = await usePasskey(options, key.credentialId);
+        const answer = await usePasskey(options, key.credentialId, id);
         if (prompted !== id) return;
         if (answer?.ok && answer.credential) {
           closePrompt();
@@ -1121,7 +1134,7 @@
       const [only] = listed.passkeys;
       for (const other of keys.querySelectorAll("button")) other.disabled = true;
       text.textContent = `Signing in as ${only.userName || only.userDisplayName || "your account"}… ${busyLine}`;
-      const answer = await usePasskey(options, only.credentialId);
+      const answer = await usePasskey(options, only.credentialId, id);
       if (prompted !== id) return;
       if (answer?.ok && answer.credential) {
         closePrompt();
@@ -1165,7 +1178,7 @@
         const field = anchor;
         hidePanel();
         if (waitingPasskey !== waiting) return showNote(field, "The sign-in form changed. Click the field again.");
-        const answer = await usePasskey(waiting.options, key.credentialId);
+        const answer = await usePasskey(waiting.options, key.credentialId, waiting.id);
         if (answer?.ok && answer.credential && waitingPasskey === waiting) {
           waitingPasskey = null;
           answerPage(waiting.id, { result: "credential", credential: answer.credential });
@@ -1196,6 +1209,7 @@
         heard.add(id);
       }
       if (kind === "abort") {
+        void send({ type: "passkeyCancel", requestId: id });
         if (waitingPasskey?.id === id) waitingPasskey = null;
         if (prompted === id) closePrompt();
         return;
@@ -1207,7 +1221,10 @@
         return;
       }
       // A newer request takes the place of the one on screen.
-      if (prompted) refuse(prompted, "cancelled");
+      if (prompted) {
+        void send({ type: "passkeyCancel", requestId: prompted });
+        refuse(prompted, "cancelled");
+      }
       prompted = id;
       if (kind === "create") void offerNewPasskey(id, options);
       else if (kind === "get") void offerSignIn(id, options);

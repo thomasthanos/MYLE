@@ -107,9 +107,8 @@
     phase = "downloading";
     title = "Downloading update";
     detail = `v${current} → v${latest}`;
-    progress = 0;
-    percent = 0;
-    assetSize = asset.size ?? 0;
+    progress = asset.size ? 0 : null;
+    percent = asset.size ? 0 : null;
     transfer = asset.size ? `0 B of ${formatBytes(asset.size)}` : "";
     await updater.installUpdate(asset, onDownloadEvent);
   }
@@ -117,8 +116,6 @@
   let sample = { at: 0, bytes: 0 };
   let speed = 0; // bytes per second, smoothed
   let lastMeta = 0;
-  /** The update manifest's size, for a server that does not say. */
-  let assetSize = 0;
 
   function onDownloadEvent(e: DownloadEvent) {
     switch (e.event) {
@@ -126,8 +123,8 @@
         sample = { at: performance.now(), bytes: 0 };
         speed = 0;
         lastMeta = 0;
-        progress = e.data.total || assetSize ? 0 : null;
-        percent = e.data.total || assetSize ? 0 : null;
+        progress = e.data.total ? 0 : null;
+        percent = e.data.total ? 0 : null;
         break;
       case "progress":
         onProgress(e.data.downloaded, e.data.total);
@@ -161,8 +158,8 @@
       speed = speed ? speed * 0.65 + current * 0.35 : current;
       sample = { at: now, bytes: downloaded };
     }
-    // No size from the server: the manifest's size, else bytes and a spinning ring.
-    const size = total ?? (assetSize || null);
+    // The backend includes the manifest hint and withdraws it when stale.
+    const size = total || null;
     progress = size ? Math.min(downloaded / size, 1) : null;
     total = size;
 

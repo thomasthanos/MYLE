@@ -221,6 +221,7 @@ export interface PasswordsApi {
   /** The master password for it, or null to refuse. */
   verifyAnswer(id: number, master: string | null): Promise<void>;
   onVerify(handler: (request: VerifyRequest) => void): Promise<() => void>;
+  onVerifyCancelled(handler: (id: number) => void): Promise<() => void>;
   copyText(text: string): Promise<void>;
   save(entry: EntryInput): Promise<string>;
   remove(id: string): Promise<void>;
@@ -289,6 +290,7 @@ const tauriApi: PasswordsApi = {
   verifyPending: () => invoke("passwords_verify_pending"),
   verifyAnswer: (id, master) => invoke("passwords_verify_answer", { id, master }),
   onVerify: (handler) => listen<VerifyRequest>("passwords-verify", (event) => handler(event.payload)),
+  onVerifyCancelled: (handler) => listen<number>("passwords-verify-cancelled", (event) => handler(event.payload)),
   copyText: (text) => invoke("passwords_copy_text", { text }),
   save: (entry) => invoke("passwords_save", { entry }),
   remove: (id) => invoke("passwords_delete", { id }),
@@ -442,6 +444,9 @@ function previewApi(): PasswordsApi {
       if (master !== null && master !== "preview") throw new Error("Wrong master password. (Type “preview” here.)");
     },
     async onVerify() {
+      return () => {};
+    },
+    async onVerifyCancelled() {
       return () => {};
     },
     async copyText() {},

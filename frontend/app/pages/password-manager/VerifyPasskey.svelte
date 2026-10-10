@@ -19,27 +19,54 @@
     request = next;
     master = "";
     error = null;
+    busy = false;
     queueMicrotask(() => input?.focus());
   }
 
   onMount(() => {
-    let stop: (() => void) | undefined;
-    void api.verifyPending().then((pending) => pending && show(pending)).catch(() => {});
-    void api.onVerify(show).then((unlisten) => (stop = unlisten));
-    return () => stop?.();
+    let alive = true;
+    let revision = 0;
+    const stops: (() => void)[] = [];
+    void (async () => {
+      for (const subscribe of [
+        () => api.onVerify((next) => { revision++; show(next); }),
+        () => api.onVerifyCancelled((id) => {
+          revision++;
+          if (request?.id !== id) return;
+          request = null;
+          master = "";
+          error = null;
+          busy = false;
+        }),
+      ]) {
+        const stop = await subscribe();
+        if (!alive) { stop(); return; }
+        stops.push(stop);
+      }
+      const before = revision;
+      const pending = await api.verifyPending();
+      if (alive && before === revision) {
+        if (pending) show(pending);
+        else { request = null; master = ""; }
+      }
+    })().catch(() => {});
+    return () => { alive = false; for (const stop of stops) stop(); };
   });
 
   async function answer(confirmed: boolean) {
     if (!request || busy) return;
+    const id = request.id;
     busy = true;
     try {
-      await api.verifyAnswer(request.id, confirmed ? master : null);
-      request = null;
+      await api.verifyAnswer(id, confirmed ? master : null);
+      if (request?.id === id) request = null;
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : String(failure);
+      if (request?.id === id) error = failure instanceof Error ? failure.message : String(failure);
     } finally {
-      master = "";
-      busy = false;
+      if (!request || request.id === id) {
+        master = "";
+        busy = false;
+      }
     }
   }
 </script>

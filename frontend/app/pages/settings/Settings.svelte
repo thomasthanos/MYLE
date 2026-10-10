@@ -21,24 +21,15 @@
   import { settings } from "../../../lib/settings.svelte";
   import { whatsNew } from "../../../lib/whats-new.svelte";
   import { toast } from "../../../lib/toast.svelte";
-  import { checkForUpdate, formatBytes, installUpdate, type UpdateAsset } from "../../../lib/updater";
+  import type { UpdateAsset } from "../../../lib/updater";
+  import { settingsUpdater } from "../../../lib/updater-state.svelte";
   import AccountCard from "./AccountCard.svelte";
   import SyncedData from "./SyncedData.svelte";
 
   const REPO_URL = "https://github.com/thomasthanos/MYLE";
 
-  type UpdateView =
-    | { state: "idle" }
-    | { state: "checking" }
-    | { state: "upToDate"; latest: string }
-    | { state: "available"; latest: string; asset: UpdateAsset }
-    | { state: "downloading"; latest: string; progress: number | null; detail: string }
-    | { state: "installing" }
-    | { state: "restarting"; version: string }
-    | { state: "error"; message: string };
-
   let version = $state("");
-  let update = $state<UpdateView>({ state: "idle" });
+  const update = $derived(settingsUpdater.view);
   /** Starting with Windows (the Startup shortcut), and how the app opens then. */
   let startup = $state({ enabled: false, minimized: true, canChange: false });
   let startupBusy = $state(false);
@@ -80,44 +71,13 @@
     return error instanceof Error ? error.message : String(error);
   }
 
-  async function check() {
-    update = { state: "checking" };
-    try {
-      const result = await checkForUpdate();
-      if (result.status === "available") update = { state: "available", latest: result.latest, asset: result.asset };
-      else if (result.status === "upToDate") update = { state: "upToDate", latest: result.latest };
-      else if (result.status === "justUpdated") update = { state: "upToDate", latest: result.current };
-      else update = { state: "error", message: "Updates are not configured in this build." };
-    } catch (error) {
-      update = { state: "error", message: message(error) };
-    }
+  function check() {
+    return settingsUpdater.check();
   }
 
   /** Same path as the splash: download, verify, run the installer, restart. */
-  async function install(latest: string, asset: UpdateAsset) {
-    update = { state: "downloading", latest, progress: 0, detail: "" };
-    try {
-      await installUpdate(asset, (event) => {
-        if (event.event === "started" || event.event === "progress") {
-          const total = event.data.total;
-          const done = event.event === "progress" ? event.data.downloaded : 0;
-          update = {
-            state: "downloading",
-            latest,
-            progress: total ? Math.min(done / total, 1) : null,
-            detail: total ? `${formatBytes(done)} of ${formatBytes(total)}` : formatBytes(done),
-          };
-        } else if (event.event === "installing") {
-          update = { state: "installing" };
-        } else if (event.event === "restarting") {
-          // This window stays until the new version's is on screen.
-          update = { state: "restarting", version: event.data.version || latest };
-        }
-      });
-    } catch (error) {
-      update = { state: "error", message: message(error) };
-      toast.error(`The update failed: ${message(error)}`);
-    }
+  function install(latest: string, asset: UpdateAsset) {
+    return settingsUpdater.install(latest, asset);
   }
 
   // --- Sections, the side navigation and the search ---------------------
@@ -372,6 +332,10 @@
             </span>
             <span class="bar" class:indeterminate={update.progress === null}>
               <span style:transform={update.progress === null ? undefined : `scaleX(${update.progress})`}></span>
+            </span>
+          {:else if update.state === "verifying"}
+            <span class="status">
+              <LoaderCircle size={14} class="spin" /> Verifying update…
             </span>
           {:else if update.state === "installing"}
             <span class="status">

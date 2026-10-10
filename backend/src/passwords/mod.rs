@@ -40,6 +40,7 @@ const CHANGED_EVENT: &str = "passwords-changed";
 const SYNCED_EVENT: &str = "passwords-synced";
 /// Asks the page for the master password, for a passkey (see `ask_master`).
 const VERIFY_EVENT: &str = "passwords-verify";
+const VERIFY_CANCELLED_EVENT: &str = "passwords-verify-cancelled";
 /// How often the vault syncs by itself while the app runs.
 const SYNC_EVERY: Duration = Duration::from_secs(5 * 60);
 
@@ -450,6 +451,42 @@ static VERIFYING: Mutex<Option<Verifying>> = Mutex::new(None);
 static NEXT_VERIFY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 const VERIFY_WAIT: Duration = Duration::from_secs(120);
 
+/// Dropping a timed-out or cancelled browser wait clears only its own
+/// verification cell and modal; a newer site's prompt remains untouched.
+struct VerificationGuard<'a> {
+    id: u64,
+    app: &'a AppHandle,
+}
+
+fn take_verification(slot: &mut Option<Verifying>, id: u64) -> Option<Verifying> {
+    if slot.as_ref().is_some_and(|pending| pending.id == id) { slot.take() } else { None }
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelling_master_verification_clears_only_its_own_waiter() {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let mut slot = Some(Verifying { id: 2, site: "new.example".into(), reply });
+        assert!(take_verification(&mut slot, 1).is_none(), "the newer prompt must survive an older cancellation");
+        assert_eq!(slot.as_ref().unwrap().id, 2);
+        drop(take_verification(&mut slot, 2));
+        assert!(slot.is_none());
+        assert!(answer.await.is_err(), "its master-password receiver is released on cancellation");
+    }
+}
+
+impl Drop for VerificationGuard<'_> {
+    fn drop(&mut self) {
+        let mut slot = VERIFYING.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = take_verification(&mut slot, self.id);
+        drop(slot);
+        let _ = self.app.emit(VERIFY_CANCELLED_EVENT, self.id);
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyRequest {
@@ -464,14 +501,10 @@ pub(crate) async fn ask_master(app: &AppHandle, site: &str) -> bool {
     let id = NEXT_VERIFY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // A newer request replaces an older one, which is refused.
     *VERIFYING.lock().unwrap_or_else(|p| p.into_inner()) = Some(Verifying { id, site: site.to_string(), reply });
+    let _guard = VerificationGuard { id, app };
     browser::open_vault(app);
     let _ = app.emit(VERIFY_EVENT, VerifyRequest { id, site: site.to_string() });
-    let verified = matches!(tokio::time::timeout(VERIFY_WAIT, answer).await, Ok(Ok(true)));
-    let mut slot = VERIFYING.lock().unwrap_or_else(|p| p.into_inner());
-    if slot.as_ref().is_some_and(|pending| pending.id == id) {
-        *slot = None;
-    }
-    verified
+    matches!(tokio::time::timeout(VERIFY_WAIT, answer).await, Ok(Ok(true)))
 }
 
 /// The master password asked for, if a passkey waits for it (the page may
@@ -495,7 +528,7 @@ pub async fn passwords_verify_answer(
 ) -> Result<(), String> {
     let take = || {
         let mut slot = VERIFYING.lock().unwrap_or_else(|p| p.into_inner());
-        if slot.as_ref().is_some_and(|pending| pending.id == id) { slot.take() } else { None }
+        take_verification(&mut slot, id)
     };
     let Some(master) = master else {
         if let Some(pending) = take() {

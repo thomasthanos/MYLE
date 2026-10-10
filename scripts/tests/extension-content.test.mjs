@@ -16,6 +16,45 @@ function pick(name) {
   return vm.runInNewContext(`(${source.slice(start, end + 4).trim()})`);
 }
 
+function unlockWait(context) {
+  const start = source.indexOf("  async function carryOnWhenUnlocked(");
+  assert.ok(start >= 0);
+  const end = source.indexOf("\n  }\n", start);
+  return vm.runInNewContext(`(${source.slice(start, end + 4).trim()})`, {
+    prompted: "request", UNLOCK_WAIT: 180, problems: {}, debug() {}, ...context,
+  });
+}
+
+for (const [label, reply] of [
+  ["refused", { ok: false, error: "badRequest" }],
+  ["disconnected", { ok: false, error: "noHost" }],
+  ["missing", undefined],
+  ["missing state", { ok: true }],
+]) {
+  test(`a ${label} unlock reply stops polling and explains the connection failure`, async () => {
+    let calls = 0;
+    const wait = unlockWait({
+      send: async () => {
+        if (++calls > 1) throw new Error("the failed reply was polled again");
+        return reply;
+      },
+    });
+    const shown = { textContent: "" };
+    await wait("request", shown, () => assert.fail("a failed check must not sign in"));
+    assert.match(shown.textContent, /extension|connection/i);
+    assert.equal(calls, 1);
+  });
+}
+
+test("a valid unlocked reply resumes the waiting sign-in once", async () => {
+  const wait = unlockWait({ send: async () => ({ ok: true, state: "unlocked", unlocked: true }) });
+  const shown = { textContent: "" };
+  let retries = 0;
+  await wait("request", shown, () => retries++);
+  assert.equal(retries, 1);
+  assert.match(shown.textContent, /Signing you in/);
+});
+
 test("a 2FA key written on a setup page is told from other text", () => {
   const keyIn = pick("keyIn");
   // As sites write them: groups of four, either case, or one block.

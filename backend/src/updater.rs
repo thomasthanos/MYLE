@@ -357,14 +357,33 @@ pub async fn install_update(
     // place while we run (Windows lets a running program be renamed), the
     // new version starts, and we close once its window is up.
     if let Some(exe) = installed_exe() {
-        match live_install(&path).await {
-            Ok(()) => {
+        match live_install(&path).await? {
+            LiveInstall::Installed => {
                 let _ = on_event.send(DownloadEvent::Restarting {
                     version: asset.version.clone().unwrap_or_else(|| asset_version(&asset.name)),
                 });
                 return hand_over(&app, &exe).await;
             }
-            Err(error) => log(&format!("live update failed, using the setup window: {error}")),
+            LiveInstall::NeedsSetup => {}
+            LiveInstall::Pending { child, error } => {
+                log(&format!("live setup still owned after wait failure: {error}"));
+                // A live file swap must finish or roll back itself. Keep
+                // both guards even after returning control to the page.
+                tokio::spawn(async move {
+                    let _reset = _reset;
+                    let (status, _exclusive) = owned_setup_exit(*child, _exclusive).await;
+                    if status.success() {
+                        // Keep the actionable timeout view until handover
+                        // succeeds. Its error cannot reach the old invoke.
+                        if let Err(error) = hand_over(&app, &exe).await {
+                            log(&format!("late update handover failed: {error}"));
+                        }
+                    } else {
+                        log(&format!("late live setup exited with {status}"));
+                    }
+                });
+                return Err("Setup is taking longer than expected. MYLE can stay open; wait for setup to close before retrying the update.".into());
+            }
         }
     }
 
@@ -372,21 +391,15 @@ pub async fn install_update(
     // window, which starts at once, waits for this app to quit, and opens the
     // new version half a second before it closes itself. `/UPDATE` keeps
     // shortcuts as the user left them; `/R` asks for the relaunch.
-    let setup = std::process::Command::new(&path)
+    let mut setup = tokio::process::Command::new(&path)
         .args(["/P", "/UPDATE", "/R"])
         .spawn()
         .map_err(err)?;
 
     // Stay on screen until the setup's window is up, so there is never a
     // moment with neither; the setup waits for us to quit before it copies.
-    let pid = setup.id();
-    let waited = tokio::task::spawn_blocking(move || shown_window::wait_for_window(pid, Duration::from_secs(10)))
-        .await
-        .unwrap_or(shown_window::Wait::TimedOut);
-    log(&format!("setup window: {waited:?}"));
-    if waited != shown_window::Wait::Shown {
-        tokio::time::sleep(Duration::from_millis(600)).await;
-    }
+    wait_for_setup_window(&mut setup, Duration::from_secs(10)).await?;
+    // The setup owns the remainder of the install once its window is shown.
     app.exit(0);
     Ok(())
 }
@@ -400,23 +413,82 @@ pub(crate) fn installed_exe() -> Option<std::path::PathBuf> {
 
 /// Runs the setup silently in live mode and waits for it: it only swaps
 /// files, so a minute is far more than it needs.
-async fn live_install(setup: &std::path::Path) -> Result<(), String> {
-    let setup = setup.to_path_buf();
-    let run = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(&setup)
-            .args(["/S", "/UPDATE", "/LIVE"])
-            .status()
-    });
-    let status = tokio::time::timeout(Duration::from_secs(60), run)
-        .await
-        .map_err(|_| "the setup took too long".to_string())?
-        .map_err(err)?
+async fn live_install(setup: &std::path::Path) -> Result<LiveInstall, String> {
+    let mut child = tokio::process::Command::new(setup)
+        .args(["/S", "/UPDATE", "/LIVE"])
+        .spawn()
         .map_err(err)?;
+    let status = match wait_for_setup(&mut child, Duration::from_secs(60)).await {
+        Ok(status) => status,
+        Err(error) => return Ok(LiveInstall::Pending { child: Box::new(child), error }),
+    };
     if status.success() {
         log("live update installed");
-        Ok(())
+        Ok(LiveInstall::Installed)
     } else {
-        Err(format!("the setup exited with {status}"))
+        // Only fall back after a confirmed exit. A wait/termination error
+        // must reach the UI instead of starting a second file writer.
+        log(&format!("live update exited with {status}, using the setup window"));
+        Ok(LiveInstall::NeedsSetup)
+    }
+}
+
+enum LiveInstall {
+    Installed,
+    NeedsSetup,
+    Pending { child: Box<tokio::process::Child>, error: String },
+}
+
+/// Retain maintenance ownership until this exact installer has exited.
+/// An OS wait failure is not evidence that it stopped writing files.
+async fn owned_setup_exit<Owner: Send>(
+    mut child: tokio::process::Child,
+    owner: Owner,
+) -> (std::process::ExitStatus, Owner) {
+    let mut reported = false;
+    loop {
+        match child.wait().await {
+            Ok(status) => return (status, owner),
+            Err(error) => {
+                if !reported {
+                    log(&format!("waiting for owned setup exit: {error}"));
+                    reported = true;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+async fn wait_for_setup(
+    child: &mut tokio::process::Child,
+    limit: Duration,
+) -> Result<std::process::ExitStatus, String> {
+    match tokio::time::timeout(limit, child.wait()).await {
+        Ok(status) => status.map_err(err),
+        Err(_) => Err("the setup exceeded its initial wait; retaining it until exit".into()),
+    }
+}
+
+async fn wait_for_setup_window(
+    child: &mut tokio::process::Child,
+    limit: Duration,
+) -> Result<(), String> {
+    let pid = child.id().ok_or("the setup already exited")?;
+    let waited = tokio::task::spawn_blocking(move || shown_window::wait_for_window(pid, limit))
+        .await
+        .unwrap_or(shown_window::Wait::TimedOut);
+    log(&format!("setup window: {waited:?}"));
+    match waited {
+        shown_window::Wait::Shown => Ok(()),
+        shown_window::Wait::Exited => {
+            let status = child.wait().await.map_err(err)?;
+            Err(format!("the setup closed before its window opened ({status}); MYLE is still running"))
+        }
+        shown_window::Wait::TimedOut => {
+            child.kill().await.map_err(err)?;
+            Err("the setup did not open in time and was stopped; MYLE is still running".into())
+        }
     }
 }
 
@@ -660,6 +732,66 @@ mod demo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hidden_command(program: &str) -> tokio::process::Command {
+        let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let mut command = tokio::process::Command::new(
+            std::path::PathBuf::from(windows).join("System32").join(program),
+        );
+        command
+            .creation_flags(0x0800_0000)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        command
+    }
+
+    #[tokio::test]
+    async fn a_slow_live_setup_is_not_killed_mid_transaction() {
+        let mut child = hidden_command("ping.exe").args(["-n", "10", "127.0.0.1"]).spawn().unwrap();
+        let result = wait_for_setup(&mut child, Duration::from_millis(50)).await;
+        let stopped = child.try_wait().unwrap().is_some();
+        if !stopped {
+            child.kill().await.unwrap();
+        }
+        assert!(result.is_err());
+        assert!(!stopped, "a live setup must finish or roll back its file transaction itself");
+    }
+
+    #[tokio::test]
+    async fn a_slow_live_setup_blocks_retries_until_its_exact_child_exits() {
+        let jobs = Jobs::default();
+        let owner = jobs.start_exclusive("application-update").unwrap();
+        let mut child = hidden_command("ping.exe").args(["-n", "2", "127.0.0.1"]).spawn().unwrap();
+        assert!(wait_for_setup(&mut child, Duration::from_millis(50)).await.is_err());
+        let waiting = tokio::spawn(owned_setup_exit(child, owner));
+        assert!(jobs.start_exclusive("another-update").is_err());
+        assert!(jobs.start("another-install").is_err());
+        let (status, owner) = waiting.await.unwrap();
+        assert!(status.success());
+        assert!(jobs.start_exclusive("handover-race").is_err(), "ownership survives until the caller finishes handover");
+        drop(owner);
+        assert!(jobs.is_idle(), "maintenance becomes available again after setup and handover finish");
+    }
+
+    #[tokio::test]
+    async fn a_setup_that_exits_without_a_window_is_an_error() {
+        let mut child = hidden_command("cmd.exe").args(["/c", "exit", "1"]).spawn().unwrap();
+        let result = wait_for_setup_window(&mut child, Duration::from_secs(2)).await;
+        assert!(result.is_err(), "do not quit MYLE after its setup failed to open");
+    }
+
+    #[tokio::test]
+    async fn a_setup_that_never_shows_a_window_is_stopped_and_reported() {
+        let mut child = hidden_command("ping.exe").args(["-n", "10", "127.0.0.1"]).spawn().unwrap();
+        let result = wait_for_setup_window(&mut child, Duration::from_millis(50)).await;
+        let stopped = child.try_wait().unwrap().is_some();
+        if !stopped {
+            child.kill().await.unwrap();
+        }
+        assert!(result.is_err(), "MYLE must stay open when its setup does not show");
+        assert!(stopped, "do not leave an invisible setup waiting to close MYLE later");
+    }
 
     #[test]
     fn the_version_is_read_from_the_installer_name() {
