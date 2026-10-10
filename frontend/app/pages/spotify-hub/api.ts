@@ -19,6 +19,7 @@ export interface DetectedInstall {
 
 export interface SpicetifyState extends DetectedInstall {
   healthy: boolean;
+  applied: boolean;
 }
 
 export interface MarketplaceState {

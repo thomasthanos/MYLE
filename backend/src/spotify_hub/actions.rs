@@ -27,6 +27,63 @@ fn replace_release(installed: Option<&str>, latest: &str) -> bool {
     }
 }
 
+fn finish_install(
+    job_id: &str,
+    cli: &str,
+    marketplace: &str,
+    spotify: &Path,
+    cancelled: bool,
+    launch: impl FnOnce(&Path) -> Result<(), String>,
+) -> SpotifyHubOutcome {
+    let mut note = format!("Installed Spicetify {cli} and Marketplace {marketplace}.");
+    if cancelled {
+        note.push_str(" Spotify launch skipped because cancellation was requested.");
+    } else if let Err(error) = launch(spotify) {
+        // The swaps are already committed. A Windows launch failure must not
+        // undo a valid installation or silently look like an installer error.
+        note.push_str(&format!(
+            " Spotify could not open automatically: {error}. Open it from the Start menu."
+        ));
+    }
+    SpotifyHubOutcome::new(
+        SpotifyHubResult::Done,
+        job_id,
+        SpotifyHubAction::InstallSpicetify,
+        Some(note),
+    )
+}
+
+fn launch_spotify(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    if !path.is_file() {
+        return Err("Spotify.exe was not found".into());
+    }
+    validate_no_reparse_points(path)?;
+    let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Open through the shell with a visible window, rather than inheriting the
+    // CLI runner's hidden startup environment and redirected output handles.
+    // SAFETY: the NUL-terminated strings live for the duration of this call.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(format!("Windows launch error {result}"))
+    }
+}
+
 pub async fn install(
     app: &AppHandle,
     detection: &Detection,
@@ -246,28 +303,31 @@ pub async fn install(
         preserve_custom_theme,
     )
     .await;
-    if let Err(error) = configured {
-        best_effort_restore_after_failed_apply(detection, reporter).await;
-        restore_file(&config_file, previous_config.as_deref());
-        if let Some(swap) = &mut theme_swap {
-            let _ = swap.rollback();
-        }
-        if let Some(swap) = &mut marketplace_swap {
-            let _ = swap.rollback();
-        }
-        if let Some(swap) = &mut cli_swap {
-            let _ = swap.rollback();
-        }
-        if error == CANCELLED || cancellation.is_cancelled() {
-            return Ok(cancelled(
-                reporter.job_id,
-                SpotifyHubAction::InstallSpicetify,
+    let spotify_exe = match configured {
+        Ok(path) => path,
+        Err(error) => {
+            best_effort_restore_after_failed_apply(detection, reporter).await;
+            restore_file(&config_file, previous_config.as_deref());
+            if let Some(swap) = &mut theme_swap {
+                let _ = swap.rollback();
+            }
+            if let Some(swap) = &mut marketplace_swap {
+                let _ = swap.rollback();
+            }
+            if let Some(swap) = &mut cli_swap {
+                let _ = swap.rollback();
+            }
+            if error == CANCELLED || cancellation.is_cancelled() {
+                return Ok(cancelled(
+                    reporter.job_id,
+                    SpotifyHubAction::InstallSpicetify,
+                ));
+            }
+            return Err(format!(
+                "Spicetify configuration failed and the previous installation was restored: {error}"
             ));
         }
-        return Err(format!(
-            "Spicetify configuration failed and the previous installation was restored: {error}"
-        ));
-    }
+    };
 
     if let Err(error) = add_user_path_entry(&detection.paths.cli) {
         best_effort_restore_after_failed_apply(detection, reporter).await;
@@ -311,15 +371,21 @@ pub async fn install(
     reporter.stage(SpotifyHubStage::Finalizing);
     reporter.progress(1.0);
     reporter.line("Spicetify and Marketplace are ready.");
-    Ok(SpotifyHubOutcome::new(
-        SpotifyHubResult::Done,
+    if !cancellation.is_cancelled() {
+        reporter.line("Opening Spotify…");
+    }
+    let outcome = finish_install(
         reporter.job_id,
-        SpotifyHubAction::InstallSpicetify,
-        Some(format!(
-            "Installed Spicetify {} and Marketplace {}.",
-            cli_version, marketplace_version
-        )),
-    ))
+        cli_version,
+        marketplace_version,
+        &spotify_exe,
+        cancellation.is_cancelled(),
+        launch_spotify,
+    );
+    if let Some(note) = &outcome.note {
+        reporter.line(note);
+    }
+    Ok(outcome)
 }
 
 async fn configure_spicetify(
@@ -328,7 +394,7 @@ async fn configure_spicetify(
     cancellation: &Cancellation,
     reporter: &Reporter<'_>,
     preserve_custom_theme: bool,
-) -> Result<(), String> {
+) -> Result<PathBuf, String> {
     let exe = detection.paths.cli_exe();
     for args in [
         vec!["config", "custom_apps", "marketplace"],
@@ -354,7 +420,11 @@ async fn configure_spicetify(
     if args.first() == Some(&"restore") {
         reporter.line("Spotify has no stock app packages; restoring the existing backup before rebuilding it with the new CLI…");
     }
-    ensure_success(&exe, args, job, cancellation, reporter).await
+    ensure_success(&exe, args, job, cancellation, reporter).await?;
+    Ok(apps_dir
+        .parent()
+        .ok_or("Spotify Apps directory has no parent")?
+        .join("Spotify.exe"))
 }
 
 /// Match the official CLI updater's IsBackupable check. A Spotify update may
@@ -377,7 +447,7 @@ fn backup_apply_args(apps_dir: &Path) -> Result<&'static [&'static str], String>
 /// Honor the path the CLI will use, including %VAR% references. Like its
 /// InitPaths, fall back to detected Desktop Spotify when the configured Apps
 /// directory does not exist. Do not inspect a different installation's state.
-fn spotify_apps_dir(config: &[u8], default_spotify: &Path) -> PathBuf {
+pub(super) fn spotify_apps_dir(config: &[u8], default_spotify: &Path) -> PathBuf {
     let mut setting = false;
     for line in String::from_utf8_lossy(config).lines() {
         let line = line.trim().trim_start_matches('\u{feff}');
@@ -894,6 +964,60 @@ fn ps_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_install_launches_the_same_spotify_installation() {
+        let spotify = Path::new(r"C:\Custom Spotify\Spotify.exe");
+        let mut launched = None;
+        let outcome = finish_install("test", "2.45.3", "1.0.11", spotify, false, |path| {
+            launched = Some(path.to_path_buf());
+            Ok(())
+        });
+        assert_eq!(launched.as_deref(), Some(spotify));
+        assert_eq!(outcome.result, SpotifyHubResult::Done);
+    }
+
+    #[test]
+    fn launch_failure_preserves_successful_install_and_reports_manual_open() {
+        let outcome = finish_install(
+            "test",
+            "2.45.3",
+            "1.0.11",
+            Path::new("Spotify.exe"),
+            false,
+            |_| Err("Windows error 5".into()),
+        );
+        assert_eq!(outcome.result, SpotifyHubResult::Done);
+        let note = outcome.note.unwrap();
+        assert!(note.contains("could not open automatically"));
+        assert!(note.contains("Windows error 5"));
+        assert!(note.contains("Start menu"));
+    }
+
+    #[test]
+    fn cancellation_after_commit_skips_launch_without_undoing_install() {
+        let outcome = finish_install(
+            "test",
+            "2.45.3",
+            "1.0.11",
+            Path::new("Spotify.exe"),
+            true,
+            |_| {
+                panic!("Do not launch after cancellation");
+            },
+        );
+        assert_eq!(outcome.result, SpotifyHubResult::Done);
+        assert!(outcome.note.unwrap().contains("launch skipped"));
+    }
+
+    #[test]
+    #[ignore = "Opens the local Spotify window; run explicitly for a launch smoke test"]
+    fn manually_open_local_spotify_with_visible_shell_launch() {
+        let paths = KnownPaths::discover().unwrap();
+        let config = std::fs::read(paths.config.join("config-xpui.ini")).unwrap_or_default();
+        let apps = spotify_apps_dir(&config, &paths.desktop_dir());
+        launch_spotify(&apps.parent().unwrap().join("Spotify.exe")).unwrap();
+    }
 
     #[test]
     fn a_newer_installed_component_is_preserved_when_the_other_component_updates() {

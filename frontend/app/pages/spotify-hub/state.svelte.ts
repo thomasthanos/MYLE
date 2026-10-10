@@ -183,14 +183,14 @@ class SpotifyHubState {
     const state = this.snapshot;
     if (!state?.desktop.installed) return "Install Spotify first";
     if (!state.spicetify.installed) return "Install Spicetify";
-    if (!state.spicetify.healthy || !state.marketplace.installed) return "Repair";
+    if (!state.spicetify.healthy || !state.spicetify.applied || !state.marketplace.installed || this.statuses.installSpicetify === "Error" || this.statuses.installSpicetify === "Partial") return "Repair";
     if (this.checkingUpdates) return "Checking updates…";
     if (!this.releases) return "Check for updates";
     const cli = state.spicetify.version;
     const marketplace = state.marketplace.version;
     if ((cli && compareVersions(cli, this.releases.cli) < 0)
       || (marketplace && compareVersions(marketplace, this.releases.marketplace) < 0)) return "Update";
-    return cli && marketplace ? "Up to date" : "Installed";
+    return cli && marketplace ? "Up to date" : "Repair";
   }
 
   prepareSpotifyInstall() {
@@ -211,7 +211,7 @@ class SpotifyHubState {
       await this.checkUpdates();
       return;
     }
-    if (label === "Up to date" || label === "Installed") return;
+    if (label === "Up to date") return;
     await this.run("installSpicetify", null);
   }
 
@@ -290,6 +290,7 @@ class SpotifyHubState {
       return;
     }
 
+    const requested = requestedLabel ?? this.installLabelFor(action);
     this.startingAction = action;
     this.#updateRequest++;
     this.checkingUpdates = false;
@@ -298,7 +299,7 @@ class SpotifyHubState {
     this.error = null;
     this.stopping = false;
     this.consoles[action] = { lines: [], open: true, dropped: 0 };
-    this.append(action, `${requestedLabel ?? this.installLabelFor(action)} requested.`);
+    this.append(action, `${requested} requested.`);
 
     try {
       const outcome = await spotifyHubApi.run(action, purgeToken, (event) => this.onEvent(action, event));
@@ -349,7 +350,10 @@ class SpotifyHubState {
 
   private applyOutcomeStatus(outcome: SpotifyHubOutcome, action: SpotifyHubAction | null) {
     if (!action) return;
-    if (outcome.result === "done") this.statuses[action] = "Completed";
+    if (outcome.result === "done") {
+      this.statuses[action] = "Completed";
+      if (action === "installSpicetify") this.consoles[action].open = false;
+    }
     else if (outcome.result === "partial" || outcome.result === "cancelled") this.statuses[action] = "Partial";
     else this.statuses[action] = "Error";
   }

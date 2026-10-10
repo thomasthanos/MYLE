@@ -91,6 +91,7 @@ pub struct SpicetifyState {
     pub installed: bool,
     pub version: Option<String>,
     pub healthy: bool,
+    pub applied: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]

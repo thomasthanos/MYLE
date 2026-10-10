@@ -190,6 +190,8 @@ pub async fn detect() -> Result<Detection, String> {
         } else {
             (None, false)
         };
+    let config = std::fs::read(paths.config.join("config-xpui.ini")).unwrap_or_default();
+    let apps = super::actions::spotify_apps_dir(&config, &paths.desktop_dir());
 
     Ok(Detection {
         desktop: InstallationState {
@@ -204,6 +206,7 @@ pub async fn detect() -> Result<Detection, String> {
             installed: cli_present,
             version: spicetify_version,
             healthy,
+            applied: super::installed::applied(&apps),
         },
         marketplace: MarketplaceState {
             installed: paths.marketplace.join("manifest.json").is_file()
@@ -220,8 +223,10 @@ async fn cached_executable_version(exe: &std::path::Path) -> (Option<String>, bo
         .ok()
         .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
     if let Some((len, modified)) = stamp
-        && let Some((cached_len, cached_modified, version, healthy)) =
-            CLI_VERSION.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        && let Some((cached_len, cached_modified, version, healthy)) = CLI_VERSION
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
         && cached_len == len
         && cached_modified == modified
     {

@@ -40,7 +40,7 @@
           ? "Preparing preview…"
           : "Review & uninstall",
   );
-  const current = $derived(action === "installSpicetify" && (label === "Up to date" || label === "Installed"));
+  const current = $derived(action === "installSpicetify" && label === "Up to date");
 
   function run() {
     if (action === "installSpicetify") void hub.install();
@@ -55,7 +55,7 @@
        console grows the card downwards instead of pulling the button up. -->
   <div class="main">
     <span class="icon"><Icon size={22} strokeWidth={1.65} /></span>
-    <span class="status {status.toLowerCase()}" aria-live="polite"><span class="status-dot"></span>{status}</span>
+    <span class="status {current ? 'completed' : status.toLowerCase()}" aria-live="polite"><span class="status-dot"></span>{current ? label : status}</span>
 
     <div class="copy">
       <h2>{title}</h2>
@@ -84,23 +84,17 @@
           <span style:transform={progress === null ? undefined : `scaleX(${progress})`}></span>
         </div>
       </div>
-    {:else}
+    {:else if !current}
       <div class="actions">
         <button
-        class="btn action"
-        class:danger={action === "purgeAll"}
-        disabled={hub.loading || hub.locked || unavailable || hub.previewingPurge || current || (action === "installSpicetify" && hub.checkingUpdates)}
-        onclick={run}
-      >
-        {label}
-        {#if !current}<ArrowRight size={14} />{/if}
+          class="btn action"
+          class:danger={action === "purgeAll"}
+          disabled={hub.loading || hub.locked || unavailable || hub.previewingPurge || (action === "installSpicetify" && hub.checkingUpdates)}
+          onclick={run}
+        >
+          {label}
+          <ArrowRight size={14} />
         </button>
-        {#if action === "installSpicetify" && state?.spicetify.installed && state.desktop.installed}
-          {#if state.spicetify.healthy}
-            <button class="btn quiet" disabled={hub.loading || hub.locked || hub.checkingUpdates} onclick={() => hub.checkUpdates()}>Check again</button>
-          {/if}
-          <button class="btn quiet" disabled={hub.loading || hub.locked} onclick={() => hub.repair()}>Repair / reinstall</button>
-        {/if}
       </div>
     {/if}
   </div>
@@ -243,7 +237,6 @@
     background: var(--tone-soft);
   }
   .action:hover { border-color: rgb(var(--tone) / 0.4); background: rgb(var(--tone) / 0.16); }
-  .quiet { font-size: 11px; }
 
   .progress {
     grid-column: 1 / -1;

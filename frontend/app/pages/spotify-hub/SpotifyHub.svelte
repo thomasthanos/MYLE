@@ -70,9 +70,9 @@
   {/if}
 
   {#if hub.updateError}
-    <div class="notice surface warn" role="status"><CircleAlert size={15} /><span>{hub.updateError} Use Check again to retry.</span></div>
+    <div class="notice surface warn" role="status"><CircleAlert size={15} /><span>{hub.updateError} Use Check for updates to retry.</span></div>
   {:else if hub.releases && state?.marketplace.installed && !state.marketplace.version}
-    <div class="notice surface" role="status"><CircleAlert size={15} /><span>Marketplace is installed, but its version could not be verified. Repair / reinstall records the verified release for future update checks.</span></div>
+    <div class="notice surface" role="status"><CircleAlert size={15} /><span>Marketplace is installed, but its version could not be verified. Repair records the verified release for future update checks.</span></div>
   {/if}
 
   {#if state?.prerequisites.message}
