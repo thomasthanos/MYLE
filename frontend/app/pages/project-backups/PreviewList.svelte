@@ -11,12 +11,7 @@
 
   let { preview }: { preview: Preview } = $props();
 
-  const kindNames: Record<RuleKind, string> = {
-    pattern: "Pattern",
-    detected: "Detected build / cache folder",
-    gitignore: "From .gitignore",
-    internal: "MYLE's own file",
-  };
+  const kindNames: Record<RuleKind, string> = { pattern: "Pattern", detected: "Detected build / cache folder", gitignore: "From .gitignore", internal: "MYLE's own file" };
 
   type Show = "all" | "kept" | "left";
   let show = $state<Show>("all");
@@ -38,14 +33,14 @@
 
   const lines = $derived.by(() => {
     const nodes = preview.tree;
+    // A search, a rule or a kept/left filter shows matching rows on their own,
+    // flat; otherwise the tree, with folded folders' contents left out.
     if (flat) {
       const needle = query.trim().toLowerCase();
-      return nodes.filter(
-        (node) =>
-          (show === "all" || (show === "left") === leftOut(node)) &&
-          (rule === null || node.rule === rule) &&
-          (!needle || node.path.toLowerCase().includes(needle)),
-      );
+      return nodes.filter((node) =>
+        (show === "all" || (show === "left") === leftOut(node)) &&
+        (rule === null || node.rule === rule) &&
+        (!needle || node.path.toLowerCase().includes(needle)));
     }
     const out: PreviewNode[] = [];
     let hideBelow = Infinity;
@@ -60,8 +55,7 @@
 
   function toggle(path: string) {
     const next = new Set(collapsed);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
+    if (next.has(path)) next.delete(path); else next.add(path);
     collapsed = next;
   }
 

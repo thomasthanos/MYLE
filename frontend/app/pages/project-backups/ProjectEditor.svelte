@@ -30,42 +30,27 @@
 
   let confirmDiscard = $state(false);
   let discardBar = $state<HTMLElement>();
-  $effect(() => {
-    if (confirmDiscard) discardBar?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  });
-  const initial = JSON.stringify([
-    editing?.name ?? "",
-    editing?.appName ?? "",
-    editing?.sourcePath ?? "",
-    editing?.closeApp ?? "",
-    (editing?.extraExclusions ?? []).join("\n"),
-    (editing?.keep ?? []).join("\n"),
-  ]);
+  $effect(() => { if (confirmDiscard) discardBar?.scrollIntoView({ block: "nearest", behavior: "smooth" }) });
+  const initial = JSON.stringify([editing?.name ?? "", editing?.appName ?? "", editing?.sourcePath ?? "", editing?.closeApp ?? "", (editing?.extraExclusions ?? []).join("\n"), (editing?.keep ?? []).join("\n")]);
   const dirty = $derived(JSON.stringify([name, appName, sourcePath, closeApp, extra, keep]) !== initial);
 
   onMount(() => {
     (fixMissing ? sourceInput : firstInput)?.focus();
     // A preview still reading a big folder stops with the dialog.
-    return () => {
-      if (previewing) void api.cancelPreview();
-    };
+    return () => { if (previewing) void api.cancelPreview() };
   });
 
   /** Closes the dialog; unsaved changes are confirmed first. */
   function close() {
     if (pb.busy) return;
-    if (dirty && !confirmDiscard) {
-      confirmDiscard = true;
-      return;
-    }
+    if (dirty && !confirmDiscard) { confirmDiscard = true; return }
     pb.closeEditor();
   }
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
     event.preventDefault();
-    if (confirmDiscard) confirmDiscard = false;
-    else close();
+    if (confirmDiscard) confirmDiscard = false; else close();
   }
 
   /** A folder's name, made usable as a backup folder name. */
@@ -91,17 +76,11 @@
     previewing = true;
     previewError = null;
     try {
-      preview = await api.preview({
-        sourcePath: sourcePath.trim(),
-        projectId: editing?.id ?? null,
-        extraExclusions: parseLines(extra),
-        keep: parseLines(keep),
-      });
+      preview = await api.preview({ sourcePath: sourcePath.trim(), projectId: editing?.id ?? null, extraExclusions: parseLines(extra), keep: parseLines(keep) });
     } catch (error) {
       preview = null;
       const reason = error instanceof Error ? error.message : String(error);
-      // A newer preview (or closing) stopped this one: nothing to report.
-      previewError = reason === "Cancelled." ? null : reason;
+      previewError = reason === "Cancelled." ? null : reason; // a newer preview (or closing) stopped this one
     } finally {
       previewing = false;
     }

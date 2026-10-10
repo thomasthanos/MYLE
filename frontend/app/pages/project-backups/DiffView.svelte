@@ -23,26 +23,17 @@
   const single = $derived(change.status !== "modified");
   const showRows = $derived(diff.kind === "text" || (diff.kind === "image" && svgSource));
 
-  interface Line {
-    sign: " " | "-" | "+" | "…";
-    no: number | null;
-    oldNo: number | null;
-    text: string;
-    kind: "same" | "removed" | "added" | "gap";
-  }
+  interface Line { sign: " " | "-" | "+" | "…"; no: number | null; oldNo: number | null; text: string; kind: "same" | "removed" | "added" | "gap" }
 
   /** Unified lines: a changed row becomes a removed and an added line. */
   const unified = $derived.by(() => {
     const out: Line[] = [];
     for (const row of rows) {
       if (row.kind === "gap") out.push({ sign: "…", no: null, oldNo: null, text: "", kind: "gap" });
-      else if (row.kind === "same")
-        out.push({ sign: " ", no: row.newLine, oldNo: row.oldLine, text: row.newText ?? row.oldText ?? "", kind: "same" });
+      else if (row.kind === "same") out.push({ sign: " ", no: row.newLine, oldNo: row.oldLine, text: row.newText ?? row.oldText ?? "", kind: "same" });
       else {
-        if (row.oldText !== null && row.kind !== "added")
-          out.push({ sign: "-", no: null, oldNo: row.oldLine, text: row.oldText, kind: "removed" });
-        if (row.newText !== null && row.kind !== "removed")
-          out.push({ sign: "+", no: row.newLine, oldNo: null, text: row.newText, kind: "added" });
+        if (row.oldText !== null && row.kind !== "added") out.push({ sign: "-", no: null, oldNo: row.oldLine, text: row.oldText, kind: "removed" });
+        if (row.newText !== null && row.kind !== "removed") out.push({ sign: "+", no: row.newLine, oldNo: null, text: row.newText, kind: "added" });
       }
     }
     return out;
@@ -60,9 +51,7 @@
   }
 
   const size = (info: SideInfo | null) => (info ? formatBytes(info.size) : "—");
-  const sameHash = $derived(
-    diff.kind === "binary" && diff.old?.sha256 && diff.new?.sha256 ? diff.old.sha256 === diff.new.sha256 : null,
-  );
+  const sameHash = $derived(diff.kind === "binary" && diff.old?.sha256 && diff.new?.sha256 ? diff.old.sha256 === diff.new.sha256 : null);
 </script>
 
 {#if diff.kind === "text"}

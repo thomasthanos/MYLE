@@ -19,29 +19,23 @@
   let previewError = $state<string | null>(null);
   let previewing = $state(false);
 
-  const projectOptions = $derived(
-    pb.projects.filter((project) => !pb.isMissing(project)).map((project) => ({ value: project.id, label: project.name })),
-  );
+  const projectOptions = $derived(pb.projects.filter((project) => !pb.isMissing(project)).map((project) => ({ value: project.id, label: project.name })));
   const changed = $derived(
     parseLines(text).join("\n") !== pb.page.settings.exclusions.join("\n") ||
       smartBuild !== pb.page.settings.smartBuild ||
       followGitignore !== pb.page.settings.followGitignore,
   );
 
+  /** Anything typed drops the preview: it showed the list before the edit. */
   function edited() {
     preview = null;
   }
 
-  onMount(() => () => {
-    if (previewing) void api.cancelPreview();
-  });
+  // Leaving the panel: a preview still running is stopped.
+  onMount(() => () => { if (previewing) void api.cancelPreview() });
 
   async function resetToDefaults() {
-    const ok = await confirm({
-      title: "Use the default exclusions?",
-      message: "Your own patterns in this list are replaced by MYLE's defaults. Nothing changes until you press Save.",
-      confirmLabel: "Use defaults",
-    });
+    const ok = await confirm({ title: "Use the default exclusions?", message: "Your own patterns in this list are replaced by MYLE's defaults. Nothing changes until you press Save.", confirmLabel: "Use defaults" });
     if (!ok) return;
     text = pb.page.defaultExclusions.join("\n");
     edited();
@@ -61,7 +55,6 @@
       previewing = false;
     }
   }
-
   async function save() {
     await pb.setExclusions(parseLines(text), smartBuild, followGitignore);
   }
@@ -81,7 +74,6 @@
       <span>Patterns <small>one per line · <code>name/</code> a folder anywhere · <code>*.log</code> files · <code>path/inside/</code> from the project folder</small></span>
       <textarea class="input mono" rows="9" bind:value={text} oninput={edited} disabled={!!pb.busy}></textarea>
     </label>
-
     <div class="side">
       <label class="toggle surface">
         <span>
@@ -101,9 +93,7 @@
   </div>
 
   <div class="actions">
-    <button class="btn ghost" disabled={!!pb.busy || parseLines(text).join("\n") === pb.page.defaultExclusions.join("\n")} onclick={resetToDefaults}>
-      <RotateCcw size={14} /> Defaults
-    </button>
+    <button class="btn ghost" disabled={!!pb.busy || parseLines(text).join("\n") === pb.page.defaultExclusions.join("\n")} onclick={resetToDefaults}><RotateCcw size={14} /> Defaults</button>
     <span class="spacer"></span>
     {#if projectOptions.length}
       <Select bind:value={previewProject} options={projectOptions} ariaLabel="Project to preview" size="sm" onchange={edited} />
