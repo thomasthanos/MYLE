@@ -304,10 +304,7 @@
 </div>
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
-  .dialog {
-    display: flex; flex-direction: column; gap: 12px; width: min(1180px, 100%); height: min(780px, calc(100vh - 48px));
-    padding: 18px 20px; border-radius: var(--radius-xl);
-  }
+  .dialog { display: flex; flex-direction: column; gap: 12px; width: min(1180px, 100%); height: min(780px, calc(100vh - 48px)); padding: 18px 20px; border-radius: var(--radius-xl); }
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   h2 { font-size: 17px; }
   .sides { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 4px; color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; }

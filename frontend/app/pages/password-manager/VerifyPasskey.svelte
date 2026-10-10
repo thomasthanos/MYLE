@@ -111,62 +111,21 @@
 <svelte:window onkeydown={(e) => request && e.key === "Escape" && answer(false)} />
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 92;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 92; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
-  .dialog {
-    width: min(420px, 100%);
-    border-radius: var(--radius-xl);
-  }
+  .dialog { width: min(420px, 100%); border-radius: var(--radius-xl); }
 
-  form {
-    display: grid;
-    gap: 12px;
-    padding: 20px;
-  }
+  form { display: grid; gap: 12px; padding: 20px; }
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  header { display: flex; align-items: center; gap: 10px; }
 
-  .icon {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
-    background: rgb(var(--accent-rgb) / 0.16);
-    color: #c5cafd;
-  }
+  .icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.16); color: #c5cafd; }
 
-  h2 {
-    margin: 0;
-    font-size: 17px;
-  }
+  h2 { margin: 0; font-size: 17px; }
 
-  p {
-    margin: 0;
-    color: var(--text-2);
-    font-size: 12.5px;
-    line-height: 1.5;
-  }
+  p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 
-  .error {
-    color: #ffb6a8;
-  }
+  .error { color: #ffb6a8; }
 
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
+  footer { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

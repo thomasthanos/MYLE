@@ -494,10 +494,7 @@
   .destination-head h2 { color: var(--text-2); font-size: 12px; font-weight: 600; }
   .needed { padding: 1px 7px; border-radius: 999px; background: rgb(245 176 65 / 0.1); color: rgb(245 188 95 / 0.9); font-size: 10px; }
   .cloud-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .cloud-tile {
-    display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 52px; padding: 9px 10px; border: 1px dashed rgb(255 255 255 / 0.12);
-    border-radius: 9px; background: rgb(0 0 0 / 0.06); text-align: left; transition: background 140ms, border-color 140ms;
-  }
+  .cloud-tile { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 52px; padding: 9px 10px; border: 1px dashed rgb(255 255 255 / 0.12); border-radius: 9px; background: rgb(0 0 0 / 0.06); text-align: left; transition: background 140ms, border-color 140ms; }
   .cloud-tile.found { border-style: solid; border-color: rgb(255 255 255 / 0.09); background: rgb(255 255 255 / 0.025); }
   .cloud-tile:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.45); background: rgb(var(--accent-rgb) / 0.08); }
   .cloud-tile.in-use { border-style: solid; border-color: rgb(62 207 142 / 0.32); background: rgb(62 207 142 / 0.07); }

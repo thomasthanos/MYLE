@@ -116,165 +116,55 @@
 </div>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
   /* The game list scrolls, not the glass element: an overflow on it clips
      the glass rim (see BiosRestartDialog). */
-  .dialog {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
-    gap: 15px;
-    width: min(680px, 100%);
-    max-height: calc(100vh - 48px);
-    padding: 20px;
-    border-radius: var(--radius-xl);
-  }
+  .dialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 15px; width: min(680px, 100%); max-height: calc(100vh - 48px); padding: 20px; border-radius: var(--radius-xl); }
 
-  header {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
+  header { display: flex; align-items: flex-start; gap: 10px; }
 
-  .heading-icon {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    flex: none;
-    border: 1px solid rgb(var(--accent-rgb) / 0.17);
-    border-radius: 10px;
-    background: rgb(var(--accent-rgb) / 0.08);
-    color: var(--accent);
-  }
+  .heading-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1px solid rgb(var(--accent-rgb) / 0.17); border-radius: 10px; background: rgb(var(--accent-rgb) / 0.08); color: var(--accent); }
 
-  .heading {
-    flex: 1;
-  }
+  .heading { flex: 1; }
 
-  h2 {
-    font-size: 17px;
-  }
+  h2 { font-size: 17px; }
 
-  header p {
-    margin-top: 3px;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  header p { margin-top: 3px; color: var(--text-3); font-size: 12px; }
 
-  .games {
-    display: grid;
-    gap: 7px;
-    overflow: auto;
-  }
+  .games { display: grid; gap: 7px; overflow: auto; }
 
-  .game {
-    display: grid;
-    grid-template-columns: minmax(120px, 0.7fr) minmax(220px, 1.3fr);
-    align-items: center;
-    gap: 10px 16px;
-    padding: 11px 12px;
-  }
+  .game { display: grid; grid-template-columns: minmax(120px, 0.7fr) minmax(220px, 1.3fr); align-items: center; gap: 10px 16px; padding: 11px 12px; }
 
-  .game-title {
-    display: grid;
-    min-width: 0;
-  }
+  .game-title { display: grid; min-width: 0; }
 
-  .game-title strong {
-    overflow: hidden;
-    font-size: 12.5px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
+  .game-title strong { overflow: hidden; font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
 
-  .game-title span {
-    color: var(--text-3);
-    font-size: 10.5px;
-  }
+  .game-title span { color: var(--text-3); font-size: 10.5px; }
 
-  .snapshot-field {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-  }
+  .snapshot-field { display: grid; gap: 4px; min-width: 0; }
 
   .snapshot-field > span,
-  .destination small {
-    color: var(--text-3);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.035em;
-    text-transform: uppercase;
-  }
+  .destination small { color: var(--text-3); font-size: 10px; font-weight: 600; letter-spacing: 0.035em; text-transform: uppercase; }
 
-  .destination {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 7px;
-    padding-top: 8px;
-    border-top: 1px solid rgb(255 255 255 / 0.045);
-  }
+  .destination { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 7px; padding-top: 8px; border-top: 1px solid rgb(255 255 255 / 0.045); }
 
-  .destination > span {
-    display: grid;
-    min-width: 0;
-  }
+  .destination > span { display: grid; min-width: 0; }
 
-  .destination strong {
-    overflow: hidden;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 400;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
+  .destination strong { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: 10px; font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
 
   .destination.missing strong,
-  .problem {
-    color: rgb(245 188 95 / 0.82);
-  }
+  .problem { color: rgb(245 188 95 / 0.82); }
 
-  .problem {
-    font-size: 11.5px;
-  }
+  .problem { font-size: 11.5px; }
 
-  .safety {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: rgb(92 218 166 / 0.72);
-    font-size: 11.5px;
-  }
+  .safety { display: flex; align-items: center; gap: 7px; color: rgb(92 218 166 / 0.72); font-size: 11.5px; }
 
-  footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
+  footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
-  .summary {
-    margin-right: auto;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .summary { margin-right: auto; color: var(--text-3); font-size: 11.5px; }
 
-  button:disabled {
-    opacity: 0.45;
-    pointer-events: none;
-  }
+  button:disabled { opacity: 0.45; pointer-events: none; }
 
   @media (max-width: 620px) {
     .game {

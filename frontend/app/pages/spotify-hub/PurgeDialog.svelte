@@ -144,33 +144,12 @@
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: 22px;
-    background: rgb(4 6 12 / 0.62);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 22px; background: rgb(4 6 12 / 0.62); }
 
   /* No overflow on the glass element: see BiosRestartDialog. */
-  .dialog {
-    display: flex;
-    flex-direction: column;
-    width: min(640px, 100%);
-    max-height: calc(100vh - 44px);
-    border-radius: var(--radius-xl);
-  }
+  .dialog { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100vh - 44px); border-radius: var(--radius-xl); }
 
-  .dialog-body {
-    display: grid;
-    gap: 14px;
-    min-height: 0;
-    padding: 20px;
-    overflow: auto;
-    border-radius: inherit;
-  }
+  .dialog-body { display: grid; gap: 14px; min-height: 0; padding: 20px; overflow: auto; border-radius: inherit; }
 
   header { display: flex; align-items: flex-start; gap: 10px; }
   .warning { display: grid; place-items: center; width: 35px; height: 35px; flex: none; border: 1px solid rgb(229 72 77 / 0.25); border-radius: 10px; background: rgb(229 72 77 / 0.1); color: #ff7778; }

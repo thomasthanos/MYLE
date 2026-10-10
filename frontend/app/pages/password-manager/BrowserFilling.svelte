@@ -281,340 +281,107 @@
 </div>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: clamp(12px, 3vh, 24px);
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: clamp(12px, 3vh, 24px); background: var(--scrim); }
 
   /* Never set overflow on a .glass element: .glass::before sits at inset: -1px
      and would cause a permanent 1px scrollbar. */
-  .dialog {
-    display: flex;
-    flex-direction: column;
-    width: min(560px, 100%);
-    max-height: calc(100dvh - clamp(24px, 6vh, 48px));
-    border-radius: var(--radius-xl);
-  }
+  .dialog { display: flex; flex-direction: column; width: min(560px, 100%); max-height: calc(100dvh - clamp(24px, 6vh, 48px)); border-radius: var(--radius-xl); }
 
-  .dialog-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: clamp(10px, 1.6vh, 14px);
-    min-height: 0;
-    padding: clamp(14px, 2.2vh, 20px);
-    overflow-x: hidden;
-    overflow-y: auto;
-    scrollbar-width: none;
-    border-radius: inherit;
-  }
+  .dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(10px, 1.6vh, 14px); min-height: 0; padding: clamp(14px, 2.2vh, 20px); overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-radius: inherit; }
 
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 
-  header :global(.icon-btn) {
-    flex: none;
-  }
+  header :global(.icon-btn) { flex: none; }
 
-  h2 {
-    min-width: 0;
-    margin: 0;
-    font-size: 17px;
-  }
+  h2 { min-width: 0; margin: 0; font-size: 17px; }
 
-  h3 {
-    margin: 0;
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
+  h3 { margin: 0; color: var(--text-2); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 
-  .status {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 12px;
-    background: rgb(0 0 0 / 0.16);
-  }
+  .status { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 12px; background: rgb(0 0 0 / 0.16); }
 
-  .status.good {
-    border-color: rgb(74 222 128 / 0.28);
-    background: rgb(74 222 128 / 0.07);
-  }
+  .status.good { border-color: rgb(74 222 128 / 0.28); background: rgb(74 222 128 / 0.07); }
 
-  .status.bad {
-    border-color: rgb(255 140 120 / 0.3);
-    background: rgb(255 140 120 / 0.07);
-  }
+  .status.bad { border-color: rgb(255 140 120 / 0.3); background: rgb(255 140 120 / 0.07); }
 
-  .status-icon {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    color: var(--text-2);
-    background: rgb(255 255 255 / 0.06);
-  }
+  .status-icon { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--text-2); background: rgb(255 255 255 / 0.06); }
 
-  .good .status-icon {
-    color: #4ade80;
-    background: rgb(74 222 128 / 0.14);
-  }
+  .good .status-icon { color: #4ade80; background: rgb(74 222 128 / 0.14); }
 
-  .bad .status-icon {
-    color: #ffb6a8;
-    background: rgb(255 140 120 / 0.14);
-  }
+  .bad .status-icon { color: #ffb6a8; background: rgb(255 140 120 / 0.14); }
 
-  .status-text {
-    display: grid;
-    flex: 1 1 0%;
-    min-width: 0;
-    gap: 2px;
-  }
+  .status-text { display: grid; flex: 1 1 0%; min-width: 0; gap: 2px; }
 
-  .status-text small {
-    color: var(--text-3);
-    font-size: 12px;
-    line-height: 1.4;
-    overflow-wrap: break-word;
-  }
+  .status-text small { color: var(--text-3); font-size: 12px; line-height: 1.4; overflow-wrap: break-word; }
 
-  .status .switch {
-    flex: none;
-  }
+  .status .switch { flex: none; }
 
-  .checks {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
+  .checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 
-  .checks li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    min-height: 26px;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
+  .checks li { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 26px; color: var(--text-3); font-size: 12.5px; }
 
-  .checks li.done {
-    color: var(--text-2);
-  }
+  .checks li.done { color: var(--text-2); }
 
-  .checks li.done :global(svg) {
-    color: #4ade80;
-  }
+  .checks li.done :global(svg) { color: #4ade80; }
 
-  .checks li :global(svg) {
-    flex: none;
-  }
+  .checks li :global(svg) { flex: none; }
 
-  .checks li span {
-    flex: 1 1 0%;
-    min-width: 0;
-  }
+  .checks li span { flex: 1 1 0%; min-width: 0; }
 
-  .checks li .btn {
-    flex: none;
-  }
+  .checks li .btn { flex: none; }
 
-  .refusal {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 0;
-    color: #ffcf9e;
-    font-size: 12px;
-    line-height: 1.45;
-  }
+  .refusal { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: #ffcf9e; font-size: 12px; line-height: 1.45; }
 
-  .refusal :global(svg) {
-    flex: none;
-    margin-top: 2px;
-  }
+  .refusal :global(svg) { flex: none; margin-top: 2px; }
 
-  section {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: clamp(8px, 1.4vh, 12px);
-    min-width: 0;
-  }
+  section { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(8px, 1.4vh, 12px); min-width: 0; }
 
-  .steps-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 2px 0;
-  }
+  .steps-toggle { display: flex; align-items: center; justify-content: space-between; padding: 2px 0; }
 
-  .chevron {
-    display: grid;
-    color: var(--text-3);
-    transition: transform 160ms ease;
-  }
+  .chevron { display: grid; color: var(--text-3); transition: transform 160ms ease; }
 
-  .chevron.open {
-    transform: rotate(180deg);
-  }
+  .chevron.open { transform: rotate(180deg); }
 
-  .store-row {
-    display: grid;
-    gap: 6px;
-    justify-items: start;
-  }
+  .store-row { display: grid; gap: 6px; justify-items: start; }
 
-  .store {
-    height: 36px;
-  }
+  .store { height: 36px; }
 
-  .more {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    justify-self: start;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .more { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-3); font-size: 12px; }
 
-  .more:hover {
-    color: var(--text-1);
-  }
+  .more:hover { color: var(--text-1); }
 
-  .folder-copy {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
-    border: 1px solid rgb(255 196 102 / 0.3);
-    border-radius: 10px;
-    background: rgb(255 196 102 / 0.08);
-    color: #ffd18f;
-    font-size: 12px;
-    line-height: 1.45;
-  }
+  .folder-copy { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid rgb(255 196 102 / 0.3); border-radius: 10px; background: rgb(255 196 102 / 0.08); color: #ffd18f; font-size: 12px; line-height: 1.45; }
 
-  .folder-copy span {
-    flex: 1;
-    color: var(--text-2);
-  }
+  .folder-copy span { flex: 1; color: var(--text-2); }
 
   .folder-copy :global(svg),
-  .folder-copy .btn {
-    flex: none;
-  }
+  .folder-copy .btn { flex: none; }
 
-  .or {
-    margin: 0;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .or { margin: 0; color: var(--text-3); font-size: 12px; }
 
-  .path {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: 100%;
-    padding: 6px 6px 6px 10px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.22);
-  }
+  .path { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 6px 6px 6px 10px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 10px; background: rgb(0 0 0 / 0.22); }
 
-  .path code {
-    flex: 1 1 0%;
-    min-width: 0;
-    overflow: hidden;
-    font-size: 11.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .path code { flex: 1 1 0%; min-width: 0; overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .path button {
-    flex: none;
-  }
+  .path button { flex: none; }
 
   /* Side by side when the dialog is wide enough: no scrolling at 1080p. */
-  .browsers {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 10px 16px;
-    min-width: 0;
-  }
+  .browsers { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; min-width: 0; }
 
-  .browser {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-content: start;
-    gap: 4px;
-    min-width: 0;
-  }
+  .browser { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4px; min-width: 0; }
 
-  .browser strong {
-    font-size: 13px;
-  }
+  .browser strong { font-size: 13px; }
 
-  ol {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    min-width: 0;
-    margin: 2px 0 0;
-    padding-left: 20px;
-    color: var(--text-2);
-    font-size: 12.5px;
-    line-height: 1.45;
-  }
+  ol { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; margin: 2px 0 0; padding-left: 20px; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
 
-  li {
-    min-width: 0;
-    overflow-wrap: break-word;
-  }
+  li { min-width: 0; overflow-wrap: break-word; }
 
-  code {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
+  code { font-family: var(--font-mono); font-size: 11.5px; }
 
-  .link {
-    display: inline;
-    padding: 0;
-    color: #b9c2ff;
-  }
+  .link { display: inline; padding: 0; color: #b9c2ff; }
 
-  .link:hover {
-    text-decoration: underline;
-  }
+  .link:hover { text-decoration: underline; }
 
-  .hint {
-    min-width: 0;
-    margin: 0;
-    color: var(--text-3);
-    font-size: 11.5px;
-    line-height: 1.5;
-    overflow-wrap: break-word;
-  }
+  .hint { min-width: 0; margin: 0; color: var(--text-3); font-size: 11.5px; line-height: 1.5; overflow-wrap: break-word; }
 
   @media (max-width: 480px) {
     .path {

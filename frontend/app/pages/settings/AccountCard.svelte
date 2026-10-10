@@ -104,11 +104,7 @@
 </section>
 
 <style>
-  .card {
-    position: relative; display: grid; gap: 16px; padding: 18px; overflow: hidden; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: var(--radius-lg);
-    background: var(--grain), radial-gradient(circle at 8% 0%, rgb(var(--accent-rgb) / 0.14), transparent 45%), linear-gradient(180deg, rgb(200 210 255 / 0.08), rgb(200 210 255 / 0.02) 65%, rgb(0 0 0 / 0.08));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.11), inset 0 -1px 0 rgb(0 0 0 / 0.28), var(--elev-2);
-  }
+  .card { position: relative; display: grid; gap: 16px; padding: 18px; overflow: hidden; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: var(--radius-lg); background: var(--grain), radial-gradient(circle at 8% 0%, rgb(var(--accent-rgb) / 0.14), transparent 45%), linear-gradient(180deg, rgb(200 210 255 / 0.08), rgb(200 210 255 / 0.02) 65%, rgb(0 0 0 / 0.08)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.11), inset 0 -1px 0 rgb(0 0 0 / 0.28), var(--elev-2); }
   .rim { position: absolute; top: 0; left: 10%; width: 80%; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--accent-rgb) / 0.7), transparent); box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.4); }
   h2 { font-size: 16.5px; letter-spacing: -0.01em; }
   .intro { display: flex; align-items: flex-start; gap: 13px; }

@@ -408,149 +408,47 @@
 <style>
   /* Laid out by its own width, not the window's: the sidebar takes a share.
      It fills the page's height; the list and the entry scroll inside it. */
-  .vault {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    gap: 14px;
-    min-width: 0;
-    min-height: 0;
-    container: vault / inline-size;
-  }
+  .vault { display: flex; flex: 1 1 auto; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; container: vault / inline-size; }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-width: 0;
-  }
+  .toolbar { display: flex; align-items: center; gap: 9px; min-width: 0; }
 
-  .search {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    gap: 10px;
-    height: 40px;
-    padding: 0 14px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.2);
-    color: var(--text-3);
-  }
+  .search { display: flex; flex: 1; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.2); color: var(--text-3); }
 
-  .search:focus-within {
-    border-color: rgb(var(--accent-rgb) / 0.55);
-  }
+  .search:focus-within { border-color: rgb(var(--accent-rgb) / 0.55); }
 
-  .search .clear {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    flex: none;
-    margin-right: -6px;
-    border-radius: 6px;
-    color: var(--text-3);
-  }
+  .search .clear { display: grid; place-items: center; width: 22px; height: 22px; flex: none; margin-right: -6px; border-radius: 6px; color: var(--text-3); }
 
-  .search .clear:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .search .clear:hover { background: var(--hover); color: var(--text-1); }
 
-  .search input {
-    flex: 1;
-    min-width: 0;
-    border: 0;
-    outline: none;
-    background: none;
-    color: var(--text-1);
-    font: inherit;
-    font-size: 13.5px;
-  }
+  .search input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-1); font: inherit; font-size: 13.5px; }
 
-  .toolbar > :global(.btn) {
-    height: 40px;
-    flex: none;
-  }
+  .toolbar > :global(.btn) { height: 40px; flex: none; }
 
-  .more {
-    width: 40px;
-    height: 40px;
-  }
+  .more { width: 40px; height: 40px; }
 
-  .menu {
-    padding: 5px;
-  }
+  .menu { padding: 5px; }
 
-  .menu-label {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 4px;
-  }
+  .menu-label { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
 
-  .lock-times {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    padding: 0 8px 8px;
-  }
+  .lock-times { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 8px 8px; }
 
-  .lock-times .chip {
-    height: 24px;
-    padding: 0 9px;
-    font-size: 11.5px;
-  }
+  .lock-times .chip { height: 24px; padding: 0 9px; font-size: 11.5px; }
 
-  .filters {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
+  .filters { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
-  .filters :global(.sync) {
-    margin-left: auto;
-  }
+  .filters :global(.sync) { margin-left: auto; }
 
-  .other-vault {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 11px 14px;
-    border: 1px solid rgb(255 180 84 / 0.3);
-    border-radius: 12px;
-    background: rgb(255 180 84 / 0.08);
-    color: #ffd08a;
-    font-size: 12.5px;
-  }
+  .other-vault { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid rgb(255 180 84 / 0.3); border-radius: 12px; background: rgb(255 180 84 / 0.08); color: #ffd08a; font-size: 12.5px; }
 
-  .other-vault span {
-    flex: 1;
-    color: var(--text-2);
-  }
+  .other-vault span { flex: 1; color: var(--text-2); }
 
-  .other-vault strong {
-    display: block;
-    color: #ffd08a;
-  }
+  .other-vault strong { display: block; color: #ffd08a; }
 
-  .windows-hotkey-error {
-    margin: 0;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .windows-hotkey-error { margin: 0; color: var(--text-3); font-size: 11.5px; }
 
   /* Whatever height is left: a banner above makes it shorter, never the
      page longer. */
-  .split {
-    display: grid;
-    flex: 1 1 auto;
-    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-    gap: 14px;
-    min-height: 300px;
-  }
+  .split { display: grid; flex: 1 1 auto; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 14px; min-height: 300px; }
 
   @container vault (min-width: 1100px) {
     .split {
@@ -564,381 +462,118 @@
     }
   }
 
-  .list {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
+  .list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
-  .list-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 65px;
-    padding: 12px 20px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.07);
-    color: var(--text-3);
-  }
+  .list-head { display: flex; align-items: center; justify-content: space-between; min-height: 65px; padding: 12px 20px; border-bottom: 1px solid rgb(255 255 255 / 0.07); color: var(--text-3); }
 
-  .list-head h2 {
-    margin: 0 0 2px;
-    color: var(--text-1);
-    font-size: 14px;
-    font-weight: 650;
-  }
+  .list-head h2 { margin: 0 0 2px; color: var(--text-1); font-size: 14px; font-weight: 650; }
 
-  .list-head span {
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-  }
+  .list-head span { font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
-  .sort {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 8px;
-    color: var(--text-2);
-    font-size: 11.5px;
-    transition: background var(--dur-fast), color var(--dur-fast);
-  }
+  .sort { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 8px; color: var(--text-2); font-size: 11.5px; transition: background var(--dur-fast), color var(--dur-fast); }
 
-  .sort:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .sort:hover { background: var(--hover); color: var(--text-1); }
 
   .list-scroll,
-  .panel-scroll {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-  }
+  .panel-scroll { flex: 1; min-height: 0; overflow: auto; }
 
-  .list-scroll {
-    display: grid;
-    align-content: start;
-    gap: 2px;
-    margin: 0;
-    padding: 8px;
-    list-style: none;
-  }
+  .list-scroll { display: grid; align-content: start; gap: 2px; margin: 0; padding: 8px; list-style: none; }
 
-  .item {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    transition: background var(--dur-fast), border-color var(--dur-fast);
-  }
+  .item { display: flex; align-items: center; min-width: 0; border: 1px solid transparent; border-radius: 10px; transition: background var(--dur-fast), border-color var(--dur-fast); }
 
-  .item:hover {
-    background: var(--hover);
-  }
+  .item:hover { background: var(--hover); }
 
-  .item.selected {
-    border-color: rgb(var(--accent-rgb) / 0.33);
-    background: rgb(var(--accent-rgb) / 0.13);
-  }
+  .item.selected { border-color: rgb(var(--accent-rgb) / 0.33); background: rgb(var(--accent-rgb) / 0.13); }
 
-  .item-main {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    gap: 11px;
-    min-width: 0;
-    min-height: 59px;
-    padding: 9px 12px;
-    border-radius: 10px;
-    text-align: left;
-  }
+  .item-main { display: flex; flex: 1; align-items: center; gap: 11px; min-width: 0; min-height: 59px; padding: 9px 12px; border-radius: 10px; text-align: left; }
 
-  .item-main:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
-    outline-offset: -2px;
-  }
+  .item-main:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: -2px; }
 
   /* Copy buttons take the marks' place while the row is pointed at or
      has the keyboard. */
-  .quick {
-    display: none;
-    flex: none;
-    gap: 2px;
-    padding-right: 8px;
-  }
+  .quick { display: none; flex: none; gap: 2px; padding-right: 8px; }
 
   .item:hover .quick,
-  .item:focus-within .quick {
-    display: flex;
-  }
+  .item:focus-within .quick { display: flex; }
 
   .item:hover .marks,
-  .item:focus-within .marks {
-    display: none;
-  }
+  .item:focus-within .marks { display: none; }
 
-  .quick-btn {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    color: var(--text-2);
-    transition: background var(--dur-fast), color var(--dur-fast);
-  }
+  .quick-btn { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--text-2); transition: background var(--dur-fast), color var(--dur-fast); }
 
-  .quick-btn:hover {
-    background: var(--press);
-    color: var(--text-1);
-  }
+  .quick-btn:hover { background: var(--press); color: var(--text-1); }
 
-  .quick-btn.done {
-    color: var(--ok);
-  }
+  .quick-btn.done { color: var(--ok); }
 
-  .quick-btn:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
-    outline-offset: -2px;
-  }
+  .quick-btn:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: -2px; }
 
-  .text {
-    display: grid;
-    flex: 1;
-    min-width: 0;
-    gap: 2px;
-  }
+  .text { display: grid; flex: 1; min-width: 0; gap: 2px; }
 
   .text strong,
-  .text small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .text strong {
-    font-size: 13.5px;
-    font-weight: 620;
-    line-height: 1.2;
-  }
+  .text strong { font-size: 13.5px; font-weight: 620; line-height: 1.2; }
 
-  .text small {
-    color: var(--text-2);
-    font-size: 11.8px;
-    line-height: 1.25;
-  }
+  .text small { color: var(--text-2); font-size: 11.8px; line-height: 1.25; }
 
-  .marks {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-3);
-  }
+  .marks { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
 
-  .fav {
-    color: #ffd166;
-  }
+  .fav { color: #ffd166; }
 
-  .empty {
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 9px;
-    min-height: 250px;
-    padding: 35px 20px;
-    color: var(--text-3);
-    font-size: 12.5px;
-    text-align: center;
-  }
+  .empty { display: grid; justify-items: center; align-content: center; gap: 9px; min-height: 250px; padding: 35px 20px; color: var(--text-3); font-size: 12.5px; text-align: center; }
 
-  .empty strong {
-    color: var(--text-1);
-    font-size: 14px;
-  }
+  .empty strong { color: var(--text-1); font-size: 14px; }
 
-  .panel {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
+  .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
-  .panel-scroll {
-    padding: clamp(20px, 2.2vw, 34px) clamp(18px, 2.6vw, 40px);
-  }
+  .panel-scroll { padding: clamp(20px, 2.2vw, 34px) clamp(18px, 2.6vw, 40px); }
 
   /* Only on a narrow page, where the list and the entry take turns. */
-  .back {
-    display: none;
-    align-items: center;
-    gap: 7px;
-    align-self: flex-start;
-    margin: 12px 0 0 14px;
-    padding: 6px 10px;
-    border-radius: 8px;
-    color: var(--text-2);
-    font-size: 12.5px;
-  }
+  .back { display: none; align-items: center; gap: 7px; align-self: flex-start; margin: 12px 0 0 14px; padding: 6px 10px; border-radius: 8px; color: var(--text-2); font-size: 12.5px; }
 
-  .back:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .back:hover { background: var(--hover); color: var(--text-1); }
 
-  .overview {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: clamp(26px, 5vh, 54px);
-    width: min(100%, 730px);
-    min-height: 100%;
-    margin: 0 auto;
-  }
+  .overview { display: flex; flex-direction: column; justify-content: center; gap: clamp(26px, 5vh, 54px); width: min(100%, 730px); min-height: 100%; margin: 0 auto; }
 
-  .overview-main {
-    display: flex;
-    align-items: center;
-    gap: clamp(22px, 4vw, 48px);
-  }
+  .overview-main { display: flex; align-items: center; gap: clamp(22px, 4vw, 48px); }
 
-  .overview-symbol {
-    display: grid;
-    place-items: center;
-    width: clamp(86px, 11vw, 132px);
-    aspect-ratio: 1;
-    flex: none;
-    border: 1px solid rgb(var(--accent-rgb) / 0.27);
-    border-radius: 32px;
-    background:
-      radial-gradient(circle at 28% 24%, rgb(255 255 255 / 0.13), transparent 50%),
-      linear-gradient(145deg, rgb(var(--accent-rgb) / 0.21), rgb(111 179 198 / 0.07));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 20px 45px -28px rgb(var(--accent-rgb) / 0.45);
-    color: #c5cafd;
-  }
+  .overview-symbol { display: grid; place-items: center; width: clamp(86px, 11vw, 132px); aspect-ratio: 1; flex: none; border: 1px solid rgb(var(--accent-rgb) / 0.27); border-radius: 32px; background: radial-gradient(circle at 28% 24%, rgb(255 255 255 / 0.13), transparent 50%), linear-gradient(145deg, rgb(var(--accent-rgb) / 0.21), rgb(111 179 198 / 0.07)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 20px 45px -28px rgb(var(--accent-rgb) / 0.45); color: #c5cafd; }
 
-  .overview-copy {
-    min-width: 0;
-  }
+  .overview-copy { min-width: 0; }
 
-  .overview-copy h2 {
-    max-width: 20ch;
-    margin: 0;
-    font-family: var(--font-brand);
-    font-size: clamp(24px, 2.4vw, 34px);
-    font-weight: 600;
-    line-height: 1.15;
-    letter-spacing: -0.025em;
-  }
+  .overview-copy h2 { max-width: 20ch; margin: 0; font-family: var(--font-brand); font-size: clamp(24px, 2.4vw, 34px); font-weight: 600; line-height: 1.15; letter-spacing: -0.025em; }
 
-  .overview-copy p {
-    max-width: 47ch;
-    margin: 12px 0 0;
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 1.5;
-  }
+  .overview-copy p { max-width: 47ch; margin: 12px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
 
-  .overview-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 22px;
-  }
+  .overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 
-  .overview-actions .btn {
-    height: 36px;
-  }
+  .overview-actions .btn { height: 36px; }
 
-  .overview-health {
-    border-top: 1px solid rgb(255 255 255 / 0.09);
-    padding-top: 22px;
-  }
+  .overview-health { border-top: 1px solid rgb(255 255 255 / 0.09); padding-top: 22px; }
 
-  .overview-health-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
+  .overview-health-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 
-  .overview-health-heading strong {
-    font-size: 13px;
-    font-weight: 620;
-  }
+  .overview-health-heading strong { font-size: 13px; font-weight: 620; }
 
-  .overview-health-heading span {
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .overview-health-heading span { color: var(--text-3); font-size: 11.5px; }
 
-  .overview-health-items {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
-  }
+  .overview-health-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 
-  .overview-health-items button {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    min-height: 55px;
-    padding: 10px 12px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 11px;
-    background: rgb(255 255 255 / 0.035);
-    font-size: 12px;
-    text-align: left;
-    transition: background var(--dur-fast), border-color var(--dur-fast);
-  }
+  .overview-health-items button { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 55px; padding: 10px 12px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 11px; background: rgb(255 255 255 / 0.035); font-size: 12px; text-align: left; transition: background var(--dur-fast), border-color var(--dur-fast); }
 
-  .overview-health-items button:not(:disabled):hover {
-    border-color: rgb(var(--accent-rgb) / 0.3);
-    background: rgb(var(--accent-rgb) / 0.09);
-  }
+  .overview-health-items button:not(:disabled):hover { border-color: rgb(var(--accent-rgb) / 0.3); background: rgb(var(--accent-rgb) / 0.09); }
 
-  .overview-health-items button:disabled {
-    cursor: default;
-    opacity: 0.68;
-  }
+  .overview-health-items button:disabled { cursor: default; opacity: 0.68; }
 
-  .overview-health-items button:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
-    outline-offset: 2px;
-  }
+  .overview-health-items button:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: 2px; }
 
-  .health-count {
-    display: grid;
-    place-items: center;
-    min-width: 32px;
-    height: 32px;
-    padding: 0 6px;
-    border-radius: 9px;
-    font-family: var(--font-brand);
-    font-size: 15px;
-    font-weight: 650;
-    font-variant-numeric: tabular-nums;
-  }
+  .health-count { display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border-radius: 9px; font-family: var(--font-brand); font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
-  .health-count.weak {
-    background: rgb(255 143 143 / 0.12);
-    color: #ffb3b3;
-  }
+  .health-count.weak { background: rgb(255 143 143 / 0.12); color: #ffb3b3; }
 
-  .health-count.reused {
-    background: rgb(255 196 102 / 0.12);
-    color: #ffd18f;
-  }
+  .health-count.reused { background: rgb(255 196 102 / 0.12); color: #ffd18f; }
 
-  .health-action {
-    margin-left: auto;
-    color: #b7bef5;
-    font-size: 11px;
-  }
+  .health-action { margin-left: auto; color: #b7bef5; font-size: 11px; }
 
   @container vault (max-width: 760px) {
     .split {
@@ -989,41 +624,23 @@
 
   /* A phone: rows and bars a finger can hit, whatever the screen's height. */
   :global(html.mobile) .search,
-  :global(html.mobile) .toolbar > :global(.btn) {
-    height: 44px;
-  }
+  :global(html.mobile) .toolbar > :global(.btn) { height: 44px; }
 
-  :global(html.mobile) .more {
-    width: 44px;
-    height: 44px;
-  }
+  :global(html.mobile) .more { width: 44px; height: 44px; }
 
-  :global(html.mobile) .search input {
-    font-size: 15px;
-  }
+  :global(html.mobile) .search input { font-size: 15px; }
 
-  :global(html.mobile) .item-main {
-    min-height: 62px;
-    padding: 9px 12px;
-  }
+  :global(html.mobile) .item-main { min-height: 62px; padding: 9px 12px; }
 
-  :global(html.mobile) .text strong {
-    font-size: 15px;
-  }
+  :global(html.mobile) .text strong { font-size: 15px; }
 
-  :global(html.mobile) .text small {
-    font-size: 13px;
-  }
+  :global(html.mobile) .text small { font-size: 13px; }
 
-  :global(html.mobile) .list-head {
-    display: none;
-  }
+  :global(html.mobile) .list-head { display: none; }
 
   /* An open entry has the whole screen; "All logins" goes back. */
   :global(html.mobile) .vault:has(.split.has-selection) > .toolbar,
-  :global(html.mobile) .vault:has(.split.has-selection) > .filters {
-    display: none;
-  }
+  :global(html.mobile) .vault:has(.split.has-selection) > .filters { display: none; }
 
   /* Last, so it wins over the rules above: a big screen gets roomier rows. */
   @container vault (min-width: 1700px) {

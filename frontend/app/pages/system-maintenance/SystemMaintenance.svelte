@@ -108,177 +108,59 @@
 </div>
 
 <style>
-  .maintenance-page {
-    container-name: maintenance;
-    container-type: inline-size;
-  }
+  .maintenance-page { container-name: maintenance; container-type: inline-size; }
 
-  .top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    /* Line the controls up with the page title, not the subtitle. */
-    margin-top: 4px;
-  }
+  .tools { display: flex; align-items: center; gap: 10px; /* Line the controls up with the page title, not the subtitle. */ margin-top: 4px; }
 
-  .safety {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 11px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.18);
-    border-radius: 999px;
-    background: rgb(var(--accent-rgb) / 0.065);
-    color: var(--text-2);
-    font-size: 11.5px;
-    font-weight: 500;
-  }
+  .safety { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid rgb(var(--accent-rgb) / 0.18); border-radius: 999px; background: rgb(var(--accent-rgb) / 0.065); color: var(--text-2); font-size: 11.5px; font-weight: 500; }
 
-  .segmented {
-    display: flex;
-    gap: 2px;
-    padding: 1px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.15);
-  }
+  .segmented { display: flex; gap: 2px; padding: 1px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.15); }
 
-  .segmented .icon-btn {
-    width: 32px;
-    height: 28px;
-  }
+  .segmented .icon-btn { width: 32px; height: 28px; }
 
-  .banner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
-    padding: 12px 14px;
-    border-color: rgb(229 72 77 / 0.35);
-    color: #ffb4b0;
-    font-size: 13px;
-  }
+  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: 13px; }
 
-  section {
-    --section-tone: rgb(var(--accent-soft-rgb));
-    margin-bottom: 24px;
-  }
+  section { --section-tone: rgb(var(--accent-soft-rgb)); margin-bottom: 24px; }
 
   section[data-section="network"] { --section-tone: #63d7e9; }
   section[data-section="health"] { --section-tone: rgb(var(--accent-soft-rgb)); }
   section[data-section="software"] { --section-tone: #54d6a0; }
 
-  .section-heading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 11px;
-  }
+  .section-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 
-  .section-icon {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    border: 1px solid color-mix(in srgb, var(--section-tone) 24%, transparent);
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--section-tone) 9%, transparent);
-    color: var(--section-tone);
-  }
+  .section-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid color-mix(in srgb, var(--section-tone) 24%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--section-tone) 9%, transparent); color: var(--section-tone); }
 
-  h2 {
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
+  h2 { color: var(--text-2); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 
-  .section-count {
-    color: var(--text-3);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-  }
+  .section-count { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-  .section-divider {
-    height: 1px;
-    flex: 1;
-    background: linear-gradient(90deg, rgb(255 255 255 / 0.085), transparent);
-  }
+  .section-divider { height: 1px; flex: 1; background: linear-gradient(90deg, rgb(255 255 255 / 0.085), transparent); }
 
-  .cards {
-    display: grid;
-    gap: 12px;
-    align-items: stretch;
-  }
+  .cards { display: grid; gap: 12px; align-items: stretch; }
 
   /* A card with its console open must not stretch the one beside it. */
-  .cards:has(:global(.console.expanded)) {
-    align-items: start;
-  }
+  .cards:has(:global(.console.expanded)) { align-items: start; }
 
-  .cards.grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .cards.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-  .cards.list {
-    grid-template-columns: 1fr;
-  }
+  .cards.list { grid-template-columns: 1fr; }
 
-  .skeleton-heading {
-    width: 210px;
-    height: 22px;
-    margin: 0 0 12px;
-  }
+  .skeleton-heading { width: 210px; height: 22px; margin: 0 0 12px; }
 
-  .skeleton-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-  }
+  .skeleton-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 
-  .skeleton-card {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 12px;
-    min-height: 142px;
-    padding: 16px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: var(--radius-lg);
-    background: rgb(255 255 255 / 0.02);
-  }
+  .skeleton-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; min-height: 142px; padding: 16px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: var(--radius-lg); background: rgb(255 255 255 / 0.02); }
 
-  .skeleton-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-  }
+  .skeleton-icon { width: 42px; height: 42px; border-radius: 12px; }
 
-  .skeleton-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 3px;
-  }
+  .skeleton-copy { display: flex; flex-direction: column; gap: 8px; padding-top: 3px; }
 
   .skeleton-title { width: 42%; height: 14px; }
   .skeleton-line { width: 88%; height: 10px; }
   .skeleton-line.short { width: 62%; }
-  .skeleton-footer {
-    grid-column: 1 / -1;
-    align-self: end;
-    width: 100%;
-    height: 28px;
-    margin-top: 8px;
-  }
+  .skeleton-footer { grid-column: 1 / -1; align-self: end; width: 100%; height: 28px; margin-top: 8px; }
 
   @container maintenance (max-width: 760px) {
     .cards.grid,
@@ -297,8 +179,5 @@
     }
   }
 
-  :global(:root.solid) .shimmer::after {
-    animation: none;
-    opacity: 0.3;
-  }
+  :global(:root.solid) .shimmer::after { animation: none; opacity: 0.3; }
 </style>

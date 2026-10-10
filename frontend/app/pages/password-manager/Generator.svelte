@@ -204,117 +204,37 @@
 </div>
 
 <style>
-  .generator {
-    display: grid;
-    gap: 12px;
-    width: 336px;
-    padding: 14px;
-  }
+  .generator { display: grid; gap: 12px; width: 336px; padding: 14px; }
 
-  .mode {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 3px;
-    padding: 3px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.22);
-  }
+  .mode { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 10px; background: rgb(0 0 0 / 0.22); }
 
-  .mode button {
-    height: 28px;
-    border-radius: 7px;
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-    transition: background var(--dur-fast), color var(--dur-fast);
-  }
+  .mode button { height: 28px; border-radius: 7px; color: var(--text-2); font-size: 12px; font-weight: 600; transition: background var(--dur-fast), color var(--dur-fast); }
 
-  .mode button:hover {
-    color: var(--text-1);
-  }
+  .mode button:hover { color: var(--text-1); }
 
-  .mode button.active {
-    background: rgb(var(--accent-rgb) / 0.2);
-    color: var(--text-1);
-    box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.35);
-  }
+  .mode button.active { background: rgb(var(--accent-rgb) / 0.2); color: var(--text-1); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.35); }
 
-  .result {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 44px;
-    padding: 8px 6px 8px 12px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.25);
-  }
+  .result { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 6px 8px 12px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.25); }
 
-  .value {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-    font-family: var(--font-mono);
-    font-size: 13.5px;
-    line-height: 1.4;
-  }
+  .value { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.4; }
 
-  .rating {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
+  .rating { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
-  .bits {
-    color: var(--text-3);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-  }
+  .bits { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-  .length {
-    display: grid;
-    gap: 6px;
-    color: var(--text-2);
-    font-size: 12px;
-  }
+  .length { display: grid; gap: 6px; color: var(--text-2); font-size: 12px; }
 
-  .length strong {
-    color: var(--text-1);
-  }
+  .length strong { color: var(--text-1); }
 
-  input[type="range"] {
-    width: 100%;
-    accent-color: var(--accent);
-  }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
 
-  .kinds {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
+  .kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
-  .kinds-label {
-    margin-right: 2px;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .kinds-label { margin-right: 2px; color: var(--text-3); font-size: 11.5px; }
 
-  .kinds .chip {
-    height: 26px;
-    padding: 0 10px;
-    font-size: 11.5px;
-  }
+  .kinds .chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
 
-  .kinds .chip:disabled {
-    cursor: not-allowed;
-  }
+  .kinds .chip:disabled { cursor: not-allowed; }
 
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

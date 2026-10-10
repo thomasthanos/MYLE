@@ -176,11 +176,7 @@
   .images.single { grid-template-columns: minmax(0, 1fr); }
   figure { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; }
   figcaption { color: var(--text-3); font-size: 11px; }
-  .canvas {
-    display: grid; place-items: center; flex: 1; min-height: 160px; padding: 10px; border-radius: 8px;
-    border: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: 11.5px;
-    background: repeating-conic-gradient(rgb(255 255 255 / 0.05) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
-  }
+  .canvas { display: grid; place-items: center; flex: 1; min-height: 160px; padding: 10px; border-radius: 8px; border: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: 11.5px; background: repeating-conic-gradient(rgb(255 255 255 / 0.05) 0% 25%, transparent 0% 50%) 50% / 16px 16px; }
   .canvas img { max-width: 100%; max-height: 52vh; object-fit: contain; image-rendering: auto; }
   .binary { display: grid; gap: 4px; padding: 6px 0; }
   table { margin: 4px 10px; border-collapse: collapse; font-size: 11.5px; }

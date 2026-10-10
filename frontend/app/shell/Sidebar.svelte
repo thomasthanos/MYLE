@@ -177,10 +177,7 @@
   .sidebar { --owner-rgb: 214 186 128; grid-area: side; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; min-height: 0; padding: 9px; border-radius: var(--shell-panel-radius); }
   :global(:root.dark) .sidebar { background: var(--sidebar-fill); }
   /* On a short window the page list scrolls; Settings and the toggle stay. */
-  .top {
-    min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px;
-    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%);
-  }
+  .top { min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px; mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
   .top.more-above { --fade-top: 22px; }
   .top.more-below { --fade-bottom: 22px; }
   .group { display: grid; gap: 2px; }
@@ -207,12 +204,7 @@
   /* Count on the right while expanded; on the icon's corner while collapsed. */
   .badge { flex: none; min-width: 19px; margin: 0 10px 0 auto; padding: 1px 6px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; box-shadow: 0 0 10px var(--accent-glow); transition: opacity var(--dur-med) var(--ease-out); }
   /* The icon is 20px in 48 x 40: the count sits on its top-right corner, cut out by a ring in the sidebar's colour. */
-  .dot {
-    position: absolute; top: -2px; left: 30px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
-    background: var(--accent-grad); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 2px var(--bg-1), 0 0 8px var(--accent-glow); opacity: 0; transform: scale(0.6);
-    transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
-  }
+  .dot { position: absolute; top: -2px; left: 30px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg-1), 0 0 8px var(--accent-glow); opacity: 0; transform: scale(0.6); transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
   .collapsed .badge { opacity: 0; }
   .collapsed .dot { opacity: 1; transform: scale(1); }
   .label { white-space: nowrap; font-weight: 500; transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }

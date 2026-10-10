@@ -70,99 +70,35 @@
 </div>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
-  .dialog {
-    display: grid;
-    gap: 10px;
-    width: min(560px, 100%);
-    max-height: min(640px, 100%);
-    padding: 20px;
-    border-radius: var(--radius-xl);
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-  }
+  .dialog { display: grid; gap: 10px; width: min(560px, 100%); max-height: min(640px, 100%); padding: 20px; border-radius: var(--radius-xl); grid-template-rows: auto auto minmax(0, 1fr) auto; }
 
   header,
   footer,
-  .actions-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .actions-row { display: flex; align-items: center; gap: 8px; }
 
-  header {
-    justify-content: space-between;
-  }
+  header { justify-content: space-between; }
 
-  footer {
-    justify-content: flex-end;
-  }
+  footer { justify-content: flex-end; }
 
-  h2 {
-    font-size: 17px;
-  }
+  h2 { font-size: 17px; }
 
-  ul {
-    display: grid;
-    align-content: start;
-    gap: 2px;
-    margin: 0;
-    padding: 0;
-    overflow: auto;
-    list-style: none;
-  }
+  ul { display: grid; align-content: start; gap: 2px; margin: 0; padding: 0; overflow: auto; list-style: none; }
 
-  label {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 8px;
-    border-radius: 8px;
-  }
+  label { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; }
 
-  label:hover {
-    background: var(--hover);
-  }
+  label:hover { background: var(--hover); }
 
-  .known {
-    opacity: 0.55;
-  }
+  .known { opacity: 0.55; }
 
-  .text {
-    display: grid;
-    min-width: 0;
-    gap: 1px;
-  }
+  .text { display: grid; min-width: 0; gap: 1px; }
 
-  strong {
-    font-size: 13px;
-  }
+  strong { font-size: 13px; }
 
-  em {
-    color: var(--text-3);
-    font-style: normal;
-    font-weight: 400;
-  }
+  em { color: var(--text-3); font-style: normal; font-weight: 400; }
 
-  small {
-    overflow: hidden;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 10.8px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  small { overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: 10.8px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .apps {
-    color: #b7befa;
-    font-family: inherit;
-  }
+  .apps { color: #b7befa; font-family: inherit; }
 </style>

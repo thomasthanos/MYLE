@@ -122,160 +122,53 @@
 </div>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
   /* The form scrolls, not the glass element (see BiosRestartDialog). */
-  .dialog {
-    display: flex;
-    flex-direction: column;
-    width: min(570px, 100%);
-    max-height: calc(100vh - 48px);
-    border-radius: var(--radius-xl);
-  }
+  .dialog { display: flex; flex-direction: column; width: min(570px, 100%); max-height: calc(100vh - 48px); border-radius: var(--radius-xl); }
 
-  form {
-    display: grid;
-    gap: 17px;
-    min-height: 0;
-    padding: 20px;
-    overflow: auto;
-    border-radius: inherit;
-  }
+  form { display: grid; gap: 17px; min-height: 0; padding: 20px; overflow: auto; border-radius: inherit; }
 
-  header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 
-  h2 {
-    font-size: 17px;
-  }
+  h2 { font-size: 17px; }
 
-  header p {
-    margin-top: 3px;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  header p { margin-top: 3px; color: var(--text-3); font-size: 12px; }
 
-  .field {
-    display: grid;
-    gap: 7px;
-  }
+  .field { display: grid; gap: 7px; }
 
-  .field > span {
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
+  .field > span { color: var(--text-2); font-size: 12px; font-weight: 600; }
 
-  .field small {
-    color: var(--text-3);
-    font-size: 10px;
-    font-weight: 400;
-  }
+  .field small { color: var(--text-3); font-size: 10px; font-weight: 400; }
 
-  .paths {
-    display: grid;
-    gap: 5px;
-    max-height: 150px;
-    overflow: auto;
-  }
+  .paths { display: grid; gap: 5px; max-height: 150px; overflow: auto; }
 
-  .path {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 6px 5px 9px;
-    border: 1px solid rgb(255 255 255 / 0.055);
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.12);
-  }
+  .path { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 5px 6px 5px 9px; border: 1px solid rgb(255 255 255 / 0.055); border-radius: 8px; background: rgb(0 0 0 / 0.12); }
 
   .path > span,
-  .picked {
-    overflow: hidden;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
+  .picked { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
 
-  .remove {
-    color: rgb(255 145 145 / 0.68);
-  }
+  .remove { color: rgb(255 145 145 / 0.68); }
 
-  .empty {
-    color: var(--text-3);
-  }
+  .empty { color: var(--text-3); }
 
-  p.empty {
-    padding: 9px 10px;
-    border: 1px dashed rgb(255 255 255 / 0.07);
-    border-radius: 8px;
-    font-size: 11.5px;
-  }
+  p.empty { padding: 9px 10px; border: 1px dashed rgb(255 255 255 / 0.07); border-radius: 8px; font-size: 11.5px; }
 
-  .add {
-    justify-self: start;
-  }
+  .add { justify-self: start; }
 
-  .path-picker {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
+  .path-picker { display: flex; align-items: center; gap: 7px; }
 
-  .picked {
-    flex: 1;
-    min-width: 0;
-    padding: 8px 10px;
-    border: 1px solid rgb(255 255 255 / 0.055);
-    border-radius: 9px;
-    background: rgb(0 0 0 / 0.14);
-  }
+  .picked { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid rgb(255 255 255 / 0.055); border-radius: 9px; background: rgb(0 0 0 / 0.14); }
 
-  .auto {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 11px 12px;
-  }
+  .auto { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 11px 12px; }
 
-  .auto > span {
-    display: grid;
-    gap: 2px;
-  }
+  .auto > span { display: grid; gap: 2px; }
 
-  .auto strong {
-    font-size: 12.5px;
-  }
+  .auto strong { font-size: 12.5px; }
 
-  .auto small {
-    color: var(--text-3);
-    font-size: 11px;
-  }
+  .auto small { color: var(--text-3); font-size: 11px; }
 
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
+  footer { display: flex; justify-content: flex-end; gap: 8px; }
 
-  button:disabled {
-    opacity: 0.45;
-    pointer-events: none;
-  }
+  button:disabled { opacity: 0.45; pointer-events: none; }
 </style>

@@ -109,41 +109,18 @@
 </div>
 
 <style>
-  .console {
-    margin-top: 14px;
-    border-top: 1px solid rgb(255 255 255 / 0.065);
-  }
+  .console { margin-top: 14px; border-top: 1px solid rgb(255 255 255 / 0.065); }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    min-height: 38px;
-    padding-top: 8px;
-  }
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 38px; padding-top: 8px; }
 
   .toggle,
-  .phase {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--text-2);
-    font-size: 11.5px;
-  }
+  .phase { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 11.5px; }
 
   .toggle:hover { color: var(--text-1); }
   .toggle :global(svg:last-child) { transition: transform var(--dur-med) var(--ease-out); }
   .toggle :global(svg.flip) { transform: rotate(180deg); }
 
-  .count {
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.07);
-    color: var(--text-3);
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-  }
+  .count { padding: 1px 6px; border-radius: 999px; background: rgb(255 255 255 / 0.07); color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
   .phase { margin-left: auto; color: var(--text-3); }
   .phase + .btn { margin-left: 0; }
@@ -151,42 +128,18 @@
   .copy { width: 26px; height: 26px; }
   .toolbar > .btn { margin-left: auto; }
 
-  .collapse {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--dur-med) var(--ease-out);
-  }
+  .collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-med) var(--ease-out); }
 
   .collapse.open { grid-template-rows: 1fr; }
   .inner { position: relative; min-height: 0; overflow: hidden; }
 
-  .scroll {
-    max-height: 210px;
-    margin-top: 3px;
-    padding: 10px 11px;
-    overflow: auto;
-    border: 1px solid rgb(255 255 255 / 0.055);
-    border-radius: var(--radius-sm);
-    background: rgb(0 0 0 / 0.3);
-    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.35);
-  }
+  .scroll { max-height: 210px; margin-top: 3px; padding: 10px 11px; overflow: auto; border: 1px solid rgb(255 255 255 / 0.055); border-radius: var(--radius-sm); background: rgb(0 0 0 / 0.3); box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.35); }
 
-  pre {
-    margin: 0;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+  pre { margin: 0; color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
   .empty,
   .trimmed,
-  .stop-note {
-    color: var(--text-3);
-    font-size: 10.5px;
-  }
+  .stop-note { color: var(--text-3); font-size: 10.5px; }
 
   .empty { font-family: var(--font-mono); }
   .trimmed { margin-bottom: 5px; font-style: italic; }

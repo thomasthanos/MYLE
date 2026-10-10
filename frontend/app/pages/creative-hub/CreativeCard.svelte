@@ -149,150 +149,39 @@
 <style>
   /* 3D glass card: lit top edge, inner depth, and a lift on hover.
      No backdrop-filter here: it sits inside the content panel. */
-  .card {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-    padding: 16px 16px 14px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: var(--radius-lg);
-    background:
-      var(--grain),
-      linear-gradient(180deg, rgb(200 210 255 / 0.09), rgb(200 210 255 / 0.025) 60%, rgb(0 0 0 / 0.06));
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.12),
-      inset 0 -1px 0 rgb(0 0 0 / 0.25),
-      var(--elev-2);
-    transition:
-      transform var(--dur-med) var(--ease-out),
-      border-color var(--dur-fast),
-      box-shadow var(--dur-med) var(--ease-out);
-  }
+  .card { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px 16px 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: var(--radius-lg); background: var(--grain), linear-gradient(180deg, rgb(200 210 255 / 0.09), rgb(200 210 255 / 0.025) 60%, rgb(0 0 0 / 0.06)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-2); transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med) var(--ease-out); }
 
-  .card:hover {
-    transform: translateY(-2px);
-    border-color: rgb(255 255 255 / 0.16);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.18),
-      inset 0 -1px 0 rgb(0 0 0 / 0.25),
-      var(--elev-3);
-  }
+  .card:hover { transform: translateY(-2px); border-color: rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-3); }
 
-  .card.working {
-    border-color: rgb(var(--accent-rgb) / 0.4);
-  }
+  .card.working { border-color: rgb(var(--accent-rgb) / 0.4); }
 
-  .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
-  .icon {
-    display: grid;
-    place-items: center;
-    width: 46px;
-    height: 46px;
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: 13px;
-    background: linear-gradient(160deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.03));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
-    color: var(--accent);
-  }
+  .icon { display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 13px; background: linear-gradient(160deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.03)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); color: var(--accent); }
 
-  img {
-    border-radius: 8px;
-    object-fit: contain;
-  }
+  img { border-radius: 8px; object-fit: contain; }
 
-  .chip {
-    padding: 3px 9px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.04);
-    color: var(--text-3);
-    font-size: 11.5px;
-    text-transform: capitalize;
-  }
+  .chip { padding: 3px 9px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 999px; background: rgb(255 255 255 / 0.04); color: var(--text-3); font-size: 11.5px; text-transform: capitalize; }
 
-  h3 {
-    margin-top: 2px;
-    font-size: 15.5px;
-  }
+  h3 { margin-top: 2px; font-size: 15.5px; }
 
-  .desc {
-    flex: 1;
-    color: var(--text-2);
-    font-size: 12.5px;
-    line-height: 1.5;
-  }
+  .desc { flex: 1; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 
-  .foot {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 6px;
-  }
+  .foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 
-  .meta {
-    color: var(--text-3);
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-  }
+  .meta { color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
-  .progress {
-    flex: 1;
-    display: grid;
-    gap: 5px;
-    min-width: 0;
-  }
+  .progress { flex: 1; display: grid; gap: 5px; min-width: 0; }
 
-  .status {
-    overflow: hidden;
-    color: var(--text-2);
-    font-size: 11.5px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-variant-numeric: tabular-nums;
-  }
+  .status { overflow: hidden; color: var(--text-2); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
-  .file {
-    overflow: hidden;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
+  .file { overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 
-  .bar {
-    position: relative;
-    height: 5px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: rgb(0 0 0 / 0.3);
-    box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.4);
-  }
+  .bar { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: rgb(0 0 0 / 0.3); box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.4); }
 
-  .fill {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: var(--accent-grad);
-    box-shadow: 0 0 10px var(--accent-glow);
-    transform-origin: left center;
-    transform: scaleX(0);
-    transition: transform 160ms linear;
-  }
+  .fill { position: absolute; inset: 0; border-radius: inherit; background: var(--accent-grad); box-shadow: 0 0 10px var(--accent-glow); transform-origin: left center; transform: scaleX(0); transition: transform 160ms linear; }
 
-  .indeterminate .fill {
-    width: 35%;
-    transition: none;
-    animation: sweep 1.2s var(--ease-in-out) infinite;
-  }
+  .indeterminate .fill { width: 35%; transition: none; animation: sweep 1.2s var(--ease-in-out) infinite; }
 
   @keyframes sweep {
     from {
@@ -304,25 +193,7 @@
   }
 
   /* Revert button: same size/layout as the primary, but muted amber tint */
-  .btn.revert {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid rgb(255 200 80 / 0.25);
-    border-radius: var(--radius-md, 8px);
-    background: rgb(255 200 80 / 0.08);
-    color: rgb(255 215 100);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition:
-      background var(--dur-fast),
-      border-color var(--dur-fast);
-  }
+  .btn.revert { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid rgb(255 200 80 / 0.25); border-radius: var(--radius-md, 8px); background: rgb(255 200 80 / 0.08); color: rgb(255 215 100); font-size: 13px; font-weight: 500; cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }
 
-  .btn.revert:hover {
-    background: rgb(255 200 80 / 0.16);
-    border-color: rgb(255 200 80 / 0.45);
-  }
+  .btn.revert:hover { background: rgb(255 200 80 / 0.16); border-color: rgb(255 200 80 / 0.45); }
 </style>

@@ -124,89 +124,29 @@
 </div>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 91;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: var(--scrim);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
-  .dialog {
-    width: min(440px, 100%);
-    border-radius: var(--radius-xl);
-  }
+  .dialog { width: min(440px, 100%); border-radius: var(--radius-xl); }
 
-  form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    padding: 20px;
-  }
+  form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 20px; }
 
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+  header { display: flex; align-items: center; justify-content: space-between; }
 
-  h2 {
-    font-size: 17px;
-  }
+  h2 { font-size: 17px; }
 
-  p {
-    color: var(--text-2);
-    font-size: 12.5px;
-    line-height: 1.5;
-  }
+  p { color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 
-  .path {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .path { min-width: 0; overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .sample {
-    display: grid;
-    gap: 3px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
+  .sample { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 
-  .sample li {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 6px 10px;
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.18);
-    font-size: 12px;
-  }
+  .sample li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-radius: 8px; background: rgb(0 0 0 / 0.18); font-size: 12px; }
 
-  .sample small {
-    color: var(--text-3);
-  }
+  .sample small { color: var(--text-3); }
 
-  .hint {
-    color: #ffd08a;
-    font-size: 11.5px;
-  }
+  .hint { color: #ffd08a; font-size: 11.5px; }
 
-  .error {
-    color: #ff9d9d;
-  }
+  .error { color: #ff9d9d; }
 
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
-  }
+  footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 </style>

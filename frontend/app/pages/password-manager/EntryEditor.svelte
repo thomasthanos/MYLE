@@ -400,20 +400,9 @@
 <style>
   /* The same readable width as the entry it edits; two columns when the
      panel is wide enough, so the whole form shows at 1080p. */
-  .editor {
-    display: grid;
-    gap: 14px;
-    width: min(100%, 760px);
-    margin: 0 auto;
-    container: editor / inline-size;
-  }
+  .editor { display: grid; gap: 14px; width: min(100%, 760px); margin: 0 auto; container: editor / inline-size; }
 
-  .grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-  }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 
   @container editor (min-width: 600px) {
     .grid {
@@ -436,217 +425,73 @@
     .totp { grid-area: totp; }
   }
 
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+  header { display: flex; align-items: center; justify-content: space-between; }
 
-  h2 {
-    font-size: 17px;
-  }
+  h2 { font-size: 17px; }
 
-  .star.on {
-    color: #ffd166;
-  }
+  .star.on { color: #ffd166; }
 
-  .field {
-    display: grid;
-    gap: 6px;
-  }
+  .field { display: grid; gap: 6px; }
 
-  .field > span {
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
+  .field > span { color: var(--text-2); font-size: 12px; font-weight: 600; }
 
-  .field small {
-    margin-left: 6px;
-    color: var(--text-3);
-    font-size: 10.5px;
-    font-weight: 400;
-  }
+  .field small { margin-left: 6px; color: var(--text-3); font-size: 10.5px; font-weight: 400; }
 
   .password-row,
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
+  .row { display: flex; align-items: center; gap: 6px; }
 
   .password-row .input,
-  .row .input {
-    flex: 1;
-    min-width: 0;
-  }
+  .row .input { flex: 1; min-width: 0; }
 
-  .mono {
-    font-family: var(--font-mono);
-  }
+  .mono { font-family: var(--font-mono); }
 
-  .field .duplicate {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin: 0;
-    color: #ffd18f;
-    font-size: 11.5px;
-  }
+  .field .duplicate { display: flex; align-items: center; gap: 5px; margin: 0; color: #ffd18f; font-size: 11.5px; }
 
-  footer .keys {
-    margin-right: auto;
-    align-self: center;
-    color: var(--text-3);
-    font-size: 11px;
-  }
+  footer .keys { margin-right: auto; align-self: center; color: var(--text-3); font-size: 11px; }
 
   /* A phone's narrow row: the generator by its icon only. */
-  :global(html.mobile) .generate {
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    justify-content: center;
-  }
+  :global(html.mobile) .generate { width: 40px; height: 40px; padding: 0; justify-content: center; }
 
-  :global(html.mobile) .generate .label {
-    display: none;
-  }
+  :global(html.mobile) .generate .label { display: none; }
 
-  .menu {
-    padding: 0;
-  }
+  .menu { padding: 0; }
 
-  .add {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    justify-self: start;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .add { display: inline-flex; align-items: center; gap: 5px; justify-self: start; color: var(--text-3); font-size: 12px; }
 
-  .add:hover {
-    color: var(--text-1);
-  }
+  .add:hover { color: var(--text-1); }
 
-  .apps {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
+  .apps { display: flex; flex-wrap: wrap; gap: 6px; }
 
-  .app-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    min-width: 0;
-    padding: 3px 5px 3px 10px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.25);
-    border-radius: 999px;
-    background: rgb(var(--accent-rgb) / 0.1);
-    font-size: 12px;
-  }
+  .app-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 3px 5px 3px 10px; border: 1px solid rgb(var(--accent-rgb) / 0.25); border-radius: 999px; background: rgb(var(--accent-rgb) / 0.1); font-size: 12px; }
 
-  .app-chip code {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 10.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .app-chip code { min-width: 0; overflow: hidden; color: var(--text-3); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .app-chip button {
-    display: grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
-    flex: none;
-    border-radius: 50%;
-    color: var(--text-3);
-  }
+  .app-chip button { display: grid; place-items: center; width: 18px; height: 18px; flex: none; border-radius: 50%; color: var(--text-3); }
 
-  .app-chip button:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .app-chip button:hover { background: var(--hover); color: var(--text-1); }
 
-  .totp-set {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 0 12px;
-    border: 1px solid rgb(74 222 128 / 0.22);
-    border-radius: 10px;
-    background: rgb(74 222 128 / 0.06);
-    color: #86efac;
-    font-size: 12.5px;
-  }
+  .totp-set { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; border: 1px solid rgb(74 222 128 / 0.22); border-radius: 10px; background: rgb(74 222 128 / 0.06); color: #86efac; font-size: 12.5px; }
 
-  .totp-set span {
-    flex: 1;
-    color: var(--text-2);
-  }
+  .totp-set span { flex: 1; color: var(--text-2); }
 
-  .totp-set .muted {
-    color: var(--text-3);
-  }
+  .totp-set .muted { color: var(--text-3); }
 
-  .link-btn {
-    color: #b9c2ff;
-    font-size: 12px;
-  }
+  .link-btn { color: #b9c2ff; font-size: 12px; }
 
-  .link-btn:hover {
-    text-decoration: underline;
-  }
+  .link-btn:hover { text-decoration: underline; }
 
-  .link-btn.danger {
-    color: #ff9d9d;
-  }
+  .link-btn.danger { color: #ff9d9d; }
 
-  .totp-note {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin: 0;
-    color: var(--text-3);
-    font-size: 11.5px;
-    line-height: 1.35;
-  }
+  .totp-note { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text-3); font-size: 11.5px; line-height: 1.35; }
 
-  .totp-note.good {
-    color: #86efac;
-  }
+  .totp-note.good { color: #86efac; }
 
-  .totp-note.bad {
-    color: #ffb6a8;
-  }
+  .totp-note.bad { color: #ffb6a8; }
 
-  .notes {
-    height: auto;
-    padding: 9px 12px;
-    resize: vertical;
-    line-height: 1.45;
-  }
+  .notes { height: auto; padding: 9px 12px; resize: vertical; line-height: 1.45; }
 
   /* Save stays in sight while the form scrolls. */
-  footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin: 0 -10px -6px;
-    padding: 10px 10px 6px;
-    border-top: 1px solid rgb(255 255 255 / 0.06);
-    background: var(--solid-fill-bottom);
-    border-radius: 0 0 12px 12px;
-  }
+  footer { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -10px -6px; padding: 10px 10px 6px; border-top: 1px solid rgb(255 255 255 / 0.06); background: var(--solid-fill-bottom); border-radius: 0 0 12px 12px; }
 
   @media (max-height: 1000px) {
     .editor,

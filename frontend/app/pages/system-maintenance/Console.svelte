@@ -97,129 +97,44 @@
 </div>
 
 <style>
-  .console {
-    margin-top: 2px;
-    overflow: hidden;
-    border: 1px solid rgb(255 255 255 / 0.055);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.1);
-  }
+  .console { margin-top: 2px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.055); border-radius: 10px; background: rgb(0 0 0 / 0.1); }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 38px;
-    padding: 5px 8px 5px 10px;
-    transition: border-color var(--dur-fast);
-  }
+  .bar { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 5px 8px 5px 10px; transition: border-color var(--dur-fast); }
 
-  .console.expanded .bar {
-    border-bottom: 1px solid rgb(255 255 255 / 0.055);
-  }
+  .console.expanded .bar { border-bottom: 1px solid rgb(255 255 255 / 0.055); }
 
-  .toggle {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--text-2);
-    font-size: 12.5px;
-    font-weight: 500;
-  }
+  .toggle { display: flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 12.5px; font-weight: 500; }
 
-  .toggle:hover {
-    color: var(--text-1);
-  }
+  .toggle:hover { color: var(--text-1); }
 
-  .toggle :global(.flip) {
-    transform: rotate(180deg);
-  }
+  .toggle :global(.flip) { transform: rotate(180deg); }
 
-  .toggle :global(svg:last-child) {
-    transition: transform var(--dur-med) var(--ease-out);
-  }
+  .toggle :global(svg:last-child) { transition: transform var(--dur-med) var(--ease-out); }
 
-  .count {
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.07);
-    color: var(--text-3);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-  }
+  .count { padding: 1px 6px; border-radius: 999px; background: rgb(255 255 255 / 0.07); color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-  .phase {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .phase { display: flex; align-items: center; gap: 6px; margin-left: auto; color: var(--text-3); font-size: 11.5px; }
 
-  .bar .btn {
-    margin-left: auto;
-  }
+  .bar .btn { margin-left: auto; }
 
-  .phase + .btn {
-    margin-left: 0;
-  }
+  .phase + .btn { margin-left: 0; }
 
   /* Collapses without needing to know the content height. */
-  .wrap {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--dur-med) var(--ease-out);
-  }
+  .wrap { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-med) var(--ease-out); }
 
-  .wrap.open {
-    grid-template-rows: 1fr;
-  }
+  .wrap.open { grid-template-rows: 1fr; }
 
-  .wrap > div {
-    position: relative;
-    min-height: 0;
-    overflow: hidden;
-  }
+  .wrap > div { position: relative; min-height: 0; overflow: hidden; }
 
-  .scroll {
-    max-height: 260px;
-    padding: 12px 14px;
-    overflow: auto;
-    background: rgb(5 8 14 / 0.48);
-    box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.22);
-  }
+  .scroll { max-height: 260px; padding: 12px 14px; overflow: auto; background: rgb(5 8 14 / 0.48); box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.22); }
 
-  pre {
-    margin: 0;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+  pre { margin: 0; color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 
-  .idle {
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
+  .idle { color: var(--text-3); font-family: var(--font-mono); font-size: 11.5px; }
 
-  .trimmed {
-    margin-bottom: 6px;
-    color: var(--text-3);
-    font-size: 11px;
-    font-style: italic;
-  }
+  .trimmed { margin-bottom: 6px; color: var(--text-3); font-size: 11px; font-style: italic; }
 
-  .jump {
-    position: absolute;
-    right: 12px;
-    bottom: 10px;
-  }
+  .jump { position: absolute; right: 12px; bottom: 10px; }
 
-  :global(:root.solid) .wrap {
-    transition: none;
-  }
+  :global(:root.solid) .wrap { transition: none; }
 </style>

@@ -167,275 +167,84 @@
 </div>
 
 <style>
-  .clean {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 14px;
-    min-height: 0;
-    overflow: auto;
-  }
+  .clean { display: flex; flex: 1; flex-direction: column; gap: 14px; min-height: 0; overflow: auto; }
 
   .hero,
   .actions,
   .commits,
-  .keys {
-    flex: none;
-  }
+  .keys { flex: none; }
 
-  .hero {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 4px 2px 0;
-  }
+  .hero { display: flex; align-items: center; gap: 12px; padding: 4px 2px 0; }
 
-  .hero-icon {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    background: rgb(62 207 142 / 0.12);
-    color: #6fdba5;
-  }
+  .hero-icon { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: rgb(62 207 142 / 0.12); color: #6fdba5; }
 
-  .hero-text {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
+  .hero-text { display: grid; gap: 2px; min-width: 0; }
 
-  .hero-text strong {
-    font-size: 14px;
-  }
+  .hero-text strong { font-size: 14px; }
 
-  .hero-text span {
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .hero-text span { color: var(--text-3); font-size: 12px; }
 
-  .link {
-    padding: 0;
-    color: #b7befa;
-    font-size: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
+  .link { padding: 0; color: #b7befa; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
-  .actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px;
-  }
+  .actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 
-  .action {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    min-width: 0;
-    padding: 11px 13px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 11px;
-    background: rgb(255 255 255 / 0.03);
-    color: var(--text-2);
-    text-align: left;
-    transition: background var(--dur-fast), border-color var(--dur-fast);
-  }
+  .action { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 11px 13px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 11px; background: rgb(255 255 255 / 0.03); color: var(--text-2); text-align: left; transition: background var(--dur-fast), border-color var(--dur-fast); }
 
-  .action:hover:not(:disabled) {
-    border-color: rgb(255 255 255 / 0.13);
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .action:hover:not(:disabled) { border-color: rgb(255 255 255 / 0.13); background: var(--hover); color: var(--text-1); }
 
-  .action.accent {
-    border-color: rgb(var(--accent-rgb) / 0.35);
-    background: rgb(var(--accent-rgb) / 0.1);
-    color: #c9cffb;
-  }
+  .action.accent { border-color: rgb(var(--accent-rgb) / 0.35); background: rgb(var(--accent-rgb) / 0.1); color: #c9cffb; }
 
-  .action > span {
-    display: grid;
-    gap: 1px;
-    min-width: 0;
-  }
+  .action > span { display: grid; gap: 1px; min-width: 0; }
 
-  .action strong {
-    color: var(--text-1);
-    font-size: 12.8px;
-    font-weight: 600;
-  }
+  .action strong { color: var(--text-1); font-size: 12.8px; font-weight: 600; }
 
-  .action small {
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .action small { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .commits {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 12px;
-    background: rgb(0 0 0 / 0.14);
-  }
+  .commits { display: flex; flex-direction: column; min-height: 0; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 12px; background: rgb(0 0 0 / 0.14); }
 
-  .commits header {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 10px 14px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.06);
-  }
+  .commits header { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgb(255 255 255 / 0.06); }
 
-  h3 {
-    margin: 0;
-    font-size: 12.8px;
-    font-weight: 620;
-  }
+  h3 { margin: 0; font-size: 12.8px; font-weight: 620; }
 
-  .released {
-    color: #7fe0b0;
-    font-size: 11.5px;
-  }
+  .released { color: #7fe0b0; font-size: 11.5px; }
 
-  ol {
-    margin: 0;
-    padding: 4px;
-    list-style: none;
-  }
+  ol { margin: 0; padding: 4px; list-style: none; }
 
-  li {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-width: 0;
-    padding: 6px 10px;
-    border-radius: 8px;
-    font-size: 12.3px;
-  }
+  li { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 6px 10px; border-radius: 8px; font-size: 12.3px; }
 
-  li:hover {
-    background: var(--hover);
-  }
+  li:hover { background: var(--hover); }
 
-  .dot {
-    display: inline-flex;
-    flex: none;
-    color: var(--text-3);
-  }
+  .dot { display: inline-flex; flex: none; color: var(--text-3); }
 
-  li.unreleased .dot {
-    color: #a9b3ff;
-  }
+  li.unreleased .dot { color: #a9b3ff; }
 
-  .subject {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-1);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .subject { flex: 1; min-width: 0; overflow: hidden; color: var(--text-1); text-overflow: ellipsis; white-space: nowrap; }
 
-  .pill {
-    flex: none;
-    padding: 0 7px;
-    border-radius: 999px;
-    background: rgb(255 196 92 / 0.14);
-    color: #ffd08a;
-    font-size: 10.5px;
-    line-height: 17px;
-  }
+  .pill { flex: none; padding: 0 7px; border-radius: 999px; background: rgb(255 196 92 / 0.14); color: #ffd08a; font-size: 10.5px; line-height: 17px; }
 
-  .meta {
-    flex: none;
-    color: var(--text-3);
-    font-size: 11px;
-  }
+  .meta { flex: none; color: var(--text-3); font-size: 11px; }
 
-  .sha {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 6px;
-    border-radius: 6px;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 11px;
-  }
+  .sha { display: inline-flex; flex: none; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 6px; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
 
-  button.sha:hover {
-    background: rgb(255 255 255 / 0.06);
-    color: var(--text-1);
-  }
+  button.sha:hover { background: rgb(255 255 255 / 0.06); color: var(--text-1); }
 
-  .none {
-    color: var(--text-3);
-  }
+  .none { color: var(--text-3); }
 
-  li.divider {
-    gap: 6px;
-    padding: 4px 10px;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-  }
+  li.divider { gap: 6px; padding: 4px 10px; color: var(--text-3); font-family: var(--font-mono); font-size: 10.5px; }
 
-  li.divider::after {
-    flex: 1;
-    height: 1px;
-    background: rgb(255 255 255 / 0.07);
-    content: "";
-  }
+  li.divider::after { flex: 1; height: 1px; background: rgb(255 255 255 / 0.07); content: ""; }
 
-  li.divider:hover {
-    background: none;
-  }
+  li.divider:hover { background: none; }
 
-  li.unreleased .subject {
-    font-weight: 500;
-  }
+  li.unreleased .subject { font-weight: 500; }
 
-  .quiet {
-    display: grid;
-    place-items: center;
-    min-height: 80px;
-    color: var(--text-3);
-  }
+  .quiet { display: grid; place-items: center; min-height: 80px; color: var(--text-3); }
 
-  .error {
-    margin: 10px 14px;
-    color: #ff9d9d;
-    font-size: 12px;
-  }
+  .error { margin: 10px 14px; color: #ff9d9d; font-size: 12px; }
 
-  .keys {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    margin: auto 0 0;
-    padding-top: 4px;
-    color: var(--text-3);
-    font-size: 11px;
-  }
+  .keys { display: flex; flex-wrap: wrap; gap: 14px; margin: auto 0 0; padding-top: 4px; color: var(--text-3); font-size: 11px; }
 
-  kbd {
-    padding: 0 5px;
-    border: 1px solid rgb(255 255 255 / 0.12);
-    border-bottom-width: 2px;
-    border-radius: 5px;
-    background: rgb(255 255 255 / 0.04);
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-  }
+  kbd { padding: 0 5px; border: 1px solid rgb(255 255 255 / 0.12); border-bottom-width: 2px; border-radius: 5px; background: rgb(255 255 255 / 0.04); color: var(--text-2); font-family: var(--font-mono); font-size: 10.5px; }
 
   @container changes (max-width: 620px) {
     .action {

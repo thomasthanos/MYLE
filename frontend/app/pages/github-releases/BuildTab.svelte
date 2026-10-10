@@ -237,226 +237,72 @@
 </div>
 
 <style>
-  .build {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 9px;
-    min-height: 0;
-    padding: 14px 16px 16px;
-    overflow-y: auto;
-  }
+  .build { display: flex; flex: 1; flex-direction: column; gap: 9px; min-height: 0; padding: 14px 16px 16px; overflow-y: auto; }
 
   .bar,
   .cmd,
   .last,
-  .artifacts {
-    flex: none;
-  }
+  .artifacts { flex: none; }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
+  .bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-  .bar :global(.select) {
-    flex: 1;
-    min-width: 0;
-  }
+  .bar :global(.select) { flex: 1; min-width: 0; }
 
-  .bar .input {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
+  .bar .input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; }
 
-  .none {
-    flex: 1;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
+  .none { flex: 1; color: var(--text-3); font-size: 12.5px; }
 
-  .cmd {
-    overflow: hidden;
-    color: var(--text-3);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .cmd { overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .last {
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .last { color: var(--text-3); font-size: 11.5px; }
 
-  .pipeline {
-    display: flex;
-    flex: none;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
+  .pipeline { display: flex; flex: none; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
 
-  .pipeline li {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 9px 3px 6px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 99px;
-    background: rgb(255 255 255 / 0.03);
-    color: var(--text-2);
-    font-size: 11.8px;
-  }
+  .pipeline li { display: flex; align-items: center; gap: 5px; padding: 3px 9px 3px 6px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 99px; background: rgb(255 255 255 / 0.03); color: var(--text-2); font-size: 11.8px; }
 
-  .pipeline .n {
-    color: var(--text-3);
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-  }
+  .pipeline .n { color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
-  .pipeline li :global(svg) {
-    color: var(--text-3);
-  }
+  .pipeline li :global(svg) { color: var(--text-3); }
 
-  .pipeline .p-done :global(svg) {
-    color: #7ee2a8;
-  }
+  .pipeline .p-done :global(svg) { color: #7ee2a8; }
 
-  .pipeline .p-running {
-    border-color: rgb(var(--accent-rgb) / 0.4);
-    background: rgb(var(--accent-rgb) / 0.12);
-    color: var(--text-1);
-  }
+  .pipeline .p-running { border-color: rgb(var(--accent-rgb) / 0.4); background: rgb(var(--accent-rgb) / 0.12); color: var(--text-1); }
 
-  .pipeline .p-running :global(svg) {
-    color: rgb(var(--accent-rgb));
-  }
+  .pipeline .p-running :global(svg) { color: rgb(var(--accent-rgb)); }
 
-  .pipeline .p-failed {
-    border-color: rgb(255 120 120 / 0.35);
-    color: #ffb3b3;
-  }
+  .pipeline .p-failed { border-color: rgb(255 120 120 / 0.35); color: #ffb3b3; }
 
-  .pipeline .p-failed :global(svg) {
-    color: #ff9d9d;
-  }
+  .pipeline .p-failed :global(svg) { color: #ff9d9d; }
 
-  .partial {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border: 1px solid rgb(255 196 92 / 0.25);
-    border-radius: 10px;
-    background: rgb(255 196 92 / 0.07);
-    color: var(--text-2);
-    font-size: 12px;
-  }
+  .partial { display: flex; flex: none; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgb(255 196 92 / 0.25); border-radius: 10px; background: rgb(255 196 92 / 0.07); color: var(--text-2); font-size: 12px; }
 
-  .partial > :global(svg) {
-    flex: none;
-    color: #ffd08a;
-  }
+  .partial > :global(svg) { flex: none; color: #ffd08a; }
 
-  .partial span {
-    flex: 1;
-    min-width: 0;
-  }
+  .partial span { flex: 1; min-width: 0; }
 
-  .partial code {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
+  .partial code { font-family: var(--font-mono); font-size: 11.5px; }
 
-  .none-made {
-    flex: none;
-    margin: 0;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .none-made { flex: none; margin: 0; color: var(--text-3); font-size: 12px; }
 
-  .quiet {
-    display: grid;
-    place-items: center;
-    align-content: center;
-    gap: 8px;
-    flex: 1;
-    min-height: 160px;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
+  .quiet { display: grid; place-items: center; align-content: center; gap: 8px; flex: 1; min-height: 160px; color: var(--text-3); font-size: 12.5px; }
 
-  .artifacts {
-    display: grid;
-    gap: 3px;
-    padding: 8px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 10px;
-    background: rgb(255 255 255 / 0.03);
-  }
+  .artifacts { display: grid; gap: 3px; padding: 8px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 10px; background: rgb(255 255 255 / 0.03); }
 
-  .art-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 2px 6px 6px;
-    color: var(--text-2);
-    font-size: 12px;
-  }
+  .art-head { display: flex; align-items: center; gap: 7px; padding: 2px 6px 6px; color: var(--text-2); font-size: 12px; }
 
-  .art-head span {
-    color: var(--text-3);
-  }
+  .art-head span { color: var(--text-3); }
 
-  .artifact {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 6px;
-    border-radius: 7px;
-  }
+  .artifact { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 7px; }
 
-  .artifact:hover {
-    background: var(--hover);
-  }
+  .artifact:hover { background: var(--hover); }
 
-  .art-text {
-    display: grid;
-    flex: 1;
-    min-width: 0;
-    gap: 1px;
-  }
+  .art-text { display: grid; flex: 1; min-width: 0; gap: 1px; }
 
-  .art-text strong {
-    overflow: hidden;
-    font-size: 12.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .art-text strong { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .art-text small {
-    overflow: hidden;
-    color: var(--text-3);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .art-text small { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .artifact .icon-btn {
-    width: 28px;
-    height: 28px;
-  }
+  .artifact .icon-btn { width: 28px; height: 28px; }
 
-  .error {
-    color: #ff9d9d;
-    font-size: 12.5px;
-  }
+  .error { color: #ff9d9d; font-size: 12.5px; }
 </style>

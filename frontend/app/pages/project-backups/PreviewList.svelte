@@ -169,10 +169,7 @@
   .env { font-family: var(--font-mono); font-size: 10.5px; }
   .skipped { color: rgb(245 188 95 / 0.85); font-size: 11px; overflow-wrap: anywhere; }
   .rules { display: flex; flex-wrap: wrap; gap: 4px; max-height: 92px; overflow: auto; }
-  .rule-chip {
-    display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 7px; border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 6px; background: rgb(255 255 255 / 0.03); color: var(--text-2); font-size: 10.5px;
-  }
+  .rule-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 7px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 6px; background: rgb(255 255 255 / 0.03); color: var(--text-2); font-size: 10.5px; }
   .rule-chip:hover { border-color: rgb(var(--accent-rgb) / 0.3); }
   .rule-chip.active { border-color: rgb(var(--accent-rgb) / 0.45); background: var(--selected); }
   .rule-name { font-family: var(--font-mono); }

@@ -154,28 +154,9 @@
 {/if}
 
 <style>
-  .tooltip {
-    position: fixed;
-    z-index: 300;
-    max-width: min(460px, calc(100vw - 16px));
-    padding: 6px 10px;
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: var(--radius-sm);
-    background: var(--tooltip-bg);
-    box-shadow: var(--elev-1);
-    color: var(--text-1);
-    font-size: 12px;
-    line-height: 1.45;
-    white-space: pre-line;
-    overflow-wrap: anywhere;
-    pointer-events: none;
-    visibility: hidden;
-  }
+  .tooltip { position: fixed; z-index: 300; max-width: min(460px, calc(100vw - 16px)); padding: 6px 10px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: var(--radius-sm); background: var(--tooltip-bg); box-shadow: var(--elev-1); color: var(--text-1); font-size: 12px; line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; visibility: hidden; }
 
-  .tooltip.placed {
-    visibility: visible;
-    animation: tip-in var(--dur-fast) var(--ease-out);
-  }
+  .tooltip.placed { visibility: visible; animation: tip-in var(--dur-fast) var(--ease-out); }
 
   @keyframes tip-in {
     from {

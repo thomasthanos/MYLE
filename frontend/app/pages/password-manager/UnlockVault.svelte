@@ -208,334 +208,109 @@
 </section>
 
 <style>
-  .unlock {
-    display: grid;
-    justify-items: center;
-    gap: 10px;
-    width: min(400px, 100%);
-    margin: 40px auto 0;
-    padding: 30px 28px 22px;
-    text-align: center;
-  }
+  .unlock { display: grid; justify-items: center; gap: 10px; width: min(400px, 100%); margin: 40px auto 0; padding: 30px 28px 22px; text-align: center; }
 
-  .lock {
-    display: grid;
-    place-items: center;
-    width: 58px;
-    height: 58px;
-    margin-bottom: 4px;
-    border-radius: 18px;
-    color: #cfd6ff;
-    background:
-      radial-gradient(circle at 50% 20%, rgb(var(--accent-rgb) / 0.32), transparent 70%),
-      rgb(var(--accent-rgb) / 0.1);
-    box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.25), 0 10px 30px -12px var(--accent-glow);
-    transition: transform var(--dur-med) var(--ease-out);
-  }
+  .lock { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 4px; border-radius: 18px; color: #cfd6ff; background: radial-gradient(circle at 50% 20%, rgb(var(--accent-rgb) / 0.32), transparent 70%), rgb(var(--accent-rgb) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.25), 0 10px 30px -12px var(--accent-glow); transition: transform var(--dur-med) var(--ease-out); }
 
-  .lock.open {
-    transform: scale(1.06);
-  }
+  .lock.open { transform: scale(1.06); }
 
-  h2 {
-    font-size: 18px;
-  }
+  h2 { font-size: 18px; }
 
-  p {
-    color: var(--text-2);
-    font-size: 12.5px;
-  }
+  p { color: var(--text-2); font-size: 12.5px; }
 
-  form {
-    display: grid;
-    gap: 10px;
-    width: 100%;
-    margin-top: 8px;
-  }
+  form { display: grid; gap: 10px; width: 100%; margin-top: 8px; }
 
-  .input {
-    height: 38px;
-    text-align: center;
-  }
+  .input { height: 38px; text-align: center; }
 
-  .mono {
-    font-family: var(--font-mono);
-    letter-spacing: 0.04em;
-  }
+  .mono { font-family: var(--font-mono); letter-spacing: 0.04em; }
 
-  .error {
-    color: #ff9d9d;
-    font-size: 12px;
-  }
+  .error { color: #ff9d9d; font-size: 12px; }
 
-  .btn.primary {
-    height: 38px;
-  }
+  .btn.primary { height: 38px; }
 
-  .hello {
-    width: 100%;
-    height: 42px;
-    margin-top: 8px;
-    font-size: 13.5px;
-  }
+  .hello { width: 100%; height: 42px; margin-top: 8px; font-size: 13.5px; }
 
-  .or {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .or { display: flex; align-items: center; gap: 10px; width: 100%; color: var(--text-3); font-size: 11.5px; }
 
   .or::before,
-  .or::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: rgb(255 255 255 / 0.08);
-  }
+  .or::after { content: ""; flex: 1; height: 1px; background: rgb(255 255 255 / 0.08); }
 
-  .link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-3); font-size: 12px; }
 
-  .link:hover {
-    color: var(--text-1);
-  }
+  .link:hover { color: var(--text-1); }
 
-  .unlock.recovering {
-    width: min(470px, 100%);
-    margin-top: 12px;
-    padding: 20px;
-    gap: 12px;
-    text-align: left;
-  }
+  .unlock.recovering { width: min(470px, 100%); margin-top: 12px; padding: 20px; gap: 12px; text-align: left; }
 
-  .recovery-intro {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    width: 100%;
-  }
+  .recovery-intro { display: flex; align-items: flex-start; gap: 14px; width: 100%; }
 
-  .recovery-icon {
-    flex: 0 0 48px;
-    width: 48px;
-    height: 48px;
-    border-radius: 15px;
-    margin: 0;
-  }
+  .recovery-icon { flex: 0 0 48px; width: 48px; height: 48px; border-radius: 15px; margin: 0; }
 
-  .recovery-intro h2 {
-    margin-bottom: 7px;
-    font-size: 21px;
-    line-height: 1.2;
-    letter-spacing: -0.025em;
-  }
+  .recovery-intro h2 { margin-bottom: 7px; font-size: 21px; line-height: 1.2; letter-spacing: -0.025em; }
 
-  .recovery-intro p {
-    line-height: 1.6;
-  }
+  .recovery-intro p { line-height: 1.6; }
 
-  .recovery-form {
-    margin: 0;
-    gap: 14px;
-  }
+  .recovery-form { margin: 0; gap: 14px; }
 
-  fieldset {
-    min-width: 0;
-    padding: 0;
-    margin: 0;
-    border: 0;
-  }
+  fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
 
-  legend {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    padding: 0;
-    margin-bottom: 10px;
-    font-size: 13px;
-    font-weight: 600;
-  }
+  legend { display: flex; align-items: center; gap: 9px; width: 100%; padding: 0; margin-bottom: 10px; font-size: 13px; font-weight: 600; }
 
-  .step {
-    display: grid;
-    place-items: center;
-    width: 23px;
-    height: 23px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.24);
-    border-radius: 7px;
-    background: rgb(var(--accent-rgb) / 0.1);
-    color: #cfd6ff;
-    font-size: 11px;
-  }
+  .step { display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid rgb(var(--accent-rgb) / 0.24); border-radius: 7px; background: rgb(var(--accent-rgb) / 0.1); color: #cfd6ff; font-size: 11px; }
 
-  .recovery-form .input {
-    width: 100%;
-    height: 43px;
-    text-align: left;
-    font-size: 13px;
-  }
+  .recovery-form .input { width: 100%; height: 43px; text-align: left; font-size: 13px; }
 
-  .code-help {
-    margin-top: 9px;
-    color: var(--text-2);
-    font-size: 11.5px;
-  }
+  .code-help { margin-top: 9px; color: var(--text-2); font-size: 11.5px; }
 
-  .code-help summary {
-    cursor: pointer;
-    width: fit-content;
-  }
+  .code-help summary { cursor: pointer; width: fit-content; }
 
-  .code-help p {
-    padding-top: 7px;
-    font-size: 11.5px;
-    line-height: 1.6;
-  }
+  .code-help p { padding-top: 7px; font-size: 11.5px; line-height: 1.6; }
 
-  .new-password {
-    border-top: 1px solid rgb(255 255 255 / 0.07);
-    padding-top: 14px;
-  }
+  .new-password { border-top: 1px solid rgb(255 255 255 / 0.07); padding-top: 14px; }
 
-  .new-password legend {
-    float: left;
-  }
+  .new-password legend { float: left; }
 
-  .field {
-    display: grid;
-    gap: 7px;
-    clear: both;
-  }
+  .field { display: grid; gap: 7px; clear: both; }
 
-  .field + .field {
-    margin-top: 14px;
-  }
+  .field + .field { margin-top: 14px; }
 
-  .field label {
-    color: var(--text-1);
-    font-size: 12px;
-    font-weight: 500;
-  }
+  .field label { color: var(--text-1); font-size: 12px; font-weight: 500; }
 
-  .password-input {
-    position: relative;
-  }
+  .password-input { position: relative; }
 
-  .password-input .input {
-    padding-right: 43px;
-  }
+  .password-input .input { padding-right: 43px; }
 
-  .reveal {
-    position: absolute;
-    inset: 4px 4px 4px auto;
-    display: grid;
-    place-items: center;
-    width: 35px;
-    border-radius: 7px;
-    color: var(--text-2);
-  }
+  .reveal { position: absolute; inset: 4px 4px 4px auto; display: grid; place-items: center; width: 35px; border-radius: 7px; color: var(--text-2); }
 
-  .reveal:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
+  .reveal:hover { background: var(--hover); color: var(--text-1); }
 
-  .password-feedback {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-  }
+  .password-feedback { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 
   .length-hint,
-  .match-feedback {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--text-2);
-    font-size: 11.5px;
-  }
+  .match-feedback { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: 11.5px; }
 
-  .met {
-    color: #5fd99a;
-  }
+  .met { color: #5fd99a; }
 
-  .input.bad {
-    border-color: rgb(255 120 120 / 0.55);
-  }
+  .input.bad { border-color: rgb(255 120 120 / 0.55); }
 
-  .match-feedback.error {
-    color: #ff9d9d;
-  }
+  .match-feedback.error { color: #ff9d9d; }
 
-  .recovery-error {
-    border: 1px solid rgb(255 120 120 / 0.2);
-    border-radius: 9px;
-    padding: 10px 12px;
-    background: rgb(255 120 120 / 0.06);
-    line-height: 1.5;
-  }
+  .recovery-error { border: 1px solid rgb(255 120 120 / 0.2); border-radius: 9px; padding: 10px 12px; background: rgb(255 120 120 / 0.06); line-height: 1.5; }
 
-  .btn.recover-button {
-    min-height: 43px;
-    height: auto;
-    padding: 10px 12px;
-    white-space: normal;
-    font-size: 13px;
-    font-weight: 600;
-  }
+  .btn.recover-button { min-height: 43px; height: auto; padding: 10px 12px; white-space: normal; font-size: 13px; font-weight: 600; }
 
-  .recover-button:disabled {
-    opacity: 1;
-    color: var(--text-2);
-    border-color: rgb(var(--accent-rgb) / 0.18);
-    background: rgb(var(--accent-rgb) / 0.1);
-    box-shadow: none;
-  }
+  .recover-button:disabled { opacity: 1; color: var(--text-2); border-color: rgb(var(--accent-rgb) / 0.18); background: rgb(var(--accent-rgb) / 0.1); box-shadow: none; }
 
-  .back-link {
-    justify-content: center;
-    width: 100%;
-    padding: 6px;
-    margin: 0;
-    color: var(--text-2);
-  }
+  .back-link { justify-content: center; width: 100%; padding: 6px; margin: 0; color: var(--text-2); }
 
   .link:focus-visible,
   .reveal:focus-visible,
   summary:focus-visible,
-  .recover-button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 3px;
-  }
+  .recover-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
   .link:disabled,
-  .reveal:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
+  .reveal:disabled { opacity: 0.5; cursor: default; }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
   @media (max-width: 560px) {
     .unlock.recovering {
@@ -552,13 +327,5 @@
     }
   }
 
-  .site-waiting {
-    margin: 0 0 4px;
-    padding: 8px 12px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.4);
-    border-radius: 10px;
-    background: rgb(var(--accent-rgb) / 0.12);
-    color: var(--text-1);
-    font-size: 12.5px;
-  }
+  .site-waiting { margin: 0 0 4px; padding: 8px 12px; border: 1px solid rgb(var(--accent-rgb) / 0.4); border-radius: 10px; background: rgb(var(--accent-rgb) / 0.12); color: var(--text-1); font-size: 12.5px; }
 </style>

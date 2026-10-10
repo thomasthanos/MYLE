@@ -261,22 +261,8 @@
   .error-banner { color: rgb(255 170 170 / 0.9); }
   .lock-banner { color: var(--text-2); }
   /* 3-Column Equal Height Grid */
-  .cards {
-    display: grid;
-    grid-template-columns: minmax(0, 560px);
-    align-items: stretch;
-    gap: 14px;
-  }
-  .tool-card {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-width: 0;
-    padding: 14px;
-    box-shadow: var(--elev-1);
-    transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med);
-  }
+  .cards { display: grid; grid-template-columns: minmax(0, 560px); align-items: stretch; gap: 14px; }
+  .tool-card { position: relative; display: flex; flex-direction: column; overflow: hidden; min-width: 0; padding: 14px; box-shadow: var(--elev-1); transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med); }
   .tool-card:hover:not(.active) { transform: translateY(-2px); border-color: rgb(255 255 255 / 0.095); box-shadow: var(--elev-2); }
   .tool-card.active { border-color: rgb(125 151 255 / 0.22); }
   .rim { position: absolute; inset: 0 14% auto; height: 1px; pointer-events: none; }
@@ -299,35 +285,11 @@
   .status.warn i { background: #e8ad55; }
   .status.error i { background: var(--danger); }
   /* Info strip */
-  .info-box {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 8px;
-    padding: 8px 10px;
-    border-radius: 10px;
-  }
-  .info-box strong {
-    display: block;
-    font-size: 10.8px;
-    font-weight: 600;
-    color: rgb(232 238 250 / 0.88);
-  }
-  .info-box p {
-    margin-top: 2px;
-    font-size: 9.6px;
-    line-height: 1.4;
-    color: var(--text-3);
-  }
+  .info-box { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; }
+  .info-box strong { display: block; font-size: 10.8px; font-weight: 600; color: rgb(232 238 250 / 0.88); }
+  .info-box p { margin-top: 2px; font-size: 9.6px; line-height: 1.4; color: var(--text-3); }
   /* Auto-Logon Specifics */
-  .account {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    margin-top: 10px;
-    padding: 8px 10px;
-  }
+  .account { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 10px; }
   .account.account-conflict { border-color: rgb(237 170 73 / 0.16); }
   .account-icon { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgb(81 215 166 / 0.12); border-radius: 10px; background: rgb(66 204 153 / 0.07); color: rgb(99 224 177 / 0.86); }
   .account-copy { display: grid; min-width: 0; }
@@ -335,82 +297,32 @@
   .account-copy strong { overflow: hidden; margin-top: 1px; color: rgb(235 241 248 / 0.9); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
   .account-copy code { overflow: hidden; margin-top: 1px; color: var(--text-3); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
   .badge.account-type { justify-self: end; border-color: rgb(77 209 159 / 0.12); color: rgb(117 218 181 / 0.7); white-space: nowrap; }
-  .auto-details {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 8px;
-  }
-  .auto-details > div {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    padding: 8px 10px;
-    border: 1px solid rgb(255 255 255 / 0.045);
-    border-radius: 9px;
-    background: linear-gradient(145deg, rgb(63 203 151 / 0.035), rgb(255 255 255 / 0.012));
-    color: rgb(93 211 167 / 0.72);
-  }
+  .auto-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .auto-details > div { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid rgb(255 255 255 / 0.045); border-radius: 9px; background: linear-gradient(145deg, rgb(63 203 151 / 0.035), rgb(255 255 255 / 0.012)); color: rgb(93 211 167 / 0.72); }
   .auto-details :global(svg) { flex: none; }
   .auto-details > div > div { display: grid; min-width: 0; }
   .auto-details strong { color: rgb(228 235 244 / 0.86); font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .auto-details span { color: var(--text-3); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .auto-message {
-    border: 1px solid rgb(255 255 255 / 0.05);
-    background: rgb(255 255 255 / 0.018);
-  }
+  .auto-message { border: 1px solid rgb(255 255 255 / 0.05); background: rgb(255 255 255 / 0.018); }
   .auto-message :global(svg) { flex: none; }
   .auto-message.secure { border-color: rgb(63 203 151 / 0.11); background: rgb(63 203 151 / 0.03); }
   .auto-message.secure :global(svg) { color: rgb(81 216 165 / 0.8); }
   .auto-message.conflict, .auto-message.unavailable { border-color: rgb(237 170 73 / 0.12); background: rgb(237 170 73 / 0.035); }
   .auto-message.conflict :global(svg), .auto-message.unavailable :global(svg) { color: rgb(236 174 78 / 0.85); }
   /* Card Actions Pinned to Bottom */
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: auto;
-    padding-top: 12px;
-  }
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; }
   .launch { flex: 1; min-width: 126px; justify-content: center; }
   .github { color: var(--text-2); }
   .disable { color: rgb(225 230 240 / 0.72); }
   /* Restart to BIOS / UEFI Card */
-  .firmware-action {
-    position: relative;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 12px;
-    margin-top: 10px;
-    padding: 10px 14px;
-    overflow: hidden;
-    box-shadow: var(--elev-1);
-    transition: border-color var(--dur-fast), box-shadow var(--dur-med);
-  }
+  .firmware-action { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 14px; overflow: hidden; box-shadow: var(--elev-1); transition: border-color var(--dur-fast), box-shadow var(--dur-med); }
   .firmware-action.active { border-color: rgb(112 157 242 / 0.22); }
-  .firmware-rim {
-    position: absolute;
-    inset: 0 22% auto;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgb(102 163 255 / 0.58), transparent);
-    box-shadow: 0 0 14px rgb(86 143 242 / 0.2);
-    pointer-events: none;
-  }
+  .firmware-rim { position: absolute; inset: 0 22% auto; height: 1px; background: linear-gradient(90deg, transparent, rgb(102 163 255 / 0.58), transparent); box-shadow: 0 0 14px rgb(86 143 242 / 0.2); pointer-events: none; }
   .firmware-copy { min-width: 0; }
   .firmware-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .firmware-title h2 { font-size: 14.5px; }
   .badge.firmware-badge { border-color: rgb(106 165 255 / 0.15); color: rgb(147 188 255 / 0.72); }
-  .firmware-copy p {
-    overflow: hidden;
-    margin-top: 3px;
-    color: var(--text-3);
-    font-size: 11px;
-    line-height: 1.45;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .firmware-copy p { overflow: hidden; margin-top: 3px; color: var(--text-3); font-size: 11px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
   .firmware-status.status { position: static; white-space: nowrap; }
   .firmware-button { min-width: 146px; white-space: nowrap; }
   :global(:root.solid) .tool-card, :global(:root.solid) .tool-card:hover:not(.active) { transform: none; box-shadow: none; }

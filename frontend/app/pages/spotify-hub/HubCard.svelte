@@ -105,146 +105,45 @@
 </article>
 
 <style>
-  .card {
-    --tone: 62 207 142;
-    --tone-soft: rgb(var(--tone) / 0.1);
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    padding: 17px;
-    overflow: hidden;
-    border: 1px solid rgb(var(--tone) / 0.18);
-    border-radius: var(--radius-lg);
-    background:
-      var(--grain),
-      radial-gradient(circle at 12% 0%, rgb(var(--tone) / 0.1), transparent 42%),
-      linear-gradient(180deg, rgb(200 210 255 / 0.08), rgb(200 210 255 / 0.022) 62%, rgb(0 0 0 / 0.08));
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.11),
-      inset 0 -1px 0 rgb(0 0 0 / 0.28),
-      var(--elev-2);
-    transition:
-      transform var(--dur-med) var(--ease-out),
-      border-color var(--dur-fast),
-      box-shadow var(--dur-med) var(--ease-out);
-  }
+  .card { --tone: 62 207 142; --tone-soft: rgb(var(--tone) / 0.1); position: relative; display: flex; flex-direction: column; min-width: 0; padding: 17px; overflow: hidden; border: 1px solid rgb(var(--tone) / 0.18); border-radius: var(--radius-lg); background: var(--grain), radial-gradient(circle at 12% 0%, rgb(var(--tone) / 0.1), transparent 42%), linear-gradient(180deg, rgb(200 210 255 / 0.08), rgb(200 210 255 / 0.022) 62%, rgb(0 0 0 / 0.08)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.11), inset 0 -1px 0 rgb(0 0 0 / 0.28), var(--elev-2); transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med) var(--ease-out); }
 
   .card.amber { --tone: 245 180 84; }
   .card.red { --tone: 229 72 77; }
 
-  .card:hover:not(.active) {
-    transform: translateY(-3px);
-    border-color: rgb(var(--tone) / 0.32);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.17),
-      inset 0 -1px 0 rgb(0 0 0 / 0.28),
-      0 18px 48px -24px rgb(var(--tone) / 0.35),
-      var(--elev-3);
-  }
+  .card:hover:not(.active) { transform: translateY(-3px); border-color: rgb(var(--tone) / 0.32); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.17), inset 0 -1px 0 rgb(0 0 0 / 0.28), 0 18px 48px -24px rgb(var(--tone) / 0.35), var(--elev-3); }
 
   .card.active { border-color: rgb(var(--tone) / 0.48); }
   .card.error { border-color: rgb(229 72 77 / 0.48); }
 
-  .rim {
-    position: absolute;
-    top: 0;
-    left: 12%;
-    width: 76%;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgb(var(--tone) / 0.72), transparent);
-    box-shadow: 0 0 15px rgb(var(--tone) / 0.42);
-  }
+  .rim { position: absolute; top: 0; left: 12%; width: 76%; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--tone) / 0.72), transparent); box-shadow: 0 0 15px rgb(var(--tone) / 0.42); }
 
   .progress-meta,
-  .progress-meta span {
-    display: flex;
-    align-items: center;
-  }
+  .progress-meta span { display: flex; align-items: center; }
 
-  .main {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto 1fr auto;
-    gap: 14px 10px;
-    flex: 1;
-  }
+  .main { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr auto; gap: 14px 10px; flex: 1; }
 
-  .icon {
-    grid-column: 1;
-    grid-row: 1;
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    border: 1px solid rgb(var(--tone) / 0.24);
-    border-radius: 13px;
-    background: linear-gradient(160deg, rgb(var(--tone) / 0.16), rgb(var(--tone) / 0.035));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 8px 20px -13px rgb(var(--tone) / 0.7);
-    color: rgb(var(--tone));
-  }
+  .icon { grid-column: 1; grid-row: 1; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid rgb(var(--tone) / 0.24); border-radius: 13px; background: linear-gradient(160deg, rgb(var(--tone) / 0.16), rgb(var(--tone) / 0.035)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 8px 20px -13px rgb(var(--tone) / 0.7); color: rgb(var(--tone)); }
 
-  .status {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-    align-self: center;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 9px;
-    border: 1px solid rgb(255 255 255 / 0.07);
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.035);
-    color: var(--text-3);
-    font-size: 10.5px;
-    font-weight: 600;
-  }
+  .status { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 999px; background: rgb(255 255 255 / 0.035); color: var(--text-3); font-size: 10.5px; font-weight: 600; }
 
-  .status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--idle);
-  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--idle); }
 
   .status.running .status-dot { background: rgb(var(--tone)); box-shadow: 0 0 8px rgb(var(--tone) / 0.6); animation: pulse 1s ease-in-out infinite alternate; }
   .status.completed .status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok-glow); }
   .status.partial .status-dot { background: #f5b454; box-shadow: 0 0 8px rgb(245 180 84 / 0.45); }
   .status.error .status-dot { background: var(--danger); box-shadow: 0 0 8px rgb(229 72 77 / 0.5); }
 
-  .copy {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    min-width: 0;
-  }
+  .copy { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
 
   h2 { font-size: 16px; }
   .copy p { margin-top: 6px; color: var(--text-2); font-size: 12px; line-height: 1.48; }
   .copy .detail { color: var(--text-3); font-size: 10.75px; }
 
-  .actions {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-self: start;
-    align-self: end;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-  }
-  .action {
-    border-color: rgb(var(--tone) / 0.22);
-    background: var(--tone-soft);
-  }
+  .actions { grid-column: 1 / -1; grid-row: 3; justify-self: start; align-self: end; display: flex; flex-wrap: wrap; gap: 7px; }
+  .action { border-color: rgb(var(--tone) / 0.22); background: var(--tone-soft); }
   .action:hover { border-color: rgb(var(--tone) / 0.4); background: rgb(var(--tone) / 0.16); }
 
-  .progress {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    align-self: end;
-    display: grid;
-    gap: 7px;
-  }
+  .progress { grid-column: 1 / -1; grid-row: 3; align-self: end; display: grid; gap: 7px; }
   .progress-meta { justify-content: space-between; gap: 8px; color: var(--text-2); font-size: 11px; }
   .progress-meta span { gap: 6px; }
   .progress-meta strong { color: var(--text-3); font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -294,10 +193,7 @@
   @keyframes pulse { to { opacity: 0.4; } }
 
   :global(:root.solid) .card,
-  :global(:root.solid) .card:hover:not(.active) {
-    transform: none;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.28), var(--elev-1);
-  }
+  :global(:root.solid) .card:hover:not(.active) { transform: none; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.28), var(--elev-1); }
 
   :global(:root.solid) .rim { box-shadow: none; }
 

@@ -172,114 +172,39 @@
 </div>
 
 <style>
-  .toolbar {
-    display: grid;
-    gap: 12px;
-    margin-bottom: 22px;
-  }
+  .toolbar { display: grid; gap: 12px; margin-bottom: 22px; }
 
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-  .search {
-    position: relative;
-    flex: 1 1 260px;
-    display: flex;
-    align-items: center;
-  }
+  .search { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
 
-  .search .input {
-    width: 100%;
-    padding-left: 34px;
-    padding-right: 34px;
-  }
+  .search .input { width: 100%; padding-left: 34px; padding-right: 34px; }
 
-  .search input::-webkit-search-cancel-button {
-    display: none;
-  }
+  .search input::-webkit-search-cancel-button { display: none; }
 
-  .search-icon {
-    position: absolute;
-    left: 12px;
-    display: grid;
-    color: var(--text-3);
-    pointer-events: none;
-  }
+  .search-icon { position: absolute; left: 12px; display: grid; color: var(--text-3); pointer-events: none; }
 
-  .clear {
-    position: absolute;
-    right: 3px;
-    width: 28px;
-    height: 28px;
-  }
+  .clear { position: absolute; right: 3px; width: 28px; height: 28px; }
 
-  .btn.open {
-    background: rgb(255 255 255 / 0.1);
-  }
+  .btn.open { background: rgb(255 255 255 / 0.1); }
 
-  .segmented {
-    display: flex;
-    gap: 2px;
-    padding: 1px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.15);
-  }
+  .segmented { display: flex; gap: 2px; padding: 1px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.15); }
 
-  .segmented .icon-btn {
-    width: 32px;
-    height: 28px;
-  }
+  .segmented .icon-btn { width: 32px; height: 28px; }
 
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
-  .meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-left: auto;
-  }
+  .meta { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 
-  .checking {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .checking { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; }
 
-  .badge {
-    padding: 3px 10px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.04);
-    color: var(--text-2);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
+  .badge { padding: 3px 10px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 999px; background: rgb(255 255 255 / 0.04); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-  .packs {
-    min-width: 260px;
-  }
+  .packs { min-width: 260px; }
 
-  .pack-text {
-    display: grid;
-  }
+  .pack-text { display: grid; }
 
-  .pack-name {
-    font-weight: 600;
-  }
+  .pack-name { font-weight: 600; }
 
-  .pack-desc {
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .pack-desc { color: var(--text-3); font-size: 12px; }
 </style>

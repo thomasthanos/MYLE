@@ -64,114 +64,43 @@
 <div class="markdown selectable">{@render render(blocks)}</div>
 
 <style>
-  .markdown {
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
+  .markdown { color: var(--text-2); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 
-  .markdown :global(h3) {
-    margin: 18px 0 6px;
-    color: var(--text-1);
-    font-size: 14.5px;
-    font-weight: 650;
-  }
+  .markdown :global(h3) { margin: 18px 0 6px; color: var(--text-1); font-size: 14.5px; font-weight: 650; }
 
-  .markdown :global(h4) {
-    margin: 14px 0 4px;
-    color: var(--text-1);
-    font-size: 13.5px;
-    font-weight: 600;
-  }
+  .markdown :global(h4) { margin: 14px 0 4px; color: var(--text-1); font-size: 13.5px; font-weight: 600; }
 
-  .markdown > :global(:first-child) {
-    margin-top: 0;
-  }
+  .markdown > :global(:first-child) { margin-top: 0; }
 
-  .markdown :global(p) {
-    margin: 6px 0;
-  }
+  .markdown :global(p) { margin: 6px 0; }
 
   .markdown :global(ul),
-  .markdown :global(ol) {
-    margin: 6px 0;
-    padding-left: 20px;
-  }
+  .markdown :global(ol) { margin: 6px 0; padding-left: 20px; }
 
-  .markdown :global(li) {
-    margin: 3px 0;
-  }
+  .markdown :global(li) { margin: 3px 0; }
 
-  .markdown :global(strong) {
-    color: var(--text-1);
-    font-weight: 600;
-  }
+  .markdown :global(strong) { color: var(--text-1); font-weight: 600; }
 
-  .markdown :global(code) {
-    padding: 1px 5px;
-    border-radius: 5px;
-    background: rgb(255 255 255 / 0.07);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-  }
+  .markdown :global(code) { padding: 1px 5px; border-radius: 5px; background: rgb(255 255 255 / 0.07); font-family: var(--font-mono); font-size: 11.5px; }
 
-  .markdown :global(pre) {
-    margin: 8px 0;
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.25);
-    overflow-x: auto;
-  }
+  .markdown :global(pre) { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: rgb(0 0 0 / 0.25); overflow-x: auto; }
 
-  .markdown :global(pre code) {
-    padding: 0;
-    background: none;
-  }
+  .markdown :global(pre code) { padding: 0; background: none; }
 
-  .markdown :global(a) {
-    color: rgb(var(--accent-rgb));
-    text-decoration: none;
-  }
+  .markdown :global(a) { color: rgb(var(--accent-rgb)); text-decoration: none; }
 
-  .markdown :global(a:hover) {
-    text-decoration: underline;
-  }
+  .markdown :global(a:hover) { text-decoration: underline; }
 
-  .markdown :global(blockquote) {
-    margin: 8px 0;
-    padding: 2px 12px;
-    border-left: 3px solid rgb(var(--accent-rgb) / 0.4);
-    color: var(--text-3);
-  }
+  .markdown :global(blockquote) { margin: 8px 0; padding: 2px 12px; border-left: 3px solid rgb(var(--accent-rgb) / 0.4); color: var(--text-3); }
 
-  .markdown :global(hr) {
-    margin: 14px 0;
-    border: 0;
-    border-top: 1px solid rgb(255 255 255 / 0.08);
-  }
+  .markdown :global(hr) { margin: 14px 0; border: 0; border-top: 1px solid rgb(255 255 255 / 0.08); }
 
-  .markdown :global(.table) {
-    margin: 8px 0;
-    overflow-x: auto;
-  }
+  .markdown :global(.table) { margin: 8px 0; overflow-x: auto; }
 
-  .markdown :global(table) {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12.5px;
-  }
+  .markdown :global(table) { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
   .markdown :global(th),
-  .markdown :global(td) {
-    padding: 6px 8px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.07);
-    text-align: left;
-    vertical-align: top;
-  }
+  .markdown :global(td) { padding: 6px 8px; border-bottom: 1px solid rgb(255 255 255 / 0.07); text-align: left; vertical-align: top; }
 
-  .markdown :global(th) {
-    color: var(--text-1);
-    font-weight: 600;
-  }
+  .markdown :global(th) { color: var(--text-1); font-weight: 600; }
 </style>

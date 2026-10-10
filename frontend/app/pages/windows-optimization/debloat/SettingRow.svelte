@@ -105,16 +105,7 @@
 </div>
 
 <style>
-  .setting {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-    align-items: center;
-    gap: 6px;
-    min-height: 36px;
-    padding: 3px 4px 3px 8px;
-    border-radius: 8px;
-    transition: background var(--dur-fast);
-  }
+  .setting { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px; min-height: 36px; padding: 3px 4px 3px 8px; border-radius: 8px; transition: background var(--dur-fast); }
   .setting:hover { background: rgb(255 255 255 / 0.03); }
   .setting.pending { background: rgb(var(--accent-rgb) / 0.08); }
   .setting.open { background: rgb(255 255 255 / 0.035); }

@@ -154,128 +154,50 @@
 {/if}
 
 <style>
-  .windows-fill {
-    display: grid;
-    gap: 8px;
-    padding: 11px 13px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.34);
-    border-radius: 12px;
-    background: rgb(var(--accent-rgb) / 0.09);
-  }
+  .windows-fill { display: grid; gap: 8px; padding: 11px 13px; border: 1px solid rgb(var(--accent-rgb) / 0.34); border-radius: 12px; background: rgb(var(--accent-rgb) / 0.09); }
 
   .head,
   .row,
-  .empty {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  .empty { display: flex; align-items: center; gap: 10px; }
 
   .head > span,
-  .name {
-    display: grid;
-    flex: 1;
-    min-width: 0;
-    gap: 2px;
-  }
+  .name { display: grid; flex: 1; min-width: 0; gap: 2px; }
 
   .head strong,
-  .name strong {
-    color: var(--text-1);
-    font-size: 12.5px;
-  }
+  .name strong { color: var(--text-1); font-size: 12.5px; }
 
   .head small,
   .name small,
   .empty,
-  .note {
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .note { color: var(--text-3); font-size: 11.5px; }
 
-  .path {
-    overflow: hidden;
-    color: var(--text-2);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .path { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .row {
-    padding: 7px 0 0 27px;
-    border-top: 1px solid rgb(255 255 255 / 0.06);
-  }
+  .row { padding: 7px 0 0 27px; border-top: 1px solid rgb(255 255 255 / 0.06); }
 
-  .row.legacy {
-    opacity: 0.85;
-  }
+  .row.legacy { opacity: 0.85; }
 
-  .guidance {
-    color: #ffd08a !important;
-  }
+  .guidance { color: #ffd08a !important; }
 
-  .empty {
-    flex-wrap: wrap;
-    padding: 4px 0 0 27px;
-  }
+  .empty { flex-wrap: wrap; padding: 4px 0 0 27px; }
 
-  .empty span {
-    flex: 1;
-  }
+  .empty span { flex: 1; }
 
   .more,
-  .text-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    justify-self: start;
-    margin-left: 27px;
-    color: #b9c2ff;
-    font-size: 11.5px;
-  }
+  .text-btn { display: inline-flex; align-items: center; gap: 5px; justify-self: start; margin-left: 27px; color: #b9c2ff; font-size: 11.5px; }
 
-  .text-btn {
-    margin: 0;
-  }
+  .text-btn { margin: 0; }
 
   .more:hover,
-  .text-btn:hover {
-    text-decoration: underline;
-  }
+  .text-btn:hover { text-decoration: underline; }
 
-  .linking {
-    display: grid;
-    gap: 6px;
-  }
+  .linking { display: grid; gap: 6px; }
 
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    height: 32px;
-    margin-left: 27px;
-    padding: 0 10px;
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: 9px;
-    background: rgb(0 0 0 / 0.2);
-    color: var(--text-3);
-  }
+  .search { display: flex; align-items: center; gap: 7px; height: 32px; margin-left: 27px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 9px; background: rgb(0 0 0 / 0.2); color: var(--text-3); }
 
-  .search input {
-    flex: 1;
-    min-width: 0;
-    border: 0;
-    outline: none;
-    background: none;
-    color: var(--text-1);
-    font: inherit;
-    font-size: 12.5px;
-  }
+  .search input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-1); font: inherit; font-size: 12.5px; }
 
-  .note {
-    margin: 0 0 0 27px;
-  }
+  .note { margin: 0 0 0 27px; }
 
   @container vault (max-width: 640px) {
     .row {

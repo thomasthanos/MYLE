@@ -138,16 +138,9 @@
   .notice.warn { border-color: rgb(245 180 84 / 0.24); color: rgb(255 205 126 / 0.85); }
   .notice :global(svg), .banner :global(svg) { flex: none; }
 
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: stretch;
-    gap: 12px;
-  }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
 
-  .cards:has(:global(.collapse.open)) {
-    align-items: start;
-  }
+  .cards:has(:global(.collapse.open)) { align-items: start; }
 
   @media (max-width: 980px) {
     .cards {

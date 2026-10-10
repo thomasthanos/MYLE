@@ -182,107 +182,34 @@
 {/if}
 
 <style>
-  .icon-btn.done {
-    color: var(--ok);
-  }
+  .icon-btn.done { color: var(--ok); }
 
   /* A readable width however wide the window: the buttons stay by their values. */
-  .view {
-    display: grid;
-    gap: 18px;
-    width: min(100%, 760px);
-    margin: 0 auto;
-    container: entry / inline-size;
-  }
+  .view { display: grid; gap: 18px; width: min(100%, 760px); margin: 0 auto; container: entry / inline-size; }
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
+  header { display: flex; align-items: center; gap: 14px; }
 
-  .titles {
-    display: grid;
-    flex: 1;
-    gap: 4px;
-    min-width: 0;
-  }
+  .titles { display: grid; flex: 1; gap: 4px; min-width: 0; }
 
-  h2 {
-    overflow: hidden;
-    font-size: 20px;
-    line-height: 1.2;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  h2 { overflow: hidden; font-size: 20px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 
-  .subtitle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
+  .subtitle { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: 12.5px; }
 
-  .subtitle > * {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .subtitle > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .site {
-    color: #b9c2ff;
-  }
+  .site { color: #b9c2ff; }
 
-  .site:hover {
-    text-decoration: underline;
-  }
+  .site:hover { text-decoration: underline; }
 
-  .folder {
-    flex: none;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: rgb(255 255 255 / 0.06);
-    color: var(--text-2);
-    font-size: 11.5px;
-  }
+  .folder { flex: none; padding: 1px 8px; border-radius: 999px; background: rgb(255 255 255 / 0.06); color: var(--text-2); font-size: 11.5px; }
 
-  .star.on {
-    color: #ffd166;
-  }
+  .star.on { color: #ffd166; }
 
-  .warning {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 8px 11px;
-    border: 1px solid rgb(255 180 84 / 0.25);
-    border-radius: 10px;
-    background: rgb(255 180 84 / 0.08);
-    color: #ffd08a;
-    font-size: 12px;
-  }
+  .warning { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgb(255 180 84 / 0.25); border-radius: 10px; background: rgb(255 180 84 / 0.08); color: #ffd08a; font-size: 12px; }
 
-  .fields {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: 6px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 14px;
-    background: rgb(0 0 0 / 0.14);
-  }
+  .fields { display: grid; gap: 2px; margin: 0; padding: 6px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 14px; background: rgb(0 0 0 / 0.14); }
 
-  .row {
-    display: grid;
-    grid-template-columns: 96px minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 6px;
-    min-height: 42px;
-    padding: 0 4px 0 12px;
-    border-radius: 10px;
-  }
+  .row { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-height: 42px; padding: 0 4px 0 12px; border-radius: 10px; }
 
   /* A narrow panel: each label above its value. */
   @container entry (max-width: 420px) {
@@ -302,160 +229,54 @@
     }
   }
 
-  .row:not(.meta):hover {
-    background: rgb(255 255 255 / 0.035);
-  }
+  .row:not(.meta):hover { background: rgb(255 255 255 / 0.035); }
 
-  .row.meta {
-    min-height: 0;
-    margin-top: -6px;
-  }
+  .row.meta { min-height: 0; margin-top: -6px; }
 
-  dt {
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  dt { color: var(--text-3); font-size: 12px; }
 
-  dd {
-    margin: 0;
-    overflow: hidden;
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  dd { margin: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
-  .secret {
-    font-family: var(--font-mono);
-    letter-spacing: 0.02em;
-  }
+  .secret { font-family: var(--font-mono); letter-spacing: 0.02em; }
 
-  .link {
-    color: #b9c2ff;
-  }
+  .link { color: #b9c2ff; }
 
-  .notes {
-    padding: 8px 0;
-    white-space: pre-wrap;
-  }
+  .notes { padding: 8px 0; white-space: pre-wrap; }
 
-  .apps {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    white-space: normal;
-  }
+  .apps { display: flex; flex-wrap: wrap; gap: 6px; white-space: normal; }
 
-  .app {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: rgb(var(--accent-rgb) / 0.12);
-    font-size: 11.5px;
-  }
+  .app { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.12); font-size: 11.5px; }
 
-  .passkeys {
-    display: grid;
-    gap: 4px;
-  }
+  .passkeys { display: grid; gap: 4px; }
 
-  .passkeys h3 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 0 2px;
-    color: var(--text-2);
-    font-size: 12px;
-    font-weight: 600;
-  }
+  .passkeys h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; color: var(--text-2); font-size: 12px; font-weight: 600; }
 
-  .passkey {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 40px;
-    padding: 4px 4px 4px 12px;
-    border: 1px solid rgb(255 255 255 / 0.06);
-    border-radius: 10px;
-    background: rgb(0 0 0 / 0.14);
-  }
+  .passkey { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 4px 4px 12px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 10px; background: rgb(0 0 0 / 0.14); }
 
-  .passkey-text {
-    display: grid;
-    flex: 1;
-    min-width: 0;
-  }
+  .passkey-text { display: grid; flex: 1; min-width: 0; }
 
   .passkey-text strong,
-  .passkey-text small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .passkey-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .passkey-text strong {
-    font-size: 13px;
-    font-weight: 600;
-  }
+  .passkey-text strong { font-size: 13px; font-weight: 600; }
 
-  .passkey-text small {
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .passkey-text small { color: var(--text-3); font-size: 11.5px; }
 
-  .history-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    justify-self: start;
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  .history-toggle { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-3); font-size: 12px; }
 
-  .history-toggle:hover {
-    color: var(--text-1);
-  }
+  .history-toggle:hover { color: var(--text-1); }
 
-  .history {
-    display: grid;
-    gap: 4px;
-    margin: -6px 0 0;
-    padding: 0;
-    list-style: none;
-  }
+  .history { display: grid; gap: 4px; margin: -6px 0 0; padding: 0; list-style: none; }
 
-  .history li {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 6px 12px;
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.18);
-    font-size: 12px;
-  }
+  .history li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-radius: 8px; background: rgb(0 0 0 / 0.18); font-size: 12px; }
 
-  .history span {
-    color: var(--text-3);
-  }
+  .history span { color: var(--text-3); }
 
-  footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgb(255 255 255 / 0.06);
-  }
+  footer { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid rgb(255 255 255 / 0.06); }
 
-  .updated {
-    flex: 1;
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .updated { flex: 1; color: var(--text-3); font-size: 11.5px; }
 
-  .danger-text {
-    color: #ff9d9d;
-  }
+  .danger-text { color: #ff9d9d; }
 
   /* A big screen: a little more room, and larger type. */
   @container vault (min-width: 1700px) {
