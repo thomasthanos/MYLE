@@ -2,25 +2,18 @@
 // the pending changes and their upkeep. Tested in
 // scripts/tests/debloat-selection.test.mjs.
 import type { AppStatus, Level, TweakStatus } from "./api";
-
 export type Profile = Level;
 export const profiles: readonly Profile[] = ["light", "recommended", "maximum"];
-
 const rank: Record<Level, number> = { light: 0, recommended: 1, maximum: 2 };
-
 type TweakLike = Pick<TweakStatus, "id" | "level" | "state">;
 type AppLike = Pick<AppStatus, "id" | "level" | "packages">;
-
 /** Whether something of `level` is part of `profile`: each takes in the ones before it. */
 export function inProfile(level: Level | null, profile: Profile): boolean {
   return level !== null && rank[level] <= rank[profile];
 }
-
 /** Whether a tweak is in place, as its switch shows it before any choice. */
 export const isApplied = (tweak: Pick<TweakStatus, "state">) => tweak.state === "applied";
-
 const canChange = (tweak: Pick<TweakStatus, "state">) => tweak.state !== "unavailable";
-
 /** What a profile would do on this PC: its tweaks not yet in place and its installed apps. */
 export function profilePlan<T extends TweakLike, A extends AppLike>(tweaks: readonly T[], apps: readonly A[], profile: Profile) {
   return {
@@ -28,7 +21,6 @@ export function profilePlan<T extends TweakLike, A extends AppLike>(tweaks: read
     apps: apps.filter((app) => app.packages.length > 0 && inProfile(app.level, profile)),
   };
 }
-
 /**
  * The choices after picking a profile. It decides everything a profile can
  * reach (the tweaks and apps that have a level), and keeps what was picked
@@ -54,7 +46,6 @@ export function withProfile(
   for (const app of plan.apps) nextApps.add(app.id);
   return { desired: nextDesired, apps: nextApps };
 }
-
 /** The profile the choices are exactly, if any: for the card that shows as picked. */
 export function matchingProfile(
   tweaks: readonly TweakLike[],
@@ -74,7 +65,6 @@ export function matchingProfile(
   }
   return null;
 }
-
 /** The changes the choices make: tweaks to turn on, and tweaks to turn off. */
 export function pendingOf<T extends TweakLike>(tweaks: readonly T[], desired: ReadonlyMap<string, boolean>) {
   const on: T[] = [];
@@ -87,7 +77,6 @@ export function pendingOf<T extends TweakLike>(tweaks: readonly T[], desired: Re
   }
   return { on, off };
 }
-
 /**
  * The choices that still change something: after a run, or when Windows
  * changed on its own, a choice that is now how things are goes, and so does
@@ -107,13 +96,11 @@ export function prune(
   const nextApps = new Set([...removing].filter((id) => apps.some((app) => app.id === id && app.packages.length > 0)));
   return { desired: nextDesired, apps: nextApps };
 }
-
 /** Choices saved by an older version: the apps the user ticked by hand are kept; the
  *  tweaks it left out of its one-click run say nothing about what to change. */
 export function fromLegacy(savedApps: readonly string[] | null) {
   return { desired: new Map<string, boolean>(), apps: new Set(savedApps ?? []) };
 }
-
 /** Apps for the Apps tab's quick choices. */
 export function appPresetIds(apps: readonly AppLike[], preset: "recommended" | "all" | "none"): string[] {
   return apps

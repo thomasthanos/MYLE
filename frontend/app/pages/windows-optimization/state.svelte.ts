@@ -12,13 +12,10 @@ import {
   type FirmwareRestartOutcome,
   type WindowsOptimizationSnapshot,
 } from "./api";
-
 const POLL_MS = 1500;
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 class WindowsOptimizationState {
   snapshot = $state<WindowsOptimizationSnapshot | null>(null);
   loading = $state(false);
@@ -26,9 +23,7 @@ class WindowsOptimizationState {
   autoLogonRequest = $state<AutoLogonOperation | null>(null);
   firmwareRestartRequest = $state(false);
   biosDialogOpen = $state(false);
-
   #pollTimer: ReturnType<typeof setTimeout> | null = null;
-
   readonly autoLogonBusy = $derived(
     this.autoLogonRequest !== null || isAutoLogonActive(this.snapshot?.autoLogon),
   );
@@ -38,7 +33,6 @@ class WindowsOptimizationState {
   readonly ownBusy = $derived(this.autoLogonBusy || this.firmwareRestartBusy);
   readonly externallyLocked = $derived(operationGate.lockedFor("windows-optimization"));
   readonly locked = $derived(this.ownBusy || this.externallyLocked);
-
   async load() {
     if (!isTauri() || this.loading) return;
     this.loading = true;
@@ -51,7 +45,6 @@ class WindowsOptimizationState {
       this.loading = false;
     }
   }
-
   autoLogonStatus(): string {
     if (this.autoLogonRequest === "enable") return "Enabling";
     if (this.autoLogonRequest === "disable") return "Disabling";
@@ -61,28 +54,23 @@ class WindowsOptimizationState {
     if (state.activeOperation === "disable") return "Disabling";
     return state.status.charAt(0).toUpperCase() + state.status.slice(1);
   }
-
   firmwareRestartStatus(): "Ready" | "Unavailable" | "Processing" {
     if (this.firmwareRestartBusy) return "Processing";
     return this.snapshot?.firmwareRestart.available ? "Ready" : "Unavailable";
   }
-
   openBiosDialog() {
     if (this.locked || !this.snapshot?.firmwareRestart.available) return;
     this.biosDialogOpen = true;
   }
-
   dismissBiosDialog() {
     if (!this.firmwareRestartBusy) this.biosDialogOpen = false;
   }
-
   async restartToFirmware() {
     if (this.locked || !this.snapshot?.firmwareRestart.available) return;
     if (!operationGate.begin("windows-optimization")) {
       toast.info("Finish the current app task before restarting to BIOS / UEFI.");
       return;
     }
-
     this.firmwareRestartRequest = true;
     this.error = null;
     toast.info("Save your work now. Windows will request administrator approval next.");
@@ -100,12 +88,10 @@ class WindowsOptimizationState {
       await this.load();
     }
   }
-
   async setAutoLogon(enabled: boolean) {
     if (this.locked) return;
     const state = this.snapshot?.autoLogon;
     if (!state) return;
-
     const approved = await confirm(
       enabled
         ? {
@@ -134,7 +120,6 @@ class WindowsOptimizationState {
             },
     );
     if (!approved || this.locked) return;
-
     if (!operationGate.begin("windows-optimization")) {
       toast.info("Finish the current app task before changing Auto-Logon.");
       return;
@@ -152,7 +137,6 @@ class WindowsOptimizationState {
       await this.load();
     }
   }
-
   private applySnapshot(snapshot: WindowsOptimizationSnapshot) {
     this.snapshot = snapshot;
     if (isAutoLogonActive(snapshot.autoLogon) || snapshot.firmwareRestart.active) {
@@ -162,7 +146,6 @@ class WindowsOptimizationState {
       operationGate.end("windows-optimization");
     }
   }
-
   private watchBackendOperation() {
     if (this.#pollTimer) return;
     const poll = async () => {
@@ -186,7 +169,6 @@ class WindowsOptimizationState {
     };
     this.#pollTimer = setTimeout(poll, POLL_MS);
   }
-
   private reportAutoLogonOutcome(outcome: AutoLogonOutcome) {
     const suffix = outcome.note ? ` ${outcome.note}` : "";
     if (outcome.result === "enabled") {
@@ -203,7 +185,6 @@ class WindowsOptimizationState {
       toast.error(`Auto-Logon is not available for this account or Windows configuration.${suffix}`);
     }
   }
-
   private reportFirmwareRestartOutcome(outcome: FirmwareRestartOutcome) {
     const suffix = outcome.note ? ` ${outcome.note}` : "";
     if (outcome.result === "scheduled") {
@@ -217,9 +198,7 @@ class WindowsOptimizationState {
     }
   }
 }
-
 function isAutoLogonActive(state: AutoLogonState | null | undefined): boolean {
   return state?.status === "working" || state?.activeOperation != null;
 }
-
 export const windowsOptimizationState = new WindowsOptimizationState();

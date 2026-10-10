@@ -21,10 +21,8 @@ import Settings from "./settings/Settings.svelte";
 import SystemCleaner from "./system-cleaner/SystemCleaner.svelte";
 import SystemMaintenance from "./system-maintenance/SystemMaintenance.svelte";
 import WindowsOptimization from "./windows-optimization/WindowsOptimization.svelte";
-
 /** A page's component, loaded with the app or the first time it opens. */
 export type PageModule = () => Promise<{ default: Component }>;
-
 export interface PageDef {
   id: string;
   label: string;
@@ -45,7 +43,6 @@ export interface PageDef {
    *  from everyone else, and the backend refuses its commands. */
   ownerOnly?: boolean;
 }
-
 // The sidebar shows them in this order, group by group: what you install,
 // what you keep, the PC itself, then the owner's tools. Install Apps comes
 // first: it is the page the app opens on.
@@ -75,11 +72,8 @@ const defs = [
   { id: "settings",             label: "Settings",              group: "bottom", icon: IconSettings,       component: Settings,
     description: "Your account, sync, appearance and updates." },
 ] as const satisfies readonly PageDef[];
-
 export type PageId = (typeof defs)[number]["id"];
-
 export const pages: readonly (PageDef & { id: PageId })[] = defs;
-
 /** Whether the page can be shown, given whether the owner is signed in. */
 export function canOpen(page: PageDef, owner: boolean): boolean {
   return !page.ownerOnly || owner;

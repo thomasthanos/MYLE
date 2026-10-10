@@ -9,7 +9,6 @@ import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { cleanerApi, formatSize, type CleanerCategory } from "./api";
 import { DOWNLOADS, DOWNLOADS_CATEGORY, type Preview } from "./downloads";
-
 const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned" };
 /** The backend's answer when the UAC prompt is declined. */
 const DECLINED = "Administrator approval was declined.";
@@ -18,25 +17,21 @@ const DECLINED = "Administrator approval was declined.";
  *  slower, and the full bar is held for a moment at the end. */
 const STEP_MS = 210;
 const HOLD_MS = 420;
-
 export interface Measured { bytes: number; files: number; locked: boolean }
 /** What a clean pass removed from one category, and what it left. */
 export interface Outcome { freed: number; skipped: number; skippedBytes: number; adminSkipped: number; adminSkippedBytes: number }
 /** The step the running clean is on. */
 export interface CleanProgress { pass: "user" | "administrator"; step: number; total: number; current: string }
-
 type Phase = "idle" | "scanning" | "cleaning";
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /** "Freed 900 MB · 1.2 GB in use", or just the half that applies. */
 export function freedAndInUse(freed: number, inUse: number): string {
   if (inUse <= 0) return `Freed ${formatSize(freed)}`;
   if (freed <= 0) return `${formatSize(inUse)} in use`;
   return `Freed ${formatSize(freed)} · ${formatSize(inUse)} in use`;
 }
-
 class CleanerState {
   categories = $state<CleanerCategory[]>([]);
   sizes = $state<Record<string, Measured>>({});
@@ -66,7 +61,6 @@ class CleanerState {
   #barTarget = 0;
   /** When the running visual step is free to move on; see `step` in `clean`. */
   #paced: number | null = null;
-
   readonly total = $derived(Object.values(this.sizes).reduce((sum, m) => sum + m.bytes, 0));
   readonly selectedBytes = $derived([...this.selected].reduce((sum, id) => sum + (this.sizes[id]?.bytes ?? 0), 0));
   readonly lockedIds = $derived(this.categories.filter((c) => this.sizes[c.id]?.locked).map((c) => c.id));
@@ -85,7 +79,6 @@ class CleanerState {
     if (this.lockedIds.length) return "System folders skipped (no administrator)";
     return this.autoSelected ? "Scan completed · everything selected" : "Scan completed";
   });
-
   async load() {
     if (!isTauri()) return;
     try {
@@ -98,28 +91,23 @@ class CleanerState {
       this.error = message(err);
     }
   }
-
   /** Re-reads the saved selection (after account sync replaced it). */
   reloadSelection() {
     const saved = readJson<string[]>(KEY.selected, [...this.selected], isStringArray);
     this.selected.clear();
     for (const id of saved) if (!this.cleaned.has(id)) this.selected.add(id);
   }
-
   isCleaned = (id: string) => this.cleaned.has(id);
-
   toggle(id: string) {
     if (this.busy || this.cleaned.has(id)) return;
     if (this.selected.has(id)) this.selected.delete(id); else this.selected.add(id);
     this.#persistSelection();
   }
-
   toggleAll() {
     if (this.busy) return;
     if (this.allSelected) this.selected.clear(); else for (const c of this.selectable) this.selected.add(c.id);
     this.#persistSelection();
   }
-
   /** Measures everything. The UAC prompt for the system folders appears right
    *  away and runs next to the normal pass; declining it only leaves those
    *  folders out. When it is over everything found is ticked. */
@@ -155,7 +143,6 @@ class CleanerState {
     this.phase = "idle";
     this.#selectAllAfterScan();
   }
-
   async #measureDownloads() {
     try {
       this.downloads = await cleanerApi.downloadsPreview();
@@ -165,7 +152,6 @@ class CleanerState {
       toast.error(`Downloads folder: ${message(err)}`);
     }
   }
-
   /** Deletes the Downloads items the scan listed (each checked again). */
   async #cleanDownloads(): Promise<{ freed: number; skipped: number }> {
     const items = this.downloads?.items ?? [];
@@ -174,7 +160,6 @@ class CleanerState {
     this.#applyCleaned({ id: DOWNLOADS, bytes: outcome.freed, files: outcome.deleted, skipped: outcome.skipped.length, skippedBytes: Math.max(0, skippedBytes), adminSkipped: 0, adminSkippedBytes: 0 });
     return { freed: outcome.freed, skipped: outcome.skipped.length };
   }
-
   /** A scan is only useful when it ends with something ticked: select the rest. */
   #selectAllAfterScan() {
     let added = 0;
@@ -186,7 +171,6 @@ class CleanerState {
     this.autoSelected = added > 0;
     if (added) this.#persistSelection();
   }
-
   /** Asks for administrator rights again after a declined prompt. */
   async allowAdmin() {
     if (this.busy) return;
@@ -200,14 +184,12 @@ class CleanerState {
       this.phase = "idle";
     }
   }
-
   #afterAdminScan(error: string | null) {
     this.adminGranted = error === null;
     if (error === null) return;
     if (error === DECLINED) toast.info("System folders were left out: administrator approval was declined.");
     else toast.error(`System folders could not be measured: ${error}`);
   }
-
   async clean() {
     if (this.busy || !this.selected.size) return;
     const chosen = this.categories.filter((c) => this.selected.has(c.id) && !this.cleaned.has(c.id));
@@ -314,7 +296,6 @@ class CleanerState {
       this.#paced = null;
     }
   }
-
   /** One toast with the whole outcome: what went and what stayed. */
   #announce(freed: number, inUse: number, skipped: number, selectedBefore: number) {
     if (inUse > 0) {
@@ -325,7 +306,6 @@ class CleanerState {
     }
     toast.success(`Successfully freed up ${formatSize(freed)}!`);
   }
-
   /** Subtracts what a pass freed from a measured size, and keeps what it
    *  removed and left for the card. The administrator pass retries what the
    *  first one left in its folders, so its count replaces that part. */
@@ -346,7 +326,6 @@ class CleanerState {
     if (!before) return;
     this.sizes[id] = { bytes: Math.max(0, before.bytes - bytes), files: Math.max(0, before.files - files), locked: before.locked };
   }
-
   /** Measures `ids` again after a clean; the system folders only through the
    *  helper that is still running, so this never asks for approval. */
   async #remeasure(ids: string[], admin: boolean) {
@@ -362,10 +341,8 @@ class CleanerState {
     }
     for (const [id, measured] of Object.entries(next)) this.sizes[id] = measured;
   }
-
   /** What the freshly measured categories still hold, over the whole run. */
   #stillThere = (ids: string[]) => ids.reduce((sum, id) => sum + (this.sizes[id]?.bytes ?? 0), 0);
-
   // The bar: the work sets a target, a frame loop eases up to it.
   #startBar() {
     this.#stopBar();
@@ -374,11 +351,9 @@ class CleanerState {
     this.#barTarget = 0;
     this.#tick();
   }
-
   #setBarTarget(value: number) {
     this.#barTarget = Math.max(this.#barTarget, Math.min(1, value));
   }
-
   #tick() {
     this.#raf = requestAnimationFrame(() => {
       const gap = this.#barTarget - this.barPercent;
@@ -386,7 +361,6 @@ class CleanerState {
       this.#tick();
     });
   }
-
   /** Rides the bar to the end and holds the full one for a moment. */
   async #holdBar() {
     this.#setBarTarget(1);
@@ -396,15 +370,12 @@ class CleanerState {
     this.barDone = true;
     await sleep(HOLD_MS);
   }
-
   #stopBar() {
     if (this.#raf) cancelAnimationFrame(this.#raf);
     this.#raf = 0;
   }
-
   #persistSelection() {
     writeJson(KEY.selected, [...this.selected]);
   }
 }
-
 export const cleanerState = new CleanerState();

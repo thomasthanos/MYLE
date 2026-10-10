@@ -7,14 +7,11 @@ import { confirm } from "../../../lib/confirm.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { maintenanceApi, type MaintenanceAction, type MaintenanceCard, type TaskOutcome } from "./api";
-
 const KEY = { view: "myle.maintenance.view" };
 /** Kept per console; older lines are dropped so a long run stays responsive. */
 const MAX_LINES = 1200;
 const TRIM_TO = 1000;
-
 export type View = "grid" | "list";
-
 export type MaintenanceStatusKind =
   | "ready"
   | "running"
@@ -23,34 +20,28 @@ export type MaintenanceStatusKind =
   | "stopped"
   | "needsAdmin"
   | "error";
-
 export interface MaintenanceCardStatus {
   state: MaintenanceStatusKind;
   label: string;
   actionId?: string;
 }
-
 interface ConsoleBuffer {
   lines: string[];
   open: boolean;
   /** How many lines scrolled out of the buffer, so the page can say so. */
   dropped: number;
 }
-
 interface PendingLine {
   text: string;
   replace: boolean;
 }
-
 const oneOf =
   <T extends string>(...values: T[]) =>
   (v: unknown) =>
     values.includes(v as T);
-
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
 class MaintenanceState {
   cards = $state<MaintenanceCard[]>([]);
   loading = $state(true);
@@ -66,33 +57,25 @@ class MaintenanceState {
   error = $state<string | null>(null);
   /** Session-only outcomes. They intentionally do not survive an app restart. */
   cardStatuses = $state<Record<string, MaintenanceCardStatus>>({});
-
   #pending: Record<string, PendingLine[]> = {};
   #frame = 0;
   #loaded = false;
   /** Locked because of a task we did not start, so nothing will report it done. */
   #adopted = false;
-
   readonly locked = $derived(this.running !== null);
-
   isRunning = (actionId: string) => this.running === actionId;
-
   cardOf(actionId: string): MaintenanceCard | undefined {
     return this.cards.find((card) => card.actions.some((action) => action.id === actionId));
   }
-
   statusOf(card: MaintenanceCard): MaintenanceCardStatus {
     return this.cardStatuses[card.id] ?? { state: "ready", label: "Ready" };
   }
-
   #actionName(action: MaintenanceAction): string {
     return action.label.replace(/^Run\s+/i, "").replace(/^Update all$/i, "Updates");
   }
-
   #setStatus(card: MaintenanceCard, action: MaintenanceAction, state: MaintenanceStatusKind, label: string) {
     this.cardStatuses[card.id] = { state, label, actionId: action.id };
   }
-
   async load() {
     if (!isTauri()) {
       this.loading = false;
@@ -123,7 +106,6 @@ class MaintenanceState {
       this.loading = false;
     }
   }
-
   #watchAdopted() {
     const tick = async () => {
       if (!this.#adopted) return;
@@ -140,22 +122,18 @@ class MaintenanceState {
     };
     setTimeout(tick, 2000);
   }
-
   /** Re-reads the saved layout (after account sync replaced it). */
   reloadView() {
     this.view = readJson(KEY.view, this.view, oneOf("grid", "list"));
   }
-
   setView(view: View) {
     this.view = view;
     writeJson(KEY.view, view);
   }
-
   toggleConsole(cardId: string) {
     const buffer = (this.consoles[cardId] ??= { lines: [], open: false, dropped: 0 });
     buffer.open = !buffer.open;
   }
-
   async run(card: MaintenanceCard, action: MaintenanceAction, elevated = false) {
     if (this.locked) return;
     // The retry has already been agreed to; do not ask twice.
@@ -169,7 +147,6 @@ class MaintenanceState {
       // Something without a dialog may have started while this one was open.
       if (!ok || this.locked) return;
     }
-
     this.running = action.id;
     this.phase = "waiting";
     this.#setStatus(
@@ -181,7 +158,6 @@ class MaintenanceState {
     this.#adopted = false;
     this.needsAdmin.delete(action.id);
     if (card.console) this.consoles[card.id] = { lines: [], open: true, dropped: 0 };
-
     try {
       const outcome = await maintenanceApi.run(action.id, elevated, (e) => {
         if (e.event === "waiting") {
@@ -209,7 +185,6 @@ class MaintenanceState {
       }
     }
   }
-
   async cancel(card: MaintenanceCard, action: MaintenanceAction) {
     if (!this.isRunning(action.id) || this.stopping) return;
     if (action.cancelConfirm) {
@@ -227,7 +202,6 @@ class MaintenanceState {
     this.#setStatus(card, action, "running", `Stopping ${this.#actionName(action)}…`);
     void maintenanceApi.cancel(action.id);
   }
-
   #report(card: MaintenanceCard, action: MaintenanceAction, outcome: TaskOutcome, elevated: boolean) {
     switch (outcome.result) {
       case "done":
@@ -253,7 +227,6 @@ class MaintenanceState {
         break;
     }
   }
-
   /** Console output arrives in bursts; repaint at most once a frame. */
   #queue(cardId: string, line: PendingLine) {
     (this.#pending[cardId] ??= []).push(line);
@@ -263,7 +236,6 @@ class MaintenanceState {
       this.#flush();
     });
   }
-
   #flush() {
     for (const [cardId, incoming] of Object.entries(this.#pending)) {
       const buffer = this.consoles[cardId];
@@ -281,5 +253,4 @@ class MaintenanceState {
     this.#pending = {};
   }
 }
-
 export const maintenanceState = new MaintenanceState();

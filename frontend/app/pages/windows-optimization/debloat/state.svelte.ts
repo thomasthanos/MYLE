@@ -11,21 +11,17 @@ import { toast } from "../../../../lib/toast.svelte";
 import { debloatApi as api, type AppStatus, type DebloatEvent, type DebloatOutcome, type DebloatStatus, type StartMenuUpdate, type Step, type TweakStatus } from "./api";
 import { pinCatalog } from "./catalog";
 import { appPresetIds, fromLegacy, inProfile, isApplied, matchingProfile, pendingOf, prune, withProfile, type Profile } from "./selection";
-
 const PENDING_KEY = "myle.debloat.pending";
 /** Kept by older versions: the apps ticked for the one-click run, and the tweaks left out of it. */
 const LEGACY_APPS_KEY = "myle.debloat.apps";
 const LEGACY_SKIPPED_KEY = "myle.debloat.skipped";
-
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
-
 interface SavedChoices {
   tweaks: Record<string, boolean>;
   apps: string[];
 }
-
 function loadChoices() {
   try {
     const raw = localStorage.getItem(PENDING_KEY);
@@ -42,7 +38,6 @@ function loadChoices() {
     return fromLegacy(null);
   }
 }
-
 function saveChoices(desired: ReadonlyMap<string, boolean>, apps: ReadonlySet<string>) {
   try {
     localStorage.setItem(PENDING_KEY, JSON.stringify({ tweaks: Object.fromEntries(desired), apps: [...apps] } satisfies SavedChoices));
@@ -52,17 +47,13 @@ function saveChoices(desired: ReadonlyMap<string, boolean>, apps: ReadonlySet<st
     // A preference only.
   }
 }
-
 /** Two runs' outcomes as one. */
 function merged(a: DebloatOutcome, b: DebloatOutcome): DebloatOutcome {
   return { changed: a.changed + b.changed, failed: [...a.failed, ...b.failed], reboot: a.reboot || b.reboot, needsAdmin: a.needsAdmin || b.needsAdmin };
 }
-
 const nothing: DebloatOutcome = { changed: 0, failed: [], reboot: false, needsAdmin: false };
-
 export type Tab = "quick" | "settings" | "apps" | "startMenu" | "tools";
 const saved = loadChoices();
-
 class DebloatState {
   tab = $state<Tab>("quick");
   status = $state<DebloatStatus | null>(null);
@@ -90,9 +81,7 @@ class DebloatState {
   outcome = $state<DebloatOutcome | null>(null);
   /** The phase of a run: for the button and the progress header. */
   phase = $state<"idle" | "restorePoint" | "running" | "done">("idle");
-
   readonly locked = $derived(this.busy || this.startMenuBusy || operationGate.lockedFor("windows-optimization"));
-
   readonly tweaks = $derived(this.status?.tweaks ?? []);
   readonly installedApps = $derived((this.status?.apps ?? []).filter((app) => app.packages.length > 0));
   /** What "Review & apply" would do. */
@@ -103,7 +92,6 @@ class DebloatState {
   readonly profile = $derived(matchingProfile(this.tweaks, this.status?.apps ?? [], this.desired, this.removing));
   /** Everything MYLE changed and can put back as it was. */
   readonly undoable = $derived(this.tweaks.filter((tweak) => tweak.canUndo));
-
   async load() {
     this.loading = true;
     try {
@@ -116,14 +104,12 @@ class DebloatState {
       this.loading = false;
     }
   }
-
   /** Drops the choices that no longer change anything. */
   #tidy() {
     if (!this.status) return;
     const kept = prune(this.status.tweaks, this.status.apps, this.desired, this.removing);
     this.#replace(kept.desired, kept.apps);
   }
-
   #replace(desired: ReadonlyMap<string, boolean>, apps: ReadonlySet<string>) {
     this.desired.clear();
     for (const [id, on] of desired) this.desired.set(id, on);
@@ -131,24 +117,20 @@ class DebloatState {
     for (const id of apps) this.removing.add(id);
     saveChoices(this.desired, this.removing);
   }
-
   /** Whether a tweak's switch is on: the choice if there is one, else how it is now. */
   isOn(tweak: TweakStatus) {
     return this.desired.get(tweak.id) ?? isApplied(tweak);
   }
-
   /** A choice that is not how things are now. */
   isPending(tweak: TweakStatus) {
     return this.desired.has(tweak.id) && this.desired.get(tweak.id) !== isApplied(tweak);
   }
-
   setTweak(tweak: TweakStatus, on: boolean) {
     if (this.locked || tweak.state === "unavailable") return;
     if (on === isApplied(tweak)) this.desired.delete(tweak.id);
     else this.desired.set(tweak.id, on);
     saveChoices(this.desired, this.removing);
   }
-
   /** Turns on the recommended tweaks of one group, leaving the rest as chosen. */
   recommend(tweaks: readonly TweakStatus[]) {
     if (this.locked) return;
@@ -157,50 +139,42 @@ class DebloatState {
     }
     saveChoices(this.desired, this.removing);
   }
-
   chooseProfile(profile: Profile) {
     if (this.locked || !this.status) return;
     const next = withProfile(this.status.tweaks, this.status.apps, this.desired, this.removing, profile);
     this.#replace(next.desired, next.apps);
   }
-
   /** Leaves these out of the choices (unticked in the review). */
   forget(tweakIds: readonly string[], appIds: readonly string[]) {
     for (const id of tweakIds) this.desired.delete(id);
     for (const id of appIds) this.removing.delete(id);
     saveChoices(this.desired, this.removing);
   }
-
   clearChoices() {
     if (this.locked) return;
     this.#replace(new Map(), new Set());
     this.reviewing = false;
   }
-
   isRemoving(id: string) {
     return this.removing.has(id);
   }
-
   setApp(id: string, on: boolean) {
     if (this.locked || !this.installedApps.some((app) => app.id === id)) return;
     if (on) this.removing.add(id);
     else this.removing.delete(id);
     saveChoices(this.desired, this.removing);
   }
-
   selectApps(which: "recommended" | "all" | "none") {
     if (this.locked || !this.status) return;
     this.removing.clear();
     for (const id of appPresetIds(this.status.apps, which)) this.removing.add(id);
     saveChoices(this.desired, this.removing);
   }
-
   togglePin(id: string) {
     if (this.locked || !this.status?.startMenu.supported) return;
     if (this.selectedPins.has(id)) this.selectedPins.delete(id);
     else this.selectedPins.add(id);
   }
-
   selectPins(preset: "essential" | "all" | "none") {
     if (this.locked || !this.status?.startMenu.supported) return;
     this.selectedPins.clear();
@@ -208,15 +182,12 @@ class DebloatState {
       if (preset === "all" || (preset === "essential" && item.essential)) this.selectedPins.add(item.id);
     }
   }
-
   #onStep = (step: Step) => {
     const at = this.steps.findIndex((known) => known.id === step.id);
     if (at >= 0) this.steps[at] = step;
     else this.steps.push(step);
   };
-
   #onEvent = (event: DebloatEvent) => this.#onStep(event.data);
-
   /** Asks for a restore point first; false when the run should stop. */
   async #restorePoint(): Promise<boolean> {
     this.phase = "restorePoint";
@@ -260,7 +231,6 @@ class DebloatState {
       cancelLabel: "Stop",
     });
   }
-
   async #perform(work: () => Promise<DebloatOutcome>, withRestorePoint: boolean, steps: number) {
     if (this.locked || !operationGate.begin("windows-optimization")) {
       toast.error("Another app task is running. Try again when it finishes.");
@@ -291,7 +261,6 @@ class DebloatState {
       await this.load();
     }
   }
-
   /** Asks about the tweaks that ask again (Edge); returns those still wanted. */
   async #confirmEach(tweaks: TweakStatus[]): Promise<TweakStatus[] | null> {
     const wanted: TweakStatus[] = [];
@@ -303,7 +272,6 @@ class DebloatState {
     }
     return wanted;
   }
-
   /** Does every pending change: one restore point, then the tweaks and the
    *  apps, then the tweaks to turn off. */
   async applyPending() {
@@ -332,7 +300,6 @@ class DebloatState {
       onIds.length + offIds.length + appIds.length,
     );
   }
-
   async undo(tweaks: TweakStatus[]): Promise<boolean> {
     if (this.locked || !tweaks.length) return false;
     const single = tweaks.length === 1 ? tweaks[0] : null;
@@ -350,7 +317,6 @@ class DebloatState {
     await this.#perform(() => api.undo(tweaks.map((tweak) => tweak.id), this.#onEvent), false, tweaks.length);
     return true;
   }
-
   async openStore(app: AppStatus) {
     try {
       await api.openStore(app.id);
@@ -358,7 +324,6 @@ class DebloatState {
       toast.error(message(error));
     }
   }
-
   async setStartMenu(update: StartMenuUpdate) {
     if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
     this.startMenuBusy = true;
@@ -372,7 +337,6 @@ class DebloatState {
       operationGate.end("windows-optimization");
     }
   }
-
   async setHideRecommended(hide: boolean) {
     if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
     this.startMenuBusy = true;
@@ -387,7 +351,6 @@ class DebloatState {
       operationGate.end("windows-optimization");
     }
   }
-
   async applyStartPins(pins: string[], label: string) {
     if (this.locked || !this.status?.startMenu.supported) return;
     const ok = await confirm({
@@ -412,7 +375,6 @@ class DebloatState {
       operationGate.end("windows-optimization");
     }
   }
-
   async restoreStartPins() {
     if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
     this.startMenuBusy = true;
@@ -428,5 +390,4 @@ class DebloatState {
     }
   }
 }
-
 export const debloat = new DebloatState();

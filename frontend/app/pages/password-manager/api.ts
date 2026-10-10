@@ -3,10 +3,8 @@
 // here; a password does only when the user reveals it.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
 export type VaultStatus = "new" | "locked" | "unlocked";
 export type Strength = "none" | "weak" | "fair" | "strong";
-
 export interface StatusInfo {
   status: VaultStatus;
   autoLockMinutes: number;
@@ -15,20 +13,17 @@ export interface StatusInfo {
   /** The list shows each website's icon. */
   websiteIcons: boolean;
 }
-
 /** A website's icon, fetched in the background. */
 export interface WebsiteIcon {
   host: string;
   /** A `data:` URL. */
   icon: string;
 }
-
 export interface AppLink {
   /** Full executable path; older links may contain only the file name. */
   exe: string;
   name: string;
 }
-
 export interface Summary {
   id: string;
   title: string;
@@ -48,7 +43,6 @@ export interface Summary {
   /** Its passkeys (never their keys). */
   passkeys: PasskeyInfo[];
 }
-
 /** A passkey a login holds, as the page sees it. */
 export interface PasskeyInfo {
   credentialId: string;
@@ -58,20 +52,17 @@ export interface PasskeyInfo {
   userDisplayName: string;
   createdAt: number;
 }
-
 /** A login linked to the program the hotkey was pressed in. */
 export interface WindowsMatch {
   id: string;
   /** Linked by the program's path; else by file name only (not enough to fill). */
   exact: boolean;
 }
-
 /** A passkey's site asks for the master password (no Windows Hello here). */
 export interface VerifyRequest {
   id: number;
   site: string;
 }
-
 /** A 2FA code, and how long it still holds. */
 export interface TotpCode {
   code: string;
@@ -79,7 +70,6 @@ export interface TotpCode {
   /** Seconds until the next code. */
   remaining: number;
 }
-
 /** What a 2FA key says about itself (never the key). */
 export interface TotpInfo {
   issuer: string;
@@ -88,12 +78,10 @@ export interface TotpInfo {
   period: number;
   algorithm: string;
 }
-
 export interface OldPassword {
   password: string;
   changedAt: number;
 }
-
 export interface EntryInput {
   id?: string;
   title: string;
@@ -108,7 +96,6 @@ export interface EntryInput {
   /** The 2FA key or its otpauth:// link; leave out to keep it, "" removes it. */
   totp?: string;
 }
-
 export interface GeneratorOptions {
   /** Random characters, or random words (older apps know only the first). */
   kind?: "password" | "passphrase";
@@ -127,7 +114,6 @@ export interface GeneratorOptions {
   /** Passphrases: one word gets a digit after it. */
   number?: boolean;
 }
-
 /** What a sync with the account did. */
 export type SyncResult =
   | { state: "signedOut" }
@@ -137,7 +123,6 @@ export type SyncResult =
   | { state: "adopted" }
   /** The account holds another vault than this PC. */
   | { state: "otherVault" };
-
 /** Windows Hello on this PC. */
 export interface HelloStatus {
   /** A PIN, fingerprint or face is set up in Windows. */
@@ -145,7 +130,6 @@ export interface HelloStatus {
   /** It opens this vault here. */
   enabled: boolean;
 }
-
 /** A browser's request through the extension (no address, only which browser). */
 export interface BrowserContact {
   browser: string;
@@ -156,7 +140,6 @@ export interface BrowserContact {
   /** The extension's version, when it says (1.5.1 and later). */
   version?: string;
 }
-
 export interface BrowserSetup {
   enabled: boolean;
   /** The extension's folder, for "Load unpacked". */
@@ -176,7 +159,6 @@ export interface BrowserSetup {
   /** The side-loaded copy is older than the one this app carries. */
   localUpdate: boolean;
 }
-
 /** A newer MYLE Passwords for Android. */
 export interface MobileUpdate {
   version: string;
@@ -187,12 +169,10 @@ export interface MobileUpdate {
   size?: number;
   sha256?: string;
 }
-
 export interface UpdateProgress {
   downloaded: number;
   total: number;
 }
-
 export interface ImportPreview {
   path: string;
   /** The app's own backup: needs its password first. */
@@ -200,7 +180,6 @@ export interface ImportPreview {
   count: number;
   sample: [string, string][];
 }
-
 export interface PasswordsApi {
   status(): Promise<StatusInfo>;
   create(master: string): Promise<string>;
@@ -276,7 +255,6 @@ export interface PasswordsApi {
   /** Phones (Android): download progress listener. */
   onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<() => void>;
 }
-
 const tauriApi: PasswordsApi = {
   status: () => invoke("passwords_status"),
   create: (master) => invoke("passwords_create", { master }),
@@ -335,7 +313,6 @@ const tauriApi: PasswordsApi = {
   updateInstall: (path) => invoke("mobile_update_install", { path }),
   onUpdateProgress: (handler) => listen<UpdateProgress>("mobile://update-progress", (event) => handler(event.payload)),
 };
-
 /** In a plain browser (`npx vite`): a vault in memory, to work on the page. */
 function previewApi(): PasswordsApi {
   let status: VaultStatus = new URLSearchParams(location.search).has("new-vault") ? "new" : "locked";
@@ -598,5 +575,4 @@ function previewApi(): PasswordsApi {
     },
   };
 }
-
 export const passwordsApi: PasswordsApi = isTauri() ? tauriApi : previewApi();

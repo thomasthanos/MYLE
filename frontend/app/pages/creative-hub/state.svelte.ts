@@ -3,10 +3,8 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { toast } from "../../../lib/toast.svelte";
 import type { JobEvent, JobOutcome, Stage } from "../install-apps/api";
-
 export const CLIP_STUDIO_ID = "creative.clipstudiopaint.5.1.4";
 export const WAND_ENHANCER_ID = "creative.wandenhancer";
-
 export interface CreativeApp {
   id: string;
   name: string;
@@ -19,7 +17,6 @@ export interface CreativeApp {
   /** "Download & Setup", or "Download & Extract" for plain packages. */
   actionLabel: string;
 }
-
 export interface Job {
   phase: Stage;
   progress: number | null;
@@ -31,14 +28,11 @@ export interface Job {
   /** Bytes per second, smoothed; only while downloading. */
   speed?: number;
 }
-
 /** Speed samples at most this often, averaged so the number does not jump. */
 const SPEED_SAMPLE_MS = 500;
-
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
 class CreativeState {
   apps = $state<CreativeApp[]>([]);
   loading = $state(false);
@@ -49,7 +43,6 @@ class CreativeState {
   /** True when WandEnhancer.exe is present in roaming directory. */
   wandEnhancerReady = $state(false);
   #loaded = false;
-
   async load() {
     if (!isTauri() || this.loading || this.#loaded) return;
     this.loading = true;
@@ -70,7 +63,6 @@ class CreativeState {
       this.loading = false;
     }
   }
-
   async install(app: CreativeApp) {
     if (this.jobs[app.id]) return;
     this.jobs[app.id] = { phase: "resolving", progress: null };
@@ -130,11 +122,9 @@ class CreativeState {
       }
     }
   }
-
   cancel(app: CreativeApp) {
     void invoke("apps_cancel", { id: app.id });
   }
-
   async swapExe() {
     try {
       const note = await invoke<string>("creative_clip_studio_swap_exe");
@@ -143,7 +133,6 @@ class CreativeState {
       toast.error(`Swap failed: ${message(err)}`);
     }
   }
-
   async launchWandEnhancer() {
     try {
       const note = await invoke<string>("creative_wand_enhancer_launch");
@@ -153,5 +142,4 @@ class CreativeState {
     }
   }
 }
-
 export const creativeState = new CreativeState();

@@ -5,20 +5,16 @@ import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
 import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
-
 export type Filter = "all" | "favorites" | "weak" | "reused" | "totp";
 /** The list's order: by name, or the most recently changed first. */
 export type Sort = "name" | "recent";
-
 const SORT_KEY = "myle.passwords.sort";
 /** How long a Copy button shows that it worked. */
 const COPIED_FOR = 1600;
-
 /** The words of a search, lowercased: every one has to match somewhere. */
 export function searchWords(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 }
-
 /** Whether `entry` has every word of the search in one of its fields. */
 export function matches(entry: Summary, words: string[]): boolean {
   if (!words.length) return true;
@@ -35,10 +31,8 @@ export function matches(entry: Summary, words: string[]): boolean {
     .toLowerCase();
   return words.every((word) => haystack.includes(word));
 }
-
 /** Phones: Face ID / fingerprint was offered after an unlock. */
 const QUICK_UNLOCK_OFFERED_KEY = "myle.passwords.quickUnlockOffered";
-
 /** How the vault stands with the account, for the sync indicator. */
 export type SyncView =
   | { kind: "idle" }
@@ -47,14 +41,12 @@ export type SyncView =
   | { kind: "signedOut" }
   | { kind: "otherVault" }
   | { kind: "error"; message: string };
-
 /** Where the right-hand panel is. */
 export type Panel =
   | { kind: "none" }
   | { kind: "view"; id: string }
   /** `program`: a new login, linked to the Windows program it is for. */
   | { kind: "edit"; id: string | null; program?: AppLink };
-
 /** The host an entry's address is known by, written the way the app writes
  *  it (lowercase, no `www.`): the key of its website icon. */
 export function iconHost(url: string): string | null {
@@ -66,18 +58,15 @@ export function iconHost(url: string): string | null {
     return null;
   }
 }
-
 export interface WindowsTarget {
   exe: string;
   path: string;
   /** It runs as administrator: MYLE cannot type into it. */
   elevated: boolean;
 }
-
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
-
 class PasswordsState {
   status = $state<VaultStatus | null>(null);
   autoLockMinutes = $state(5);
@@ -121,7 +110,6 @@ class PasswordsState {
   #unlistenSync: (() => void) | null = null;
   #unlistenChanged: (() => void) | null = null;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
-
   readonly visible = $derived.by(() => {
     const words = searchWords(this.query);
     const byName = (a: Summary, b: Summary) =>
@@ -141,7 +129,6 @@ class PasswordsState {
           : Number(b.favorite) - Number(a.favorite) || byName(a, b),
       );
   });
-
   readonly counts = $derived({
     all: this.entries.length,
     favorites: this.entries.filter((e) => e.favorite).length,
@@ -149,24 +136,19 @@ class PasswordsState {
     reused: this.entries.filter((e) => e.reused).length,
     totp: this.entries.filter((e) => e.hasTotp).length,
   });
-
   setSort(sort: Sort) {
     this.sort = sort;
     writeJson(SORT_KEY, sort);
   }
-
   /** Back to every login: no search, no filter. */
   clearSearch() {
     this.query = "";
     this.filter = "all";
   }
-
   readonly folders = $derived([...new Set(this.entries.map((e) => e.folder).filter(Boolean))].sort());
-
   entry(id: string) {
     return this.entries.find((e) => e.id === id) ?? null;
   }
-
   async load() {
     this.#unlisten ??= await api.onLocked(() => this.#onLocked(true)).catch(() => null);
     this.#unlistenSync ??= await api.onSynced((result) => void this.#afterSync(result)).catch(() => null);
@@ -186,7 +168,6 @@ class PasswordsState {
     await this.syncNow();
     this.checkedAccount = true;
   }
-
   async #readStatus() {
     await this.#readHello();
     try {
@@ -201,7 +182,6 @@ class PasswordsState {
       this.error = message(error);
     }
   }
-
   async #readHello() {
     try {
       this.hello = await api.helloStatus();
@@ -209,7 +189,6 @@ class PasswordsState {
       this.hello = { available: false, enabled: false };
     }
   }
-
   /** The browser extension wants the vault for a sign-in. */
   async wantUnlock() {
     // Asked as the app starts: the vault's state may not be read yet.
@@ -219,12 +198,10 @@ class PasswordsState {
     this.siteWaiting = true;
     this.helloForSite = true;
   }
-
   /** The user came to the page. */
   pageOpened() {
     this.#helloOnOpenUntil = Date.now() + 4000;
   }
-
   /** Whether the lock screen should ask Windows Hello by itself: once, just
    *  after the page was opened, with the window in front. */
   takeHelloOnOpen() {
@@ -235,7 +212,6 @@ class PasswordsState {
     this.#helloOnOpenUntil = 0;
     return due && this.hello.enabled && document.visibilityState === "visible" && document.hasFocus();
   }
-
   /** Opens the vault with Windows Hello (PIN, fingerprint or face). `quiet`:
    *  asked by itself, so a cancelled prompt leaves no error behind. */
   async unlockWithHello(quiet = false) {
@@ -252,7 +228,6 @@ class PasswordsState {
     }
     return !!ok;
   }
-
   async setHello(enabled: boolean) {
     try {
       if (enabled) await api.helloEnable();
@@ -263,7 +238,6 @@ class PasswordsState {
     }
     await this.#readHello();
   }
-
   /** Syncs with the account now. Quiet: the indicator shows how it went. */
   async syncNow() {
     clearTimeout(this.#syncTimer);
@@ -275,13 +249,11 @@ class PasswordsState {
       this.sync = { kind: "error", message: message(error) };
     }
   }
-
   /** Soon after a change, so a burst of edits goes up together. */
   #syncSoon() {
     clearTimeout(this.#syncTimer);
     this.#syncTimer = setTimeout(() => void this.syncNow(), 1500);
   }
-
   async #afterSync(result: SyncResult) {
     switch (result.state) {
       case "signedOut":
@@ -308,7 +280,6 @@ class PasswordsState {
         if (this.status === "unlocked") await this.refresh();
     }
   }
-
   /** Replaces this PC's vault with the account's, after asking. */
   async useAccountVault() {
     const ok = await confirm({
@@ -330,7 +301,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   async refresh() {
     try {
       this.entries = await api.list();
@@ -341,7 +311,6 @@ class PasswordsState {
     }
     void this.#loadIcons();
   }
-
   /** Asks for the icons of websites new to the page; the app fetches the
    *  missing ones in the background and sends each as it arrives. */
   async #loadIcons() {
@@ -356,7 +325,6 @@ class PasswordsState {
       // Icons are a nicety: the letters stay.
     }
   }
-
   async setWebsiteIcons(on: boolean) {
     try {
       await api.setWebsiteIcons(on);
@@ -368,7 +336,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   /** The icon for an entry's addresses, if one was found. */
   iconFor(urls: string[]) {
     for (const url of urls) {
@@ -377,7 +344,6 @@ class PasswordsState {
     }
     return null;
   }
-
   /** Runs `work` with the page marked busy; the error goes to `this.error`. */
   async #run<T>(work: () => Promise<T>): Promise<T | null> {
     this.busy = true;
@@ -391,12 +357,10 @@ class PasswordsState {
       this.busy = false;
     }
   }
-
   /** Returns the recovery code to show once. */
   async create(master: string) {
     return this.#run(() => api.create(master));
   }
-
   /** After the recovery code was saved; with Windows Hello if asked. */
   async finishSetup(useHello = false) {
     this.status = "unlocked";
@@ -404,7 +368,6 @@ class PasswordsState {
     this.#syncSoon();
     if (useHello) await this.setHello(true);
   }
-
   async unlock(master: string) {
     const ok = await this.#run(() => api.unlock(master).then(() => true));
     if (ok) {
@@ -426,7 +389,6 @@ class PasswordsState {
     }
     return !!ok;
   }
-
   async recover(code: string, master: string) {
     const ok = await this.#run(() => api.recover(code, master).then(() => true));
     if (ok) {
@@ -437,7 +399,6 @@ class PasswordsState {
     }
     return !!ok;
   }
-
   async changeMaster(current: string, master: string) {
     const ok = await this.#run(() => api.changeMaster(current, master).then(() => true));
     if (ok) {
@@ -446,12 +407,10 @@ class PasswordsState {
     }
     return !!ok;
   }
-
   async lock() {
     await api.lock().catch(() => {});
     this.#onLocked(false);
   }
-
   #onLocked(automatic: boolean) {
     if (this.status !== "unlocked") return;
     this.status = "locked";
@@ -462,12 +421,10 @@ class PasswordsState {
     this.panel = { kind: "none" };
     if (automatic) toast.info("The password vault locked itself.");
   }
-
   async setAutoLock(minutes: number) {
     this.autoLockMinutes = minutes;
     await api.setAutoLock(minutes).catch((error) => toast.error(message(error)));
   }
-
   /** Hides a shown password (and forgets its timer). */
   hide(id: string) {
     clearTimeout(this.#revealTimers.get(id));
@@ -476,13 +433,11 @@ class PasswordsState {
     const { [id]: _hidden, ...rest } = this.revealed;
     this.revealed = rest;
   }
-
   #hideAll() {
     for (const timer of this.#revealTimers.values()) clearTimeout(timer);
     this.#revealTimers.clear();
     this.revealed = {};
   }
-
   async toggleReveal(id: string) {
     if (this.revealed[id] !== undefined) {
       this.hide(id);
@@ -503,7 +458,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   /** Marks a Copy button as done for a moment. */
   #markCopied(key: string) {
     clearTimeout(this.#copiedTimer);
@@ -512,7 +466,6 @@ class PasswordsState {
       if (this.copied === key) this.copied = null;
     }, COPIED_FOR);
   }
-
   async copy(id: string, field: "password" | "username" | "totp") {
     try {
       await api.copy(id, field);
@@ -528,7 +481,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   async copyText(text: string) {
     try {
       await api.copyText(text);
@@ -538,7 +490,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   async save(entry: EntryInput) {
     try {
       const id = await api.save(entry);
@@ -553,7 +504,6 @@ class PasswordsState {
       return false;
     }
   }
-
   async toggleFavorite(id: string) {
     const e = this.entry(id);
     if (!e) return;
@@ -565,7 +515,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   async removePasskey(id: string, credentialId: string) {
     const key = this.entry(id)?.passkeys.find((k) => k.credentialId === credentialId);
     if (!key) return;
@@ -584,7 +533,6 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
-
   async remove(id: string) {
     const e = this.entry(id);
     if (!e) return;
@@ -605,9 +553,7 @@ class PasswordsState {
     }
   }
 }
-
 export const passwords = new PasswordsState();
-
 /** After an import: the new entries go up to the account. */
 export function afterImport() {
   void passwords.syncNow();

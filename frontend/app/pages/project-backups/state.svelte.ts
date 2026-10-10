@@ -7,20 +7,17 @@ import { formatRelative } from "../game-saves/state.svelte";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import type { ProjectChanges } from "./api";
-
 /** How often the folders are checked while the page is open; 30 days old is
  *  called old, a backup within 7 days counts as up to date. */
 const CHECK_EVERY_MS = 5 * 60 * 1000;
 const STALE_DAYS = 30;
 const FRESH_DAYS = 7;
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
-
 export const stageLabels: Record<Stage, string> = {
   preparing: "Preparing", startingCloud: "Starting the cloud app", closingApp: "Closing the app", scanning: "Reading the project",
   zipping: "Zipping", verifying: "Checking the zip", checkingCompleteness: "Checking nothing is missing", copying: "Copying to the cloud folder",
   verifyingCopy: "Checking the copy", finishing: "Finishing",
 };
-
 /** What each stage does, in plain words (shown under the stage). */
 export const stageHints: Record<Stage, string> = {
   preparing: "Getting the backup folder ready.", startingCloud: "The cloud app has to run for its folder to be there.",
@@ -29,55 +26,42 @@ export const stageHints: Record<Stage, string> = {
   checkingCompleteness: "Comparing the zip with the project folder.", copying: "Copying the checked zip into the cloud folder.",
   verifyingCopy: "Reading the copy back from the cloud folder.", finishing: "Naming the backup and saving its details.",
 };
-
 /** The order of the stages, for "step 3 of 8" (starting and closing the app happen sometimes). */
 const stageOrder: Stage[] = ["preparing", "scanning", "zipping", "verifying", "checkingCompleteness", "copying", "verifyingCopy", "finishing"];
-
 export function stageStep(stage: Stage): { step: number; of: number } | null {
   const index = stageOrder.indexOf(stage);
   return index < 0 ? null : { step: index + 1, of: stageOrder.length };
 }
-
 export const providerNames: Record<BackupProvider, string> = { googleDrive: "Google Drive", dropbox: "Dropbox" };
-
 interface OperationView {
   startedAt: number; index: number; total: number; projectName: string; stage: Stage;
   doneBytes: number; totalBytes: number; doneFiles: number; totalFiles: number; note: string | null;
 }
-
 export interface EditorView {
   /** null: a new project; `fixMissing`: the folder was not found, save then back up. */
   project: Project | null;
   fixMissing: boolean;
 }
-
 export interface CompareView { projectId: string; firstId: string; secondId: string }
-
 /** How a project is doing, for the card's badge and for the groups. */
 export type Health = "missing" | "failed" | "never" | "stale" | "due" | "ok" | "cancelled";
-
 /** What the page summary counts. */
 export interface Summary {
   projects: number; ok: number; attention: number; never: number; stale: number; missing: number;
   /** Everything the kept backups hold, when the sizes are known. */
   backupBytes: number; knownSizes: number; newest: number | null; oldest: number | null;
 }
-
 /** A group of projects under one heading of the list. */
 export interface Group { key: "attention" | "never" | "stale" | "ok" | "missing"; title: string; note: string; projects: Project[] }
-
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
 const emptyPage: PageState = {
   settings: { version: 2, provider: null, cloudFolder: null, projects: [], exclusions: [], smartBuild: true, followGitignore: false, imported: true },
   clouds: [], backupRoot: null, running: false, defaultExclusions: [], missingSources: [], imported: null,
 };
-
 export function samePath(a: string, b: string) {
   const normal = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   return normal(a) === normal(b);
 }
-
 class ProjectBackupsState {
   page = $state<PageState>(emptyPage);
   loading = $state(true);
@@ -106,12 +90,10 @@ class ProjectBackupsState {
   checking = $state<string[]>([]);
   #watching = false;
   private loaded = false;
-
   /** Projects with changes not in a backup yet (or none at all). */
   get changedIds(): string[] {
     return this.projects.filter((p) => ["changed", "noBackup"].includes(this.changes[p.id]?.state ?? "")).map((p) => p.id);
   }
-
   /** Checks `ids` (all projects by default). `fresh`: no cached answer. */
   async checkChanges(ids: string[] = this.projects.map((p) => p.id), fresh = false) {
     if (!isTauri() || !ids.length) return;
@@ -126,7 +108,6 @@ class ProjectBackupsState {
       this.checking = this.checking.filter((id) => !todo.includes(id));
     }
   }
-
   /** Watches the folders and checks them now and every few minutes. */
   async startWatching() {
     void this.checkChanges();
@@ -137,44 +118,36 @@ class ProjectBackupsState {
     void listen<string[]>("project-backups-changed", (event) => { if (!this.locked) void this.checkChanges(event.payload); });
     setInterval(() => { if (!this.locked) void this.checkChanges(); }, CHECK_EVERY_MS);
   }
-
   get locked() { return this.operation !== null || this.busy !== null }
   get projects() { return this.page.settings.projects }
   get provider() { return this.page.settings.provider }
-
   get cloud(): CloudChoice | null {
     const folder = this.page.settings.cloudFolder;
     if (!folder) return null;
     return this.page.clouds.find((cloud) => samePath(cloud.path, folder)) ?? null;
   }
-
   /** The projects that match the search box. */
   get filtered() {
     const query = this.query.trim().toLowerCase();
     if (!query) return this.projects;
     return this.projects.filter((project) => [project.name, project.appName, project.sourcePath].some((text) => text.toLowerCase().includes(query)));
   }
-
   /** "5 minutes ago", kept fresh by `clock`; days since the last good backup. */
   ago(value: number) {
     void this.clock;
     return formatRelative(value);
   }
-
   daysSinceBackup(project: Project) {
     if (!project.lastBackup) return null;
     return Math.floor((this.clock - project.lastBackup.createdAt) / 86_400_000);
   }
-
   isMissing = (project: Project) => this.page.missingSources.includes(project.id);
-
   /** The last attempt that ended badly, for the card's badge. */
   lastFailure(project: Project) {
     const result = project.lastResult;
     if (!result?.at || result.ok) return null;
     return result;
   }
-
   /** Where the project stands, in one word. */
   health(project: Project): Health {
     if (this.isMissing(project)) return "missing";
@@ -184,13 +157,11 @@ class ProjectBackupsState {
     const days = this.daysSinceBackup(project) ?? 0;
     return days >= STALE_DAYS ? "stale" : days >= FRESH_DAYS ? "due" : "ok";
   }
-
   /** True when the project wants the user to do something. */
   needsAttention(project: Project) {
     const health = this.health(project);
     return health !== "ok" && health !== "due";
   }
-
   /** Everything the page says about itself, in one pass. */
   get summary(): Summary {
     void this.clock;
@@ -211,13 +182,11 @@ class ProjectBackupsState {
     }
     return summary;
   }
-
   /** The groups, in the order the user should read them; `filter` narrows to one. */
   get groups(): Group[] {
     const all = this.allGroups;
     return this.filter === "all" ? all : all.filter((group) => group.key === this.filter);
   }
-
   /** Every group, whatever the current filter is. Counts come from here. */
   get allGroups(): Group[] {
     const of = (...keys: Health[]) => this.filtered.filter((project) => keys.includes(this.health(project)));
@@ -231,11 +200,9 @@ class ProjectBackupsState {
     ];
     return groups.filter((group) => group.projects.length > 0);
   }
-
   setFilter(filter: "all" | Group["key"]) {
     this.filter = filter;
   }
-
   async init() {
     if (this.loaded && !this.loading) {
       void this.refresh(false);
@@ -243,7 +210,6 @@ class ProjectBackupsState {
     }
     await this.refresh(true);
   }
-
   async refresh(first = false) {
     try {
       const page = await api.getState();
@@ -261,7 +227,6 @@ class ProjectBackupsState {
       this.loading = false;
     }
   }
-
   private async run<T>(busy: string, work: () => Promise<T>): Promise<T | undefined> {
     if (this.locked) return undefined;
     this.busy = busy;
@@ -274,14 +239,12 @@ class ProjectBackupsState {
       this.busy = null;
     }
   }
-
   async useCloud(provider: BackupProvider, path: string | null) {
     const settings = await this.run("provider", () => api.setProvider(provider, path));
     if (!settings) return;
     toast.success(`Backups go to ${providerNames[provider]}.`);
     await this.refresh();
   }
-
   async importProjects() {
     const result = await this.run("import", () => api.import());
     if (!result) return;
@@ -291,16 +254,13 @@ class ProjectBackupsState {
     else toast.info("Backup Projects' project list was not found on this PC or in the backups folder.");
     await this.refresh();
   }
-
   openEditor(project: Project | null, fixMissing = false) {
     if (this.operation) return;
     this.editor = { project, fixMissing };
   }
-
   closeEditor() {
     this.editor = null;
   }
-
   /** Saves the project from the editor; after a missing folder was fixed the backup continues. */
   async saveProject(project: Project) {
     const fixMissing = this.editor?.fixMissing ?? false;
@@ -317,7 +277,6 @@ class ProjectBackupsState {
     }
     void this.startWatching();
   }
-
   async removeProject(project: Project) {
     const ok = await confirm({ title: `Remove ${project.name}?`, message: "MYLE stops backing up this project. Its backups stay in the cloud folder.", confirmLabel: "Remove", danger: true });
     if (!ok) return;
@@ -327,7 +286,6 @@ class ProjectBackupsState {
     await this.refresh();
     void this.startWatching();
   }
-
   async setExclusions(patterns: string[], smartBuild: boolean, followGitignore: boolean) {
     const settings = await this.run("exclusions", () => api.setExclusions(patterns, smartBuild, followGitignore));
     if (!settings) return false;
@@ -335,7 +293,6 @@ class ProjectBackupsState {
     toast.success("Exclusions saved.");
     return true;
   }
-
   async pickFolder(title: string) {
     try {
       return await api.pickFolder(title);
@@ -344,7 +301,6 @@ class ProjectBackupsState {
       return null;
     }
   }
-
   async backup(projectIds: string[]) {
     if (this.locked || !projectIds.length) return;
     if (!this.provider) {
@@ -391,7 +347,6 @@ class ProjectBackupsState {
       void this.checkChanges(projectIds, true); // what was just backed up is up to date: shown right away
     }
   }
-
   private onEvent(event: ProjectBackupsEvent) {
     const operation = this.operation;
     if (!operation) return;
@@ -419,7 +374,6 @@ class ProjectBackupsState {
         break;
     }
   }
-
   async cancel() {
     if (!this.operation || this.cancelling) return;
     this.cancelling = true;
@@ -430,23 +384,19 @@ class ProjectBackupsState {
       toast.error(`Could not cancel: ${message(error)}`);
     }
   }
-
   dismissFailures() {
     this.failures = [];
   }
-
   /** Backs up the projects of the failure list again. */
   async retryFailures(projectIds: string[] = this.failures.map((failure) => failure.projectId)) {
     await this.backup(projectIds);
   }
-
   /** Starts Google Drive or Dropbox for a backup that could not reach it. */
   async startCloud(provider: BackupProvider) {
     const text = await this.run("cloud", () => api.startCloud(provider));
     if (text) toast.info(`${text} Try the backup again once it is signed in.`);
     await this.refresh();
   }
-
   async toggleBackups(projectId: string) {
     if (this.expanded === projectId) {
       this.expanded = null;
@@ -456,7 +406,6 @@ class ProjectBackupsState {
     this.picked = [];
     await this.loadBackups(projectId);
   }
-
   async loadBackups(projectId: string) {
     this.backupsLoading = projectId;
     try {
@@ -468,21 +417,17 @@ class ProjectBackupsState {
       if (this.backupsLoading === projectId) this.backupsLoading = null;
     }
   }
-
   togglePick(id: string) {
     if (this.picked.includes(id)) this.picked = this.picked.filter((item) => item !== id);
     else this.picked = [...this.picked.slice(-1), id];
   }
-
   openCompare(projectId: string, firstId: string, secondId: string = SOURCE_ID) {
     if (this.operation) return;
     this.compare = { projectId, firstId, secondId };
   }
-
   closeCompare() {
     this.compare = null;
   }
-
   async open(target: "root" | "backups" | "source", projectId: string | null = null, backupId: string | null = null) {
     try {
       await api.open(target, projectId, backupId);
@@ -491,9 +436,7 @@ class ProjectBackupsState {
     }
   }
 }
-
 export const projectBackupsState = new ProjectBackupsState();
-
 /** Patterns typed one per line. */
 export function parseLines(text: string): string[] {
   return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));

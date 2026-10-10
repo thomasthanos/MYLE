@@ -11,17 +11,13 @@ import { onStorageChange, readJson } from "../../lib/storage";
 import { toast } from "../../lib/toast.svelte";
 import { ACCESS_EVENT, accountApi, type Profile, type Provider } from "./api";
 import { apply, collect, isSnapshot, isSynced } from "./snapshot";
-
 const UPDATED_AT_KEY = "myle.sync.updatedAt";
 const SYNCED_AT_KEY = "myle.sync.lastSyncedAt";
 const PUSH_DELAY_MS = 2000;
-
 const PROVIDER_NAMES: Record<Provider, string> = { discord: "Discord", google: "Google" };
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 /** Written with localStorage directly: these must not count as a change. */
 function writeRaw(key: string, value: string) {
   try {
@@ -30,7 +26,6 @@ function writeRaw(key: string, value: string) {
     // Sync still works for this run.
   }
 }
-
 function localUpdatedAt(): string | null {
   try {
     return localStorage.getItem(UPDATED_AT_KEY);
@@ -38,7 +33,6 @@ function localUpdatedAt(): string | null {
     return null;
   }
 }
-
 class AccountState {
   profile = $state<Profile | null>(null);
   /** The provider whose browser sign-in is being waited for. */
@@ -54,9 +48,7 @@ class AccountState {
   #started = false;
   #applying = false;
   #pushTimer: ReturnType<typeof setTimeout> | undefined;
-
   readonly signedIn = $derived(this.profile !== null);
-
   /** Once per run, from the app shell: restores the session and syncs. */
   async init() {
     if (!isTauri() || this.#started) return;
@@ -77,7 +69,6 @@ class AccountState {
       this.accessKnown = true;
     }
   }
-
   async refreshAccess(recheck = false) {
     if (!isTauri() || !this.profile) {
       this.owner = false;
@@ -92,7 +83,6 @@ class AccountState {
       this.accessKnown = true;
     }
   }
-
   async signIn(provider: Provider) {
     if (this.signingIn || this.profile) return;
     this.signingIn = provider;
@@ -112,11 +102,9 @@ class AccountState {
       this.signingIn = null;
     }
   }
-
   cancelSignIn() {
     void accountApi.cancelSignIn();
   }
-
   async signOut() {
     if (!this.profile) return;
     const ok = await confirm({
@@ -138,7 +126,6 @@ class AccountState {
     this.error = null;
     toast.info("Signed out.");
   }
-
   /** Reads the cloud copy and keeps whichever side changed last. */
   async sync(announce = false) {
     if (!this.profile || this.syncing) return;
@@ -169,19 +156,16 @@ class AccountState {
       this.syncing = false;
     }
   }
-
   #onLocalChange(key: string) {
     if (this.#applying || !isSynced(key)) return;
     writeRaw(UPDATED_AT_KEY, new Date().toISOString());
     if (!this.profile) return;
     this.#schedulePush();
   }
-
   #schedulePush() {
     clearTimeout(this.#pushTimer);
     this.#pushTimer = setTimeout(() => void this.#pushNow(), PUSH_DELAY_MS);
   }
-
   async #pushNow() {
     if (!this.profile) return;
     // A sync is running: try again after it rather than drop this change.
@@ -200,18 +184,15 @@ class AccountState {
       this.syncing = false;
     }
   }
-
   async #push() {
     const updatedAt = localUpdatedAt() ?? new Date().toISOString();
     writeRaw(UPDATED_AT_KEY, updatedAt);
     await accountApi.push(await collect(updatedAt));
   }
-
   #markSynced() {
     this.lastSyncedAt = Date.now();
     writeRaw(SYNCED_AT_KEY, JSON.stringify(this.lastSyncedAt));
   }
-
   #fail(error: unknown) {
     const text = message(error);
     this.error = text;
@@ -219,5 +200,4 @@ class AccountState {
     if (/sign in again|not signed in/i.test(text)) this.profile = null;
   }
 }
-
 export const account = new AccountState();

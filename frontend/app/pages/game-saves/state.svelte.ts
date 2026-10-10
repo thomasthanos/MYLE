@@ -30,15 +30,12 @@ import {
   type RootStore,
   type ScheduleWeekday,
 } from "./api";
-
 /** Windows paths, compared as Windows does: case and a trailing slash aside. */
 export function samePath(a: string, b: string) {
   const normal = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   return normal(a) === normal(b);
 }
-
 export type GameSavesFilter = "all" | "changed" | "notBackedUp" | "backedUp" | "problems";
-
 interface OperationView {
   startedAt: number;
   kind: OperationKind;
@@ -51,26 +48,21 @@ interface OperationView {
    *  the window): a line in the toolbar, not the progress bar. */
   background?: boolean;
 }
-
 const KEY = {
   tab: "myle.gameSaves.tab",
   filter: "myle.gameSaves.filter",
   settingsOpen: "myle.gameSaves.settingsOpen",
   steamCovers: "myle.gameSaves.steamCovers",
 };
-
 const oneOf = <T extends string>(...values: T[]) => (value: unknown) => values.includes(value as T);
-
 /** Settings that follow the account to other PCs (the rest name local folders). */
 const SYNCED_SETTINGS = new Set(["schedule", "customGame"]);
-
 /** Background check for saves changed by playing, while the app is open. */
 const WATCH_EVERY_MS = 10 * 60 * 1000;
 const WATCH_FIRST_MS = 20 * 1000;
 /** Coming back to the window checks again, but not more often than this:
  *  every Alt+Tab back was one more scan. */
 const FOCUS_CHECK_MS = 10 * 60 * 1000;
-
 const emptySettings = (): GameSavesSettings => ({
   backupFolder: null,
   schedule: "off",
@@ -84,7 +76,6 @@ const emptySettings = (): GameSavesSettings => ({
   customGames: [],
   pathMappings: [],
 });
-
 const emptyPage = (): GameSavesPageState => ({
   settings: emptySettings(),
   cloudFolders: [],
@@ -96,11 +87,9 @@ const emptyPage = (): GameSavesPageState => ({
   undoRestore: null,
   cachedScan: null,
 });
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 function matchesStatus(status: GameSaveStatus, filter: GameSavesFilter): boolean {
   switch (filter) {
     case "changed":
@@ -115,7 +104,6 @@ function matchesStatus(status: GameSaveStatus, filter: GameSavesFilter): boolean
       return true;
   }
 }
-
 class GameSavesState {
   page = $state<GameSavesPageState>(emptyPage());
   scanResult = $state<GameSavesScan | null>(null);
@@ -157,9 +145,7 @@ class GameSavesState {
   /** Changed saves already announced; null until the first result. */
   #announced: number | null = null;
   #settingsRevision = 0;
-
   readonly games = $derived(this.tab === "pc" ? (this.scanResult?.onThisPc ?? []) : (this.scanResult?.inBackup ?? []));
-
   readonly visibleGames = $derived.by(() => {
     const q = this.query.trim().toLocaleLowerCase();
     return this.games.filter((game) => {
@@ -167,11 +153,9 @@ class GameSavesState {
       return !q || game.title.toLocaleLowerCase().includes(q) || game.platformBadges.some((badge) => badge.toLocaleLowerCase().includes(q));
     });
   });
-
   canSelect(game: GameSaveEntry): boolean {
     return this.tab === "pc" ? game.hasLocalData : game.hasBackup && game.snapshots.length > 0;
   }
-
   readonly selectableGames = $derived(this.visibleGames.filter((game) => this.canSelect(game)));
   readonly selectedGames = $derived(this.games.filter((game) => this.selected.has(game.id) && this.canSelect(game)));
   readonly allVisibleSelected = $derived(
@@ -206,7 +190,6 @@ class GameSavesState {
   readonly backupGames = $derived(this.scanResult?.stats.backupGames ?? 0);
   readonly totalBytes = $derived(this.scanResult?.stats.totalBytes ?? 0);
   readonly databaseGames = $derived(this.scanResult?.stats.databaseGames ?? this.page.databaseGames);
-
   async init() {
     if (!isTauri()) {
       this.loading = false;
@@ -245,7 +228,6 @@ class GameSavesState {
       this.loading = false;
     }
   }
-
   /** The page was reloaded while an operation ran: its result cannot reach
    *  this page any more, so wait until the backend is idle and rescan. */
   async #waitForAdopted() {
@@ -269,13 +251,11 @@ class GameSavesState {
       }
     }
   }
-
   /** Re-reads the saved tab and filter (after account sync replaced them). */
   reloadChoices() {
     this.tab = readJson(KEY.tab, this.tab, oneOf("pc", "backup"));
     this.filter = readJson(KEY.filter, this.filter, oneOf("all", "changed", "notBackedUp", "backedUp", "problems"));
   }
-
   /** For the app's preload: the last saved list and its covers, without
    *  running the engine, so the page opens on them (and the sidebar badge
    *  counts changed saves from the start). Opening the page still checks. */
@@ -292,7 +272,6 @@ class GameSavesState {
     }
     await this.loadCovers();
   }
-
   /** Asks for the covers of the listed games not asked for yet. Quietly:
    *  a game without one keeps its monogram. */
   async loadCovers() {
@@ -314,18 +293,15 @@ class GameSavesState {
       for (const id of unique) this.#coversAsked.delete(id);
     }
   }
-
   setSteamCovers(on: boolean) {
     this.steamCovers = on;
     writeFlag(KEY.steamCovers, on);
     if (on) void this.loadCovers();
   }
-
   toggleSettings() {
     this.settingsOpen = !this.settingsOpen;
     writeFlag(KEY.settingsOpen, this.settingsOpen);
   }
-
   setTab(tab: GameSavesTab) {
     if (this.selectionLocked) return;
     if (this.tab === tab) return;
@@ -334,26 +310,21 @@ class GameSavesState {
     this.restoreDialogOpen = false;
     writeJson(KEY.tab, tab);
   }
-
   setFilter(filter: GameSavesFilter) {
     this.filter = filter;
     writeJson(KEY.filter, filter);
   }
-
   setQuery(value: string) {
     this.query = value;
   }
-
   isSelected(game: GameSaveEntry): boolean {
     return this.selected.has(game.id);
   }
-
   toggleSelected(game: GameSaveEntry) {
     if (this.selectionLocked || !this.canSelect(game)) return;
     if (this.selected.has(game.id)) this.selected.delete(game.id);
     else this.selected.add(game.id);
   }
-
   toggleAllVisible() {
     if (this.selectionLocked) return;
     if (this.allVisibleSelected) {
@@ -362,12 +333,10 @@ class GameSavesState {
       for (const game of this.selectableGames) this.selected.add(game.id);
     }
   }
-
   clearSelection() {
     if (this.selectionLocked) return;
     this.selected.clear();
   }
-
   selectPending() {
     if (this.selectionLocked) return;
     this.setTab("pc");
@@ -375,7 +344,6 @@ class GameSavesState {
     this.setFilter("all");
     this.setQuery("");
   }
-
   async openRestorePicker() {
     if (!this.selectedGames.length || this.locked) return;
     await this.#stopDiscovery();
@@ -385,36 +353,30 @@ class GameSavesState {
     }
     this.restoreDialogOpen = true;
   }
-
   setSnapshot(gameId: string, snapshotId: string) {
     if (this.selectionLocked) return;
     this.snapshotChoices[gameId] = snapshotId;
   }
-
   snapshotFor(game: GameSaveEntry): string {
     const selected = this.snapshotChoices[game.id];
     return game.snapshots.some((snapshot) => snapshot.id === selected) ? selected : (game.snapshots[0]?.id ?? "");
   }
-
   mappingFor(game: GameSaveEntry): PathMapping | undefined {
     return this.page.settings.pathMappings.find(
       (mapping) => mapping.gameId === game.id && (!game.paths[0] || samePath(mapping.source, game.paths[0])),
     );
   }
-
   openCustomDialog(game: CustomGame | null = null) {
     if (this.locked) return;
     this.editingCustomGame = game;
     this.customDialogOpen = true;
   }
-
   closeCustomDialog() {
     if (!this.locked) {
       this.customDialogOpen = false;
       this.editingCustomGame = null;
     }
   }
-
   /** Full scan of every game in the database ("Scan again"). */
   async scan(announce = true) {
     if (this.locked || !this.page.engineAvailable) return;
@@ -433,7 +395,6 @@ class GameSavesState {
       this.operation = null;
     }
   }
-
   /** Re-checks only the games already found: a couple of seconds. */
   async refresh(quiet = false) {
     if (this.locked || this.discovering || !this.page.engineAvailable || !this.scanResult) return;
@@ -453,7 +414,6 @@ class GameSavesState {
     }
     if (discoveryDue) void this.discover();
   }
-
   /**
    * Full scan in the background, for games installed since the last one.
    * The list stays usable; any action cancels it first.
@@ -479,19 +439,16 @@ class GameSavesState {
     })();
     return this.#discovery;
   }
-
   /** "Stop" on the background search for new games. */
   async stopDiscovery() {
     await this.#stopDiscovery();
   }
-
   async #stopDiscovery() {
     const running = this.#discovery;
     if (!running) return;
     await gameSavesApi.cancel().catch(() => {});
     await running;
   }
-
   /**
    * Starts the background check that notices saves changed by playing:
    * shortly after launch, every ten minutes, and on coming back to the window.
@@ -513,7 +470,6 @@ class GameSavesState {
       this.#watching = false;
     };
   }
-
   /** Ends the watcher: on a hot reload in development, the old copy of this
    *  module would otherwise go on scanning next to the new one, one more
    *  after every reload. */
@@ -521,9 +477,7 @@ class GameSavesState {
     this.#stopWatching?.();
     this.#stopWatching = null;
   }
-
   #stopWatching: (() => void) | null = null;
-
   async #backgroundCheck() {
     if (this.busy || this.discovering || this.settingsBusy) return;
     try {
@@ -543,13 +497,11 @@ class GameSavesState {
       // A background check never interrupts; the next one retries.
     }
   }
-
   #applyScan(result: GameSavesScan) {
     this.scanResult = result;
     this.pruneSelection();
     this.#updateBadge(result);
   }
-
   /** Sidebar count of changed saves, and a toast when it goes up. */
   #updateBadge(result: GameSavesScan) {
     const changed = result.onThisPc.filter((game) => game.autoBackup && game.status === "changedSinceBackup").length;
@@ -566,7 +518,6 @@ class GameSavesState {
     }
     this.#announced = changed;
   }
-
   /** A scan can re-detect launcher folders; show the settings it used. */
   #reloadPage() {
     const revision = this.#settingsRevision;
@@ -577,7 +528,6 @@ class GameSavesState {
       })
       .catch(() => {});
   }
-
   async updateDatabase() {
     if (this.locked) return;
     await this.#stopDiscovery();
@@ -597,11 +547,9 @@ class GameSavesState {
     }
     await this.scan(false);
   }
-
   async backupSelected() {
     await this.backup(this.selectedGames.map((game) => game.id));
   }
-
   /** Backs up, in one go, the games whose saves were never backed up
    *  ("new"), changed since their backup ("changed"), or both. */
   async backupPending(which: "both" | "new" | "changed") {
@@ -615,7 +563,6 @@ class GameSavesState {
     }[which];
     await this.backup(games.map((game) => game.id), title);
   }
-
   async backupChanged() {
     const ids = (this.scanResult?.onThisPc ?? [])
       .filter(
@@ -628,7 +575,6 @@ class GameSavesState {
     }
     await this.backup(ids);
   }
-
   private async backup(gameIds: string[], title?: string) {
     if (this.locked || !this.page.engineAvailable || !gameIds.length) return;
     if (!this.page.settings.backupFolder) {
@@ -656,7 +602,6 @@ class GameSavesState {
     }
     await this.refreshAfterOperation();
   }
-
   async restore(selections: RestoreSelection[]) {
     if (this.locked || !this.page.engineAvailable || !selections.length) return;
     this.restoreDialogOpen = false;
@@ -693,7 +638,6 @@ class GameSavesState {
     }
     await this.refreshAfterOperation();
   }
-
   async undoLastRestore() {
     const undo = this.page.undoRestore;
     if (!undo || this.locked) return;
@@ -720,7 +664,6 @@ class GameSavesState {
     }
     await this.refreshAfterOperation();
   }
-
   async cancel() {
     if (!this.busy || this.cancelling) return;
     this.cancelling = true;
@@ -732,7 +675,6 @@ class GameSavesState {
       this.cancelling = false;
     }
   }
-
   async chooseBackupFolder() {
     let changed = false;
     await this.setting("backupFolder", async () => {
@@ -741,7 +683,6 @@ class GameSavesState {
     });
     if (changed) await this.refresh();
   }
-
   private applyBackupFolder(settings: GameSavesSettings): boolean {
     const changed = !samePath(this.page.settings.backupFolder ?? "", settings.backupFolder ?? "");
     this.page.settings = settings;
@@ -759,7 +700,6 @@ class GameSavesState {
     if (this.tab === "backup") this.selected.clear();
     return true;
   }
-
   /** Backs up into a cloud folder: a detected one, or one the user points to. */
   async useCloudFolder(provider: CloudProvider, folder: DetectedFolder | null) {
     const before = this.page.settings.backupFolder;
@@ -777,7 +717,6 @@ class GameSavesState {
     });
     if (changed) await this.refresh();
   }
-
   async openBackupFolder() {
     try {
       await gameSavesApi.openBackupFolder();
@@ -785,7 +724,6 @@ class GameSavesState {
       toast.error(`Could not open the backup folder: ${message(error)}`);
     }
   }
-
   async detectCloudFolders() {
     await this.setting("cloudFolders", async () => {
       this.page.cloudFolders = await gameSavesApi.detectCloudFolders();
@@ -793,28 +731,24 @@ class GameSavesState {
       toast.info(count ? `Found ${count} cloud folder${count === 1 ? "" : "s"}.` : "No cloud folders were found on this PC.");
     });
   }
-
   async setSchedule(schedule: BackupSchedule, time: string, weekday: ScheduleWeekday) {
     await this.setting("schedule", async () => {
       this.page.settings = await gameSavesApi.setSchedule(schedule, time, weekday);
       toast.success(schedule === "off" ? "Automatic backups turned off." : `Automatic backups set to ${schedule}.`);
     });
   }
-
   async refreshRoots() {
     await this.setting("roots", async () => {
       this.page.settings = await gameSavesApi.refreshRoots();
       toast.success("Game install folders refreshed.");
     });
   }
-
   async addRoot(store: RootStore) {
     await this.setting("roots", async () => {
       const settings = await gameSavesApi.addRoot(store);
       if (settings) this.page.settings = settings;
     });
   }
-
   async removeRoot(rootId: string) {
     const root = this.page.settings.roots.find((item) => item.id === rootId);
     if (!root) return;
@@ -829,7 +763,6 @@ class GameSavesState {
       this.page.settings = await gameSavesApi.removeRoot(rootId);
     });
   }
-
   async saveCustomGame(game: CustomGame) {
     await this.setting("customGame", async () => {
       this.page.settings = await gameSavesApi.upsertCustomGame(game);
@@ -838,13 +771,11 @@ class GameSavesState {
       toast.success(`${game.name.trim()} saved.`);
     });
   }
-
   async pickFolder(title: string): Promise<string | null> {
     let path: string | null = null;
     await this.setting("folderPicker", async () => { path = await gameSavesApi.pickFolder(title); });
     return path;
   }
-
   async chooseRestoreLocation(game: GameSaveEntry) {
     await this.setting("pathMapping", async () => {
       const target = await gameSavesApi.pickFolder(`Choose where to restore ${game.title}`);
@@ -856,7 +787,6 @@ class GameSavesState {
       });
     });
   }
-
   async removeRestoreLocation(game: GameSaveEntry) {
     const mapping = this.mappingFor(game);
     if (!mapping) return;
@@ -864,7 +794,6 @@ class GameSavesState {
       this.page.settings = await gameSavesApi.removePathMapping(mapping.gameId, mapping.source);
     });
   }
-
   async removeCustomGame(gameId: string) {
     const game = this.page.settings.customGames.find((item) => item.id === gameId);
     if (!game) return;
@@ -880,7 +809,6 @@ class GameSavesState {
       toast.success(`${game.name} removed.`);
     });
   }
-
   async setAutoBackup(game: GameSaveEntry, enabled: boolean) {
     if (this.selectionLocked || !game.hasLocalData) return;
     if (!this.#autoBackupConfirmed.has(game.id)) this.#autoBackupConfirmed.set(game.id, game.autoBackup);
@@ -897,13 +825,11 @@ class GameSavesState {
     }
     await this.#autoBackupSave;
   }
-
   #mirrorAutoBackup(id: string, enabled: boolean) {
     for (const game of [...(this.scanResult?.onThisPc ?? []), ...(this.scanResult?.inBackup ?? [])]) {
       if (game.id === id) game.autoBackup = enabled;
     }
   }
-
   async #saveAutoBackup() {
     let saved = false;
     try {
@@ -945,7 +871,6 @@ class GameSavesState {
       if (saved) notifyChange("gameSaves");
     }
   }
-
   async openGameFolder(game: GameSaveEntry) {
     try {
       await gameSavesApi.openGameFolder(game.id);
@@ -953,7 +878,6 @@ class GameSavesState {
       toast.error(`Could not open ${game.title}: ${message(error)}`);
     }
   }
-
   private async setting(key: string, action: () => Promise<void>) {
     if (this.locked) return;
     this.settingsBusy = key;
@@ -969,13 +893,11 @@ class GameSavesState {
       this.settingsBusy = null;
     }
   }
-
   private beginOperation(kind: OperationKind, stage: OperationStage) {
     this.operation = { startedAt: Date.now(), kind, stage, done: 0, total: 0, current: null, note: null };
     this.error = null;
     if (kind !== "scan") this.failures = null;
   }
-
   private readonly onEvent = (event: GameSavesEvent) => {
     if (!this.operation) return;
     if (event.event === "stage") {
@@ -996,7 +918,6 @@ class GameSavesState {
       this.operation.note = null;
     } else this.operation.note = event.data.text;
   };
-
   private reportResult(result: GameSavesOperationResult) {
     const verb = result.kind === "backup" ? "Backed up" : "Restored";
     const failed = result.failedGames.length;
@@ -1012,7 +933,6 @@ class GameSavesState {
     };
     toast.error(`${failed} ${failed === 1 ? "game" : "games"} could not be ${result.kind === "backup" ? "backed up" : "restored"}. See the details on the page.`);
   }
-
   private keepFailedSelection(ids: string[], result: GameSavesOperationResult) {
     const failed = new Set(result.failedGames);
     // IPC returns failure titles, not IDs. Ambiguous duplicate titles stay
@@ -1023,16 +943,13 @@ class GameSavesState {
       if (game && !failed.has(game.title)) this.selected.delete(id);
     }
   }
-
   dismissFailures() {
     this.failures = null;
   }
-
   private fail(label: string, error: unknown) {
     this.error = `${label}: ${message(error)}`;
     toast.error(this.error);
   }
-
   private pruneSelection() {
     const known = new Set([...(this.scanResult?.onThisPc ?? []), ...(this.scanResult?.inBackup ?? [])].map((game) => game.id));
     for (const id of [...this.selected]) if (!known.has(id)) this.selected.delete(id);
@@ -1044,7 +961,6 @@ class GameSavesState {
       }
     }
   }
-
   /** After a backup or restore only the known games can have changed. */
   private async refreshAfterOperation() {
     try {
@@ -1056,16 +972,13 @@ class GameSavesState {
     else await this.scan(false);
   }
 }
-
 export const gameSavesState = new GameSavesState();
-
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     gameSavesState.stopWatcher();
     void gameSavesState.stopDiscovery();
   });
 }
-
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1078,22 +991,18 @@ export function formatBytes(bytes: number): string {
   const decimals = unit === 0 ? 0 : value >= 100 ? 0 : 1;
   return `${value.toFixed(decimals)} ${units[unit]}`;
 }
-
 function toDate(value: number | string): Date {
   return new Date(typeof value === "number" && value < 10_000_000_000 ? value * 1000 : value);
 }
-
 const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const dayFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
 export function formatDate(value: number | string | null): string {
   if (value === null) return "Never";
   const date = toDate(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return dateTimeFormat.format(date);
 }
-
 /** "5 minutes ago", "yesterday", "3 days ago"; the day itself after a month. */
 export function formatRelative(value: number | string | null): string {
   if (value === null) return "Never";

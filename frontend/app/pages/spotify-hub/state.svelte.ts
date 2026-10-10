@@ -16,21 +16,17 @@ import {
   type SpotifyHubStage,
   type SpotifyHubReleases,
 } from "./api";
-
 export type HubCardStatus = "Ready" | "Running" | "Completed" | "Partial" | "Error";
-
 export interface ConsoleBuffer {
   lines: string[];
   open: boolean;
   dropped: number;
 }
-
 const MAX_LINES = 1200;
 const TRIM_TO = 1000;
 const POLL_MS = 1500;
 /** A revisit within this window reuses the last detection. */
 const FRESH_MS = 30_000;
-
 const STAGE_LABELS: Record<SpotifyHubStage, string> = {
   preparing: "Preparing",
   downloading: "Downloading",
@@ -41,11 +37,9 @@ const STAGE_LABELS: Record<SpotifyHubStage, string> = {
   cleaning: "Cleaning",
   finalizing: "Finalizing",
 };
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 class SpotifyHubState {
   snapshot = $state<SpotifyHubSnapshot | null>(null);
   loading = $state(false);
@@ -68,7 +62,6 @@ class SpotifyHubState {
     restoreSpotify: "Ready",
     purgeAll: "Ready",
   });
-
   #pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Last backend outcome already reflected in `statuses`. A failed run
    *  leaves the previous outcome in place, and re-applying it would turn
@@ -76,26 +69,21 @@ class SpotifyHubState {
   #seenOutcome: string | null = null;
   #loadedAt = 0;
   #updateRequest = 0;
-
   readonly activeJob = $derived(this.liveJob ?? this.snapshot?.activeJob ?? null);
   readonly activeAction = $derived(this.startingAction ?? this.activeJob?.action ?? null);
   readonly ownBusy = $derived(this.activeAction !== null);
   readonly installAppsBusy = $derived(appsState.busy || operationGate.lockedFor("spotify-hub"));
   readonly locked = $derived(this.ownBusy || this.installAppsBusy);
-
   statusOf(action: SpotifyHubAction): HubCardStatus {
     return this.activeAction === action ? "Running" : this.statuses[action];
   }
-
   stageLabel(action: SpotifyHubAction): string | null {
     if (this.activeAction !== action) return null;
     return this.activeJob ? STAGE_LABELS[this.activeJob.stage] : "Preparing";
   }
-
   progressOf(action: SpotifyHubAction): number | null {
     return this.activeAction === action ? (this.activeJob?.progress ?? null) : null;
   }
-
   /** `force` after an action; a plain page visit reuses a fresh detection. */
   async load(force = false) {
     if (!isTauri() || this.loading) return;
@@ -113,7 +101,6 @@ class SpotifyHubState {
     }
     if (this.snapshot && !this.error && !this.ownBusy) await this.checkUpdates();
   }
-
   async checkUpdates() {
     if (!isTauri() || this.locked || this.checkingUpdates || !this.snapshot?.spicetify.healthy) return;
     const request = ++this.#updateRequest;
@@ -131,7 +118,6 @@ class SpotifyHubState {
       if (request === this.#updateRequest) this.checkingUpdates = false;
     }
   }
-
   private applySnapshot(snapshot: SpotifyHubSnapshot) {
     this.snapshot = snapshot;
     if (snapshot.activeJob) {
@@ -146,13 +132,11 @@ class SpotifyHubState {
       if (snapshot.lastOutcome) this.adoptOutcome(snapshot.lastOutcome);
     }
   }
-
   private adoptOutcome(outcome: SpotifyHubOutcome) {
     if (outcome.jobId === this.#seenOutcome) return;
     this.#seenOutcome = outcome.jobId;
     this.applyOutcomeStatus(outcome, outcome.action);
   }
-
   private watchActiveJob() {
     if (this.#pollTimer) return;
     const poll = async () => {
@@ -178,7 +162,6 @@ class SpotifyHubState {
     };
     this.#pollTimer = setTimeout(poll, POLL_MS);
   }
-
   installLabel(): string {
     const state = this.snapshot;
     if (!state?.desktop.installed) return "Install Spotify first";
@@ -192,14 +175,12 @@ class SpotifyHubState {
       || (marketplace && compareVersions(marketplace, this.releases.marketplace) < 0)) return "Update";
     return cli && marketplace ? "Up to date" : "Repair";
   }
-
   prepareSpotifyInstall() {
     if (this.locked) return;
     appsState.prepareInstall("Spotify.Spotify");
     nav.rememberScroll("install-apps", 0);
     nav.go("install-apps");
   }
-
   async install() {
     if (this.checkingUpdates || this.locked) return;
     if (!this.snapshot?.desktop.installed) {
@@ -214,11 +195,9 @@ class SpotifyHubState {
     if (label === "Up to date") return;
     await this.run("installSpicetify", null);
   }
-
   async repair() {
     if (this.snapshot?.desktop.installed) await this.run("installSpicetify", null, "Repair");
   }
-
   async restore() {
     if (this.locked) return;
     const ok = await confirm({
@@ -229,7 +208,6 @@ class SpotifyHubState {
     });
     if (ok && !this.locked) await this.run("restoreSpotify", null);
   }
-
   async previewPurge() {
     if (this.locked || this.previewingPurge) return;
     this.previewingPurge = true;
@@ -241,11 +219,9 @@ class SpotifyHubState {
       this.previewingPurge = false;
     }
   }
-
   dismissPurgePreview() {
     if (!this.startingAction) this.purgePreview = null;
   }
-
   async confirmPurge() {
     const preview = this.purgePreview;
     if (!preview || preview.expiresAt <= Date.now()) {
@@ -256,7 +232,6 @@ class SpotifyHubState {
     this.purgePreview = null;
     await this.run("purgeAll", preview.token);
   }
-
   async cancel() {
     const job = this.activeJob;
     if (!job || this.stopping) return;
@@ -279,17 +254,14 @@ class SpotifyHubState {
       toast.error(`Could not request cancellation: ${message(error)}`);
     }
   }
-
   toggleConsole(action: SpotifyHubAction) {
     this.consoles[action].open = !this.consoles[action].open;
   }
-
   private async run(action: SpotifyHubAction, purgeToken: string | null, requestedLabel?: string) {
     if (this.locked || !operationGate.begin("spotify-hub")) {
       toast.info("Finish the current app task before starting another action.");
       return;
     }
-
     const requested = requestedLabel ?? this.installLabelFor(action);
     this.startingAction = action;
     this.#updateRequest++;
@@ -300,7 +272,6 @@ class SpotifyHubState {
     this.stopping = false;
     this.consoles[action] = { lines: [], open: true, dropped: 0 };
     this.append(action, `${requested} requested.`);
-
     try {
       const outcome = await spotifyHubApi.run(action, purgeToken, (event) => this.onEvent(action, event));
       this.#seenOutcome = outcome.jobId;
@@ -319,7 +290,6 @@ class SpotifyHubState {
       await this.load(true);
     }
   }
-
   private onEvent(action: SpotifyHubAction, event: SpotifyHubEvent) {
     if (event.event === "stage") {
       // The backend announces "preparing" twice (on start and inside the
@@ -333,7 +303,6 @@ class SpotifyHubState {
       this.append(action, event.data.text, event.data.replace);
     }
   }
-
   private append(action: SpotifyHubAction, text: string, replace = false) {
     const buffer = this.consoles[action];
     const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
@@ -347,7 +316,6 @@ class SpotifyHubState {
       buffer.dropped += remove;
     }
   }
-
   private applyOutcomeStatus(outcome: SpotifyHubOutcome, action: SpotifyHubAction | null) {
     if (!action) return;
     if (outcome.result === "done") {
@@ -357,7 +325,6 @@ class SpotifyHubState {
     else if (outcome.result === "partial" || outcome.result === "cancelled") this.statuses[action] = "Partial";
     else this.statuses[action] = "Error";
   }
-
   private reportOutcome(action: SpotifyHubAction, outcome: SpotifyHubOutcome) {
     const title = this.titleFor(action);
     if (outcome.result === "done") toast.success(`${title} completed.${outcome.note ? ` ${outcome.note}` : ""}`);
@@ -365,18 +332,15 @@ class SpotifyHubState {
     else if (outcome.result === "partial") toast.info(`${title} completed only partially.${outcome.note ? ` ${outcome.note}` : ""}`);
     else toast.info(`${title} needs administrator approval to finish.${outcome.note ? ` ${outcome.note}` : ""}`);
   }
-
   private titleFor(action: SpotifyHubAction): string {
     if (action === "installSpicetify") return "Spicetify setup";
     if (action === "restoreSpotify") return "Spotify restore";
     return "Full Spotify uninstall";
   }
-
   private installLabelFor(action: SpotifyHubAction): string {
     if (action === "installSpicetify") return this.installLabel();
     if (action === "restoreSpotify") return "Restore Spotify";
     return "Full uninstall";
   }
 }
-
 export const spotifyHubState = new SpotifyHubState();

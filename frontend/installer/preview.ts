@@ -2,9 +2,7 @@
 // browser: `npx vite`, then /installer.html?demo=install (or =update,
 // =uninstall, =running, =error, =shortcut-warning).
 import type { Progress, SetupApi, SetupState } from "./api";
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
 export function previewApi(mode: string): SetupApi {
   const uninstall = mode === "uninstall";
   const installed = uninstall
@@ -27,7 +25,6 @@ export function previewApi(mode: string): SetupApi {
     extensionUrl: uninstall ? null : "https://example.com/myle-passwords",
   };
   let runningAsked = false;
-
   return {
     async state() {
       await sleep(120);
@@ -91,12 +88,10 @@ export function previewApi(mode: string): SetupApi {
     async exit() {},
   };
 }
-
 async function stage(onEvent: (e: Progress) => void, name: Extract<Progress, { event: "stage" }>["data"]["stage"], ms: number) {
   onEvent({ event: "stage", data: { stage: name } });
   await sleep(ms);
 }
-
 const DIR = String.raw`C:\Users\Thomas\AppData\Local\ThomasThanos\MakeYourLifeEasier`;
 const FILES: [string, number][] = [
   ["MYLE.exe", 14_200_000],

@@ -4,11 +4,8 @@
 // path. The GitHub token and AI keys never come back here.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { FileDiff } from "../project-backups/api";
-
 export type { FileDiff };
-
 // ─── Shared ────────────────────────────────────────────────────────────────
-
 /** A failure the page can act on: `code` says what, `message` is for people. */
 export interface Problem {
   code: string;
@@ -17,7 +14,6 @@ export interface Problem {
   /** AI failures: the provider that failed and the one to offer next. */
   data?: { provider?: ProviderId; next?: ProviderId | null; nextName?: string | null; retryAfter?: number | null } & Record<string, unknown>;
 }
-
 /** The backend's errors are plain text or a Problem as JSON. */
 export function problemOf(error: unknown): Problem {
   const text = error instanceof Error ? error.message : String(error);
@@ -31,13 +27,9 @@ export function problemOf(error: unknown): Problem {
   }
   return { code: "FAILED", message: text, details: null };
 }
-
 export const messageOf = (error: unknown): string => problemOf(error).message;
-
 // ─── Page ──────────────────────────────────────────────────────────────────
-
 export type ProviderId = "groq" | "gemini" | "openrouter" | "deepseek" | "ollama";
-
 export interface ProviderView {
   id: ProviderId;
   name: string;
@@ -51,14 +43,12 @@ export interface ProviderView {
   ready: boolean;
   keyHint: string | null;
 }
-
 export interface AiView {
   providers: ProviderView[];
   order: ProviderId[];
   ollamaUrl: string | null;
   ollamaEnabled: boolean;
 }
-
 export interface Account {
   login: string;
   name: string | null;
@@ -67,7 +57,6 @@ export interface Account {
   source: string;
   scopes: string[];
 }
-
 export interface GbrImport {
   at: number;
   project: string | null;
@@ -77,14 +66,12 @@ export interface GbrImport {
   error: string | null;
   dismissed: boolean;
 }
-
 export interface RepoBrief {
   id: string;
   path: string;
   name: string;
   exists: boolean;
 }
-
 export interface PageState {
   repos: RepoBrief[];
   account: Account | null;
@@ -93,26 +80,20 @@ export interface PageState {
   ai: AiView;
   gbrImport: GbrImport | null;
 }
-
 // ─── Status ────────────────────────────────────────────────────────────────
-
 export type FileKind = "packageJson" | "packageLock" | "cargoToml" | "tauriConf" | "pyproject" | "csproj" | "extensionManifest";
-
 export interface VersionFile {
   path: string;
   kind: FileKind;
   version: string;
   skipped: boolean;
 }
-
 export interface Versions {
   files: VersionFile[];
   current: string | null;
   mismatched: string[];
 }
-
 export type BuildKind = "tauri" | "electron" | "vite" | "node" | "rust" | "dotnet" | "python" | "go" | "flutter" | "extension";
-
 export interface LastTag {
   name: string;
   /** Unix seconds. */
@@ -120,13 +101,11 @@ export interface LastTag {
   /** A shared `v…` tag from before the app had its own prefix. */
   legacy: boolean;
 }
-
 export interface Workflow {
   file: string;
   name: string | null;
   tags: string[];
 }
-
 export interface Remote {
   name: string;
   url: string;
@@ -135,7 +114,6 @@ export interface Remote {
   repo: string | null;
   ssh: boolean;
 }
-
 export interface BranchInfo {
   branch: string | null;
   head: string | null;
@@ -143,7 +121,6 @@ export interface BranchInfo {
   ahead: number;
   behind: number;
 }
-
 export interface EntryStatus {
   id: string;
   repoId: string;
@@ -160,7 +137,6 @@ export interface EntryStatus {
   releaseMode: "local" | "actions";
   skipVersionFiles: string[];
 }
-
 export interface RepoStatus {
   repoId: string;
   path: string;
@@ -173,7 +149,6 @@ export interface RepoStatus {
   workflows: Workflow[];
   problem: string | null;
 }
-
 export interface Asset {
   id: number;
   name: string;
@@ -181,7 +156,6 @@ export interface Asset {
   downloadCount: number;
   browserDownloadUrl: string;
 }
-
 export interface Release {
   id: number;
   tagName: string;
@@ -196,7 +170,6 @@ export interface Release {
   targetCommitish: string;
   assets: Asset[];
 }
-
 export interface Run {
   id: number;
   name: string | null;
@@ -210,14 +183,12 @@ export interface Run {
   createdAt: string | null;
   updatedAt: string | null;
 }
-
 export interface Step {
   name: string;
   status: string | null;
   conclusion: string | null;
   number: number;
 }
-
 export interface WorkflowJob {
   id: number;
   name: string;
@@ -226,53 +197,43 @@ export interface WorkflowJob {
   htmlUrl: string | null;
   steps: Step[];
 }
-
 export interface RemoteInfo {
   releases: Release[];
   lastRelease: Record<string, Release>;
   run: Run | null;
   problem: Problem | null;
 }
-
 export interface FoundRepo {
   path: string;
   name: string;
   known: boolean;
   apps: string[];
 }
-
 export interface AddResult {
   state: PageState;
   added: string | null;
   found: FoundRepo[];
 }
-
 export interface EntrySettings {
   skipVersionFiles?: string[];
   releaseMode?: "local" | "actions" | "";
   buildCommand?: string | null;
   buildChoice?: string | null;
 }
-
 // ─── Changes ───────────────────────────────────────────────────────────────
-
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "typeChanged" | "untracked" | "conflicted";
 export type Staged = "all" | "partial" | "none";
-
 export interface FileChange {
   path: string;
   origPath: string | null;
   kind: ChangeKind;
   staged: Staged;
 }
-
 export interface GitStatus {
   branch: BranchInfo;
   changes: FileChange[];
 }
-
 export type GitEvent = { event: "line"; data: { text: string; replace: boolean } };
-
 export interface NetOutcome {
   ok: boolean;
   problem: Problem | null;
@@ -280,27 +241,22 @@ export interface NetOutcome {
   usedToken: boolean;
   output: string;
 }
-
 export interface CommitOutcome {
   commit: string | null;
   problem: Problem | null;
   push: NetOutcome | null;
   status: GitStatus;
 }
-
 export interface Answer {
   text: string;
   provider: ProviderId;
   model: string;
 }
-
 // ─── Build ─────────────────────────────────────────────────────────────────
-
 export interface BuildStep {
   title: string;
   command: string | null;
 }
-
 export interface BuildOption {
   id: string;
   command: string;
@@ -311,21 +267,18 @@ export interface BuildOption {
   /** The project's whole build: the one to run before a release. */
   full: boolean;
 }
-
 export interface BuildPlan {
   options: BuildOption[];
   packageManager: string | null;
   needsInstall: boolean;
   installCommand: string | null;
 }
-
 export interface BuildStats {
   command: string;
   durationMs: number;
   lines: number;
   at: number;
 }
-
 export interface BuildInfo {
   plan: BuildPlan;
   command: string | null;
@@ -334,9 +287,7 @@ export interface BuildInfo {
   lastBuild: BuildStats | null;
   running: boolean;
 }
-
 export type Severity = "error" | "warning";
-
 export interface Diagnostic {
   severity: Severity;
   message: string;
@@ -347,7 +298,6 @@ export interface Diagnostic {
   tool: string;
   logLine: number;
 }
-
 export interface LogLine {
   index: number;
   text: string;
@@ -356,14 +306,12 @@ export interface LogLine {
   replace: boolean;
   severity: Severity | null;
 }
-
 export type BuildEvent =
   | { event: "started"; data: { command: string; dir: string; logPath: string | null } }
   | { event: "lines"; data: { lines: LogLine[] } }
   | { event: "diagnostic"; data: { diagnostic: Diagnostic } }
   | { event: "stage"; data: { text: string } }
   | { event: "progress"; data: { percent: number; estimated: boolean } };
-
 export interface BuildOutcome {
   ok: boolean;
   cancelled: boolean;
@@ -376,7 +324,6 @@ export interface BuildOutcome {
   logPath: string | null;
   failure: string | null;
 }
-
 export interface Artifact {
   path: string;
   rel: string;
@@ -386,18 +333,14 @@ export interface Artifact {
   modified: number;
   kind: "installer" | "program" | "package" | "archive" | "update" | "signature" | "file";
 }
-
 export interface BuildResult {
   outcome: BuildOutcome;
   artifacts: Artifact[];
   selected: string[];
   startedAt: number;
 }
-
 // ─── Release ───────────────────────────────────────────────────────────────
-
 export type Mode = "local" | "actions";
-
 export interface ReleaseInfo {
   versions: Versions;
   next: Partial<Record<"patch" | "minor" | "major", string>>;
@@ -413,7 +356,6 @@ export interface ReleaseInfo {
   /** The project's whole build, when the chosen command is not it. */
   fullBuild: string | null;
 }
-
 export interface Commit {
   sha: string;
   subject: string;
@@ -421,16 +363,13 @@ export interface Commit {
   /** Unix seconds. */
   date: number;
 }
-
 /** The newest commits, and how many came after the last release. */
 export interface RecentCommits {
   commits: Commit[];
   unreleased: number;
   lastTag: string | null;
 }
-
 export type CheckState = "ok" | "warn" | "fail";
-
 export interface Check {
   id: string;
   state: CheckState;
@@ -438,14 +377,12 @@ export interface Check {
   /** What fixes it: "pull", "commit", "connect", "build". */
   fix: string | null;
 }
-
 export interface Notes {
   title: string | null;
   notes: string;
   provider: ProviderId;
   model: string;
 }
-
 export interface ReleaseRequest {
   entryId: string;
   version: string;
@@ -468,9 +405,7 @@ export interface ReleaseRequest {
   /** Actions mode: "windows" (the .exe only) or "full" (everything). */
   target: BuildTarget | null;
 }
-
 export type BuildTarget = "windows" | "full";
-
 /** A failed job of a workflow run: where it broke and what it said. */
 export interface FailedJob {
   job: string;
@@ -479,10 +414,8 @@ export interface FailedJob {
   logTail: string;
   url: string | null;
 }
-
 export type StepId = "merge" | "check" | "version" | "build" | "commit" | "push" | "tag" | "release" | "upload" | "publish" | "workflow";
 export type StepState = "running" | "done" | "failed" | "skipped";
-
 export type ReleaseEvent =
   | { event: "step"; data: { id: StepId; state: StepState; message: string | null } }
   | { event: "build"; data: { event: BuildEvent } }
@@ -490,7 +423,6 @@ export type ReleaseEvent =
   | { event: "workflow"; data: { run: Run | null; jobs: WorkflowJob[] } }
   | { event: "log"; data: { text: string } }
   | { event: "failure"; data: { jobs: FailedJob[] } };
-
 export interface Resume {
   releaseId: number | null;
   pendingAssets: string[];
@@ -499,7 +431,6 @@ export interface Resume {
   tag: string | null;
   commit: string | null;
 }
-
 export interface ReleaseOutcome {
   ok: boolean;
   cancelled: boolean;
@@ -514,7 +445,6 @@ export interface ReleaseOutcome {
   build: BuildOutcome | null;
   artifacts: Artifact[];
 }
-
 export interface Deleted {
   releaseId: number;
   tag: string;
@@ -525,13 +455,11 @@ export interface Deleted {
   tagKept: string | null;
   error: string | null;
 }
-
 /** A combine: the release with the merged notes, and what was deleted. */
 export interface Combined {
   release: Release;
   deleted: Deleted[];
 }
-
 /** A tag no release uses. */
 export interface LoneTag {
   name: string;
@@ -540,38 +468,31 @@ export interface LoneTag {
   /** Unix seconds. */
   date: number | null;
 }
-
 export interface TagDeleted {
   tag: string;
   remoteDeleted: boolean;
   localDeleted: boolean;
   error: string | null;
 }
-
 export interface GhStatus {
   installed: boolean;
   signedIn: boolean;
 }
-
 export interface AiChanges {
   order?: ProviderId[];
   models?: Partial<Record<ProviderId, string>>;
   ollamaUrl?: string | null;
   ollamaEnabled?: boolean;
 }
-
 // ─── Commands ──────────────────────────────────────────────────────────────
-
 function channel<T>(on: (event: T) => void): Channel<T> {
   const c = new Channel<T>();
   c.onmessage = on;
   return c;
 }
-
 export const githubReleasesApi = {
   getState: () => invoke<PageState>("github_releases_get_state"),
   dismissImport: () => invoke<void>("github_releases_dismiss_import"),
-
   status: (repoId: string) => invoke<RepoStatus>("github_releases_status", { repoId }),
   fetch: (repoId: string, quiet: boolean) => invoke<RepoStatus>("github_releases_fetch", { repoId, quiet }),
   remote: (repoId: string) => invoke<RemoteInfo>("github_releases_remote", { repoId }),
@@ -581,7 +502,6 @@ export const githubReleasesApi = {
   addRepos: (paths: string[]) => invoke<PageState>("github_releases_add_repos", { paths }),
   removeRepo: (repoId: string) => invoke<PageState>("github_releases_remove_repo", { repoId }),
   setEntry: (entryId: string, changes: EntrySettings) => invoke<void>("github_releases_set_entry", { entryId, changes }),
-
   changes: (repoId: string) => invoke<GitStatus>("github_releases_changes", { repoId }),
   fileDiff: (repoId: string, path: string) => invoke<FileDiff>("github_releases_file_diff", { repoId, path }),
   stage: (repoId: string, paths: string[], stage: boolean) => invoke<GitStatus>("github_releases_stage", { repoId, paths, stage }),
@@ -593,7 +513,6 @@ export const githubReleasesApi = {
   cancelCi: (repoId: string, runId: number) => invoke<void>("github_releases_cancel_ci", { repoId, runId }),
   aiCommitMessage: (repoId: string, provider: ProviderId | null) =>
     invoke<Answer>("github_releases_ai_commit_message", { repoId, provider }),
-
   buildInfo: (entryId: string) => invoke<BuildInfo>("github_releases_build_info", { entryId }),
   build: (entryId: string, command: string, install: boolean, on: (e: BuildEvent) => void) =>
     invoke<BuildResult>("github_releases_build", { entryId, command, install, onEvent: channel(on) }),
@@ -602,7 +521,6 @@ export const githubReleasesApi = {
   openInEditor: (entryId: string, file: string, line: number | null, column: number | null) =>
     invoke<void>("github_releases_open_in_editor", { entryId, file, line, column }),
   reveal: (entryId: string, path: string | null) => invoke<void>("github_releases_reveal", { entryId, path }),
-
   releaseInfo: (entryId: string) => invoke<ReleaseInfo>("github_releases_release_info", { entryId }),
   recentCommits: (entryId: string, max: number) => invoke<RecentCommits>("github_releases_recent_commits", { entryId, max }),
   preflight: (entryId: string, version: string, mode: Mode, includeChanges: boolean, build: boolean) =>
@@ -616,7 +534,6 @@ export const githubReleasesApi = {
   branches: (repoId: string) => invoke<string[]>("github_releases_branches", { repoId }),
   watch: (entryId: string, commit: string, tag: string | null, on: (e: ReleaseEvent) => void) =>
     invoke<Run>("github_releases_watch", { entryId, commit, tag, onEvent: channel(on) }),
-
   listReleases: (repoId: string) => invoke<Release[]>("github_releases_list_releases", { repoId }),
   updateRelease: (repoId: string, releaseId: number, title: string, notes: string, prerelease: boolean) =>
     invoke<Release>("github_releases_update_release", { repoId, releaseId, title, notes, prerelease }),
@@ -630,14 +547,12 @@ export const githubReleasesApi = {
     invoke<Deleted[]>("github_releases_combine_retry", { repoId, targetId, releaseIds, tags }),
   aiCombine: (repoId: string, releaseIds: number[], provider: ProviderId | null) =>
     invoke<Notes>("github_releases_ai_combine", { repoId, releaseIds, provider }),
-
   ghStatus: () => invoke<GhStatus>("github_releases_gh_status"),
   connectGh: () => invoke<PageState>("github_releases_connect_gh"),
   connectToken: (token: string) => invoke<PageState>("github_releases_connect_token", { token }),
   disconnect: () => invoke<PageState>("github_releases_disconnect"),
   ghLogin: () => invoke<void>("github_releases_gh_login"),
   installTool: (tool: "gh" | "git") => invoke<void>("github_releases_install_tool", { tool }),
-
   aiSetKey: (provider: ProviderId, key: string) => invoke<AiView>("github_releases_ai_set_key", { provider, key }),
   aiRemoveKey: (provider: ProviderId) => invoke<AiView>("github_releases_ai_remove_key", { provider }),
   aiSetSettings: (changes: AiChanges) => invoke<AiView>("github_releases_ai_set_settings", { changes }),

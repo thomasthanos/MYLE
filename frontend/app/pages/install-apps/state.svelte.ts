@@ -12,9 +12,7 @@ import { toast } from "../../../lib/toast.svelte";
 import { api, type JobEvent, type JobOutcome, type Mode, type PackageLinks, type Stage } from "./api";
 import { CATEGORIES, categorize, isCategory, type Category } from "./categories";
 import catalog from "./data/apps.json";
-
 export type Source = "winget" | "custom" | "catalog";
-
 export interface AppEntry {
   id: string;
   name: string;
@@ -34,33 +32,28 @@ export interface AppEntry {
   /** Latest version, for catalog search results. */
   version?: string;
 }
-
 export type Status = "installed" | "update" | "missing" | "unknown";
 export type View = "grid" | "list";
 export type Filter = "all" | "installed" | "updates" | "missing";
 export type Sort = "category" | "az" | "za" | "status";
-
 export interface AppStatus {
   installed: boolean;
   version?: string;
   available?: string;
   activated?: boolean;
 }
-
 export interface Job {
   mode: Mode;
   phase: "queued" | Stage;
   progress: number | null;
   note?: string;
 }
-
 export interface Pack {
   id: string;
   name: string;
   description: string;
   apps: string[];
 }
-
 const KEY = {
   view: "myle.apps.view",
   filter: "myle.apps.filter",
@@ -70,10 +63,8 @@ const KEY = {
   statuses: "myle.apps.statuses",
   links: "myle.apps.links",
 };
-
 /** Parallel `winget show` lookups for catalog results' links. */
 const LINK_CONCURRENCY = 3;
-
 const SEARCH_DEBOUNCE_MS = 250;
 /** A visit to the page re-reads what is installed after this long. */
 const RECHECK_AFTER_MS = 2 * 60 * 1000;
@@ -83,14 +74,12 @@ const FOCUS_RECHECK_MS = 45 * 1000;
 /** Installers that hand off to a second process finish after winget returns. */
 const LATE_RECHECK_MS = 20 * 1000;
 const STATUS_ORDER: Record<Status, number> = { update: 0, installed: 1, missing: 2, unknown: 3 };
-
 const key = (id: string) => id.toLowerCase();
 const oneOf = <T extends string>(...values: T[]) => (v: unknown) => values.includes(v as T);
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const isEntryArray = (v: unknown) =>
   Array.isArray(v) && v.every((x) => x && typeof x.id === "string" && typeof x.name === "string");
 const isRecord = (v: unknown) => typeof v === "object" && v !== null && !Array.isArray(v);
-
 function fromCatalog(a: (typeof catalog.apps)[number]): AppEntry {
   const category = "category" in a && isCategory(a.category) ? a.category : categorize(a.id);
   return {
@@ -104,16 +93,13 @@ function fromCatalog(a: (typeof catalog.apps)[number]): AppEntry {
     selfUpdating: "selfUpdating" in a ? a.selfUpdating : undefined,
   };
 }
-
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
 class InstallAppsState {
   readonly packs: Pack[] = catalog.packs;
   readonly curated: AppEntry[] = catalog.apps.map(fromCatalog);
   custom = $state<AppEntry[]>([]);
-
   // Persisted choices
   view = $state<View>(readJson(KEY.view, "grid", oneOf("grid", "list")));
   filter = $state<Filter>(readJson(KEY.filter, "all", oneOf("all", "installed", "updates", "missing")));
@@ -122,7 +108,6 @@ class InstallAppsState {
   /** Checked catalog search results: kept visible whatever the search. */
   pinned = $state<AppEntry[]>(readJson(KEY.pinned, [], isEntryArray));
   activePack = $state<string | null>(null);
-
   // Search
   query = $state("");
   appliedQuery = $state("");
@@ -130,7 +115,6 @@ class InstallAppsState {
   catalogLoading = $state(false);
   #searchTimer: ReturnType<typeof setTimeout> | undefined;
   #searchSeq = 0;
-
   // Installed state (cached, then refreshed)
   statuses = $state<Record<string, AppStatus>>(readJson(KEY.statuses, {}, isRecord));
   checking = $state(false);
@@ -138,19 +122,16 @@ class InstallAppsState {
   wingetError = $state<string | null>(null);
   #lastCheck = 0;
   #initialized = false;
-
   // Links (homepage + favicon domain) of catalog results, looked up lazily
   #links: Record<string, PackageLinks> = readJson(KEY.links, {}, isRecord);
   #linkPending = new Set<string>();
   #linkQueue: string[] = [];
   #linkActive = 0;
-
   /** Finished in this visit: shown whatever the status filter, so an app
    *  installed from "Not installed" does not vanish the moment it is done. */
   readonly recent = new SvelteSet<string>();
   #watching = false;
   #lateCheck: ReturnType<typeof setTimeout> | undefined;
-
   // Jobs
   jobs = $state<Record<string, Job>>({});
   #queue: { entry: AppEntry; mode: Mode }[] = [];
@@ -159,11 +140,8 @@ class InstallAppsState {
   /** Work that holds the shared installer slot besides the queue itself. */
   #activations = 0;
   #selecting = false;
-
   // ---------------------------------------------------------------- derived
-
   readonly all = $derived([...this.curated, ...this.custom]);
-
   /** Local apps matching the pack and the search (before the status filter). */
   readonly scoped = $derived.by(() => {
     let list = this.all;
@@ -176,7 +154,6 @@ class InstallAppsState {
     if (q) list = list.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
     return list;
   });
-
   readonly counts = $derived.by(() => {
     const c = { all: this.scoped.length, installed: 0, updates: 0, missing: 0 };
     for (const app of this.scoped) {
@@ -189,7 +166,6 @@ class InstallAppsState {
     }
     return c;
   });
-
   readonly visible = $derived.by(() => {
     const list = this.scoped.filter((a) => this.matchesFilter(a));
     const byName = (a: AppEntry, b: AppEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
@@ -202,7 +178,6 @@ class InstallAppsState {
         return list.sort(byName);
     }
   });
-
   /** Sections to render: category headings, or one flat list. */
   readonly groups = $derived.by(() => {
     if (this.sort !== "category") return [{ title: null as Category | null, apps: this.visible }];
@@ -210,23 +185,17 @@ class InstallAppsState {
       (g) => g.apps.length > 0,
     );
   });
-
   /** Pinned catalog apps that pass the status filter. */
   readonly visiblePinned = $derived(this.pinned.filter((a) => this.matchesFilter(a)));
-
   /** The "More from catalog" section shows when a search matches nothing local. */
   readonly showCatalog = $derived(this.appliedQuery.trim().length >= 2 && this.scoped.length === 0 && !this.activePack);
-
   readonly shownCount = $derived(
     this.visible.length + this.visiblePinned.length + (this.showCatalog ? this.catalogResults.length : 0),
   );
-
   readonly busy = $derived(Object.keys(this.jobs).length > 0);
   /** A Spotify Hub workflow owns the shared installer slot. */
   readonly externallyLocked = $derived(operationGate.lockedFor("install-apps"));
-
   // ---------------------------------------------------------------- status
-
   statusOf(app: AppEntry): Status {
     const s = this.statuses[key(app.id)];
     if (!s) return this.checkedOnce ? "missing" : "unknown";
@@ -234,11 +203,9 @@ class InstallAppsState {
     if (s.available && !app.selfUpdating) return "update";
     return "installed";
   }
-
   statusInfo(app: AppEntry): AppStatus | undefined {
     return this.statuses[key(app.id)];
   }
-
   private matchesFilter(app: AppEntry): boolean {
     if (this.recent.has(key(app.id))) return true;
     const s = this.statusOf(app);
@@ -253,7 +220,6 @@ class InstallAppsState {
         return true;
     }
   }
-
   /** First visit: load the custom catalog and check what is installed. */
   async init() {
     if (!isTauri()) return;
@@ -279,7 +245,6 @@ class InstallAppsState {
     this.#watchFocus();
     if (Date.now() - this.#lastCheck > RECHECK_AFTER_MS) await this.checkInstalled();
   }
-
   /** Re-reads installed apps when the user comes back to the window. */
   #watchFocus() {
     if (this.#watching) return;
@@ -292,7 +257,6 @@ class InstallAppsState {
     window.addEventListener("focus", recheck);
     document.addEventListener("visibilitychange", recheck);
   }
-
   /** Leaving the page (or changing what is shown) ends the grace period of
    *  apps that just finished, and unpins checked-out catalog apps with it. */
   forgetRecent() {
@@ -304,7 +268,6 @@ class InstallAppsState {
       this.persistSelection();
     }
   }
-
   async checkInstalled(announce = false) {
     if (!isTauri() || this.checking) return;
     this.checking = true;
@@ -337,9 +300,7 @@ class InstallAppsState {
       this.checking = false;
     }
   }
-
   // ---------------------------------------------------------------- choices
-
   /** Re-reads the saved choices (after account sync replaced them). */
   reloadChoices() {
     this.view = readJson(KEY.view, this.view, oneOf("grid", "list"));
@@ -350,23 +311,19 @@ class InstallAppsState {
     for (const id of selected) this.selected.add(id);
     this.pinned = readJson(KEY.pinned, this.pinned, isEntryArray);
   }
-
   setView(view: View) {
     this.view = view;
     writeJson(KEY.view, view);
   }
-
   setFilter(filter: Filter) {
     this.forgetRecent();
     this.filter = filter;
     writeJson(KEY.filter, filter);
   }
-
   setSort(sort: Sort) {
     this.sort = sort;
     writeJson(KEY.sort, sort);
   }
-
   /** Select and reveal one curated app before another page hands off here. */
   prepareInstall(id: string): boolean {
     const app = this.all.find((entry) => key(entry.id) === key(id));
@@ -387,7 +344,6 @@ class InstallAppsState {
     this.persistSelection();
     return true;
   }
-
   /** Shows only the pack's apps and checks them all. */
   applyPack(id: string | null) {
     this.forgetRecent();
@@ -400,11 +356,9 @@ class InstallAppsState {
     }
     this.persistSelection();
   }
-
   isSelected(app: AppEntry) {
     return this.selected.has(app.id);
   }
-
   toggle(app: AppEntry) {
     if (this.selected.has(app.id)) {
       this.selected.delete(app.id);
@@ -415,20 +369,16 @@ class InstallAppsState {
     }
     this.persistSelection();
   }
-
   uncheckAll() {
     this.selected.clear();
     this.pinned = [];
     this.persistSelection();
   }
-
   private persistSelection() {
     writeJson(KEY.selected, [...this.selected]);
     writeJson(KEY.pinned, $state.snapshot(this.pinned));
   }
-
   // ---------------------------------------------------------------- search
-
   setQuery(query: string) {
     this.query = query;
     clearTimeout(this.#searchTimer);
@@ -438,7 +388,6 @@ class InstallAppsState {
       void this.searchCatalog(query);
     }, SEARCH_DEBOUNCE_MS);
   }
-
   /** Searches winget only when nothing local matches. */
   private async searchCatalog(query: string) {
     const seq = ++this.#searchSeq;
@@ -465,9 +414,7 @@ class InstallAppsState {
       if (seq === this.#searchSeq) this.catalogLoading = false;
     }
   }
-
   // ---------------------------------------------------------------- catalog links
-
   /** Gives a catalog result its website and favicon (called when its card
    *  scrolls into view). Results are cached across sessions. */
   resolveLinks(app: AppEntry) {
@@ -483,7 +430,6 @@ class InstallAppsState {
     this.#linkQueue.push(app.id);
     this.drainLinks();
   }
-
   private drainLinks() {
     while (this.#linkActive < LINK_CONCURRENCY && this.#linkQueue.length) {
       const id = this.#linkQueue.shift()!;
@@ -494,7 +440,6 @@ class InstallAppsState {
       });
     }
   }
-
   private async fetchLinks(id: string): Promise<PackageLinks> {
     const k = key(id);
     let links: PackageLinks = { homepage: null, iconDomain: null };
@@ -510,7 +455,6 @@ class InstallAppsState {
     this.applyLinks(k, links);
     return links;
   }
-
   private applyLinks(k: string, links: PackageLinks) {
     let pinnedChanged = false;
     for (const list of [this.catalogResults, this.pinned]) {
@@ -523,9 +467,7 @@ class InstallAppsState {
     }
     if (pinnedChanged) this.persistSelection();
   }
-
   // ---------------------------------------------------------------- actions
-
   async openSite(app: AppEntry) {
     try {
       let url = app.site ? `https://${app.site}` : null;
@@ -536,7 +478,6 @@ class InstallAppsState {
       toast.error(`Could not open the website: ${message(err)}`);
     }
   }
-
   async activate(app: AppEntry) {
     const k = key(app.id);
     if (this.jobs[k] || !operationGate.begin("install-apps")) return;
@@ -556,14 +497,12 @@ class InstallAppsState {
       this.#releaseGate();
     }
   }
-
   /** Lets other pages have the installer slot once nothing here needs it:
    *  an activation finishing must not free it under a running install. */
   #releaseGate() {
     if (this.#running || this.#selecting || this.#activations > 0 || this.#queue.length) return;
     operationGate.end("install-apps");
   }
-
   /** Installs the checked apps; ones with an update are updated instead. */
   async installSelected() {
     if (this.#selecting) return;
@@ -581,7 +520,6 @@ class InstallAppsState {
       this.#releaseGate();
     }
   }
-
   async #queueSelected() {
     const byId = new Map([...this.all, ...this.pinned].map((a) => [a.id, a]));
     let skipped = 0;
@@ -599,7 +537,6 @@ class InstallAppsState {
     }
     if (skipped) toast.info(`${skipped} selected ${skipped === 1 ? "app is" : "apps are"} already installed.`);
   }
-
   /** Warns before installing an app that cannot coexist with an installed one. */
   private async confirmConflicts(app: AppEntry): Promise<boolean> {
     const active = (app.conflicts ?? [])
@@ -616,14 +553,12 @@ class InstallAppsState {
       danger: true,
     });
   }
-
   /** Drops everything queued and stops the running job. */
   cancelAll() {
     for (const { entry } of this.#queue) delete this.jobs[key(entry.id)];
     this.#queue = [];
     if (this.#current) void api.cancel(this.#current);
   }
-
   cancel(app: AppEntry) {
     const k = key(app.id);
     if (this.#current === app.id) {
@@ -633,7 +568,6 @@ class InstallAppsState {
       delete this.jobs[k];
     }
   }
-
   private enqueue(entry: AppEntry, mode: Mode) {
     const k = key(entry.id);
     if (this.jobs[k]) return;
@@ -641,7 +575,6 @@ class InstallAppsState {
     this.#queue.push({ entry, mode });
     void this.pump();
   }
-
   private async pump() {
     if (this.#running) return;
     this.#running = true;
@@ -667,7 +600,6 @@ class InstallAppsState {
       }, LATE_RECHECK_MS);
     }
   }
-
   /** Runs one job; returns true if something was installed or updated. */
   private async run(entry: AppEntry, mode: Mode): Promise<boolean> {
     const k = key(entry.id);
@@ -687,7 +619,6 @@ class InstallAppsState {
     try {
       let outcome: JobOutcome =
         entry.source === "custom" ? await api.installCustom(entry.id, onEvent) : await api.installWinget(entry.id, mode, onEvent);
-
       if (outcome.result === "hashMismatch") {
         const ok = await confirm({
           title: "Installer checksum mismatch",
@@ -704,7 +635,6 @@ class InstallAppsState {
         }
         outcome = await api.installIgnoringHash(entry.id, mode, onEvent);
       }
-
       switch (outcome.result) {
         case "done": {
           const s = this.statuses[k];
@@ -741,9 +671,7 @@ class InstallAppsState {
       delete this.jobs[k];
     }
   }
-
   // ---------------------------------------------------------------- import/export
-
   async exportList() {
     const byId = new Map([...this.all, ...this.pinned].map((a) => [a.id, a]));
     const apps = [...this.selected].map((id) => byId.get(id)).filter((a): a is AppEntry => !!a);
@@ -762,7 +690,6 @@ class InstallAppsState {
       toast.error(`Export failed: ${message(err)}`);
     }
   }
-
   async importList() {
     try {
       const text = await api.importList();
@@ -770,7 +697,6 @@ class InstallAppsState {
       const data: unknown = JSON.parse(text);
       const rows = isRecord(data) && Array.isArray((data as { apps?: unknown }).apps) ? (data as { apps: unknown[] }).apps : null;
       if (!rows) throw new Error("This is not an app list exported from this app.");
-
       const validId = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
       let count = 0;
       for (const row of rows) {
@@ -797,5 +723,4 @@ class InstallAppsState {
     }
   }
 }
-
 export const appsState = new InstallAppsState();

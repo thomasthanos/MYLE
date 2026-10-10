@@ -2,7 +2,6 @@
 // Filesystem paths are discovered and validated by the backend; destructive
 // actions are addressed by stable game/root/snapshot ids.
 import { Channel, invoke } from "@tauri-apps/api/core";
-
 export type GameSavesTab = "pc" | "backup";
 export type GameSaveStatus =
   | "notBackedUp"
@@ -35,14 +34,12 @@ export type OperationStage =
   | "waitingForOneDrive"
   | "restoring"
   | "finishing";
-
 export interface GameRoot {
   id: string;
   path: string;
   store: RootStore;
   source: RootSource;
 }
-
 export interface CustomGame {
   id: string;
   name: string;
@@ -50,7 +47,6 @@ export interface CustomGame {
   installPath: string | null;
   autoBackup: boolean;
 }
-
 export interface GameSavesSettings {
   backupFolder: string | null;
   schedule: BackupSchedule;
@@ -64,7 +60,6 @@ export interface GameSavesSettings {
   customGames: CustomGame[];
   pathMappings: PathMapping[];
 }
-
 export interface ScheduledBackupResult {
   attemptedAt: number;
   completedAt: number;
@@ -72,22 +67,18 @@ export interface ScheduledBackupResult {
   failedGames: string[];
   error: string | null;
 }
-
 export interface PathMapping {
   gameId: string;
   source: string;
   target: string;
 }
-
 export type CloudProvider = "dropbox" | "googleDrive" | "mega" | "oneDrive";
-
 export const CLOUD_PROVIDERS: { id: CloudProvider; name: string }[] = [
   { id: "dropbox", name: "Dropbox" },
   { id: "googleDrive", name: "Google Drive" },
   { id: "mega", name: "MEGA" },
   { id: "oneDrive", name: "OneDrive" },
 ];
-
 export interface DetectedFolder {
   provider: CloudProvider;
   /** Which account, when a provider has several ("Dropbox Business"). */
@@ -97,7 +88,6 @@ export interface DetectedFolder {
   /** Where backups go inside it (created when chosen). */
   backupPath: string;
 }
-
 export interface GameSavesPageState {
   settings: GameSavesSettings;
   cloudFolders: DetectedFolder[];
@@ -110,21 +100,18 @@ export interface GameSavesPageState {
   /** The last scan saved on disk, shown at once while a fresh one runs. */
   cachedScan: GameSavesScan | null;
 }
-
 export interface UndoRestore {
   id: string;
   createdAt: number;
   expiresAt: number;
   games: string[];
 }
-
 export interface GameSavesStats {
   localGames: number;
   backupGames: number;
   totalBytes: number;
   databaseGames: number;
 }
-
 export interface BackupSnapshot {
   id: string;
   timestamp: string;
@@ -132,7 +119,6 @@ export interface BackupSnapshot {
   label: string | null;
   isSafety: boolean;
 }
-
 export interface GameSaveEntry {
   id: string;
   title: string;
@@ -151,7 +137,6 @@ export interface GameSaveEntry {
   /** Its Steam app id in the save database, for its cover. */
   steamId?: number | null;
 }
-
 export interface GameSavesScan {
   generatedAt: number;
   stats: GameSavesStats;
@@ -165,19 +150,16 @@ export interface GameSavesScan {
   /** The backup folder, when its drive is not connected (Google Drive not running). */
   backupUnreachable?: string | null;
 }
-
 export interface RestoreSelection {
   gameId: string;
   snapshotId: string;
 }
-
 export interface GameFailure {
   game: string;
   reason: string;
   /** The end of the path of the file it happened to. */
   file?: string | null;
 }
-
 export interface GameSavesOperationResult {
   kind: "backup" | "restore";
   processedGames: number;
@@ -187,23 +169,19 @@ export interface GameSavesOperationResult {
   failures: GameFailure[];
   safetyBackupPath: string | null;
 }
-
 export interface DatabaseUpdate {
   games: number;
   updatedAt: number;
 }
-
 export type GameSavesEvent =
   | { event: "stage"; data: { stage: OperationStage } }
   | { event: "progress"; data: { done: number; total: number; current: string | null } }
   | { event: "message"; data: { text: string } };
-
 function channel(onEvent: (event: GameSavesEvent) => void): Channel<GameSavesEvent> {
   const value = new Channel<GameSavesEvent>();
   value.onmessage = onEvent;
   return value;
 }
-
 export const gameSavesApi = {
   getState: () => invoke<GameSavesPageState>("game_saves_get_state"),
   pickBackupFolder: () => invoke<GameSavesSettings | null>("game_saves_pick_backup_folder"),

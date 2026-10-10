@@ -34,19 +34,14 @@ import {
   type StepState,
   type WorkflowJob,
 } from "./api";
-
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
 export { stageIsStep, stepReached } from "./pipeline";
-
 export type Tab = "changes" | "build" | "release" | "history";
-
 const SELECTED_KEY = "myle.githubReleases.selected";
 const TAB_KEY = "myle.githubReleases.tab";
 const tabs: Tab[] = ["changes", "build", "release", "history"];
-
 /** Lines a build log keeps on screen; the whole log is in its file. */
 export const LOG_LIMIT = 20_000;
-
 export const buildKindLabels: Record<BuildKind, string> = {
   tauri: "Tauri",
   electron: "Electron",
@@ -59,7 +54,6 @@ export const buildKindLabels: Record<BuildKind, string> = {
   flutter: "Flutter",
   extension: "Extension",
 };
-
 /** A project in the list: an app of a repository, or the repository itself
  *  while its status loads (or when it can't be read). */
 export interface ListItem {
@@ -68,7 +62,6 @@ export interface ListItem {
   entry: EntryStatus | null;
   status: RepoStatus | null;
 }
-
 /** A build of one project, with its log, problems and the files it made. */
 export class BuildSession {
   running = $state(false);
@@ -88,7 +81,6 @@ export class BuildSession {
   artifacts = $state.raw<Artifact[]>([]);
   selected = $state<string[]>([]);
   startedAt = $state(0);
-
   reset(command: string, install: boolean) {
     this.running = true;
     this.install = install;
@@ -108,7 +100,6 @@ export class BuildSession {
     }
     this.startedAt = Date.now();
   }
-
   apply(event: BuildEvent) {
     switch (event.event) {
       case "started":
@@ -141,7 +132,6 @@ export class BuildSession {
         break;
     }
   }
-
   finish(outcome: BuildOutcome) {
     this.running = false;
     this.outcome = outcome;
@@ -150,7 +140,6 @@ export class BuildSession {
     if (outcome.ok) this.percent = 100;
   }
 }
-
 export const stepLabels: Record<StepId, string> = {
   check: "Checks",
   version: "Version files",
@@ -164,10 +153,8 @@ export const stepLabels: Record<StepId, string> = {
   workflow: "GitHub Actions",
   merge: "Merge branch",
 };
-
 export const localSteps: StepId[] = ["check", "version", "build", "commit", "push", "tag", "release", "upload", "publish"];
 export const actionsSteps: StepId[] = ["check", "version", "commit", "push", "tag", "workflow"];
-
 export interface Upload {
   name: string;
   sent: number;
@@ -175,7 +162,6 @@ export interface Upload {
   index: number;
   count: number;
 }
-
 /** A release of one project: what the form says and how the run goes. */
 export class ReleaseSession {
   // The form.
@@ -199,7 +185,6 @@ export class ReleaseSession {
   /** Delete the merged branch from GitHub and locally after release push. */
   deleteMergedBranch = $state(true);
   target = $state<BuildTarget>("full");
-
   // The run.
   running = $state(false);
   steps = $state<Partial<Record<StepId, { state: StepState; message: string | null }>>>({});
@@ -211,7 +196,6 @@ export class ReleaseSession {
   failures = $state.raw<FailedJob[]>([]);
   outcome = $state<ReleaseOutcome | null>(null);
   buildLog = new BuildSession();
-
   start() {
     this.running = true;
     this.steps = {};
@@ -222,7 +206,6 @@ export class ReleaseSession {
     this.failures = [];
     this.outcome = null;
   }
-
   apply(event: ReleaseEvent) {
     switch (event.event) {
       case "step":
@@ -248,18 +231,15 @@ export class ReleaseSession {
     }
   }
 }
-
 /** Output of a push or pull, shown under the commit box. */
 export interface GitOutput {
   action: string;
   lines: string[];
   running: boolean;
 }
-
 function isTab(value: unknown): boolean {
   return typeof value === "string" && (tabs as string[]).includes(value);
 }
-
 /** Runs async work a few at a time. */
 async function each<T>(items: T[], limit: number, run: (item: T) => Promise<void>) {
   const queue = items.slice();
@@ -268,7 +248,6 @@ async function each<T>(items: T[], limit: number, run: (item: T) => Promise<void
   });
   await Promise.all(workers);
 }
-
 class GithubReleasesState {
   page = $state<PageState | null>(null);
   loading = $state(true);
@@ -291,16 +270,12 @@ class GithubReleasesState {
   clock = $state(Date.now());
   /** Commit messages being written, by repository (not reactive). */
   drafts: Record<string, string> = {};
-
   builds = new SvelteMap<string, BuildSession>();
   releases = new SvelteMap<string, ReleaseSession>();
-
   #started = false;
-
   get repos(): RepoBrief[] {
     return this.page?.repos ?? [];
   }
-
   /** Every project, in the order of the repositories. */
   items = $derived.by<ListItem[]>(() => {
     const out: ListItem[] = [];
@@ -314,7 +289,6 @@ class GithubReleasesState {
     }
     return out;
   });
-
   visible = $derived.by<ListItem[]>(() => {
     const words = this.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return this.items;
@@ -326,7 +300,6 @@ class GithubReleasesState {
       return words.every((word) => text.includes(word));
     });
   });
-
   selected = $derived.by<ListItem | null>(() => {
     const id = this.selectedId;
     // Nothing chosen yet (or it was removed): the first project, so the
@@ -340,7 +313,6 @@ class GithubReleasesState {
       null
     );
   });
-
   async init() {
     if (this.#started) {
       void this.refreshSelected(false);
@@ -368,11 +340,9 @@ class GithubReleasesState {
     );
     if (selectedRepo) void this.fetchQuietly(selectedRepo);
   }
-
   setPage(page: PageState) {
     this.page = page;
   }
-
   select(id: string) {
     this.selectedId = id;
     this.showList = false;
@@ -380,12 +350,10 @@ class GithubReleasesState {
     const repoId = id.split("/")[0];
     if (!this.remotes[repoId]) void this.loadRemote(repoId);
   }
-
   setTab(tab: Tab) {
     this.tab = tab;
     writeJson(TAB_KEY, tab);
   }
-
   build(entryId: string): BuildSession {
     let session = this.builds.get(entryId);
     if (!session) {
@@ -394,7 +362,6 @@ class GithubReleasesState {
     }
     return session;
   }
-
   release(entryId: string): ReleaseSession {
     let session = this.releases.get(entryId);
     if (!session) {
@@ -403,7 +370,6 @@ class GithubReleasesState {
     }
     return session;
   }
-
   /** Whether anything runs on a repository (git, a build, a release). */
   running(repoId: string): string | null {
     if (this.busy[repoId]) return this.busy[repoId];
@@ -411,7 +377,6 @@ class GithubReleasesState {
     for (const [id, session] of this.releases) if (session.running && id.split("/")[0] === repoId) return "release";
     return null;
   }
-
   async refresh(repoId: string) {
     this.refreshing[repoId] = true;
     try {
@@ -437,14 +402,12 @@ class GithubReleasesState {
       this.updateBadge();
     }
   }
-
   async refreshSelected(withRemote: boolean) {
     const repoId = this.selected?.repo.id;
     if (!repoId) return;
     await this.refresh(repoId);
     if (withRemote) await this.loadRemote(repoId);
   }
-
   async loadRemote(repoId: string) {
     try {
       this.remotes[repoId] = await api.remote(repoId);
@@ -452,7 +415,6 @@ class GithubReleasesState {
       this.remotes[repoId] = { releases: [], lastRelease: {}, run: null, problem: problemOf(error) };
     }
   }
-
   /** Brings what GitHub has (ahead/behind), without bothering the user. */
   async fetchQuietly(repoId: string) {
     if (this.running(repoId)) return;
@@ -463,7 +425,6 @@ class GithubReleasesState {
     }
     void this.loadRemote(repoId);
   }
-
   async fetch(repoId: string) {
     if (this.running(repoId)) return;
     this.busy[repoId] = "fetch";
@@ -476,13 +437,11 @@ class GithubReleasesState {
       delete this.busy[repoId];
     }
   }
-
   updateBadge() {
     // The sidebar shows how many projects can be pulled.
     const behind = Object.values(this.statuses).filter((s) => s.branch.behind > 0).length;
     badges.set("github-releases", behind);
   }
-
   async addFolder() {
     try {
       const result = await api.addFolder();
@@ -499,7 +458,6 @@ class GithubReleasesState {
       this.showProblem(problemOf(error));
     }
   }
-
   async scanFolder() {
     this.scanning = true;
     try {
@@ -513,7 +471,6 @@ class GithubReleasesState {
       this.scanning = false;
     }
   }
-
   async addRepos(paths: string[]) {
     const before = new Set(this.repos.map((r) => r.id));
     this.page = await api.addRepos(paths);
@@ -524,7 +481,6 @@ class GithubReleasesState {
       if (!this.selected) this.select(this.items.find((i) => i.repo.id === added[0].id)?.id ?? added[0].id);
     }
   }
-
   async removeRepo(repoId: string) {
     this.page = await api.removeRepo(repoId);
     delete this.statuses[repoId];
@@ -535,9 +491,7 @@ class GithubReleasesState {
     }
     this.updateBadge();
   }
-
   // ─── Git ───────────────────────────────────────────────────────────────
-
   #output(repoId: string, action: string): (event: GitEvent) => void {
     this.gitOutput[repoId] = { action, lines: [], running: true };
     return (event) => {
@@ -549,12 +503,10 @@ class GithubReleasesState {
       if (output.lines.length > 400) output.lines.splice(0, output.lines.length - 400);
     };
   }
-
   #outputDone(repoId: string) {
     const output = this.gitOutput[repoId];
     if (output) output.running = false;
   }
-
   async push(repoId: string): Promise<boolean> {
     if (this.running(repoId)) return false;
     this.busy[repoId] = "push";
@@ -576,7 +528,6 @@ class GithubReleasesState {
       void this.loadRemote(repoId);
     }
   }
-
   async pull(repoId: string): Promise<boolean> {
     if (this.running(repoId)) return false;
     this.busy[repoId] = "pull";
@@ -597,7 +548,6 @@ class GithubReleasesState {
       await this.refresh(repoId);
     }
   }
-
   async commit(repoId: string, message: string, push: boolean): Promise<boolean> {
     if (this.running(repoId)) return false;
     this.busy[repoId] = push ? "commit-push" : "commit";
@@ -624,7 +574,6 @@ class GithubReleasesState {
       if (push) void this.loadRemote(repoId);
     }
   }
-
   /** A git or GitHub problem as a toast, with what fixes it. */
   showProblem(problem: Problem, repoId?: string) {
     const action = (() => {
@@ -645,9 +594,7 @@ class GithubReleasesState {
     })();
     toast.error(problem.message, action);
   }
-
   // ─── AI ────────────────────────────────────────────────────────────────
-
   /** Runs an AI request; when a provider fails and another is set up, the
    *  error offers it (nothing is sent to another provider unasked). */
   async ai<T>(options: {
@@ -677,15 +624,12 @@ class GithubReleasesState {
       options.setBusy(false);
     }
   }
-
   /** Providers that hit their limit, until when (ms). */
   aiLimits = $state<Partial<Record<ProviderId, number>>>({});
-
   get aiReady(): boolean {
     return !!this.page?.ai.providers.some((p) => p.ready);
   }
 }
-
 export async function installTool(tool: "gh" | "git") {
   try {
     await api.installTool(tool);
@@ -698,15 +642,12 @@ export async function installTool(tool: "gh" | "git") {
     toast.error(messageOf(error));
   }
 }
-
 export const githubReleases = new GithubReleasesState();
-
 /** "42s", "3m 5s". */
 export function duration(ms: number): string {
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
-
 /** "main ↑2 ↓1" pieces. */
 export function syncText(status: RepoStatus | null): string {
   if (!status) return "";
@@ -715,7 +656,6 @@ export function syncText(status: RepoStatus | null): string {
   if (!ahead && !behind) return "Up to date";
   return [ahead ? `${ahead} to push` : "", behind ? `${behind} to pull` : ""].filter(Boolean).join(", ");
 }
-
 /** A run's state: running, success, failure, cancelled… */
 export function runState(run: { status: string | null; conclusion: string | null } | null): "running" | "ok" | "failed" | "cancelled" | "skipped" | null {
   if (!run) return null;

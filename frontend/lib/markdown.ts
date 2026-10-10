@@ -2,7 +2,6 @@
 // data that components render as text nodes: nothing from the notes ever
 // becomes HTML, raw HTML in the notes is reduced to its text, and links are
 // kept only when they go to http(s) addresses.
-
 export type Inline =
   | { t: "text"; v: string }
   | { t: "strong"; c: Inline[] }
@@ -10,12 +9,10 @@ export type Inline =
   | { t: "code"; v: string }
   | { t: "link"; href: string; c: Inline[] }
   | { t: "br" };
-
 export interface ListItem {
   c: Inline[];
   sub: Block[];
 }
-
 export type Block =
   | { t: "h"; level: number; c: Inline[] }
   | { t: "p"; c: Inline[] }
@@ -25,15 +22,12 @@ export type Block =
   | { t: "quote"; c: Block[] }
   | { t: "hr" }
   | { t: "table"; head: Inline[][]; rows: Inline[][][] };
-
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
-
 /** Only web addresses are links; anything else (javascript:, file:, data:) is not. */
 export function safeHref(href: string): string | null {
   const url = href.trim();
   return /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
 }
-
 function decode(text: string): string {
   return text.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (whole, name: string) => {
     const lower = name.toLowerCase();
@@ -42,7 +36,6 @@ function decode(text: string): string {
     return Number.isFinite(code) && code > 31 && code < 0x110000 ? String.fromCodePoint(code) : whole;
   });
 }
-
 /** Raw HTML reduced to Markdown-ish text: no tags survive. */
 export function stripHtml(text: string): string {
   return (
@@ -65,9 +58,7 @@ export function stripHtml(text: string): string {
       .replace(/<\/?[a-zA-Z][^>]*>/g, "")
   );
 }
-
 // ─── Inline ────────────────────────────────────────────────────────────────
-
 export function parseInline(text: string): Inline[] {
   const out: Inline[] = [];
   let plain = "";
@@ -127,31 +118,25 @@ export function parseInline(text: string): Inline[] {
   flush();
   return out;
 }
-
 // ─── Blocks ────────────────────────────────────────────────────────────────
-
 const FENCE = /^\s{0,3}(```+|~~~+)\s*([\w+-]*)\s*$/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^\s{0,3}>\s?/;
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
-
 function cells(line: string): string[] {
   let row = line.trim();
   if (row.startsWith("|")) row = row.slice(1);
   if (row.endsWith("|") && !row.endsWith("\\|")) row = row.slice(0, -1);
   return row.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
 }
-
 function startsBlock(line: string, next: string | undefined): boolean {
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line) || (line.includes("|") && next !== undefined && TABLE_RULE.test(next));
 }
-
 function indentOf(line: string): number {
   return (line.match(/^\s*/)?.[0] ?? "").replace(/\t/g, "    ").length;
 }
-
 function parseList(lines: string[], start: number): { block: Block; end: number } {
   const first = lines[start].match(ITEM)!;
   const base = indentOf(lines[start]);
@@ -191,12 +176,10 @@ function parseList(lines: string[], start: number): { block: Block; end: number 
   const block: Block = ordered ? { t: "ol", start: parseInt(first[2], 10) || 1, items } : { t: "ul", items };
   return { block, end: i };
 }
-
 function dedent(lines: string[]): string[] {
   const least = Math.min(...lines.filter((l) => l.trim()).map(indentOf));
   return lines.map((l) => l.replace(/\t/g, "    ").slice(Math.min(least, indentOf(l))));
 }
-
 function parseBlocks(lines: string[]): Block[] {
   const blocks: Block[] = [];
   let i = 0;
@@ -241,7 +224,6 @@ function parseBlocks(lines: string[]): Block[] {
   }
   return blocks;
 }
-
 /** Release notes as blocks, safe to render as text. */
 export function parseMarkdown(markdown: string): Block[] {
   // HTML is stripped outside code blocks; inside them it is shown as text.

@@ -1,14 +1,12 @@
 // Typed bridge to the debloater (backend/src/debloat). The page sends only
 // ids of the backend's fixed tables.
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-
 export type Category = "privacy" | "taskbar" | "explorer" | "ai" | "system" | "apps" | "features";
 export type Risk = "safe" | "caution";
 export type TweakState = "applied" | "notApplied" | "partial" | "unavailable";
 export type AppGroup = "microsoft" | "bing" | "xbox" | "thirdParty";
 /** The Quick setup profile something belongs to; each takes in the ones before it. */
 export type Level = "light" | "recommended" | "maximum";
-
 export interface TweakStatus {
   id: string;
   title: string;
@@ -27,7 +25,6 @@ export interface TweakStatus {
   /** MYLE applied it and kept what was there before. */
   canUndo: boolean;
 }
-
 export interface AppStatus {
   id: string;
   title: string;
@@ -43,11 +40,9 @@ export interface AppStatus {
   removedByMyle: boolean;
   storeId: string | null;
 }
-
 export type StartAlignment = "left" | "center";
 export type StartLayout = "default" | "morePins" | "moreRecommendations";
 export type StartAllAppsView = "category" | "grid" | "list";
-
 export interface StartMenuStatus {
   supported: boolean;
   alignment: StartAlignment;
@@ -62,7 +57,6 @@ export interface StartMenuStatus {
   folders: string[];
   hasPinsBackup: boolean;
 }
-
 export interface StartMenuUpdate {
   alignment?: StartAlignment;
   layout?: StartLayout;
@@ -74,7 +68,6 @@ export interface StartMenuUpdate {
   showAccountNotifications?: boolean;
   folders?: string[];
 }
-
 export interface DebloatStatus {
   windows: { build: number; name: string; windows11: boolean };
   tweaks: TweakStatus[];
@@ -82,27 +75,21 @@ export interface DebloatStatus {
   startMenu: StartMenuStatus;
   adminReady: boolean;
 }
-
 export type RestorePoint = { result: "created" } | { result: "protectionOff" } | { result: "failed"; message: string };
-
 export type StepState = "running" | "done" | "unchanged" | "failed";
-
 export interface Step {
   id: string;
   label: string;
   state: StepState;
   detail: string | null;
 }
-
 export type DebloatEvent = { event: "step"; data: Step };
-
 export interface DebloatOutcome {
   changed: number;
   failed: { label: string; message: string }[];
   reboot: boolean;
   needsAdmin: boolean;
 }
-
 export interface DebloatApi {
   status(): Promise<DebloatStatus>;
   restorePoint(turnOn: boolean): Promise<RestorePoint>;
@@ -114,13 +101,11 @@ export interface DebloatApi {
   startMenuApplyPins(pins: string[]): Promise<StartMenuStatus>;
   startMenuRestorePins(): Promise<StartMenuStatus>;
 }
-
 function channel(onEvent: (event: DebloatEvent) => void): Channel<DebloatEvent> {
   const events = new Channel<DebloatEvent>();
   events.onmessage = onEvent;
   return events;
 }
-
 const tauriApi: DebloatApi = {
   status: () => invoke("debloat_status"),
   restorePoint: (turnOn) => invoke("debloat_restore_point", { turnOn }),
@@ -132,7 +117,6 @@ const tauriApi: DebloatApi = {
   startMenuApplyPins: (pins) => invoke("debloat_start_menu_apply_pins", { pins }),
   startMenuRestorePins: () => invoke("debloat_start_menu_restore_pins"),
 };
-
 /** In a plain browser (`npx vite`): a pretend PC, to work on the page. */
 function previewApi(): DebloatApi {
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -281,5 +265,4 @@ function previewApi(): DebloatApi {
     },
   };
 }
-
 export const debloatApi: DebloatApi = isTauri() ? tauriApi : previewApi();
