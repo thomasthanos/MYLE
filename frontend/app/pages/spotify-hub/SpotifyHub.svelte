@@ -39,7 +39,7 @@
     },
     {
       label: "Marketplace",
-      value: state?.marketplace.installed ? "Installed" : "Not installed",
+      value: state?.marketplace.installed ? state.marketplace.version ?? "Installed" : "Not installed",
       tone: state?.marketplace.installed ? "ok" : "idle",
       icon: Store,
     },
@@ -69,6 +69,12 @@
     <div class="banner surface" role="alert"><CircleAlert size={17} /><span>{hub.error}</span></div>
   {/if}
 
+  {#if hub.updateError}
+    <div class="notice surface warn" role="status"><CircleAlert size={15} /><span>{hub.updateError} Use Check again to retry.</span></div>
+  {:else if hub.releases && state?.marketplace.installed && !state.marketplace.version}
+    <div class="notice surface" role="status"><CircleAlert size={15} /><span>Marketplace is installed, but its version could not be verified. Repair / reinstall records the verified release for future update checks.</span></div>
+  {/if}
+
   {#if state?.prerequisites.message}
     <div class="notice surface" class:warn={!state.prerequisites.supported}>
       <CircleAlert size={15} />
@@ -83,8 +89,8 @@
   <div class="cards">
     <HubCard
       action="installSpicetify"
-      title="Install or repair Spicetify"
-      description="Install the latest verified stable CLI and Marketplace release for Spotify Desktop."
+      title={state?.spicetify.installed ? "Spicetify & Marketplace" : "Install Spicetify"}
+      description="Checks installed versions against the latest verified stable CLI and Marketplace releases."
       detail="Existing extensions and themes are preserved, and an active custom theme is never replaced."
       accent="green"
       icon={Download}

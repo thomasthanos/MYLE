@@ -7,6 +7,7 @@
 mod actions;
 mod detection;
 mod filesystem;
+mod installed;
 mod models;
 mod release;
 mod runner;
@@ -29,6 +30,16 @@ use state::PreviewGrant;
 pub use state::SpotifyHubState;
 
 const PREVIEW_LIFETIME: Duration = Duration::from_secs(5 * 60);
+
+#[tauri::command]
+pub async fn spotify_hub_check_updates() -> Result<models::SpotifyHubReleases, String> {
+    let (cli, marketplace) =
+        tokio::try_join!(release::resolve_cli(), release::resolve_marketplace())?;
+    Ok(models::SpotifyHubReleases {
+        cli: cli.version,
+        marketplace: marketplace.version,
+    })
+}
 
 #[tauri::command]
 pub async fn spotify_hub_get_state(

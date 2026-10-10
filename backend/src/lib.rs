@@ -419,6 +419,7 @@ pub fn run() {
             maintenance::maintenance_cancel,
             maintenance::maintenance_running,
             spotify_hub::spotify_hub_get_state,
+            spotify_hub::spotify_hub_check_updates,
             spotify_hub::spotify_hub_preview_purge,
             spotify_hub::spotify_hub_run,
             spotify_hub::spotify_hub_cancel,

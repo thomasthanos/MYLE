@@ -8,8 +8,8 @@ const OLD_GLASS_KEY = "myle.glass";
  * Visual preferences that apply to the whole document.
  *
  * Panels are always solid (`:root.solid`; the splash and the setup window
- * set it too). "Dark theme" swaps the blue-tinted surfaces for charcoal
- * grey-black ones (`:root.dark`, tokens.css); the accent stays the same.
+ * set it too). "Dark theme" uses matte layers and blurple actions
+ * (`:root.dark`, tokens.css).
  */
 class Settings {
   dark = $state(readFlag(DARK_KEY, false));

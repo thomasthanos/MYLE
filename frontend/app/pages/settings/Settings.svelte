@@ -88,7 +88,7 @@
   /** The words each setting is found by, beyond its title. */
   const words: Record<string, string> = {
     account: "account sign in sign out discord google sync cloud profile saved data preferences backup login",
-    theme: "appearance theme dark light charcoal black grey gray colour color blue default look",
+    theme: "appearance theme dark light matte slate blurple black grey gray colour color blue default look",
     startWindows: "startup start with windows sign in boot launch autostart",
     startMinimized: "startup minimized minimised tray hidden background launch",
     tray: "tray close quit background notification area clock shortcut ctrl shift l browser filling",
@@ -292,7 +292,7 @@
             <span class="row-icon"><Moon size={15} /></span>
             <span class="text">
               <strong>Theme</strong>
-              <small>The accent colour, sizes and layout stay the same in both.</small>
+              <small>Choose your surfaces and accents. The layout stays the same.</small>
             </span>
           </div>
           <div class="themes" role="radiogroup" aria-label="Theme">
@@ -317,10 +317,10 @@
               class:chosen={settings.dark}
               onclick={() => settings.setDark(true)}
             >
-              <span class="preview charcoal" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="preview matte" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="theme-text">
                 <b>Dark</b>
-                <small>Charcoal grey-black, neutral text</small>
+                <small>Matte surfaces, blurple accents</small>
               </span>
               <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
             </button>
@@ -656,12 +656,16 @@
     background: linear-gradient(180deg, #171b27, #12151e);
   }
 
-  .preview.charcoal {
-    background: #0b0b0c;
+  .preview.matte {
+    background: #1a1a1e;
   }
 
-  .preview.charcoal i {
-    background: linear-gradient(180deg, #1c1c1e, #161618);
+  .preview.matte i {
+    background: #222226;
+  }
+
+  .preview.matte i:first-child {
+    background: #121214;
   }
 
   .preview i:last-child {
@@ -679,8 +683,21 @@
     background: var(--accent-grad);
   }
 
-  .preview.charcoal i:last-child::after {
-    background: linear-gradient(180deg, #6f78c6, #5b63b0);
+  .preview.default i:last-child::after {
+    background: linear-gradient(135deg, #9ba3e2, #7f8ad6, #6aa9bf);
+  }
+
+  .preview.matte i:last-child::after {
+    background: #5865f2;
+  }
+
+  :global(:root.dark) .panel {
+    background: var(--surface-fill);
+    box-shadow: none;
+  }
+
+  :global(:root.dark) .search {
+    background: var(--input-fill);
   }
 
   .theme-text {

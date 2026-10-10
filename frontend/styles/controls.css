@@ -11,8 +11,8 @@
   transition-timing-function: var(--ease-out);
 }
 
-:where(button, [role="button"], .btn, .chip, .icon-btn):not(:disabled):active {
-  scale: 0.97;
+:where(button, [role="button"], .btn, .chip, .icon-btn):where(:not(:disabled):not([aria-disabled="true"])):active {
+  scale: 0.985;
   translate: 0 1px;
   transition-duration: 50ms;
 }
@@ -29,7 +29,7 @@
   background: var(--btn-fill);
   box-shadow: var(--btn-sheen);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   transition:
     background var(--dur-fast),
@@ -40,47 +40,63 @@
     translate 140ms var(--ease-out);
 }
 
-.btn:hover {
+.btn:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   background: var(--btn-fill-hover);
 }
 
 /* Held down: pressed into the surface. */
-.btn:active {
-  scale: 0.96;
+.btn:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  scale: 0.985;
   translate: 0 1px;
   background: var(--btn-fill-press);
-  box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.35);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2);
   transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms, 50ms, 50ms;
 }
 
-.btn.primary:active,
-.btn.danger:active {
-  filter: brightness(0.9);
-  box-shadow:
-    inset 0 2px 6px rgb(0 0 0 / 0.35),
-    0 2px 6px -4px var(--accent-glow);
-}
-
-.btn.ghost:active {
-  box-shadow: inset 0 1px 4px rgb(0 0 0 / 0.3);
-}
-
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"],
+.icon-btn:disabled,
+.icon-btn[aria-disabled="true"],
+.chip:disabled,
+.chip[aria-disabled="true"] {
   opacity: 0.45;
-  pointer-events: none;
+  cursor: not-allowed;
 }
 
 .btn.primary {
   border-color: transparent;
   background: var(--btn-primary);
-  color: #fff;
+  color: var(--btn-primary-text);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.25),
     0 6px 16px -6px var(--accent-glow);
 }
 
-.btn.primary:hover {
+.btn.primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   filter: brightness(1.08);
+}
+
+.btn.primary:active:where(:not(:disabled):not([aria-disabled="true"])),
+.btn.danger:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  filter: brightness(0.9);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2);
+}
+
+:root.dark .btn.primary:not(.danger) {
+  border-color: transparent;
+  background: var(--btn-primary);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-sheen);
+}
+
+:root.dark .btn.primary:not(.danger):hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--btn-primary-hover);
+  filter: none;
+}
+
+:root.dark .btn.primary:not(.danger):active:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--btn-primary-press);
+  filter: none;
 }
 
 .btn.danger {
@@ -96,8 +112,13 @@
   box-shadow: none;
 }
 
-.btn.ghost:hover {
+.btn.ghost:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   background: var(--hover);
+}
+
+.btn.ghost:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--press);
+  box-shadow: none;
 }
 
 .btn.small {
@@ -122,13 +143,13 @@
     translate 140ms var(--ease-out);
 }
 
-.icon-btn:hover {
+.icon-btn:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   background: var(--hover);
   color: var(--text-1);
 }
 
-.icon-btn:active {
-  scale: 0.9;
+.icon-btn:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  scale: 0.96;
   background: var(--press);
   transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms;
 }
@@ -144,9 +165,9 @@
   gap: 7px;
   height: 30px;
   padding: 0 12px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--btn-border);
+  border-radius: var(--chip-radius);
+  background: var(--chip-fill);
   color: var(--text-2);
   font-size: 12.5px;
   font-weight: 500;
@@ -159,15 +180,15 @@
     translate 140ms var(--ease-out);
 }
 
-.chip:hover {
-  background: rgb(255 255 255 / 0.07);
+.chip:hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--chip-fill-hover);
   color: var(--text-1);
 }
 
-.chip:active {
-  scale: 0.95;
-  background: rgb(255 255 255 / 0.1);
-  box-shadow: inset 0 1px 4px rgb(0 0 0 / 0.3);
+.chip:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  scale: 0.985;
+  background: var(--chip-fill-press);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2);
   transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-fast), 50ms, 50ms;
 }
 
@@ -180,6 +201,10 @@
 .chip .count {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+.chip.active .count {
+  color: rgb(var(--accent-soft-rgb));
 }
 
 .check {
@@ -284,15 +309,15 @@
 .input {
   height: 34px;
   padding: 0 12px;
-  border: 1px solid rgb(255 255 255 / 0.08);
+  border: 1px solid var(--btn-border);
   border-radius: 10px;
-  background: rgb(0 0 0 / 0.2);
+  background: var(--input-fill);
   box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25);
   color: var(--text-1);
   font: inherit;
   font-size: 13px;
   outline: none;
-  transition: border-color var(--dur-fast);
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
 
 .input::placeholder {
@@ -300,7 +325,15 @@
 }
 
 .input:focus {
-  border-color: rgb(var(--accent-rgb) / 0.55);
+  border-color: rgb(var(--accent-rgb) / 0.8);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(button, [role="button"], .btn, .chip, .icon-btn):active {
+    scale: 1 !important;
+    translate: none !important;
+  }
 }
 
 /* Floating menus (popovers). Solid fill: no blur stacked on blur. */

@@ -1,7 +1,7 @@
 {
   "name": "make-your-life-easier",
   "private": true,
-  "version": "9.16.0",
+  "version": "9.16.1",
   "type": "module",
   "myle": {
     "extensionUrl": "https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca"

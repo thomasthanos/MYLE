@@ -59,6 +59,13 @@
   --btn-border: rgb(255 255 255 / 0.08);
   --btn-sheen: inset 0 1px 0 rgb(255 255 255 / 0.05);
   --btn-primary: var(--accent-grad);
+  --btn-primary-text: #fff;
+  --chip-fill: rgb(255 255 255 / 0.03);
+  --chip-fill-hover: rgb(255 255 255 / 0.07);
+  --chip-fill-press: rgb(255 255 255 / 0.1);
+  --chip-radius: 999px;
+  --surface-fill: linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.02));
+  --input-fill: rgb(0 0 0 / 0.2);
   --knob: linear-gradient(180deg, #fff, #d9ddf0);
 
   /* Scrollbars (base.css): every scrolling area, slim, no arrow buttons */
@@ -114,49 +121,62 @@
 }
 
 /*
- * Dark theme (Settings → Appearance): charcoal grey-black surfaces with
- * neutral text, instead of the blue-tinted ones. The accent, the status
- * colours and every size stay as they are.
+ * Dark theme: Discord-inspired matte layers. The darker navigation and
+ * brighter content have distinct roles; blurple is reserved for actions.
  */
 :root.dark {
-  --bg-0: #0b0b0c;
-  --bg-1: #111112;
-  --solid-fill-top: #1c1c1e;
-  --solid-fill-bottom: #161618;
+  --bg-0: #121214;
+  --bg-1: #1a1a1e;
+  --solid-fill-top: #1a1a1e;
+  --solid-fill-bottom: #1a1a1e;
+  --bg-solid-panel: #1a1a1e;
+  --sidebar-fill: #121214;
+  --surface-fill: #222226;
+  --input-fill: #161619;
 
-  --text-1: rgb(242 242 244 / 0.94);
-  --text-2: rgb(228 228 232 / 0.64);
-  --text-3: rgb(220 220 226 / 0.42);
+  --text-1: #f2f3f5;
+  --text-2: #b5b7c0;
+  --text-3: #93959f;
+  --accent-rgb: 139 151 255;
+  --accent-soft-rgb: 188 196 255;
+  --accent-2: #8b97ff;
+  --accent-grad: linear-gradient(135deg, #8b97ff, #5865f2);
+  --accent-glow: rgb(88 101 242 / 0.18);
 
-  --glass-border: rgb(255 255 255 / 0.06);
-  --panel-rim: rgb(255 255 255 / 0.1);
+  --glass-border: #2b2b31;
+  --panel-rim: #2b2b31;
 
-  --hover: rgb(255 255 255 / 0.055);
-  --press: rgb(255 255 255 / 0.09);
+  --hover: #27272d;
+  --press: #303037;
+  --selected: #2b2d42;
 
-  --window-fill-top: rgb(18 18 19 / 0.98);
-  --window-fill-bottom: rgb(12 12 13 / 0.98);
-  --window-border: #050505;
-  --titlebar-fill: linear-gradient(180deg, rgb(30 30 32 / 0.6), rgb(20 20 22 / 0.4));
-  --titlebar-divider: rgb(255 255 255 / 0.06);
-  --shell-fill: linear-gradient(180deg, rgb(18 18 19 / 0.99), rgb(12 12 13 / 0.99));
+  --window-fill-top: #121214;
+  --window-fill-bottom: #121214;
+  --window-border: #303035;
+  --titlebar-fill: #121214;
+  --titlebar-divider: #252529;
+  --shell-fill: #121214;
 
-  --float-bg: rgb(30 30 32 / 0.98);
-  --tooltip-bg: rgb(36 36 39 / 0.97);
-  --toast-bg: rgb(32 32 35 / 0.97);
-  --bar-fill: linear-gradient(180deg, rgb(32 32 35 / 0.98), rgb(22 22 24 / 0.99));
-  --scrim: rgb(0 0 0 / 0.6);
+  --float-bg: #242429;
+  --tooltip-bg: #2b2b31;
+  --toast-bg: #242429;
+  /* Used as an image layer above the selection bar's border gradient. */
+  --bar-fill: linear-gradient(#222226, #222226);
+  --scrim: rgb(8 8 10 / 0.72);
 
-  /* Buttons: solid charcoal, and a deeper accent for the main action, so
-     nothing stands out light against the dark panels. */
-  --accent-grad: linear-gradient(135deg, #7c85cf 0%, #6a73c0 50%, #5a8ea2 100%);
-  --btn-fill: #232326;
-  --btn-fill-hover: #2b2b2f;
-  --btn-fill-press: #313136;
-  --btn-border: rgb(255 255 255 / 0.085);
-  --btn-sheen: inset 0 1px 0 rgb(255 255 255 / 0.035);
-  --btn-primary: linear-gradient(180deg, #6f78c6, #5b63b0);
-  --knob: linear-gradient(180deg, #f1f1f3, #cfcfd4);
+  --btn-fill: #2b2b31;
+  --btn-fill-hover: #36363e;
+  --btn-fill-press: #232329;
+  --btn-border: #414149;
+  --btn-sheen: 0 1px 2px rgb(0 0 0 / 0.16);
+  --btn-primary: #5865f2;
+  --btn-primary-hover: #4752c4;
+  --btn-primary-press: #3c45a5;
+  --chip-fill: var(--btn-fill);
+  --chip-fill-hover: var(--btn-fill-hover);
+  --chip-fill-press: var(--btn-fill-press);
+  --chip-radius: 8px;
+  --knob: #f2f3f5;
 
   --scroll-thumb: rgb(255 255 255 / 0.13);
   --scroll-thumb-hover: rgb(255 255 255 / 0.24);

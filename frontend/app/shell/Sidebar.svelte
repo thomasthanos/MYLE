@@ -213,6 +213,10 @@
     border-radius: var(--shell-panel-radius);
   }
 
+  :global(:root.dark) .sidebar {
+    background: var(--sidebar-fill);
+  }
+
   /* On a short window the page list scrolls; Settings and the toggle stay. */
   .top {
     min-height: 0;

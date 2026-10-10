@@ -25,13 +25,11 @@
   opacity: 0.035;
 }
 
-/* Dark theme: charcoal, with only a whisper of the accent in one corner. */
+/* Dark stays matte: contrast comes from the surface layers, not glows. */
 :root.dark .app-backdrop {
-  background:
-    radial-gradient(44% 52% at 8% 4%, rgb(var(--accent-rgb) / 0.07), transparent 72%),
-    linear-gradient(180deg, #111112 0%, #0b0b0c 100%);
+  background: var(--bg-0);
 }
 
 :root.dark .app-backdrop::after {
-  opacity: 0.025;
+  opacity: 0;
 }

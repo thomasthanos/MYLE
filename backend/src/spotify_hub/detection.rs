@@ -208,6 +208,7 @@ pub async fn detect() -> Result<Detection, String> {
         marketplace: MarketplaceState {
             installed: paths.marketplace.join("manifest.json").is_file()
                 || paths.marketplace.join("index.js").is_file(),
+            version: super::installed::version(&paths.marketplace),
         },
         paths,
         unknown_desktop_registration,

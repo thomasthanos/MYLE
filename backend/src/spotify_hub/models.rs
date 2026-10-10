@@ -97,6 +97,14 @@ pub struct SpicetifyState {
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceState {
     pub installed: bool,
+    pub version: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotifyHubReleases {
+    pub cli: String,
+    pub marketplace: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]

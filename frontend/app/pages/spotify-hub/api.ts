@@ -23,6 +23,12 @@ export interface SpicetifyState extends DetectedInstall {
 
 export interface MarketplaceState {
   installed: boolean;
+  version: string | null;
+}
+
+export interface SpotifyHubReleases {
+  cli: string;
+  marketplace: string;
 }
 
 export interface SpotifyHubPrerequisites {
@@ -77,6 +83,7 @@ function channel(onEvent: (event: SpotifyHubEvent) => void): Channel<SpotifyHubE
 
 export const spotifyHubApi = {
   getState: () => invoke<SpotifyHubSnapshot>("spotify_hub_get_state"),
+  checkUpdates: () => invoke<SpotifyHubReleases>("spotify_hub_check_updates"),
   previewPurge: () => invoke<PurgePreview>("spotify_hub_preview_purge"),
   run: (
     action: SpotifyHubAction,

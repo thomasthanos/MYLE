@@ -1,4 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
+import { compareVersions } from "../../../installer/versions";
 import { confirm } from "../../../lib/confirm.svelte";
 import { nav } from "../../../lib/nav.svelte";
 import { operationGate } from "../../../lib/operation-gate.svelte";
@@ -13,6 +14,7 @@ import {
   type SpotifyHubOutcome,
   type SpotifyHubSnapshot,
   type SpotifyHubStage,
+  type SpotifyHubReleases,
 } from "./api";
 
 export type HubCardStatus = "Ready" | "Running" | "Completed" | "Partial" | "Error";
@@ -48,6 +50,9 @@ class SpotifyHubState {
   snapshot = $state<SpotifyHubSnapshot | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
+  releases = $state<SpotifyHubReleases | null>(null);
+  checkingUpdates = $state(false);
+  updateError = $state<string | null>(null);
   startingAction = $state<SpotifyHubAction | null>(null);
   liveJob = $state<SpotifyHubJob | null>(null);
   stopping = $state(false);
@@ -70,6 +75,7 @@ class SpotifyHubState {
    *  the fresh "Error" back into "Completed". */
   #seenOutcome: string | null = null;
   #loadedAt = 0;
+  #updateRequest = 0;
 
   readonly activeJob = $derived(this.liveJob ?? this.snapshot?.activeJob ?? null);
   readonly activeAction = $derived(this.startingAction ?? this.activeJob?.action ?? null);
@@ -104,6 +110,25 @@ class SpotifyHubState {
       this.error = message(error);
     } finally {
       this.loading = false;
+    }
+    if (this.snapshot && !this.error && !this.ownBusy) await this.checkUpdates();
+  }
+
+  async checkUpdates() {
+    if (!isTauri() || this.locked || this.checkingUpdates || !this.snapshot?.spicetify.healthy) return;
+    const request = ++this.#updateRequest;
+    this.checkingUpdates = true;
+    this.updateError = null;
+    try {
+      const releases = await spotifyHubApi.checkUpdates();
+      if (request === this.#updateRequest) this.releases = releases;
+    } catch (error) {
+      if (request === this.#updateRequest) {
+        this.releases = null;
+        this.updateError = `Could not check releases: ${message(error)}`;
+      }
+    } finally {
+      if (request === this.#updateRequest) this.checkingUpdates = false;
     }
   }
 
@@ -158,7 +183,14 @@ class SpotifyHubState {
     const state = this.snapshot;
     if (!state?.desktop.installed) return "Install Spotify first";
     if (!state.spicetify.installed) return "Install Spicetify";
-    return state.spicetify.healthy ? "Update" : "Repair";
+    if (!state.spicetify.healthy || !state.marketplace.installed) return "Repair";
+    if (this.checkingUpdates) return "Checking updates…";
+    if (!this.releases) return "Check for updates";
+    const cli = state.spicetify.version;
+    const marketplace = state.marketplace.version;
+    if ((cli && compareVersions(cli, this.releases.cli) < 0)
+      || (marketplace && compareVersions(marketplace, this.releases.marketplace) < 0)) return "Update";
+    return cli && marketplace ? "Up to date" : "Installed";
   }
 
   prepareSpotifyInstall() {
@@ -169,11 +201,22 @@ class SpotifyHubState {
   }
 
   async install() {
+    if (this.checkingUpdates || this.locked) return;
     if (!this.snapshot?.desktop.installed) {
       this.prepareSpotifyInstall();
       return;
     }
+    const label = this.installLabel();
+    if (label === "Check for updates") {
+      await this.checkUpdates();
+      return;
+    }
+    if (label === "Up to date" || label === "Installed") return;
     await this.run("installSpicetify", null);
+  }
+
+  async repair() {
+    if (this.snapshot?.desktop.installed) await this.run("installSpicetify", null, "Repair");
   }
 
   async restore() {
@@ -241,18 +284,21 @@ class SpotifyHubState {
     this.consoles[action].open = !this.consoles[action].open;
   }
 
-  private async run(action: SpotifyHubAction, purgeToken: string | null) {
+  private async run(action: SpotifyHubAction, purgeToken: string | null, requestedLabel?: string) {
     if (this.locked || !operationGate.begin("spotify-hub")) {
       toast.info("Finish the current app task before starting another action.");
       return;
     }
 
     this.startingAction = action;
+    this.#updateRequest++;
+    this.checkingUpdates = false;
+    this.releases = null;
     this.statuses[action] = "Running";
     this.error = null;
     this.stopping = false;
     this.consoles[action] = { lines: [], open: true, dropped: 0 };
-    this.append(action, `${this.installLabelFor(action)} requested.`);
+    this.append(action, `${requestedLabel ?? this.installLabelFor(action)} requested.`);
 
     try {
       const outcome = await spotifyHubApi.run(action, purgeToken, (event) => this.onEvent(action, event));

@@ -230,12 +230,51 @@
     box-shadow: 0 8px 22px -14px rgb(255 255 255 / 0.5);
   }
 
-  /* Dark theme: Google's own dark button, nothing light on the charcoal. */
+  :global(:root.dark) .card {
+    border-color: var(--glass-border);
+    background: var(--surface-fill);
+    box-shadow: none;
+  }
+
+  :global(:root.dark) .rim {
+    display: none;
+  }
+
+  :global(:root.dark) .provider {
+    box-shadow: var(--btn-sheen);
+    transition: background var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out);
+  }
+
+  :global(:root.dark) .provider:hover {
+    transform: none;
+    filter: none;
+  }
+
+  :global(:root.dark) .provider.discord {
+    border-color: transparent;
+    background: var(--btn-primary);
+  }
+
+  :global(:root.dark) .provider.discord:hover {
+    background: var(--btn-primary-hover);
+  }
+
+  :global(:root.dark) .provider.discord:active {
+    background: var(--btn-primary-press);
+  }
+
   :global(:root.dark) .provider.google {
-    border-color: rgb(255 255 255 / 0.12);
-    background: linear-gradient(180deg, #2c2c2f, #232326);
-    color: #ececef;
-    box-shadow: 0 8px 22px -14px rgb(0 0 0 / 0.8);
+    border-color: var(--btn-border);
+    background: var(--btn-fill);
+    color: var(--text-1);
+  }
+
+  :global(:root.dark) .provider.google:hover {
+    background: var(--btn-fill-hover);
+  }
+
+  :global(:root.dark) .provider.google:active {
+    background: var(--btn-fill-press);
   }
 
   .waiting {

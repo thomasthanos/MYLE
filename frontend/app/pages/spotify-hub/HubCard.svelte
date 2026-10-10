@@ -40,6 +40,7 @@
           ? "Preparing preview…"
           : "Review & uninstall",
   );
+  const current = $derived(action === "installSpicetify" && (label === "Up to date" || label === "Installed"));
 
   function run() {
     if (action === "installSpicetify") void hub.install();
@@ -84,15 +85,23 @@
         </div>
       </div>
     {:else}
-      <button
+      <div class="actions">
+        <button
         class="btn action"
         class:danger={action === "purgeAll"}
-        disabled={hub.loading || hub.locked || unavailable || hub.previewingPurge}
+        disabled={hub.loading || hub.locked || unavailable || hub.previewingPurge || current || (action === "installSpicetify" && hub.checkingUpdates)}
         onclick={run}
       >
         {label}
-        <ArrowRight size={14} />
-      </button>
+        {#if !current}<ArrowRight size={14} />{/if}
+        </button>
+        {#if action === "installSpicetify" && state?.spicetify.installed && state.desktop.installed}
+          {#if state.spicetify.healthy}
+            <button class="btn quiet" disabled={hub.loading || hub.locked || hub.checkingUpdates} onclick={() => hub.checkUpdates()}>Check again</button>
+          {/if}
+          <button class="btn quiet" disabled={hub.loading || hub.locked} onclick={() => hub.repair()}>Repair / reinstall</button>
+        {/if}
+      </div>
     {/if}
   </div>
 
@@ -220,15 +229,21 @@
   .copy p { margin-top: 6px; color: var(--text-2); font-size: 12px; line-height: 1.48; }
   .copy .detail { color: var(--text-3); font-size: 10.75px; }
 
-  .action {
+  .actions {
     grid-column: 1 / -1;
     grid-row: 3;
     justify-self: start;
     align-self: end;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .action {
     border-color: rgb(var(--tone) / 0.22);
     background: var(--tone-soft);
   }
   .action:hover { border-color: rgb(var(--tone) / 0.4); background: rgb(var(--tone) / 0.16); }
+  .quiet { font-size: 11px; }
 
   .progress {
     grid-column: 1 / -1;
@@ -269,7 +284,7 @@
       align-self: start;
     }
 
-    .action {
+    .actions {
       grid-column: 3;
       grid-row: 2;
       justify-self: end;

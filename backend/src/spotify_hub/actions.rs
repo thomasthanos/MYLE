@@ -17,6 +17,16 @@ use super::release;
 use super::runner::{Reporter, run_program, stop_spotify_processes};
 use super::state::Cancellation;
 
+fn replace_release(installed: Option<&str>, latest: &str) -> bool {
+    match (
+        installed.and_then(|version| semver::Version::parse(version).ok()),
+        semver::Version::parse(latest).ok(),
+    ) {
+        (Some(installed), Some(latest)) => installed <= latest,
+        _ => true,
+    }
+}
+
 pub async fn install(
     app: &AppHandle,
     detection: &Detection,
@@ -141,6 +151,7 @@ pub async fn install(
         marketplace_parent.join(format!(".marketplace.myle-stage-{}", reporter.job_id));
     cleanup.add(marketplace_stage.clone());
     move_directory(&marketplace_payload, &marketplace_stage)?;
+    super::installed::write_version(&marketplace_stage, &marketplace_release.version)?;
 
     let config_file = detection.paths.config.join("config-xpui.ini");
     let previous_config = std::fs::read(&config_file).ok();
@@ -151,17 +162,59 @@ pub async fn install(
     let preserve_custom_theme =
         !active_theme.is_empty() && !active_theme.eq_ignore_ascii_case("marketplace");
 
-    let mut cli_swap = DirectorySwap::apply(&cli_stage, &detection.paths.cli, reporter.job_id)?;
-    let mut marketplace_swap = match DirectorySwap::apply(
-        &marketplace_stage,
-        &detection.paths.marketplace,
-        reporter.job_id,
+    let installed_cli = detection
+        .spicetify
+        .healthy
+        .then_some(detection.spicetify.version.as_deref())
+        .flatten();
+    let cli_version = if replace_release(installed_cli, &cli_release.version) {
+        cli_release.version.as_str()
+    } else {
+        installed_cli.expect("only a known newer version is preserved")
+    };
+    let marketplace_version = if replace_release(
+        detection.marketplace.version.as_deref(),
+        &marketplace_release.version,
     ) {
-        Ok(swap) => swap,
-        Err(error) => {
-            let _ = cli_swap.rollback();
-            return Err(error);
+        marketplace_release.version.as_str()
+    } else {
+        detection
+            .marketplace
+            .version
+            .as_deref()
+            .expect("only a known newer version is preserved")
+    };
+    let mut cli_swap = if cli_version == cli_release.version {
+        Some(DirectorySwap::apply(
+            &cli_stage,
+            &detection.paths.cli,
+            reporter.job_id,
+        )?)
+    } else {
+        reporter.line(format!(
+            "Preserving newer installed Spicetify {cli_version}."
+        ));
+        None
+    };
+    let mut marketplace_swap = if marketplace_version == marketplace_release.version {
+        match DirectorySwap::apply(
+            &marketplace_stage,
+            &detection.paths.marketplace,
+            reporter.job_id,
+        ) {
+            Ok(swap) => Some(swap),
+            Err(error) => {
+                if let Some(swap) = &mut cli_swap {
+                    let _ = swap.rollback();
+                }
+                return Err(error);
+            }
         }
+    } else {
+        reporter.line(format!(
+            "Preserving newer installed Marketplace {marketplace_version}."
+        ));
+        None
     };
 
     let mut theme_swap = if preserve_custom_theme {
@@ -199,8 +252,12 @@ pub async fn install(
         if let Some(swap) = &mut theme_swap {
             let _ = swap.rollback();
         }
-        let _ = marketplace_swap.rollback();
-        let _ = cli_swap.rollback();
+        if let Some(swap) = &mut marketplace_swap {
+            let _ = swap.rollback();
+        }
+        if let Some(swap) = &mut cli_swap {
+            let _ = swap.rollback();
+        }
         if error == CANCELLED || cancellation.is_cancelled() {
             return Ok(cancelled(
                 reporter.job_id,
@@ -218,8 +275,12 @@ pub async fn install(
         if let Some(swap) = &mut theme_swap {
             let _ = swap.rollback();
         }
-        let _ = marketplace_swap.rollback();
-        let _ = cli_swap.rollback();
+        if let Some(swap) = &mut marketplace_swap {
+            let _ = swap.rollback();
+        }
+        if let Some(swap) = &mut cli_swap {
+            let _ = swap.rollback();
+        }
         return Err(format!(
             "Could not safely add Spicetify to the user PATH: {error}"
         ));
@@ -230,10 +291,14 @@ pub async fn install(
     {
         stale_backups.push(path);
     }
-    if let Some(path) = marketplace_swap.commit() {
+    if let Some(swap) = marketplace_swap
+        && let Some(path) = swap.commit()
+    {
         stale_backups.push(path);
     }
-    if let Some(path) = cli_swap.commit() {
+    if let Some(swap) = cli_swap
+        && let Some(path) = swap.commit()
+    {
         stale_backups.push(path);
     }
     for path in stale_backups {
@@ -252,7 +317,7 @@ pub async fn install(
         SpotifyHubAction::InstallSpicetify,
         Some(format!(
             "Installed Spicetify {} and Marketplace {}.",
-            cli_release.version, marketplace_release.version
+            cli_version, marketplace_version
         )),
     ))
 }
@@ -283,7 +348,60 @@ async fn configure_spicetify(
     }
     // This is the verified local executable and a fixed argument list. It is
     // intentionally unelevated and never invokes a downloaded script.
-    ensure_success(&exe, &["backup", "apply"], job, cancellation, reporter).await
+    let config = std::fs::read(detection.paths.config.join("config-xpui.ini")).map_err(err)?;
+    let apps_dir = spotify_apps_dir(&config, &detection.paths.desktop_dir());
+    let args = backup_apply_args(&apps_dir)?;
+    if args.first() == Some(&"restore") {
+        reporter.line("Spotify has no stock app packages; restoring the existing backup before rebuilding it with the new CLI…");
+    }
+    ensure_success(&exe, args, job, cancellation, reporter).await
+}
+
+/// Match the official CLI updater's IsBackupable check. A Spotify update may
+/// leave both .spa packages and extracted directories: back up those new stock
+/// packages without restoring an older Spotify version over them. A fully
+/// customized installation needs restore first, then preprocessing by the new
+/// CLI. The CLI itself checks backup presence/version before restoring.
+fn backup_apply_args(apps_dir: &Path) -> Result<&'static [&'static str], String> {
+    for entry in std::fs::read_dir(apps_dir).map_err(err)? {
+        let entry = entry.map_err(err)?;
+        if entry.file_name().to_string_lossy().ends_with(".spa")
+            && !entry.file_type().map_err(err)?.is_dir()
+        {
+            return Ok(&["backup", "apply"]);
+        }
+    }
+    Ok(&["restore", "backup", "apply"])
+}
+
+/// Honor the path the CLI will use, including %VAR% references. Like its
+/// InitPaths, fall back to detected Desktop Spotify when the configured Apps
+/// directory does not exist. Do not inspect a different installation's state.
+fn spotify_apps_dir(config: &[u8], default_spotify: &Path) -> PathBuf {
+    let mut setting = false;
+    for line in String::from_utf8_lossy(config).lines() {
+        let line = line.trim().trim_start_matches('\u{feff}');
+        if line.starts_with('[') {
+            setting = line.eq_ignore_ascii_case("[Setting]");
+            continue;
+        }
+        if !setting {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=')
+            && key.trim().eq_ignore_ascii_case("spotify_path")
+        {
+            let value = value.trim().trim_matches(['"', '\'']);
+            if !value.is_empty() {
+                let configured = PathBuf::from(crate::apps::custom::expand_env(value)).join("Apps");
+                if configured.is_dir() {
+                    return configured;
+                }
+            }
+            break;
+        }
+    }
+    default_spotify.join("Apps")
 }
 
 /// If applying the new build changed Spotify and a later install step fails,
@@ -776,6 +894,103 @@ fn ps_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_newer_installed_component_is_preserved_when_the_other_component_updates() {
+        assert!(!replace_release(Some("2.46.0"), "2.45.3"));
+        assert!(!replace_release(Some("1.0.12"), "1.0.11"));
+        assert!(replace_release(Some("2.45.1"), "2.45.3"));
+        assert!(replace_release(Some("1.0.10"), "1.0.11"));
+        assert!(replace_release(Some("2.45.3"), "2.45.3"));
+        assert!(replace_release(None, "2.45.3"));
+    }
+
+    struct SpotifyAppsFixture(PathBuf);
+
+    impl SpotifyAppsFixture {
+        fn new(stock: bool, modified: bool) -> Self {
+            let root =
+                std::env::temp_dir().join(format!("myle-spicetify-apps-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            if stock {
+                std::fs::write(root.join("xpui.spa"), b"original Spotify package").unwrap();
+            }
+            if modified {
+                std::fs::create_dir(root.join("xpui")).unwrap();
+            }
+            Self(root)
+        }
+    }
+
+    impl Drop for SpotifyAppsFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn updating_modified_spotify_restores_before_rebuilding_backup() {
+        let apps = SpotifyAppsFixture::new(false, true);
+        assert_eq!(
+            backup_apply_args(&apps.0).unwrap(),
+            ["restore", "backup", "apply"]
+        );
+    }
+
+    #[test]
+    fn fresh_or_updated_spotify_backs_up_without_restoring_old_files() {
+        for modified in [false, true] {
+            let apps = SpotifyAppsFixture::new(true, modified);
+            assert_eq!(backup_apply_args(&apps.0).unwrap(), ["backup", "apply"]);
+        }
+    }
+
+    #[test]
+    fn a_directory_named_spa_is_not_an_original_package() {
+        let apps = SpotifyAppsFixture::new(false, true);
+        std::fs::create_dir(apps.0.join("not-a-package.spa")).unwrap();
+        assert_eq!(
+            backup_apply_args(&apps.0).unwrap(),
+            ["restore", "backup", "apply"]
+        );
+    }
+
+    #[test]
+    fn unreadable_spotify_apps_are_not_assumed_safe_to_back_up() {
+        let apps = SpotifyAppsFixture::new(false, false);
+        assert!(backup_apply_args(&apps.0.join("missing")).is_err());
+    }
+
+    #[test]
+    fn backup_policy_uses_the_configured_spotify_installation() {
+        let root = SpotifyAppsFixture::new(false, false);
+        let apps = root.0.join("Apps");
+        std::fs::create_dir(&apps).unwrap();
+        let default = root.0.join("DefaultSpotify");
+        let config = format!(
+            "[Backup]\nspotify_path=ignored\n[Setting]\nspotify_path = {}\n",
+            root.0.display()
+        );
+        assert_eq!(spotify_apps_dir(config.as_bytes(), &default), apps);
+    }
+
+    #[test]
+    fn missing_or_invalid_configured_path_uses_detected_desktop_spotify() {
+        let root = SpotifyAppsFixture::new(false, false);
+        for config in [
+            "[Setting]\nspotify_path=\n".to_string(),
+            format!(
+                "[Setting]\nspotify_path={}\n",
+                root.0.join("missing").display()
+            ),
+            format!("[Backup]\nspotify_path={}\n", root.0.display()),
+        ] {
+            assert_eq!(
+                spotify_apps_dir(config.as_bytes(), &root.0),
+                root.0.join("Apps")
+            );
+        }
+    }
 
     #[test]
     fn existing_custom_theme_is_detected_and_preserved() {
