@@ -36,7 +36,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ServerOptions;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -482,34 +482,38 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
     while let Some(message) = read_message(&mut input)? {
-        let running = app_running();
-        let reply = if running {
-            ask_app(&request_from(browser, copy, &message))
-                .unwrap_or_else(|| json!({ "ok": false, "error": "notRunning" }))
-        } else if is_open(&message) {
-            // The extension's own "open": start it (it shows the vault).
-            let how = launch_app();
-            json!({ "ok": how.is_some(), "detail": how.unwrap_or("could not start MYLE") })
-        } else if !wants_the_app(&message) {
-            // Anything else (a page's status poll, logins) never starts it.
-            json!({ "ok": false, "error": "notRunning" })
-        } else {
-            // The browser asked while MYLE was closed. The app is started and
-            // this same host waits for it, so the request is answered here
-            // instead of the page hearing "MYLE is not running" and giving up:
-            // the sign-in the user just started carries on by itself.
-            let how = launch_app();
-            let up = how.is_some() && wait_for_app(APP_START_WAIT);
-            match up.then(|| ask_app(&request_from(browser, copy, &message))).flatten() {
-                Some(answer) => answer,
-                None => json!({
-                    "ok": false,
-                    "error": "notRunning",
-                    "detail": match how {
-                        Some(how) => format!("{how}; MYLE did not answer in {}s", APP_START_WAIT.as_secs()),
-                        None => "could not start MYLE".to_owned(),
-                    },
-                }),
+        // An open-and-close availability probe consumes the listening pipe
+        // instance. Send the request on our first connection instead.
+        let request = request_from(browser, copy, &message);
+        let reply = match ask_app(&request) {
+            Ok(reply) => reply,
+            Err(AppError::Failed) => lost_app_reply(),
+            Err(AppError::Unavailable) if is_open(&message) => {
+                // The extension's own "open": start it (it shows the vault).
+                let how = launch_app(browser, copy);
+                json!({ "ok": how.is_some(), "detail": how.unwrap_or("could not start MYLE") })
+            }
+            Err(AppError::Unavailable) if !wants_the_app(&message) => {
+                // A page's status poll or logins never starts the app.
+                json!({ "ok": false, "error": "notRunning" })
+            }
+            Err(AppError::Unavailable) => {
+                // No connection was made: start the app and wait until this
+                // request can be dispatched. A lost answer is never retried.
+                let how = launch_app(browser, copy);
+                let answer = how.map_or(Err(AppError::Unavailable), |_| wait_for_app(&request, APP_START_WAIT));
+                match answer {
+                    Ok(answer) => answer,
+                    Err(AppError::Failed) => lost_app_reply(),
+                    Err(AppError::Unavailable) => json!({
+                        "ok": false,
+                        "error": "notRunning",
+                        "detail": match how {
+                            Some(how) => format!("{how}; MYLE did not answer in {}s", APP_START_WAIT.as_secs()),
+                            None => "could not start MYLE".to_owned(),
+                        },
+                    }),
+                }
             }
         };
         write_message(&mut output, &reply)?;
@@ -555,9 +559,10 @@ const PROTOCOL: &str = "myle";
 /// job when the job allows it), and if it is still not up after a moment,
 /// through Windows' shell with MYLE's `myle:` link, which starts it from
 /// Explorer like a click on its shortcut.
-fn launch_app() -> Option<&'static str> {
+fn launch_app(browser: &str, copy: &str) -> Option<&'static str> {
     if spawn_detached() {
-        if wait_for_app(Duration::from_secs(6)) {
+        let status = request_from(browser, copy, &json!({ "type": "status" }));
+        if wait_for_app(&status, Duration::from_secs(6)).is_ok() {
             return Some("started");
         }
         if open_link() {
@@ -639,42 +644,64 @@ pub fn register_protocol() -> Result<(), String> {
 
 /// Waits, up to `limit`, for the app to answer on its pipe. Milliseconds
 /// count: the app's window and vault come up in a couple of seconds.
-fn wait_for_app(limit: Duration) -> bool {
+fn wait_for_app(message: &Value, limit: Duration) -> Result<Value, AppError> {
     let until = Instant::now() + limit;
-    while Instant::now() < until {
-        if app_running() {
-            return true;
+    loop {
+        match ask_app(message) {
+            Err(AppError::Unavailable) if Instant::now() < until => {
+                std::thread::sleep(APP_START_POLL);
+            }
+            // The app may have committed a request with a lost answer.
+            // Retry only while no connection has been established.
+            answer => return answer,
         }
-        std::thread::sleep(APP_START_POLL);
     }
-    app_running()
 }
 
-fn app_running() -> bool {
-    std::fs::OpenOptions::new().read(true).write(true).open(pipe_name()).is_ok()
+fn open_app_pipe(name: &str, limit: Duration) -> std::io::Result<std::fs::File> {
+    let until = Instant::now() + limit;
+    loop {
+        match std::fs::OpenOptions::new().read(true).write(true).open(name) {
+            // The app accepts an instance and replenishes its listener on
+            // another task. A simultaneous request can reach that short gap.
+            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) && Instant::now() < until => {
+                std::thread::sleep(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(10)));
+            }
+            result => return result,
+        }
+    }
 }
 
-/// One request to the running app; `None` when it is not running (or the
-/// pipe's owner is not this program).
-fn ask_app(message: &Value) -> Option<Value> {
-    let pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(pipe_name())
-        .ok()?;
+/// One request, distinguishing unavailable connection from a lost answer.
+fn ask_app(message: &Value) -> Result<Value, AppError> {
+    ask_app_on(&pipe_name(), message)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AppError {
+    Unavailable,
+    Failed,
+}
+
+fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
+    let pipe = open_app_pipe(name, Duration::from_secs(2)).map_err(|_| AppError::Unavailable)?;
     let mut server = 0u32;
     let ok = unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut server) };
     if ok == 0 || !is_this_program(server) {
-        return None;
+        return Err(AppError::Failed);
     }
-    let mut writer = pipe.try_clone().ok()?;
-    let mut line = Zeroizing::new(serde_json::to_string(message).ok()?);
+    let mut writer = pipe.try_clone().map_err(|_| AppError::Failed)?;
+    let mut line = Zeroizing::new(serde_json::to_string(message).map_err(|_| AppError::Failed)?);
     line.push('\n');
-    writer.write_all(line.as_bytes()).ok()?;
-    writer.flush().ok()?;
+    writer.write_all(line.as_bytes()).map_err(|_| AppError::Failed)?;
+    writer.flush().map_err(|_| AppError::Failed)?;
     let mut answer = Zeroizing::new(String::new());
-    BufReader::new(pipe).read_line(&mut answer).ok()?;
-    serde_json::from_str(answer.trim()).ok()
+    BufReader::new(pipe).read_line(&mut answer).map_err(|_| AppError::Failed)?;
+    serde_json::from_str(answer.trim()).map_err(|_| AppError::Failed)
+}
+
+fn lost_app_reply() -> Value {
+    json!({ "ok": false, "error": "hostExited", "detail": "MYLE's connection closed without an answer; the request was not retried" })
 }
 
 // ---------------------------------------------------------------------------
@@ -1699,6 +1726,62 @@ mod tests {
         drop(previous);
         let server = tokio::time::timeout(Duration::from_secs(2), listener).await.unwrap().unwrap();
         drop(server);
+    }
+
+    #[tokio::test]
+    async fn a_busy_browser_pipe_is_retried_until_the_next_listener_is_ready() {
+        let name = format!(r"\\.\pipe\myle-browser-busy-test-{}", uuid::Uuid::new_v4());
+        let previous = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
+        let probe = std::fs::OpenOptions::new().read(true).write(true).open(&name).unwrap();
+        previous.connect().await.unwrap();
+        let next_name = name.clone();
+        let asking = tokio::task::spawn_blocking(move || open_app_pipe(&next_name, Duration::from_secs(1)));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let next = ServerOptions::new().reject_remote_clients(true).create(&name).unwrap();
+        assert!(asking.await.unwrap().is_ok(), "a connected probe or simultaneous request must not mean MYLE is not running");
+        drop((probe, previous, next));
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_busy_browser_pipe_has_a_deadline() {
+        let name = format!(r"\\.\pipe\myle-browser-busy-deadline-{}", uuid::Uuid::new_v4());
+        let server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
+        let occupied = std::fs::OpenOptions::new().read(true).write(true).open(&name).unwrap();
+        server.connect().await.unwrap();
+        let asking = tokio::task::spawn_blocking(move || {
+            let started = Instant::now();
+            let error = open_app_pipe(&name, Duration::from_millis(30)).unwrap_err();
+            (started.elapsed(), error.raw_os_error())
+        });
+        let (elapsed, error) = asking.await.unwrap();
+        assert_eq!(error, Some(ERROR_PIPE_BUSY as i32));
+        assert!(elapsed >= Duration::from_millis(30), "busy instances should be given time to become available");
+        assert!(elapsed < Duration::from_secs(1), "a busy pipe must not block the host indefinitely");
+        drop((occupied, server));
+    }
+
+    #[test]
+    fn a_missing_browser_pipe_is_reported_without_waiting() {
+        let name = format!(r"\\.\pipe\myle-browser-missing-test-{}", uuid::Uuid::new_v4());
+        let started = Instant::now();
+        assert_eq!(open_app_pipe(&name, Duration::from_secs(2)).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn a_lost_browser_reply_is_not_classified_as_safe_to_resend() {
+        let name = format!(r"\\.\pipe\myle-browser-lost-reply-{}", uuid::Uuid::new_v4());
+        let server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
+        let asking = tokio::task::spawn_blocking(move || ask_app_on(&name, &json!({ "type": "passkeyCreate" })));
+        server.connect().await.unwrap();
+        let mut server = tokio::io::BufReader::new(server);
+        let mut request = String::new();
+        server.read_line(&mut request).await.unwrap();
+        assert!(request.contains("passkeyCreate"));
+        // The app could already have committed this request; an EOF before
+        // its acknowledgement must not make the host dispatch it again.
+        drop(server);
+        assert_eq!(asking.await.unwrap(), Err(AppError::Failed));
     }
 
     #[test]
