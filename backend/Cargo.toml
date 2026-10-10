@@ -1,6 +1,6 @@
 [package]
 name = "make-your-life-easier"
-version = "9.15.0"
+version = "9.16.0"
 description = "MYLE — Make Your Life Easier"
 authors = ["ThomasThanos"]
 edition = "2024"
@@ -78,6 +78,7 @@ windows-future = "0.2"
 # Project Backups: CRC-32 of every zipped file, Unicode file names compared
 # alike however they were written (NFC), and the side-by-side text diff.
 crc32fast = "1"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 icu_normalizer = "2"
 similar = { version = "2", default-features = false, features = ["text"] }
 

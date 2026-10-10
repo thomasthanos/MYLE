@@ -20,7 +20,7 @@ pub fn start_windows_fill(app: AppHandle, target: WindowsFillState) {
     windows_fill::start(app, target);
 }
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
@@ -347,6 +347,79 @@ pub struct BrowserSetup {
     vault: Status,
     /// Seconds since 1970, to tell how long ago those were.
     now: u64,
+    /// The version this app carries.
+    bundled_version: Option<String>,
+    /// The folder copy for "Load unpacked" and its version, if made.
+    local_dir: Option<String>,
+    local_version: Option<String>,
+    /// A side-loaded copy (the folder, or the one that asked last) is older
+    /// than the bundled one.
+    local_update: bool,
+}
+
+/// The `version` of an extension folder's manifest.
+fn manifest_version(dir: &Path) -> Option<String> {
+    let text = std::fs::read(dir.join("manifest.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&text).ok()?;
+    value.get("version")?.as_str().map(str::to_string)
+}
+
+/// `a < b` for dotted versions (1.5.0 < 1.5.1 < 1.10.0).
+fn older(a: &str, b: &str) -> bool {
+    let parts = |v: &str| v.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    parts(a) < parts(b)
+}
+
+/// The copy of the extension for "Load unpacked": a folder of its own that
+/// MYLE keeps current, so an update never moves it.
+fn local_extension_dir() -> Option<PathBuf> {
+    crate::storage::local_dir().ok().map(|dir| dir.join("extension"))
+}
+
+/// Copies the bundled extension over the folder copy (files written in
+/// place; nothing else there is touched, so the browser keeps its id).
+fn sync_local_extension(app: &AppHandle) -> Result<PathBuf, String> {
+    let from = extension_dir(app).ok_or("The extension's folder was not found.")?;
+    let to = local_extension_dir().ok_or("No app data folder.")?;
+    if from == to {
+        return Ok(to);
+    }
+    fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            // Firefox has its own copy: not part of the Chromium one.
+            if name == "firefox" {
+                continue;
+            }
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                copy_tree(&entry.path(), &to.join(&name))?;
+            } else if kind.is_file() {
+                std::fs::copy(entry.path(), to.join(&name))?;
+            }
+        }
+        Ok(())
+    }
+    copy_tree(&from, &to).map_err(|e| format!("Could not update the extension folder: {e}"))?;
+    Ok(to)
+}
+
+/// At start: a folder copy older than the bundled extension is brought up
+/// to date (the app was updated), so reloading the extension picks it up.
+pub fn refresh_local_extension(app: &AppHandle) {
+    let (Some(local), Some(bundled)) = (local_extension_dir(), extension_dir(app)) else { return };
+    let (Some(have), Some(ours)) = (manifest_version(&local), manifest_version(&bundled)) else { return };
+    if older(&have, &ours) {
+        let _ = sync_local_extension(app);
+    }
+}
+
+/// Updates the folder copy now ("Update Local Extension").
+#[tauri::command(async)]
+pub fn passwords_extension_sync(app: AppHandle) -> Result<String, String> {
+    sync_local_extension(&app).map(|dir| dir.to_string_lossy().into_owned())
 }
 
 fn extension_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -376,11 +449,30 @@ pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -
     // Mends a missing or stale registration (the program moved, a manifest
     // was deleted) and says what is still wrong.
     let registration_error = if enabled { browser::ensure_registered().err() } else { None };
+    let bundled_version = extension_dir(&app).and_then(|d| manifest_version(&d));
+    let local = local_extension_dir().filter(|d| d.join("manifest.json").is_file());
+    let local_version = local.as_deref().and_then(manifest_version);
+    let contact = browser::last_contact();
+    let local_update = bundled_version.as_deref().is_some_and(|ours| {
+        let folder_old = local_version.as_deref().is_some_and(|have| older(have, ours));
+        // The unpacked copy that asked last said an older version.
+        let asked_old = contact
+            .as_ref()
+            .is_some_and(|c| c.copy == "folder" && !c.version.is_empty() && older(&c.version, ours));
+        folder_old || asked_old
+    });
     Ok(BrowserSetup {
         enabled,
-        extension_dir: extension_dir(&app).map(|d| d.to_string_lossy().into_owned()),
+        extension_dir: local
+            .clone()
+            .or_else(|| extension_dir(&app))
+            .map(|d| d.to_string_lossy().into_owned()),
+        bundled_version,
+        local_dir: local.map(|d| d.to_string_lossy().into_owned()),
+        local_version,
+        local_update,
         registration_error,
-        last_contact: browser::last_contact(),
+        last_contact: contact,
         last_refusal: browser::last_refusal(),
         vault: status,
         now: vault::now(),
@@ -412,7 +504,8 @@ pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) ->
 /// Shows the extension's folder in File Explorer, for "Load unpacked".
 #[tauri::command(async)]
 pub fn passwords_open_extension_dir(app: AppHandle) -> Result<(), String> {
-    let dir = extension_dir(&app).ok_or("The extension's folder was not found.")?;
+    // The folder copy, made or brought up to date first.
+    let dir = sync_local_extension(&app).or_else(|_| extension_dir(&app).ok_or("The extension's folder was not found."))?;
     std::process::Command::new(crate::apps::process::explorer())
         .arg(&dir)
         .spawn()

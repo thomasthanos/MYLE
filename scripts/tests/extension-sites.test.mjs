@@ -108,7 +108,7 @@ test("the popup's Copy asks MYLE with the frame's own address, and gets no text 
   const { context, asked } = await backgroundWithTab();
   const answer = await context.handle({ type: "copyTab", tabId: 7, frameId: 3, id: "abc", field: "password" }, popup);
   assert.equal(JSON.stringify(answer), JSON.stringify({ ok: true }));
-  assert.deepEqual(asked, [JSON.stringify({ type: "copy", id: "abc", url: "https://auth.other.com/frame", field: "password" })]);
+  assert.deepEqual(asked, [JSON.stringify({ type: "copy", id: "abc", url: "https://auth.other.com/frame", field: "password", extVersion: "" })]);
 });
 
 test("Copy refuses other fields, a frame that is gone, and pages asking for it", async () => {

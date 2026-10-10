@@ -153,6 +153,8 @@ export interface BrowserContact {
   at: number;
   /** Which copy of the extension: the store's, one loaded from a folder, or Firefox's. */
   copy: "store" | "folder" | "firefox" | "";
+  /** The extension's version, when it says (1.5.1 and later). */
+  version?: string;
 }
 
 export interface BrowserSetup {
@@ -167,6 +169,12 @@ export interface BrowserSetup {
   vault: VaultStatus;
   /** Seconds since 1970, as the app counts them. */
   now: number;
+  bundledVersion: string | null;
+  /** MYLE's own "Load unpacked" folder, once made, and its version. */
+  localDir: string | null;
+  localVersion: string | null;
+  /** The side-loaded copy is older than the one this app carries. */
+  localUpdate: boolean;
 }
 
 /** A newer MYLE Passwords for Android. */
@@ -239,6 +247,8 @@ export interface PasswordsApi {
   browserGet(): Promise<BrowserSetup>;
   browserSet(enabled: boolean): Promise<void>;
   openExtensionDir(): Promise<void>;
+  /** Copies the bundled extension into the folder copy; its path. */
+  syncExtension(): Promise<string>;
   onBrowserContact(handler: (contact: BrowserContact) => void): Promise<() => void>;
   /** The hotkey for filling Windows programs ("Ctrl+Shift+L"), or null when taken. */
   windowsHotkey(): Promise<string | null>;
@@ -307,6 +317,7 @@ const tauriApi: PasswordsApi = {
   browserGet: () => invoke("passwords_browser_get"),
   browserSet: (enabled) => invoke("passwords_browser_set", { enabled }),
   openExtensionDir: () => invoke("passwords_open_extension_dir"),
+  syncExtension: () => invoke("passwords_extension_sync"),
   onBrowserContact: (handler) =>
     listen<BrowserContact>("passwords-browser-contact", (event) => handler(event.payload)),
   windowsHotkey: () => invoke("passwords_windows_hotkey_status"),
@@ -531,12 +542,19 @@ function previewApi(): PasswordsApi {
         lastRefusal: null,
         vault: status,
         now: seconds,
+        bundledVersion: "1.5.1",
+        localDir: null,
+        localVersion: null,
+        localUpdate: new URLSearchParams(location.search).has("old-folder"),
       };
     },
     async browserSet(enabled) {
       browserFilling = enabled;
     },
     async openExtensionDir() {},
+    async syncExtension() {
+      return "C:\\Users\\You\\AppData\\Local\\ThomasThanos\\MakeYourLifeEasier\\extension";
+    },
     async onBrowserContact() {
       return () => {};
     },

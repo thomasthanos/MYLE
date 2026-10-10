@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LocalExtensionUpdate from "../../../lib/components/LocalExtensionUpdate.svelte";
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -142,6 +143,7 @@
 
 <svelte:window onkeydown={onKey} />
 
+<div class="frame">
 <PageHeader title="Settings" subtitle="Your account, how MYLE looks and starts, and updates." />
 
 <div class="layout">
@@ -174,215 +176,217 @@
       </div>
     {/if}
 
-    <section id="settings-account" class="group" hidden={hiddenSection("account")} aria-labelledby="account-heading">
-      <header class="group-head">
-        <h2 id="account-heading">Account &amp; sync</h2>
-        <p>Sign in to keep your choices the same on every PC. Everything works without an account too.</p>
-      </header>
-      <div class="stack">
-        <AccountCard />
-        <details class="more">
-          <summary>What is saved in your account, and what stays on this PC</summary>
-          <SyncedData />
-        </details>
-      </div>
-    </section>
-
-    <section id="settings-appearance" class="group" hidden={hiddenSection("appearance")} aria-labelledby="appearance-heading">
-      <header class="group-head">
-        <h2 id="appearance-heading">Appearance</h2>
-        <p>Pick a theme. It applies at once, to every MYLE window.</p>
-      </header>
-      <div class="panel">
-        <div class="setting-head">
-          <span class="row-icon"><Moon size={15} /></span>
-          <span class="text">
-            <strong>Theme</strong>
-            <small>The accent colour, sizes and layout stay the same in both.</small>
-          </span>
+    <div class="col">
+      <section id="settings-account" class="group" hidden={hiddenSection("account")} aria-labelledby="account-heading">
+        <header class="group-head">
+          <h2 id="account-heading">Account &amp; sync</h2>
+          <p>Sign in to keep your choices the same on every PC. Everything works without an account too.</p>
+        </header>
+        <div class="stack">
+          <AccountCard />
+          <details class="more">
+            <summary>What is saved in your account, and what stays on this PC</summary>
+            <SyncedData />
+          </details>
         </div>
-        <div class="themes" role="radiogroup" aria-label="Theme">
-          <button
-            class="theme"
-            role="radio"
-            aria-checked={!settings.dark}
-            class:chosen={!settings.dark}
-            onclick={() => settings.setDark(false)}
-          >
-            <span class="preview default" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="theme-text">
-              <b>Default</b>
-              <small>Deep blue-tinted panels</small>
+      </section>
+      <section id="settings-startup" class="group" hidden={hiddenSection("startup")} aria-labelledby="startup-heading">
+        <header class="group-head">
+          <h2 id="startup-heading">Startup &amp; tray</h2>
+          <p>Whether MYLE opens with Windows, and what closing its window does.</p>
+        </header>
+        <div class="panel rows">
+          <label class="row" hidden={!showing.startWindows}>
+            <span class="row-icon"><Power size={15} /></span>
+            <span class="text">
+              <strong>Start with Windows</strong>
+              <small>
+                {startup.canChange
+                  ? "Opens MYLE when you sign in to Windows. Game Saves' scheduled backups run even without it."
+                  : "Available in the installed app."}
+              </small>
             </span>
-            <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
-          </button>
-          <button
-            class="theme"
-            role="radio"
-            aria-checked={settings.dark}
-            class:chosen={settings.dark}
-            onclick={() => settings.setDark(true)}
-          >
-            <span class="preview charcoal" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="theme-text">
-              <b>Dark</b>
-              <small>Charcoal grey-black, neutral text</small>
+            <input
+              type="checkbox"
+              class="switch"
+              checked={startup.enabled}
+              disabled={!startup.canChange || startupBusy}
+              onchange={(e) => void setStartup("enabled", e.currentTarget.checked)}
+            />
+          </label>
+
+          <label class="row" hidden={!showing.startMinimized}>
+            <span class="row-icon"><Minimize2 size={15} /></span>
+            <span class="text">
+              <strong>Start minimized</strong>
+              <small>
+                {startup.enabled
+                  ? "When it starts with Windows, MYLE waits in the tray (or the taskbar) instead of opening on screen."
+                  : "Turn on “Start with Windows” first."}
+              </small>
             </span>
-            <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
-          </button>
+            <input
+              type="checkbox"
+              class="switch"
+              checked={startup.minimized}
+              disabled={!startup.enabled || startupBusy}
+              onchange={(e) => void setStartup("minimized", e.currentTarget.checked)}
+            />
+          </label>
+
+          <label class="row" hidden={!showing.tray}>
+            <span class="row-icon"><PanelBottomClose size={15} /></span>
+            <span class="text">
+              <strong>Keep running in the tray</strong>
+              <small>
+                {keepInTray
+                  ? "Closing the window keeps MYLE next to the clock: Ctrl+Shift+L and browser filling keep working. Quit from the tray icon."
+                  : "Closing the window quits MYLE. Turn on to keep Ctrl+Shift+L and browser filling working after you close it."}
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              class="switch"
+              checked={keepInTray}
+              onchange={(e) => void setKeepInTray(e.currentTarget.checked)}
+            />
+          </label>
         </div>
-      </div>
-    </section>
+      </section>
+      <section id="settings-about" class="group" hidden={hiddenSection("about")} aria-labelledby="about-heading">
+        <header class="group-head">
+          <h2 id="about-heading">About</h2>
+          <p>What changed lately, and where MYLE lives.</p>
+        </header>
+        <div class="panel">
+          <div class="about-row">
+            <span class="brand-mark"><Logo size={38} /></span>
+            <div class="text">
+              <strong class="brand">MYLE</strong>
+              <small>Windows utility &amp; optimization suite · © 2026 ThomasThanos</small>
+            </div>
+          </div>
 
-    <section id="settings-startup" class="group" hidden={hiddenSection("startup")} aria-labelledby="startup-heading">
-      <header class="group-head">
-        <h2 id="startup-heading">Startup &amp; tray</h2>
-        <p>Whether MYLE opens with Windows, and what closing its window does.</p>
-      </header>
-      <div class="panel rows">
-        <label class="row" hidden={!showing.startWindows}>
-          <span class="row-icon"><Power size={15} /></span>
-          <span class="text">
-            <strong>Start with Windows</strong>
-            <small>
-              {startup.canChange
-                ? "Opens MYLE when you sign in to Windows. Game Saves' scheduled backups run even without it."
-                : "Available in the installed app."}
-            </small>
-          </span>
-          <input
-            type="checkbox"
-            class="switch"
-            checked={startup.enabled}
-            disabled={!startup.canChange || startupBusy}
-            onchange={(e) => void setStartup("enabled", e.currentTarget.checked)}
-          />
-        </label>
-
-        <label class="row" hidden={!showing.startMinimized}>
-          <span class="row-icon"><Minimize2 size={15} /></span>
-          <span class="text">
-            <strong>Start minimized</strong>
-            <small>
-              {startup.enabled
-                ? "When it starts with Windows, MYLE waits in the tray (or the taskbar) instead of opening on screen."
-                : "Turn on “Start with Windows” first."}
-            </small>
-          </span>
-          <input
-            type="checkbox"
-            class="switch"
-            checked={startup.minimized}
-            disabled={!startup.enabled || startupBusy}
-            onchange={(e) => void setStartup("minimized", e.currentTarget.checked)}
-          />
-        </label>
-
-        <label class="row" hidden={!showing.tray}>
-          <span class="row-icon"><PanelBottomClose size={15} /></span>
-          <span class="text">
-            <strong>Keep running in the tray</strong>
-            <small>
-              {keepInTray
-                ? "Closing the window keeps MYLE next to the clock: Ctrl+Shift+L and browser filling keep working. Quit from the tray icon."
-                : "Closing the window quits MYLE. Turn on to keep Ctrl+Shift+L and browser filling working after you close it."}
-            </small>
-          </span>
-          <input
-            type="checkbox"
-            class="switch"
-            checked={keepInTray}
-            onchange={(e) => void setKeepInTray(e.currentTarget.checked)}
-          />
-        </label>
-      </div>
-    </section>
-
-    <section id="settings-updates" class="group" hidden={hiddenSection("updates")} aria-labelledby="updates-heading">
-      <header class="group-head">
-        <h2 id="updates-heading">Updates</h2>
-        <p>MYLE checks for a new version every time it starts. You can also check now.</p>
-      </header>
-      <div class="panel">
-        <div class="setting-head">
-          <span class="row-icon"><Rocket size={15} /></span>
-          <span class="text">
-            <strong>MYLE {version ? `v${version}` : "(dev preview)"}</strong>
-            <small>Downloads come from downloads.thomast.uk, with GitHub as the fallback.</small>
-          </span>
-          <span class="version-pill">{version ? `v${version}` : "dev preview"}</span>
-        </div>
-
-        <div class="update" aria-live="polite">
-          {#if update.state === "idle"}
-            <span class="status"><span class="ok-dot" aria-hidden="true"></span> Automatic updates are on</span>
-          {:else if update.state === "checking"}
-            <span class="status"><LoaderCircle size={14} class="spin" /> Checking…</span>
-          {:else if update.state === "upToDate"}
-            <span class="status ok"><CircleCheck size={14} /> You're on the latest version.</span>
-          {:else if update.state === "available"}
-            {@const available = update}
-            <span class="status accent"><Download size={14} /> Version {available.latest} is available.</span>
-            <button class="btn small primary" onclick={() => install(available.latest, available.asset)}>
-              Install and restart
+          <div class="links">
+            <button class="btn small" disabled={whatsNew.loading} onclick={() => void whatsNew.showCurrent()}>
+              {#if whatsNew.loading}<LoaderCircle size={13} class="spin" />{:else}<Sparkles size={13} />{/if} What's new
             </button>
-          {:else if update.state === "downloading"}
-            <span class="status">
-              <LoaderCircle size={14} class="spin" /> Downloading {update.latest}… {update.detail}
-            </span>
-            <span class="bar" class:indeterminate={update.progress === null}>
-              <span style:transform={update.progress === null ? undefined : `scaleX(${update.progress})`}></span>
-            </span>
-          {:else if update.state === "verifying"}
-            <span class="status">
-              <LoaderCircle size={14} class="spin" /> Verifying update…
-            </span>
-          {:else if update.state === "installing"}
-            <span class="status">
-              <LoaderCircle size={14} class="spin" /> Installing; the app will restart by itself.
-            </span>
-          {:else if update.state === "restarting"}
-            <span class="status">
-              <LoaderCircle size={14} class="spin" /> Opening v{update.version}…
-            </span>
-          {:else if update.state === "error"}
-            <span class="status error" title={update.message}>{update.message}</span>
-          {/if}
-          {#if update.state === "idle" || update.state === "upToDate" || update.state === "error"}
-            <button class="btn small" onclick={check}><RefreshCw size={13} /> Check for updates</button>
-          {/if}
-        </div>
-      </div>
-    </section>
-
-    <section id="settings-about" class="group" hidden={hiddenSection("about")} aria-labelledby="about-heading">
-      <header class="group-head">
-        <h2 id="about-heading">About</h2>
-        <p>What changed lately, and where MYLE lives.</p>
-      </header>
-      <div class="panel">
-        <div class="about-row">
-          <span class="brand-mark"><Logo size={38} /></span>
-          <div class="text">
-            <strong class="brand">MYLE</strong>
-            <small>Windows utility &amp; optimization suite · © 2026 ThomasThanos</small>
+            <button class="btn small" onclick={() => open(`${REPO_URL}/releases`)}>
+              <ExternalLink size={13} /> All releases
+            </button>
+            <button class="btn small" onclick={() => open(REPO_URL)}>
+              <ExternalLink size={13} /> GitHub repository
+            </button>
           </div>
         </div>
-
-        <div class="links">
-          <button class="btn small" disabled={whatsNew.loading} onclick={() => void whatsNew.showCurrent()}>
-            {#if whatsNew.loading}<LoaderCircle size={13} class="spin" />{:else}<Sparkles size={13} />{/if} What's new
-          </button>
-          <button class="btn small" onclick={() => open(`${REPO_URL}/releases`)}>
-            <ExternalLink size={13} /> All releases
-          </button>
-          <button class="btn small" onclick={() => open(REPO_URL)}>
-            <ExternalLink size={13} /> GitHub repository
-          </button>
+      </section>
+    </div>
+    <div class="col">
+      <section id="settings-appearance" class="group" hidden={hiddenSection("appearance")} aria-labelledby="appearance-heading">
+        <header class="group-head">
+          <h2 id="appearance-heading">Appearance</h2>
+          <p>Pick a theme. It applies at once, to every MYLE window.</p>
+        </header>
+        <div class="panel">
+          <div class="setting-head">
+            <span class="row-icon"><Moon size={15} /></span>
+            <span class="text">
+              <strong>Theme</strong>
+              <small>The accent colour, sizes and layout stay the same in both.</small>
+            </span>
+          </div>
+          <div class="themes" role="radiogroup" aria-label="Theme">
+            <button
+              class="theme"
+              role="radio"
+              aria-checked={!settings.dark}
+              class:chosen={!settings.dark}
+              onclick={() => settings.setDark(false)}
+            >
+              <span class="preview default" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="theme-text">
+                <b>Default</b>
+                <small>Deep blue-tinted panels</small>
+              </span>
+              <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
+            </button>
+            <button
+              class="theme"
+              role="radio"
+              aria-checked={settings.dark}
+              class:chosen={settings.dark}
+              onclick={() => settings.setDark(true)}
+            >
+              <span class="preview charcoal" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="theme-text">
+                <b>Dark</b>
+                <small>Charcoal grey-black, neutral text</small>
+              </span>
+              <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
+            </button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+      <section id="settings-updates" class="group" hidden={hiddenSection("updates")} aria-labelledby="updates-heading">
+        <header class="group-head">
+          <h2 id="updates-heading">Updates</h2>
+          <p>MYLE checks for a new version every time it starts. You can also check now.</p>
+        </header>
+          <LocalExtensionUpdate />
+        <div class="panel">
+          <div class="setting-head">
+            <span class="row-icon"><Rocket size={15} /></span>
+            <span class="text">
+              <strong>MYLE {version ? `v${version}` : "(dev preview)"}</strong>
+              <small>Downloads come from downloads.thomast.uk, with GitHub as the fallback.</small>
+            </span>
+            <span class="version-pill">{version ? `v${version}` : "dev preview"}</span>
+          </div>
+
+          <div class="update" aria-live="polite">
+            {#if update.state === "idle"}
+              <span class="status"><span class="ok-dot" aria-hidden="true"></span> Automatic updates are on</span>
+            {:else if update.state === "checking"}
+              <span class="status"><LoaderCircle size={14} class="spin" /> Checking…</span>
+            {:else if update.state === "upToDate"}
+              <span class="status ok"><CircleCheck size={14} /> You're on the latest version.</span>
+            {:else if update.state === "available"}
+              {@const available = update}
+              <span class="status accent"><Download size={14} /> Version {available.latest} is available.</span>
+              <button class="btn small primary" onclick={() => install(available.latest, available.asset)}>
+                Install and restart
+              </button>
+            {:else if update.state === "downloading"}
+              <span class="status">
+                <LoaderCircle size={14} class="spin" /> Downloading {update.latest}… {update.detail}
+              </span>
+              <span class="bar" class:indeterminate={update.progress === null}>
+                <span style:transform={update.progress === null ? undefined : `scaleX(${update.progress})`}></span>
+              </span>
+            {:else if update.state === "verifying"}
+              <span class="status">
+                <LoaderCircle size={14} class="spin" /> Verifying update…
+              </span>
+            {:else if update.state === "installing"}
+              <span class="status">
+                <LoaderCircle size={14} class="spin" /> Installing; the app will restart by itself.
+              </span>
+            {:else if update.state === "restarting"}
+              <span class="status">
+                <LoaderCircle size={14} class="spin" /> Opening v{update.version}…
+              </span>
+            {:else if update.state === "error"}
+              <span class="status error" title={update.message}>{update.message}</span>
+            {/if}
+            {#if update.state === "idle" || update.state === "upToDate" || update.state === "error"}
+              <button class="btn small" onclick={check}><RefreshCw size={13} /> Check for updates</button>
+            {/if}
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
+</div>
 </div>
 
 <style>
@@ -991,5 +995,49 @@
 
   .panel {
     padding: 10px;
+  }
+
+  /* --- Responsive frame: centred, columns that fill it --- */
+
+  .frame {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .side {
+    position: static;
+    justify-content: flex-end;
+  }
+
+  .content {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+    max-width: none;
+  }
+
+  .col {
+    display: grid;
+    align-content: start;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .col > :global(section) {
+    width: 100%;
+  }
+
+  @media (max-width: 1000px) {
+    .content {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>

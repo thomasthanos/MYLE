@@ -26,6 +26,10 @@
   const failure = $derived(pb.lastFailure(project));
   const backups = $derived(pb.backups[project.id] ?? []);
   const age = $derived(pb.daysSinceBackup(project));
+  const change = $derived(pb.changes[project.id]);
+  const checkingNow = $derived(pb.checking.includes(project.id));
+  let filesOpen = $state(false);
+  const changeCount = $derived(change ? change.added + change.modified + change.deleted : 0);
 
   /** The badge next to the name: what happened, not just a colour. */
   const badge = $derived.by(() => {
@@ -61,6 +65,16 @@
           <badge.icon size={11} />
           {badge.label}
         </span>
+        {#if checkingNow && !change}
+          <span class="tag quiet"><LoaderCircle size={11} class="spin" /> Checking…</span>
+        {:else if change?.state === "changed"}
+          <button class="tag warn change" title="Show what changed since the last backup" aria-expanded={filesOpen} onclick={() => (filesOpen = !filesOpen)}>
+            <CircleAlert size={11} /> Changes detected · {changeCount}
+            <ChevronDown size={11} class={filesOpen ? "flip" : ""} />
+          </button>
+        {:else if change?.state === "upToDate"}
+          <span class="tag ok" title={`Same as ${change.backupId ?? "the last backup"}, checked ${pb.ago(change.checkedAt)}`}><CircleCheck size={11} /> No changes</span>
+        {/if}
         <span class="tag" title={`Backups are named ${project.appName}_D<day>_V<number>.zip`}>{project.appName}</span>
         {#if project.closeApp}<span class="tag" title="Closed before each backup">Closes {project.closeApp}</span>{/if}
       </div>
@@ -108,6 +122,20 @@
       >
     </div>
   </div>
+
+  {#if filesOpen && change?.state === "changed"}
+    <div class="changes" transition:slide={{ duration: 160 }}>
+      <p class="muted">
+        Since {change.backupId ?? "the last backup"}: {change.added} new · {change.modified} modified · {change.deleted} deleted
+      </p>
+      <ul>
+        {#each change.files as f (f.path + f.status)}
+          <li class="c-{f.status}"><b>{f.status === "added" ? "+" : f.status === "deleted" ? "−" : "~"}</b><span class="selectable" title={f.path}>{f.path}</span>{#if f.size !== null}<small>{formatBytes(f.size)}</small>{/if}</li>
+        {/each}
+      </ul>
+      {#if changeCount > change.files.length}<p class="muted">…and {changeCount - change.files.length} more</p>{/if}
+    </div>
+  {/if}
 
   {#if expanded}
     <div class="backups" transition:slide={{ duration: 160 }}>
@@ -405,5 +433,58 @@
     .backup-meta {
       display: none;
     }
+  }
+
+  .tag.change {
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .changes {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--btn-border);
+  }
+
+  .changes ul {
+    display: grid;
+    max-height: 220px;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    list-style: none;
+    font-size: 11.5px;
+  }
+
+  .changes li {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    gap: 6px;
+    padding: 1px 0;
+  }
+
+  .changes li span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .changes small {
+    color: var(--text-3);
+  }
+
+  .c-added b {
+    color: #6fd3a0;
+  }
+
+  .c-modified b {
+    color: #e8c46a;
+  }
+
+  .c-deleted b {
+    color: #f08a8d;
   }
 </style>

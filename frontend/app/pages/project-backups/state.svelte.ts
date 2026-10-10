@@ -16,6 +16,12 @@ import {
 } from "./api";
 
 import { formatRelative } from "../game-saves/state.svelte";
+import { listen } from "@tauri-apps/api/event";
+import { isTauri } from "@tauri-apps/api/core";
+import type { ProjectChanges } from "./api";
+
+/** How often the folders are checked while the page is open. */
+const CHECK_EVERY_MS = 5 * 60 * 1000;
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
 
 export const stageLabels: Record<Stage, string> = {
@@ -176,6 +182,48 @@ class ProjectBackupsState {
   filter = $state<"all" | Group["key"]>("all");
   /** Ticks every 30 s so "5 minutes ago" stays true. */
   clock = $state(Date.now());
+  /** Each project's folder against its newest backup. */
+  changes = $state<Record<string, ProjectChanges>>({});
+  /** Being checked now. */
+  checking = $state<string[]>([]);
+  #watching = false;
+
+  /** Projects with changes not in a backup yet (or none at all). */
+  get changedIds(): string[] {
+    return this.projects
+      .filter((p) => ["changed", "noBackup"].includes(this.changes[p.id]?.state ?? ""))
+      .map((p) => p.id);
+  }
+
+  /** Checks `ids` (all projects by default). `fresh`: no cached answer. */
+  async checkChanges(ids: string[] = this.projects.map((p) => p.id), fresh = false) {
+    if (!isTauri() || !ids.length) return;
+    const todo = ids.filter((id) => !this.checking.includes(id));
+    if (!todo.length) return;
+    this.checking = [...this.checking, ...todo];
+    try {
+      for (const result of await api.changes(todo, fresh)) this.changes[result.projectId] = result;
+    } catch {
+      // Quietly: the next check tries again.
+    } finally {
+      this.checking = this.checking.filter((id) => !todo.includes(id));
+    }
+  }
+
+  /** Watches the folders and checks them now and every few minutes. */
+  async startWatching() {
+    void this.checkChanges();
+    if (!isTauri()) return;
+    void api.watch().catch(() => {});
+    if (this.#watching) return;
+    this.#watching = true;
+    void listen<string[]>("project-backups-changed", (event) => {
+      if (!this.locked) void this.checkChanges(event.payload);
+    });
+    setInterval(() => {
+      if (!this.locked) void this.checkChanges();
+    }, CHECK_EVERY_MS);
+  }
   private loaded = false;
 
   get locked() {
@@ -414,6 +462,7 @@ class ProjectBackupsState {
     } else {
       toast.success(`${project.name.trim()} saved.`);
     }
+    void this.startWatching();
   }
 
   async removeProject(project: Project) {
@@ -428,6 +477,7 @@ class ProjectBackupsState {
     if (!settings) return;
     toast.success(`${project.name} removed.`);
     await this.refresh();
+    void this.startWatching();
   }
 
   async setExclusions(patterns: string[], smartBuild: boolean, followGitignore: boolean) {
@@ -505,6 +555,8 @@ class ProjectBackupsState {
       this.operation = null;
       this.cancelling = false;
       void this.refresh();
+      // What was just backed up is up to date: shown right away.
+      void this.checkChanges(projectIds, true);
     }
   }
 

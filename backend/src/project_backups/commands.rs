@@ -860,6 +860,24 @@ fn project_and_dir(project_id: &str) -> Result<(Settings, Project, PathBuf), Str
     Ok((settings, project, dir))
 }
 
+/// Whether each project's folder differs from its newest backup.
+#[tauri::command]
+pub async fn project_backups_changes(project_ids: Vec<String>, fresh: bool) -> Result<Vec<super::changes::ProjectChanges>, String> {
+    blocking(move || {
+        Ok(project_ids
+            .iter()
+            .filter_map(|id| super::changes::check(id, fresh).ok())
+            .collect())
+    })
+    .await?
+}
+
+/// (Re)starts watching the project folders for changes.
+#[tauri::command]
+pub async fn project_backups_watch(app: AppHandle) -> Result<(), String> {
+    blocking(move || super::changes::watch(app)).await?
+}
+
 #[tauri::command]
 pub async fn project_backups_list(project_id: String) -> Result<Vec<BackupEntry>, String> {
     blocking(move || {

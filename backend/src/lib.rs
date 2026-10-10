@@ -260,6 +260,11 @@ pub fn run() {
                 passwords::start_windows_fill(app.handle().clone(), passwords_windows_state.clone());
                 tray::init(app.handle());
                 tray::watch_quit(app.handle().clone());
+                // After an update: the "Load unpacked" folder gets the new extension.
+                {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || passwords::refresh_local_extension(&handle));
+                }
                 // Sweeps anything a previous run could not delete. Off the main
                 // thread: a locked file costs a retry delay.
                 if let Ok(dir) = storage::roaming_dir() {
@@ -318,6 +323,7 @@ pub fn run() {
             passwords::passwords_browser_get,
             passwords::passwords_browser_set,
             passwords::passwords_open_extension_dir,
+            passwords::passwords_extension_sync,
             passwords::windows_fill::passwords_windows_hotkey_status,
             passwords::windows_fill::passwords_windows_fill,
             passwords::windows_fill::passwords_windows_matches,
@@ -451,6 +457,8 @@ pub fn run() {
             project_backups::commands::project_backups_cancel_preview,
             project_backups::commands::project_backups_start_cloud,
             project_backups::commands::project_backups_list,
+            project_backups::commands::project_backups_changes,
+            project_backups::commands::project_backups_watch,
             project_backups::commands::project_backups_compare,
             project_backups::commands::project_backups_file_diff,
             project_backups::commands::project_backups_open,

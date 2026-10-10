@@ -279,6 +279,25 @@ export interface CompareProgress {
   total: number;
 }
 
+/** A project folder against its newest backup. */
+export interface ChangedFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  size: number | null;
+}
+
+export interface ProjectChanges {
+  projectId: string;
+  state: "upToDate" | "changed" | "noBackup" | "missing";
+  backupId: string | null;
+  added: number;
+  modified: number;
+  deleted: number;
+  /** At most 300; the counts are whole. */
+  files: ChangedFile[];
+  checkedAt: number;
+}
+
 export type Job = "backup" | "compare";
 
 /** Stands for the project folder itself in a comparison. */
@@ -310,6 +329,8 @@ export const projectBackupsApi = {
   /** A newer preview stops the one still running. */
   preview: (request: PreviewRequest) => invoke<Preview>("project_backups_preview", { request }),
   cancelPreview: () => invoke<void>("project_backups_cancel_preview"),
+  changes: (projectIds: string[], fresh: boolean) => invoke<ProjectChanges[]>("project_backups_changes", { projectIds, fresh }),
+  watch: () => invoke<void>("project_backups_watch"),
   backup: (projectIds: string[], onEvent: (event: ProjectBackupsEvent) => void) =>
     invoke<BackupRun>("project_backups_backup", { projectIds, onEvent: channel(onEvent) }),
   /** Cancels the running `job` (any job when null). */

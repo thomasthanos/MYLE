@@ -46,7 +46,8 @@ async function ask(message, limit = ANSWER_LIMIT) {
   let deadline;
   try {
     return await Promise.race([
-      ext.runtime.sendNativeMessage(HOST, message),
+      // The version tells MYLE when a folder copy is older than its own.
+      ext.runtime.sendNativeMessage(HOST, { ...message, extVersion: ext.runtime.getManifest?.()?.version ?? "" }),
       new Promise((resolve) => {
         deadline = setTimeout(() => resolve({ ok: false, error: "noHost", detail: "no answer in time" }), limit);
       }),

@@ -249,6 +249,9 @@ pub struct Contact {
     /// Which copy of the extension: "store", "folder" or "firefox".
     #[serde(default)]
     pub copy: String,
+    /// The extension's own version, when it says (1.5.1 and later).
+    #[serde(default)]
+    pub version: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -266,13 +269,13 @@ static LAST_CONTACT: Mutex<Option<Contact>> = Mutex::new(None);
 
 /// Notes a request from `browser`; true for the first in a minute (kept on
 /// disk too, so the setup still knows after a restart).
-fn note_contact(browser: &str, copy: &str) -> bool {
+fn note_contact(browser: &str, copy: &str, version: &str) -> bool {
     let now = super::vault::now();
     let mut last = LAST_CONTACT.lock().unwrap_or_else(|p| p.into_inner());
     let recent = last
         .as_ref()
-        .is_some_and(|c| c.browser == browser && c.copy == copy && now.saturating_sub(c.at) < 60);
-    let contact = Contact { browser: browser.to_string(), at: now, copy: copy.to_string() };
+        .is_some_and(|c| c.browser == browser && c.copy == copy && c.version == version && now.saturating_sub(c.at) < 60);
+    let contact = Contact { browser: browser.to_string(), at: now, copy: copy.to_string(), version: version.to_string() };
     *last = Some(contact.clone());
     if !recent && let Ok(dir) = manifest_dir() {
         let _ = std::fs::write(dir.join("contact.json"), serde_json::to_vec(&contact).unwrap_or_default());
@@ -522,7 +525,8 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
 }
 
 fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
-    json!({ "browser": browser, "copy": copy, "request": message })
+    let version = message.get("extVersion").and_then(Value::as_str).unwrap_or("");
+    json!({ "browser": browser, "copy": copy, "version": version, "request": message })
 }
 
 /// Whether the host starts MYLE for this request when it is closed.
@@ -762,8 +766,8 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
                     return;
                 }
                 let reply = match serde_json::from_str::<Envelope>(line.trim()) {
-                    Ok(Envelope { browser, copy, request }) => {
-                        if note_contact(&browser, &copy) {
+                    Ok(Envelope { browser, copy, version, request }) => {
+                        if note_contact(&browser, &copy, &version) {
                             let _ = app.emit(CONTACT_EVENT, last_contact());
                         }
                         if request.is_passkey() {
@@ -791,6 +795,8 @@ struct Envelope {
     browser: String,
     #[serde(default)]
     copy: String,
+    #[serde(default)]
+    version: String,
     request: Request,
 }
 

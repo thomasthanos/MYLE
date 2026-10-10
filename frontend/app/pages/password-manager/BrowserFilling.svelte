@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LocalExtensionUpdate from "../../../lib/components/LocalExtensionUpdate.svelte";
   import { onMount } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fade, scale } from "svelte/transition";
@@ -230,6 +231,7 @@
               Firefox, or a copy from MYLE's folder (for testing)
             </button>
           {/if}
+          <LocalExtensionUpdate {setup} />
           {#if showFolder || !storeUrl.startsWith("https://")}
           <div class="path">
             <code class="selectable" title={setup?.extensionDir ?? undefined}>{setup?.extensionDir ?? "The extension's folder was not found."}</code>

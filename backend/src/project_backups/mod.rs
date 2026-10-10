@@ -9,6 +9,7 @@
 //! project folder (`compare`).
 
 mod archive;
+pub(crate) mod changes;
 pub mod commands;
 pub(crate) mod compare;
 mod detect;

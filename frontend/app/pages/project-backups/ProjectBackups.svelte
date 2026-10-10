@@ -47,7 +47,7 @@
   let searchInput = $state<HTMLInputElement>();
 
   onMount(() => {
-    void pb.init();
+    void pb.init().then(() => pb.startWatching());
     const timer = setInterval(() => (pb.clock = Date.now()), 30_000);
     return () => clearInterval(timer);
   });
@@ -419,6 +419,15 @@
         title={pb.query && pb.filtered.length !== pb.projects.length ? "Backs up every project, also those hidden by the search" : undefined}
         onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
         <CloudUpload size={15} /> Back up all
+      </button>
+      <button class="btn" disabled={pb.locked || !pb.changedIds.length}
+        title="Backs up only the projects whose folders changed since their last backup"
+        onclick={() => pb.backup(pb.changedIds)}>
+        <CloudUpload size={15} /> Back up changed{pb.changedIds.length ? ` (${pb.changedIds.length})` : ""}
+      </button>
+      <button class="icon-btn" title="Check every project folder for changes now" aria-label="Check for changes"
+        disabled={pb.checking.length > 0} onclick={() => pb.checkChanges(undefined, true)}>
+        <RefreshCw size={14} class={pb.checking.length ? "spin" : ""} />
       </button>
       <button class="btn" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={15} /> Add project</button>
       {#if pb.projects.length > 1}
