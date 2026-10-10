@@ -15,68 +15,38 @@
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import CloudLogo from "../../../lib/components/CloudLogo.svelte";
   import { formatDate, gameSavesState as gs, samePath } from "./state.svelte";
-
-  const scheduleOptions: SelectOption<BackupSchedule>[] = [
-    { value: "off", label: "Off" },
-    { value: "daily", label: "Daily" },
-    { value: "weekly", label: "Weekly" },
-  ];
+  const scheduleOptions: SelectOption<BackupSchedule>[] = [{ value: "off", label: "Off" }, { value: "daily", label: "Daily" }, { value: "weekly", label: "Weekly" }];
   const storeOptions: SelectOption<RootStore>[] = [
-    { value: "steam", label: "Steam" },
-    { value: "epic", label: "Epic Games" },
-    { value: "gog", label: "GOG" },
-    { value: "gogGalaxy", label: "GOG Galaxy" },
-    { value: "uplay", label: "Ubisoft Connect" },
-    { value: "origin", label: "EA app / Origin" },
-    { value: "otherWindows", label: "Other folder" },
+    { value: "steam", label: "Steam" }, { value: "epic", label: "Epic Games" }, { value: "gog", label: "GOG" }, { value: "gogGalaxy", label: "GOG Galaxy" },
+    { value: "uplay", label: "Ubisoft Connect" }, { value: "origin", label: "EA app / Origin" }, { value: "otherWindows", label: "Other folder" },
   ];
   const weekdays: SelectOption<ScheduleWeekday>[] = [
-    { value: "monday", label: "Monday" },
-    { value: "tuesday", label: "Tuesday" },
-    { value: "wednesday", label: "Wednesday" },
-    { value: "thursday", label: "Thursday" },
-    { value: "friday", label: "Friday" },
-    { value: "saturday", label: "Saturday" },
-    { value: "sunday", label: "Sunday" },
+    { value: "monday", label: "Monday" }, { value: "tuesday", label: "Tuesday" }, { value: "wednesday", label: "Wednesday" }, { value: "thursday", label: "Thursday" },
+    { value: "friday", label: "Friday" }, { value: "saturday", label: "Saturday" }, { value: "sunday", label: "Sunday" },
   ];
-  const BASE_TIMES = Array.from(
-    { length: 48 },
-    (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`,
-  );
+  const BASE_TIMES = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
   const timeOptions = $derived.by((): SelectOption<string>[] => {
     const current = gs.page.settings.scheduleTime;
     const times = current && !BASE_TIMES.includes(current) ? [...BASE_TIMES, current].sort() : BASE_TIMES;
     return times.map((time) => ({ value: time, label: time }));
   });
-  /** One tile per detected folder (a provider can have several accounts),
-   *  and one for each provider not found, which asks where its folder is. */
-  interface CloudTile {
-    key: string;
-    provider: CloudProvider;
-    name: string;
-    folder: DetectedFolder | null;
-  }
+  /** One tile per detected folder (a provider can have several accounts), and
+   *  one for each provider not found, which asks where its folder is. */
+  interface CloudTile { key: string; provider: CloudProvider; name: string; folder: DetectedFolder | null }
   const cloudTiles = $derived.by(() =>
     CLOUD_PROVIDERS.flatMap(({ id, name }): CloudTile[] => {
       const found = gs.page.cloudFolders.filter((folder) => folder.provider === id);
-      return found.length
-        ? found.map((folder) => ({ key: folder.path, provider: id, name: folder.label, folder }))
-        : [{ key: id, provider: id, name, folder: null }];
+      return found.length ? found.map((folder) => ({ key: folder.path, provider: id, name: folder.label, folder })) : [{ key: id, provider: id, name, folder: null }];
     }),
   );
   const storeLabel = (store: RootStore) => storeOptions.find((item) => item.value === store)?.label ?? store;
   let newRootStore = $state<RootStore>("steam");
   const scheduledFailure = $derived(
-    gs.page.settings.lastScheduledResult?.error ??
-      (gs.page.settings.lastScheduledResult?.failedGames.length
-        ? `Failed: ${gs.page.settings.lastScheduledResult.failedGames.join(", ")}`
-        : null),
+    gs.page.settings.lastScheduledResult?.error ?? (gs.page.settings.lastScheduledResult?.failedGames.length ? `Failed: ${gs.page.settings.lastScheduledResult.failedGames.join(", ")}` : null),
   );
   const lastAttemptFailed = $derived(
     scheduledFailure !== null ||
-      (gs.page.settings.lastScheduledAttempt !== null &&
-        (gs.page.settings.lastScheduledSuccess === null ||
-          gs.page.settings.lastScheduledAttempt > gs.page.settings.lastScheduledSuccess)),
+      (gs.page.settings.lastScheduledAttempt !== null && (gs.page.settings.lastScheduledSuccess === null || gs.page.settings.lastScheduledAttempt > gs.page.settings.lastScheduledSuccess)),
   );
   const settingsLocked = $derived(gs.locked);
   const scheduleEnabled = $derived(gs.page.settings.schedule !== "off");
@@ -86,7 +56,6 @@
       : "Every day at " + gs.page.settings.scheduleTime,
   );
 </script>
-
 <div class="settings-frame">
   <section id="game-saves-settings" class="settings" aria-label="Backup settings">
     <article class="setting-card surface" aria-labelledby="backup-folder-heading">
@@ -97,7 +66,6 @@
           <p>Choose where your safe copies live.</p>
         </div>
       </div>
-
       <div class="folder-setting">
         <div class="section-meta">
           <span class="sub-label">Save backups to</span>
@@ -126,7 +94,6 @@
           </button>
         </div>
       </div>
-
       <div class="clouds">
         <div class="clouds-head">
           <span class="sub-label">Use a cloud folder</span>
@@ -155,7 +122,6 @@
         <p class="helper">Your cloud app syncs these backups across devices.</p>
       </div>
     </article>
-
     <article class="setting-card surface" aria-labelledby="automatic-backup-heading">
       <div class="card-head">
         <span class="card-icon"><CalendarClock size={19} /></span>
@@ -164,7 +130,6 @@
           <p>Keep new and changed saves protected.</p>
         </div>
       </div>
-
       <div class="schedule-setting">
         <div class="section-meta">
           <span class="sub-label">Backup frequency</span>
@@ -200,7 +165,6 @@
         {/if}
         <p class="helper">{scheduleEnabled ? scheduleSummary : "Choose Daily or Weekly to back up automatically."}</p>
       </div>
-
       <div class="last-run" class:failed={lastAttemptFailed}>
         <span class="run-icon"><Clock3 size={17} /></span>
         <div class="run-details">
@@ -209,7 +173,6 @@
           {#if scheduledFailure}<small class="selectable">{scheduledFailure}</small>{/if}
         </div>
       </div>
-
       <div class="schedule-footer">
         <button class="btn backup-now" disabled={settingsLocked || !gs.page.settings.backupFolder} onclick={() => gs.backupChanged()}>
           <Archive size={16} /> Back up changed saves now
@@ -217,7 +180,6 @@
         <p class="helper">{gs.page.settings.backupFolder ? "Only new and changed saves are copied." : "Choose a backup folder first."}</p>
       </div>
     </article>
-
     <article class="setting-card surface folders-card" aria-labelledby="game-folders-heading">
       <div class="card-head">
         <span class="card-icon"><FolderSearch size={19} /></span>
@@ -230,7 +192,6 @@
           <RefreshCw size={15} class={gs.settingsBusy === "roots" ? "spin" : ""} />
         </button>
       </div>
-
       <div class="section-meta roots-meta">
         <span class="sub-label">Search locations</span>
         <span class="folder-count">{gs.page.settings.roots.length} {gs.page.settings.roots.length === 1 ? "folder" : "folders"}</span>
@@ -254,7 +215,6 @@
           <li class="empty">No folders found yet. Refresh to detect launchers, or add a folder below.</li>
         {/each}
       </ul>
-
       <div class="folders-footer">
         <div class="add-root">
           <Select bind:value={newRootStore} options={storeOptions} ariaLabel="Launcher for new folder"
@@ -267,7 +227,6 @@
           <Plus size={15} /> Add custom game
         </button>
       </div>
-
       {#if gs.page.settings.customGames.length}
         <div class="custom-games">
           <span class="sub-label">Custom games</span>
@@ -288,30 +247,25 @@
     </article>
   </section>
 </div>
-
 <style>
   .settings-frame {
     container: game-save-settings / inline-size;
     margin-bottom: 20px;
   }
-
   .settings {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
     gap: 14px;
   }
-
   @container game-save-settings (min-width: 680px) {
     .settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .folders-card { grid-column: 1 / -1; }
   }
-
   @container game-save-settings (min-width: 1040px) {
     .settings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .folders-card { grid-column: auto; }
   }
-
   .setting-card {
     --settings-muted: rgb(200 210 240 / 0.68);
     display: flex;
@@ -322,7 +276,6 @@
     border-radius: 14px;
     container-type: inline-size;
   }
-
   .card-head { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
   .card-title { flex: 1; min-width: 0; }
   .card-icon {
@@ -339,7 +292,6 @@
   h2 { font-size: 14px; line-height: 1.5; }
   .card-title p { margin-top: 3px; color: var(--settings-muted); font-size: 12px; line-height: 1.5; }
   .refresh { margin: 3px -5px 0 0; }
-
   .folder-setting, .schedule-setting { display: grid; gap: 10px; }
   .section-meta, .clouds-head {
     display: flex;
@@ -364,7 +316,6 @@
   .status-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
   .status.ready { color: #98dfbd; background: rgb(62 207 142 / 0.08); }
   .status.warning { color: #efc38a; background: rgb(245 188 95 / 0.08); }
-
   .path {
     display: flex;
     align-items: flex-start;
@@ -384,7 +335,6 @@
   .button-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
   .setting-card .btn { height: 35px; font-size: 12px; }
   .folder-choose { flex: 1; }
-
   .clouds {
     display: grid;
     gap: 10px;
@@ -418,7 +368,6 @@
   .cloud-tile.in-use small { color: #98dfbd; }
   .cloud-tile :global(.cloud-check) { flex: none; margin-left: auto; color: #98dfbd; }
   .helper { margin: 0; color: var(--settings-muted); font-size: 11px; line-height: 1.6; }
-
   .frequency {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -441,7 +390,6 @@
   .frequency button.active { border-color: rgb(var(--accent-rgb) / 0.26); background: rgb(var(--accent-rgb) / 0.18); color: var(--text-1); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
   .schedule-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 3px; }
   .field { display: grid; gap: 6px; min-width: 0; }
-
   .last-run {
     display: flex;
     align-items: flex-start;
@@ -471,7 +419,6 @@
   }
   .backup-now > :global(svg) { flex: none; }
   .backup-now:hover:not(:disabled) { background: rgb(var(--accent-rgb) / 0.25); }
-
   .roots-meta { margin-bottom: -10px; }
   .folder-count { color: var(--settings-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
   .root-list {
@@ -497,13 +444,11 @@
   .folders-footer { display: grid; gap: 8px; margin-top: auto; }
   .add-root { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
   .custom-add { width: 100%; color: var(--settings-muted); }
-
   .custom-games { display: grid; gap: 7px; max-height: 170px; overflow: auto; padding-top: 14px; border-top: 1px solid rgb(255 255 255 / 0.065); }
   .custom-game { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; padding: 8px; border-radius: 8px; background: rgb(255 255 255 / 0.02); }
   .custom-game > span { display: grid; gap: 3px; min-width: 0; }
   .custom-game strong { overflow-wrap: anywhere; color: var(--text-1); font-size: 12px; font-weight: 500; }
   .custom-game small { overflow-wrap: anywhere; color: var(--settings-muted); font-family: var(--font-mono); font-size: 10px; }
-
   button:disabled { opacity: 0.45; pointer-events: none; }
   @container (max-width: 280px) {
     .cloud-list { grid-template-columns: minmax(0, 1fr); }

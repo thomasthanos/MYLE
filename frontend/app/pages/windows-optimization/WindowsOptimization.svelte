@@ -24,12 +24,10 @@
   import StartMenuTab from "./debloat/StartMenuTab.svelte";
   import { debloat, type Tab } from "./debloat/state.svelte";
   import { windowsOptimizationState as tools } from "./state.svelte";
-
   onMount(() => {
     void tools.load();
     void debloat.load();
   });
-
   const tabs: { id: Tab; label: string; icon: typeof Wrench }[] = [
     { id: "quick", label: "Quick setup", icon: WandSparkles },
     { id: "settings", label: "Settings", icon: SlidersHorizontal },
@@ -52,7 +50,6 @@
   });
   /** The tabs whose choices the bar below applies. */
   const choosing = $derived(debloat.tab === "quick" || debloat.tab === "settings" || debloat.tab === "apps");
-
   const state = $derived(tools.snapshot);
   const autoLogon = $derived(state?.autoLogon);
   const autoLogonActive = $derived(tools.autoLogonBusy);
@@ -61,7 +58,6 @@
   );
   const firmwareRestart = $derived(state?.firmwareRestart);
   const firmwareStatus = $derived(tools.firmwareRestartStatus());
-
   function statusTone(status: string) {
     if (status === "Completed" || status === "Enabled") return "ok";
     if (["Cancelled", "Waiting for UAC", "Conflict", "Unavailable"].includes(status)) return "warn";
@@ -69,7 +65,6 @@
     if (["Preparing", "Running", "Launching", "Downloading", "Verifying", "Extracting", "Resolving release", "Working", "Processing", "Enabling", "Disabling", "Checking"].includes(status)) return "active";
     return "idle";
   }
-
   function accountTypeLabel(value: string | undefined) {
     if (value === "microsoft") return "Microsoft account";
     if (value === "domain") return "Domain account";
@@ -78,7 +73,6 @@
     return "Windows account";
   }
 </script>
-
 <div class="page">
   <div class="top">
     <div class="title">
@@ -103,7 +97,6 @@
       {/each}
     </div>
   </div>
-
   {#if tools.error}
     <div class="error-banner surface" role="alert"><CircleAlert size={16} /><span>{tools.error}</span></div>
   {/if}
@@ -113,9 +106,7 @@
   {#if tools.externallyLocked && !tools.ownBusy && !debloat.busy && !debloat.startMenuBusy}
     <div class="lock-banner surface"><LoaderCircle size={14} class="spin" /><span>Another app task is running. Optimization tools are temporarily locked.</span></div>
   {/if}
-
   <Progress />
-
   <div class="panel">
   {#if debloat.tab === "quick"}
     <QuickSetupTab />
@@ -140,7 +131,6 @@
         </div>
         <span class="status {statusTone(tools.autoLogonStatus())}"><i></i>{tools.autoLogonStatus()}</span>
       </div>
-
       <div class="account surface" class:account-conflict={autoLogon?.status === "conflict"}>
         <span class="account-icon"><UserRound size={18} /></span>
         <div class="account-copy">
@@ -150,7 +140,6 @@
         </div>
         <span class="badge account-type">{accountTypeLabel(autoLogon?.accountType)}</span>
       </div>
-
       <div class="auto-details">
         <div>
           <ShieldCheck size={13} />
@@ -167,7 +156,6 @@
           </div>
         </div>
       </div>
-
       {#if autoLogon?.status === "conflict"}
         <div class="info-box auto-message conflict" role="alert">
           <CircleAlert size={15} />
@@ -193,7 +181,6 @@
           </div>
         </div>
       {/if}
-
       <div class="actions auto-actions">
         <button
           class="btn primary launch"
@@ -212,7 +199,6 @@
       </div>
     </article>
   </div>
-
   <section
     class="firmware-action surface"
     class:active={tools.firmwareRestartBusy}
@@ -253,10 +239,8 @@
   </div>
   {#if choosing}<ReviewBar />{/if}
 </div>
-
 {#if tools.biosDialogOpen}<BiosRestartDialog />{/if}
 {#if debloat.reviewing}<ReviewPanel />{/if}
-
 <style>
   .page { min-width: 0; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 11px; background: rgb(0 0 0 / 0.18); }
@@ -276,7 +260,6 @@
   .warning :global(svg) { color: rgb(241 187 84 / 0.9); flex: none; }
   .error-banner { color: rgb(255 170 170 / 0.9); }
   .lock-banner { color: var(--text-2); }
-
   /* 3-Column Equal Height Grid */
   .cards {
     display: grid;
@@ -296,10 +279,8 @@
   }
   .tool-card:hover:not(.active) { transform: translateY(-2px); border-color: rgb(255 255 255 / 0.095); box-shadow: var(--elev-2); }
   .tool-card.active { border-color: rgb(125 151 255 / 0.22); }
-
   .rim { position: absolute; inset: 0 14% auto; height: 1px; pointer-events: none; }
   .autologon .rim { background: linear-gradient(90deg, transparent, rgb(71 217 166 / 0.62), transparent); box-shadow: 0 0 15px rgb(48 199 148 / 0.22); }
-
   .card-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; position: relative; padding-right: 82px; }
   .tool-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 10px; overflow: hidden; box-shadow: 0 8px 18px -11px rgb(0 0 0 / 0.8); }
   .tool-icon img { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -311,14 +292,12 @@
   .badge.admin { border-color: rgb(94 176 255 / 0.14); color: rgb(142 199 255 / 0.72); }
   .badge.portable { border-color: rgb(149 119 255 / 0.18); color: rgb(190 171 255 / 0.76); }
   .badge.beta { border-color: rgb(240 177 73 / 0.16); color: rgb(239 191 111 / 0.72); }
-
   .status { position: absolute; top: 1px; right: 0; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 10px; }
   .status i { width: 6px; height: 6px; border-radius: 50%; background: var(--idle); }
   .status.ok i { background: var(--ok); box-shadow: 0 0 7px var(--ok-glow); }
   .status.active i { background: var(--update); box-shadow: 0 0 7px var(--update-glow); }
   .status.warn i { background: #e8ad55; }
   .status.error i { background: var(--danger); }
-
   /* Info strip */
   .info-box {
     display: flex;
@@ -340,7 +319,6 @@
     line-height: 1.4;
     color: var(--text-3);
   }
-
   /* Auto-Logon Specifics */
   .account {
     display: grid;
@@ -357,7 +335,6 @@
   .account-copy strong { overflow: hidden; margin-top: 1px; color: rgb(235 241 248 / 0.9); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
   .account-copy code { overflow: hidden; margin-top: 1px; color: var(--text-3); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
   .badge.account-type { justify-self: end; border-color: rgb(77 209 159 / 0.12); color: rgb(117 218 181 / 0.7); white-space: nowrap; }
-
   .auto-details {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -379,7 +356,6 @@
   .auto-details > div > div { display: grid; min-width: 0; }
   .auto-details strong { color: rgb(228 235 244 / 0.86); font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .auto-details span { color: var(--text-3); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
   .auto-message {
     border: 1px solid rgb(255 255 255 / 0.05);
     background: rgb(255 255 255 / 0.018);
@@ -389,7 +365,6 @@
   .auto-message.secure :global(svg) { color: rgb(81 216 165 / 0.8); }
   .auto-message.conflict, .auto-message.unavailable { border-color: rgb(237 170 73 / 0.12); background: rgb(237 170 73 / 0.035); }
   .auto-message.conflict :global(svg), .auto-message.unavailable :global(svg) { color: rgb(236 174 78 / 0.85); }
-
   /* Card Actions Pinned to Bottom */
   .actions {
     display: flex;
@@ -401,7 +376,6 @@
   .launch { flex: 1; min-width: 126px; justify-content: center; }
   .github { color: var(--text-2); }
   .disable { color: rgb(225 230 240 / 0.72); }
-
   /* Restart to BIOS / UEFI Card */
   .firmware-action {
     position: relative;
@@ -439,12 +413,10 @@
   }
   .firmware-status.status { position: static; white-space: nowrap; }
   .firmware-button { min-width: 146px; white-space: nowrap; }
-
   :global(:root.solid) .tool-card, :global(:root.solid) .tool-card:hover:not(.active) { transform: none; box-shadow: none; }
   :global(:root.solid) .rim { box-shadow: none; }
   :global(:root.solid) .firmware-action { box-shadow: none; }
   :global(:root.solid) .firmware-rim { box-shadow: none; }
-
   @media (max-width: 860px) { .cards { grid-template-columns: 1fr; } }
   @media (max-width: 720px) {
     .card-head { padding-right: 0; }

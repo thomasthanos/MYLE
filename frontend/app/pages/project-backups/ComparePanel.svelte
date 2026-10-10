@@ -26,7 +26,6 @@
   } from "./api";
   import DiffView from "./DiffView.svelte";
   import { formatBytes, projectBackupsState as pb } from "./state.svelte";
-
   const view = pb.compare!;
   const project = pb.projects.find((item) => item.id === view.projectId);
   let result = $state<CompareResult | null>(null);
@@ -51,15 +50,12 @@
   /** Previews already read, so going back and forth is instant. */
   const cache = new Map<string, FileDiff>();
   let closed = false;
-
   const labels: Record<ChangeStatus, string> = { added: "Added", modified: "Modified", deleted: "Deleted" };
-
   function label(id: string) {
     if (id === SOURCE_ID) return "Project folder (now)";
     const backup = pb.backups[view.projectId]?.find((item) => item.id === id);
     return backup?.name ?? id.split("/").pop() ?? id;
   }
-
   onMount(() => {
     void (async () => {
       try {
@@ -76,25 +72,20 @@
       closed = true;
     };
   });
-
   const visible = $derived(
     (result?.comparison.changes ?? []).filter(
       (change) => shown[change.status] && (!query || change.path.toLowerCase().includes(query.toLowerCase())),
     ),
   );
   const incomplete = $derived((result?.comparison.changes ?? []).filter((change) => change.stillInSource).length);
-
   $effect(() => {
     // A new filter starts the list from the top again.
     void query;
     void shown;
     listLimit = LIST_STEP;
   });
-
   const key = (change: Change) => `${change.oldName ?? ""}|${change.newName ?? ""}`;
-
   let timer: ReturnType<typeof setTimeout> | undefined;
-
   /** Opens the preview of `change`; `delay` while stepping with the keyboard. */
   async function choose(change: Change, delay = 0) {
     if (!result) return;
@@ -124,7 +115,6 @@
       if (selected === change) diffLoading = false;
     }
   }
-
   function step(by: number) {
     if (!visible.length) return;
     const index = selected ? visible.findIndex((change) => change.path === selected!.path) : -1;
@@ -135,12 +125,10 @@
       listElement?.querySelector<HTMLElement>(`[data-index="${next}"]`)?.scrollIntoView({ block: "nearest" }),
     );
   }
-
   function setMode(value: "split" | "unified") {
     mode = value;
     writeJson(MODE_KEY, value);
   }
-
   async function cancelCompare() {
     if (!loading || cancelling) return;
     cancelling = true;
@@ -150,14 +138,12 @@
       cancelling = false;
     }
   }
-
   function close() {
     closed = true;
     clearTimeout(timer);
     if (loading) void api.cancel("compare");
     pb.closeCompare();
   }
-
   function onKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -179,13 +165,10 @@
       document.querySelector<HTMLInputElement>(".compare-search")?.focus();
     }
   }
-
   const size = (value: number | null) => (value === null ? "—" : formatBytes(value));
   const percent = $derived(progress?.total ? Math.min(100, (progress.done / progress.total) * 100) : null);
 </script>
-
 <svelte:window onkeydown={onKeydown} />
-
 <div class="backdrop" role="presentation" transition:fade={{ duration: 140 }} {@attach portal}>
   <div
     class="dialog glass glass--3"
@@ -207,7 +190,6 @@
       </span>
       <button class="icon-btn" type="button" aria-label="Close" title="Close (Esc)" onclick={close}><X size={16} /></button>
     </header>
-
     {#if loading}
       <div class="state" role="status">
         <span class="state-line">
@@ -252,7 +234,6 @@
           {incomplete === 1 ? "it" : "them"} (it was incomplete, or its exclusions differ).
         </p>
       {/if}
-
       <div class="body">
         <div class="list-pane">
           <ul class="changes" aria-label="Changed files" bind:this={listElement}>
@@ -289,7 +270,6 @@
           </ul>
           <p class="keys">↑ ↓ to step through files · Ctrl+F to filter · Esc to close</p>
         </div>
-
         <div class="diff">
           {#if !selected}
             <p class="placeholder">{comparison.changes.length ? "Choose a file to preview its changes." : "Nothing to preview."}</p>
@@ -322,7 +302,6 @@
     {/if}
   </div>
 </div>
-
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
   .dialog {

@@ -47,14 +47,11 @@
     stepLabels,
     type ListItem,
   } from "./state.svelte";
-
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
-
   const repoId = $derived(item.repo.id);
   // The panel is made again for another project, so the id stays.
   const s = gr.release(untrack(() => entry.id));
   const busy = $derived(gr.running(repoId));
-
   let info = $state<ReleaseInfo | null>(null);
   let loadError = $state<string | null>(null);
   let checks = $state<Check[] | null>(null);
@@ -64,7 +61,6 @@
   let found = $state<Artifact[] | null>(null);
   let finding = $state(false);
   let stopping = $state(false);
-
   let branches = $state<string[] | null>(null);
   const branchOptions = $derived<SelectOption<string>[]>([
     { value: "", label: "None" },
@@ -73,12 +69,10 @@
   const isProtectedBranch = $derived(
     ["main", "master", "old"].includes(s.mergeBranch.trim().toLowerCase())
   );
-
   onMount(() => {
     void load();
     void loadBranches();
   });
-
   async function loadBranches() {
     try {
       branches = await api.branches(repoId);
@@ -87,7 +81,6 @@
       branches = [];
     }
   }
-
   async function load() {
     try {
       info = await api.releaseInfo(entry.id);
@@ -102,7 +95,6 @@
       loadError = messageOf(error);
     }
   }
-
   const tag = $derived(`${info?.tagPrefix ?? entry.tagPrefix}${s.version.trim()}`);
   const hasWorkflow = $derived(!!entry.releaseWorkflow);
   const steps = $derived<StepId[]>([
@@ -111,13 +103,11 @@
   ]);
   const versionFiles = $derived(info?.versions.files ?? []);
   const ownChanges = $derived(entry.changes);
-
   function pickVersion(version: string) {
     s.version = version;
     s.touched = true;
     if (info?.notesDir && s.notesFile !== null) s.notesFile = `${info.notesDir}/${version.trim()}.md`;
   }
-
   function setMode(mode: Mode) {
     s.mode = mode;
     s.touched = true;
@@ -125,7 +115,6 @@
     const auto: Mode = entry.releaseWorkflow ? "actions" : "local";
     void api.setEntry(entry.id, { releaseMode: mode === auto ? "" : mode }).catch(() => {});
   }
-
   async function toggleSkip(path: string) {
     const skip = new Set(entry.skipVersionFiles);
     if (skip.has(path)) skip.delete(path);
@@ -138,7 +127,6 @@
       toast.error(messageOf(error));
     }
   }
-
   // The checks follow the form (a moment after the last change).
   let timer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
@@ -149,7 +137,6 @@
     timer = setTimeout(() => void check(), 450);
     return () => clearTimeout(timer);
   });
-
   // The checks run again as the form changes; only the newest answer counts
   // (an older one finishing later would show checks for another version).
   let checkSeq = 0;
@@ -166,9 +153,7 @@
       if (seq === checkSeq) checking = false;
     }
   }
-
   const failed = $derived(checks?.filter((c) => c.state === "fail") ?? []);
-
   function fix(check: Check) {
     switch (check.fix) {
       case "pull":
@@ -186,7 +171,6 @@
     }
   }
   const fixLabels: Record<string, string> = { pull: "Pull", commit: "Open Changes", connect: "Connect", build: "Open Build" };
-
   function writeNotes(polish: boolean) {
     void gr.ai({
       run: (provider) => api.aiNotes(entry.id, s.version.trim(), provider, polish ? s.notes : null),
@@ -198,7 +182,6 @@
       setBusy: (value) => (writing = value),
     });
   }
-
   async function findFiles() {
     finding = true;
     try {
@@ -210,7 +193,6 @@
       finding = false;
     }
   }
-
   // Files from a build made here, offered when the release doesn't build.
   const lastBuild = $derived(gr.builds.get(entry.id));
   $effect(() => {
@@ -219,18 +201,15 @@
       if (s.assets === null) s.assets = lastBuild.selected.slice();
     }
   });
-
   function toggleAsset(path: string) {
     const list = new Set(s.assets ?? []);
     if (list.has(path)) list.delete(path);
     else list.add(path);
     s.assets = [...list];
   }
-
   // The GitHub repository's name ("MYLE"), not the folder's ("Make_Your_Life_Easier.A.E").
   const repoName = $derived(item.status?.remote?.repo ?? item.repo.name);
   const defaultTitle = $derived(entry.monorepo ? `${entry.name} ${tag}` : `${repoName} ${tag}`);
-
   async function release() {
     if (s.running) return;
     const version = s.version.trim();
@@ -286,7 +265,6 @@
       void load();
     }
   }
-
   function finish(outcome: ReleaseOutcome) {
     stopping = false;
     s.outcome = outcome;
@@ -302,7 +280,6 @@
       toast.success(`${outcome.tag} is out.`, url ? { label: "Open", run: () => void openUrl(url) } : undefined);
     }
   }
-
   async function resume() {
     const resumeState = s.outcome?.resume;
     if (!resumeState || s.running) return;
@@ -321,7 +298,6 @@
       void gr.loadRemote(repoId);
     }
   }
-
   async function watchAgain() {
     const commit = s.outcome?.commit;
     if (!commit || s.running) return;
@@ -339,7 +315,6 @@
       void gr.loadRemote(repoId);
     }
   }
-
   async function cancel() {
     if (stopping) return;
     stopping = true;
@@ -353,15 +328,12 @@
       stopping = false;
     }
   }
-
   function stepIcon(id: StepId) {
     return s.steps[id]?.state ?? null;
   }
-
   const showForm = $derived(!s.running && !s.outcome);
   const uploadPercent = $derived(s.upload && s.upload.total ? Math.round((s.upload.sent / s.upload.total) * 100) : 0);
 </script>
-
 <div class="release">
   {#if loadError}
     <p class="error">{loadError}</p>
@@ -411,7 +383,6 @@
         <p class="sub warn"><TriangleAlert size={12} /> No version file: only the tag carries the version.</p>
       {/if}
     </section>
-
     <!-- How -->
     <section>
       <h3>How</h3>
@@ -515,7 +486,6 @@
         </label>
       {/if}
     </section>
-
     <!-- Notes -->
     <section>
       <div class="notes-head">
@@ -542,7 +512,6 @@
         <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.makeLatest} disabled={s.prerelease} /> Latest</label>
       </div>
     </section>
-
     <!-- Checks -->
     <section>
       <div class="notes-head">
@@ -561,7 +530,6 @@
         </ul>
       {/if}
     </section>
-
     <div class="go">
       <button class="btn primary big" disabled={!!busy || checking || !checks || failed.length > 0 || !s.version.trim()} onclick={() => void release()}>
         <Rocket size={16} /> Release {tag}
@@ -651,7 +619,6 @@
           {/if}
         {/each}
       </ol>
-
       {#if s.failures.length}
         <div class="failures" role="alert">
           {#each s.failures as f (f.job)}
@@ -667,18 +634,15 @@
           {/each}
         </div>
       {/if}
-
       {#if s.steps.build && s.mode === "local" && (s.steps.build.state === "running" || s.steps.build.state === "failed")}
         <div class="build-log"><BuildLog session={s.buildLog} entryId={entry.id} compact /></div>
       {/if}
-
       {#if s.log.length}
         <details class="log">
           <summary>Details</summary>
           <pre class="selectable">{s.log.join("\n")}</pre>
         </details>
       {/if}
-
       {#if s.outcome && !s.running}
         {#if s.outcome.ok}
           <div class="result ok">
@@ -734,7 +698,6 @@
     </section>
   {/if}
 </div>
-
 <style>
   .release {
     display: flex;
@@ -745,7 +708,6 @@
     padding: 10px 12px 12px;
     overflow: auto;
   }
-
   section {
     display: grid;
     gap: 6px;
@@ -754,7 +716,6 @@
     border-radius: 12px;
     background: rgb(255 255 255 / 0.025);
   }
-
   h3 {
     display: flex;
     align-items: center;
@@ -764,39 +725,32 @@
     font-size: 13px;
     font-weight: 650;
   }
-
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
   }
-
   .wrap {
     flex-wrap: wrap;
   }
-
   .version {
     width: 130px;
     height: 32px;
     font-family: var(--font-mono);
     font-size: 12.5px;
   }
-
   .tag-preview {
     color: var(--text-3);
     font-size: 11.5px;
   }
-
   code {
     font-family: var(--font-mono);
     font-size: 11.3px;
   }
-
   .tag-preview code {
     color: #c3c9f7;
   }
-
   .sub {
     display: flex;
     flex-wrap: wrap;
@@ -806,11 +760,9 @@
     color: var(--text-3);
     font-size: 11.8px;
   }
-
   .sub.warn {
     color: #ffd08a;
   }
-
   .link {
     display: inline-flex;
     align-items: center;
@@ -821,7 +773,6 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-
   .commits {
     display: grid;
     gap: 2px;
@@ -835,16 +786,13 @@
     font-size: 11.8px;
     list-style: none;
   }
-
   .commits code {
     color: var(--text-3);
   }
-
   .files {
     display: grid;
     gap: 2px;
   }
-
   .file {
     display: flex;
     align-items: center;
@@ -853,15 +801,12 @@
     border-radius: 7px;
     font-size: 12px;
   }
-
   .file:hover {
     background: var(--hover);
   }
-
   .file.off {
     opacity: 0.55;
   }
-
   .file code {
     flex: 1;
     min-width: 0;
@@ -869,29 +814,24 @@
     color: var(--text-2);
     text-overflow: ellipsis;
   }
-
   .from {
     color: var(--text-3);
     font-family: var(--font-mono);
     font-size: 11.3px;
   }
-
   .from.bad {
     color: #ffb84d;
   }
-
   .to {
     color: #8fe6bf;
     font-family: var(--font-mono);
     font-size: 11.3px;
   }
-
   .lock {
     padding-left: 26px;
     color: var(--text-3);
     font-size: 11px;
   }
-
   .file .name {
     flex: 1;
     min-width: 0;
@@ -899,18 +839,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .file small {
     color: var(--text-3);
     font-size: 11px;
   }
-
   .modes {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
-
   .mode {
     display: grid;
     gap: 3px;
@@ -919,30 +856,24 @@
     border-radius: 10px;
     text-align: left;
   }
-
   .mode:hover:not(:disabled) {
     background: var(--hover);
   }
-
   .mode.active {
     border-color: rgb(var(--accent-rgb) / 0.5);
     background: rgb(var(--accent-rgb) / 0.12);
   }
-
   .mode:disabled {
     opacity: 0.5;
   }
-
   .mode strong {
     font-size: 12.8px;
   }
-
   .mode span {
     color: var(--text-3);
     font-size: 11.5px;
     line-height: 1.4;
   }
-
   .opt {
     display: flex;
     align-items: center;
@@ -950,21 +881,17 @@
     color: var(--text-2);
     font-size: 12.3px;
   }
-
   .opt code {
     margin-left: 4px;
     color: var(--text-3);
   }
-
   .opt em {
     color: var(--text-3);
     font-style: normal;
   }
-
   .opt.inline {
     gap: 6px;
   }
-
   .assets {
     display: grid;
     gap: 3px;
@@ -972,7 +899,6 @@
     border-radius: 9px;
     background: rgb(0 0 0 / 0.16);
   }
-
   .assets-head {
     display: flex;
     align-items: center;
@@ -981,14 +907,12 @@
     color: var(--text-2);
     font-size: 12px;
   }
-
   .notes-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
-
   .notes {
     min-height: 110px;
     resize: vertical;
@@ -996,12 +920,10 @@
     font-size: 12px;
     line-height: 1.5;
   }
-
   .commit {
     flex: 1;
     min-width: 200px;
   }
-
   .checks {
     display: grid;
     gap: 4px;
@@ -1009,7 +931,6 @@
     padding: 0;
     list-style: none;
   }
-
   .checks li {
     display: flex;
     align-items: center;
@@ -1017,36 +938,29 @@
     padding: 4px 2px;
     font-size: 12.3px;
   }
-
   .checks li span {
     flex: 1;
     color: var(--text-2);
   }
-
   .c-ok {
     color: #3ecf8e;
   }
-
   .c-warn {
     color: #ffb84d;
   }
-
   .c-fail {
     color: #ff7b7b;
   }
-
   .go {
     display: flex;
     align-items: center;
     gap: 12px;
   }
-
   .big {
     height: 42px;
     padding: 0 20px;
     font-size: 13.5px;
   }
-
   .run {
     display: flex;
     flex-direction: column;
@@ -1056,7 +970,6 @@
     border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 12px;
   }
-
   .run-head {
     display: flex;
     align-items: center;
@@ -1065,19 +978,16 @@
     padding-bottom: 12px;
     border-bottom: 1px solid rgb(255 255 255 / 0.07);
   }
-
   .run-title {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-
   .run-title h3 {
     margin: 0;
     font-size: 16px;
     font-weight: 600;
   }
-
   .run-badge {
     display: inline-flex;
     align-items: center;
@@ -1088,52 +998,41 @@
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
-
   .run-badge.info {
     background: rgb(159 211 255 / 0.14);
     color: #9fd3ff;
   }
-
   .run-badge.warn {
     background: rgb(255 184 77 / 0.14);
     color: #ffb84d;
   }
-
   .run-badge.success {
     background: rgb(62 207 142 / 0.14);
     color: #3ecf8e;
   }
-
   .run-badge.neutral {
     background: rgb(255 255 255 / 0.08);
     color: var(--text-2);
   }
-
   .run-badge.danger {
     background: rgb(255 123 123 / 0.14);
     color: #ff7b7b;
   }
-
   .stopping-icon {
     color: #ffb84d;
   }
-
   .running-icon {
     color: #9fd3ff;
   }
-
   .ok-icon {
     color: #3ecf8e;
   }
-
   .cancel-icon {
     color: #ffb84d;
   }
-
   .fail-icon {
     color: #ff7b7b;
   }
-
   .steps {
     display: flex;
     flex-direction: column;
@@ -1142,7 +1041,6 @@
     padding: 0;
     list-style: none;
   }
-
   .step {
     display: flex;
     align-items: center;
@@ -1155,21 +1053,18 @@
     font-size: 12.8px;
     transition: all 0.2s ease;
   }
-
   .step.active {
     background: rgb(var(--accent-rgb) / 0.09);
     border-color: rgb(var(--accent-rgb) / 0.3);
     color: var(--text-1);
     box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
   }
-
   .step-icon {
     display: grid;
     place-items: center;
     flex: none;
     width: 20px;
   }
-
   .step-content {
     display: flex;
     align-items: baseline;
@@ -1177,17 +1072,14 @@
     flex: 1;
     min-width: 0;
   }
-
   .step .label {
     min-width: 120px;
     font-weight: 550;
     color: var(--text-2);
   }
-
   .step.active .label {
     color: var(--text-1);
   }
-
   .step .msg {
     flex: 1;
     min-width: 0;
@@ -1197,7 +1089,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .step-tag {
     flex: none;
     padding: 1px 7px;
@@ -1206,39 +1097,31 @@
     font-weight: 600;
     text-transform: capitalize;
   }
-
   .tag-running {
     background: rgb(159 211 255 / 0.14);
     color: #9fd3ff;
   }
-
   .tag-done {
     background: rgb(62 207 142 / 0.12);
     color: #3ecf8e;
   }
-
   .tag-failed {
     background: rgb(255 123 123 / 0.12);
     color: #ff7b7b;
   }
-
   .tag-skipped {
     background: rgb(255 255 255 / 0.05);
     color: var(--text-3);
   }
-
   .s-running {
     color: #9fd3ff !important;
   }
-
   .s-done {
     color: #3ecf8e !important;
   }
-
   .s-failed {
     color: #ff7b7b !important;
   }
-
   li.upload,
   li.jobs {
     display: grid !important;
@@ -1247,66 +1130,54 @@
     background: rgb(255 255 255 / 0.015);
     border-radius: 8px;
   }
-
   .upload .progress {
     height: 5px;
     overflow: hidden;
     border-radius: 999px;
     background: rgb(255 255 255 / 0.08);
   }
-
   .upload .progress div {
     height: 100%;
     background: var(--accent-grad);
     transition: width 0.25s;
   }
-
   .upload em {
     font-style: normal;
     font-size: 11px;
   }
-
   .job {
     display: flex;
     align-items: center;
     gap: 7px;
     font-size: 12px;
   }
-
   .job strong {
     color: var(--text-2);
     font-weight: 550;
   }
-
   .job span {
     color: var(--text-3);
     font-size: 11.3px;
   }
-
   .j-ok {
     color: #3ecf8e;
   }
-
   .j-failed {
     color: #ff7b7b;
   }
-
   .j-running {
     color: #9fd3ff;
   }
-
   .build-log {
     display: flex;
     flex-direction: column;
     gap: 7px;
   }
-
   details.log summary {
     color: var(--text-3);
     font-size: 11.8px;
     cursor: pointer;
   }
-
   details.log pre {
     max-height: 160px;
     margin: 6px 0 0;
@@ -1319,7 +1190,6 @@
     font-size: 11px;
     white-space: pre-wrap;
   }
-
   .result {
     display: flex;
     align-items: flex-start;
@@ -1328,7 +1198,6 @@
     border-radius: 10px;
     font-size: 13px;
   }
-
   .result-body {
     display: flex;
     flex-direction: column;
@@ -1336,80 +1205,67 @@
     flex: 1;
     min-width: 0;
   }
-
   .result-body strong {
     font-size: 13.5px;
     font-weight: 600;
     color: var(--text-1);
   }
-
   .result-body span {
     color: var(--text-2);
     font-size: 12px;
     line-height: 1.4;
   }
-
   .result-body em {
     display: block;
     margin-top: 2px;
     color: var(--text-3);
     font-style: normal;
   }
-
   .result-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     flex: none;
   }
-
   .result.ok {
     border: 1px solid rgb(62 207 142 / 0.3);
     background: rgb(62 207 142 / 0.08);
     color: #3ecf8e;
   }
-
   .result.cancelled {
     border: 1px solid rgb(255 184 77 / 0.3);
     background: rgb(255 184 77 / 0.08);
     color: #ffb84d;
   }
-
   .result.bad {
     border: 1px solid rgb(229 72 77 / 0.3);
     background: rgb(229 72 77 / 0.08);
     color: #ff7b7b;
   }
-
   .new-btn {
     align-self: flex-start;
     margin-top: 4px;
     gap: 6px;
   }
-
   .quiet {
     display: grid;
     place-items: center;
     min-height: 160px;
     color: var(--text-3);
   }
-
   .error {
     color: #ff9d9d;
     font-size: 12.5px;
   }
-
   @container releases (max-width: 900px) {
     .modes {
       grid-template-columns: minmax(0, 1fr);
     }
   }
-
   /* Merge, target, failures */
   .pick {
     gap: 14px;
   }
-
   .field {
     display: inline-flex;
     align-items: center;
@@ -1417,18 +1273,15 @@
     color: var(--text-2);
     font-size: 11.5px;
   }
-
   .branch-field {
     position: relative;
   }
-
   .merge-summary {
     display: flex;
     flex-direction: column;
     gap: 4px;
     margin-top: 2px;
   }
-
   .delete-branch-opt {
     display: inline-flex;
     align-items: center;
@@ -1438,30 +1291,25 @@
     font-size: 12px;
     cursor: pointer;
   }
-
   .delete-branch-opt code {
     color: var(--accent);
   }
-
   .protected-branch-note {
     color: var(--text-3);
     font-size: 11.5px;
   }
-
   .select {
     height: 28px;
     min-width: 170px;
     padding: 0 8px;
     font-size: 12px;
   }
-
   .seg {
     display: inline-flex;
     padding: 2px;
     border: 1px solid var(--btn-border);
     border-radius: 8px;
   }
-
   .seg button {
     padding: 4px 10px;
     border: 0;
@@ -1471,17 +1319,14 @@
     font-size: 11.5px;
     cursor: pointer;
   }
-
   .seg button.active {
     background: rgb(var(--accent-rgb) / 0.18);
     color: var(--text-1);
   }
-
   .failures {
     display: grid;
     gap: 8px;
   }
-
   .failure {
     display: grid;
     gap: 4px;
@@ -1490,7 +1335,6 @@
     border-radius: 10px;
     background: rgb(229 72 77 / 0.07);
   }
-
   .f-head {
     display: flex;
     flex-wrap: wrap;
@@ -1500,17 +1344,14 @@
     color: #f1a7a9;
     font-size: 12px;
   }
-
   .f-head span {
     color: var(--text-2);
   }
-
   .f-error {
     margin: 0;
     color: var(--text-1);
     font-size: 11.5px;
   }
-
   .f-log {
     max-height: 180px;
     margin: 0;

@@ -31,9 +31,7 @@
   import HistoryTab from "./HistoryTab.svelte";
   import ReleaseTab from "./ReleaseTab.svelte";
   import { buildKindLabels, formatRelative, githubReleases as gr, runState, syncText, type ListItem, type Tab } from "./state.svelte";
-
   let { item }: { item: ListItem } = $props();
-
   const status = $derived(item.status);
   const entry = $derived(item.entry);
   const repoId = $derived(item.repo.id);
@@ -45,7 +43,6 @@
   const busy = $derived(gr.running(repoId));
   let menuOpen = $state(false);
   let cancellingCi = $state(false);
-
   // Poll remote while CI is running so the status updates to passed/failed/cancelled
   // automatically as soon as the run finishes on GitHub.
   $effect(() => {
@@ -56,7 +53,6 @@
       return () => clearInterval(interval);
     }
   });
-
   async function cancelCiRun() {
     if (!run || cancellingCi) return;
     const ok = await confirm({
@@ -77,14 +73,12 @@
       cancellingCi = false;
     }
   }
-
   const tabs: { id: Tab; label: string; icon: typeof Hammer }[] = [
     { id: "changes", label: "Changes", icon: FileDiff },
     { id: "build", label: "Build", icon: Hammer },
     { id: "release", label: "Release", icon: Rocket },
     { id: "history", label: "Releases", icon: ListTree },
   ];
-
   async function remove() {
     menuOpen = false;
     const ok = await confirm({
@@ -100,7 +94,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function reveal() {
     menuOpen = false;
     try {
@@ -109,11 +102,9 @@
       toast.error(messageOf(error));
     }
   }
-
   const changeCount = $derived(entry?.monorepo ? entry.changes : (status?.changes ?? 0));
   const versionFiles = $derived(entry ? entry.versions.files.filter((f) => !f.skipped).length : 0);
   const mismatched = $derived((entry?.versions.mismatched.length ?? 0) > 0);
-
   /** Alt+1…4 switch the tabs, Alt+R fetches and refreshes. */
   function onKeydown(event: KeyboardEvent) {
     if (!event.altKey || event.ctrlKey || event.metaKey || gr.settingsOpen || gr.found || event.defaultPrevented) return;
@@ -127,11 +118,8 @@
     }
   }
 </script>
-
 <svelte:window onkeydown={onKeydown} />
-
 <button class="back" onclick={() => (gr.showList = true)}><ArrowLeft size={15} /> All projects</button>
-
 <header class="head">
   <span class="avatar" aria-hidden="true">{(entry?.name ?? item.repo.name).slice(0, 1).toUpperCase()}</span>
   <div class="title">
@@ -215,7 +203,6 @@
     </Popover>
   </div>
 </header>
-
 {#if !status}
   <div class="state"><LoaderCircle size={18} class="spin" /> Reading the repository…</div>
 {:else if status.problem}
@@ -259,7 +246,6 @@
       <span class="kinds">{#each entry.buildKinds as kind (kind)}<span>{buildKindLabels[kind]}</span>{/each}</span>
     {/if}
   </div>
-
   <nav class="tabs" aria-label="Project">
     {#each tabs as tab, i (tab.id)}
       <button class="tab" class:active={gr.tab === tab.id} aria-current={gr.tab === tab.id ? "page" : undefined} title="{tab.label} (Alt+{i + 1})" onclick={() => gr.setTab(tab.id)}>
@@ -270,7 +256,6 @@
       </button>
     {/each}
   </nav>
-
   <div class="body">
     {#if gr.tab === "changes"}
       <ChangesTab {item} />
@@ -285,7 +270,6 @@
     {/if}
   </div>
 {/if}
-
 <style>
   .back {
     display: none;
@@ -298,24 +282,20 @@
     color: var(--text-2);
     font-size: 12.5px;
   }
-
   .back:hover {
     background: var(--hover);
   }
-
   @container releases (max-width: 820px) {
     .back {
       display: flex;
     }
   }
-
   .head {
     display: flex;
     align-items: center;
     gap: 14px;
     padding: 16px 18px 12px;
   }
-
   .avatar {
     display: grid;
     flex: none;
@@ -330,21 +310,18 @@
     font-size: 19px;
     font-weight: 650;
   }
-
   .title {
     display: grid;
     flex: 1;
     gap: 4px;
     min-width: 0;
   }
-
   .name-row {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
   }
-
   h2 {
     margin: 0;
     overflow: hidden;
@@ -354,7 +331,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .version {
     display: inline-flex;
     flex: none;
@@ -369,29 +345,24 @@
     font-size: 11.5px;
     line-height: 19px;
   }
-
   button.version:hover {
     background: rgb(var(--accent-rgb) / 0.2);
   }
-
   .version.warn {
     border-color: rgb(255 180 84 / 0.35);
     background: rgb(255 180 84 / 0.1);
     color: #ffd08a;
   }
-
   .version.muted {
     border-color: rgb(255 255 255 / 0.08);
     background: none;
     color: var(--text-3);
   }
-
   .in {
     flex: none;
     color: var(--text-3);
     font-size: 12.5px;
   }
-
   .where {
     display: flex;
     align-items: center;
@@ -399,7 +370,6 @@
     min-width: 0;
     font-size: 11.5px;
   }
-
   .repo {
     display: inline-flex;
     flex: none;
@@ -409,16 +379,13 @@
     color: #b7befa;
     font-size: 12px;
   }
-
   .repo:hover {
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-
   .sep {
     color: var(--text-3);
   }
-
   .path {
     min-width: 0;
     padding: 0;
@@ -430,11 +397,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .path:hover {
     color: var(--text-2);
   }
-
   .last {
     display: grid;
     flex: none;
@@ -443,14 +408,12 @@
     padding: 4px 12px;
     border-right: 1px solid rgb(255 255 255 / 0.07);
   }
-
   .last small {
     color: var(--text-3);
     font-size: 10.5px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
-
   .last strong {
     display: inline-flex;
     align-items: center;
@@ -459,71 +422,59 @@
     font-size: 13px;
     font-weight: 600;
   }
-
   .last strong.none {
     color: var(--text-2);
     font-family: inherit;
     font-size: 12.5px;
     font-weight: 500;
   }
-
   .last em {
     color: var(--text-3);
     font-size: 11px;
     font-style: normal;
   }
-
   @container releases (max-width: 760px) {
     .last {
       display: none;
     }
   }
-
   @container releases (max-width: 1100px) {
     .facts .kinds {
       display: none;
     }
   }
-
   .actions {
     display: flex;
     flex: none;
     align-items: center;
     gap: 6px;
   }
-
   .actions .icon-btn {
     width: 32px;
     height: 32px;
   }
-
   .menu {
     min-width: 210px;
     padding: 5px;
   }
-
   .menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
   }
-
   .menu-item.danger {
     color: #ff9d9d;
   }
-
   .versions {
     min-width: 280px;
     padding: 8px;
   }
-
   .versions p {
     margin: 6px 4px 2px;
     color: var(--text-3);
     font-size: 11.5px;
   }
-
   .vrow {
     display: flex;
     justify-content: space-between;
@@ -532,22 +483,18 @@
     border-radius: 6px;
     font-size: 12px;
   }
-
   .vrow code {
     color: var(--text-2);
     font-family: var(--font-mono);
     font-size: 11px;
   }
-
   .vrow.bad {
     background: rgb(255 180 84 / 0.1);
     color: #ffd08a;
   }
-
   .vrow.off {
     opacity: 0.5;
   }
-
   .facts {
     display: flex;
     flex-wrap: wrap;
@@ -559,7 +506,6 @@
     border-radius: 10px;
     background: rgb(0 0 0 / 0.16);
   }
-
   .fact {
     display: inline-flex;
     align-items: center;
@@ -571,47 +517,37 @@
     font-size: 12px;
     white-space: nowrap;
   }
-
   .fact + .fact {
     box-shadow: -1px 0 0 rgb(255 255 255 / 0.06);
   }
-
   .fact em {
     color: var(--text-3);
     font-style: normal;
   }
-
   .fact.link:hover {
     background: var(--hover);
   }
-
   .fact.warn,
   .fact .attention,
   .fact.attention {
     color: #ffd08a;
   }
-
   .fact.ci-ok {
     color: #7fe0b0;
   }
-
   .fact.ci-failed {
     color: #ff9d9d;
   }
-
   .fact.ci-cancelled {
     color: var(--text-3);
   }
-
   .fact.ci-running {
     color: #9fd3ff;
   }
-
   .fact.ci-wrapper {
     padding: 0 4px 0 10px;
     gap: 8px;
   }
-
   .ci-btn {
     display: inline-flex;
     align-items: center;
@@ -624,11 +560,9 @@
     cursor: pointer;
     font: inherit;
   }
-
   .ci-btn:hover {
     text-decoration: underline;
   }
-
   .ci-cancel-btn {
     display: inline-flex;
     align-items: center;
@@ -645,18 +579,15 @@
     line-height: 1;
     transition: all 0.15s ease;
   }
-
   .ci-cancel-btn:hover:not(:disabled) {
     background: rgb(255 100 100 / 0.28);
     border-color: rgb(255 100 100 / 0.5);
     color: #ffbebe;
   }
-
   .ci-cancel-btn:disabled {
     opacity: 0.5;
     cursor: default;
   }
-
   .kinds {
     display: inline-flex;
     align-items: center;
@@ -664,7 +595,6 @@
     margin-left: auto;
     padding-right: 4px;
   }
-
   .kinds span {
     padding: 0 8px;
     border-radius: 6px;
@@ -673,14 +603,12 @@
     font-size: 11px;
     line-height: 21px;
   }
-
   .tabs {
     display: flex;
     gap: 4px;
     padding: 0 18px;
     border-bottom: 1px solid rgb(255 255 255 / 0.07);
   }
-
   .tab {
     display: inline-flex;
     align-items: center;
@@ -692,16 +620,13 @@
     font-size: 13px;
     transition: all 0.15s ease;
   }
-
   .tab:hover {
     color: var(--text-1);
   }
-
   .tab.active {
     border-bottom-color: var(--accent);
     color: var(--text-1);
   }
-
   .badge {
     min-width: 18px;
     padding: 0 5px;
@@ -712,14 +637,12 @@
     line-height: 17px;
     text-align: center;
   }
-
   .body {
     display: flex;
     flex: 1;
     flex-direction: column;
     min-height: 0;
   }
-
   .state {
     display: flex;
     align-items: center;
@@ -728,7 +651,6 @@
     color: var(--text-2);
     font-size: 12.5px;
   }
-
   .state.problem {
     padding: 12px 14px;
     border: 1px solid rgb(255 180 84 / 0.3);
@@ -736,7 +658,6 @@
     background: rgb(255 180 84 / 0.08);
     color: #ffd08a;
   }
-
   .state.problem span {
     flex: 1;
     color: var(--text-2);

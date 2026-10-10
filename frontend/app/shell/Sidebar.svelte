@@ -18,14 +18,7 @@
   const OWNER_NOTE = "Only visible to the owner account.";
   const COLLAPSE = "collapse";
 
-  interface Tip {
-    title: string;
-    description?: string;
-    shortcut?: string | null;
-    owner?: boolean;
-    x: number;
-    y: number;
-  }
+  interface Tip { title: string; description?: string; shortcut?: string | null; owner?: boolean; x: number; y: number }
 
   // Rendered outside the sidebar panel, so nothing in it can clip the tooltip.
   let tip = $state<Tip | null>(null);
@@ -51,18 +44,18 @@
 
   function place(target: HTMLElement): { x: number; y: number } {
     const item = target.getBoundingClientRect();
-    const edge = sidebar?.getBoundingClientRect().right ?? item.right;
-    return { x: edge + 10, y: item.top + item.height / 2 };
+    return { x: (sidebar?.getBoundingClientRect().right ?? item.right) + 10, y: item.top + item.height / 2 };
   }
 
   function showTip(target: HTMLElement, content: Omit<Tip, "x" | "y">, immediate: boolean) {
     clearTimeout(tipTimer);
     const open = () => (tip = { ...content, ...place(target) });
-    if (immediate) open();
-    else {
-      tip = null;
-      tipTimer = setTimeout(open, TIP_DELAY_MS);
+    if (immediate) {
+      open();
+      return;
     }
+    tip = null;
+    tipTimer = setTimeout(open, TIP_DELAY_MS);
   }
 
   function hideTip() {
@@ -71,18 +64,8 @@
   }
 
   /** The page's shortcut; the toggle's is App.svelte's Ctrl+B. */
-  function shortcutFor(page: PageDef): string | null {
-    return page.id === COLLAPSE ? "Ctrl+B" : shortcutOf(shown, page.id);
-  }
-
-  function pageTip(page: PageDef) {
-    return {
-      title: page.label,
-      description: page.description,
-      shortcut: shortcutFor(page),
-      owner: page.ownerOnly ?? false,
-    };
-  }
+  const shortcutFor = (page: PageDef): string | null => (page.id === COLLAPSE ? "Ctrl+B" : shortcutOf(shown, page.id));
+  const pageTip = (page: PageDef) => ({ title: page.label, description: page.description, shortcut: shortcutFor(page), owner: page.ownerOnly ?? false });
 
   function toggle() {
     hideTip();
@@ -104,9 +87,7 @@
   }
 
   /** Keyboard focus shows the tooltip at once; a click's focus does not. */
-  function focusedByKeyboard(event: FocusEvent): boolean {
-    return (event.currentTarget as HTMLElement).matches(":focus-visible");
-  }
+  const focusedByKeyboard = (event: FocusEvent): boolean => (event.currentTarget as HTMLElement).matches(":focus-visible");
 </script>
 
 {#snippet item(page: PageDef, active: boolean, onclick: () => void, badge = 0)}
@@ -174,13 +155,7 @@
     {/each}
     <div class="divider" aria-hidden="true"></div>
     {@render item(
-      {
-        id: COLLAPSE,
-        label: nav.collapsed ? "Expand sidebar" : "Collapse sidebar",
-        description: nav.collapsed ? "Show the page names." : "Show only the icons.",
-        icon: nav.collapsed ? PanelLeftOpen : PanelLeftClose,
-        group: "bottom",
-      },
+      { id: COLLAPSE, label: nav.collapsed ? "Expand sidebar" : "Collapse sidebar", description: nav.collapsed ? "Show the page names." : "Show only the icons.", icon: nav.collapsed ? PanelLeftOpen : PanelLeftClose, group: "bottom" },
       false,
       toggle,
     )}
@@ -199,340 +174,63 @@
 {/if}
 
 <style>
-  .sidebar {
-    --owner-rgb: 214 186 128;
-
-    grid-area: side;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 6px;
-    min-width: 0;
-    min-height: 0;
-    padding: 9px;
-    border-radius: var(--shell-panel-radius);
-  }
-
-  :global(:root.dark) .sidebar {
-    background: var(--sidebar-fill);
-  }
-
+  .sidebar { --owner-rgb: 214 186 128; grid-area: side; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; min-height: 0; padding: 9px; border-radius: var(--shell-panel-radius); }
+  :global(:root.dark) .sidebar { background: var(--sidebar-fill); }
   /* On a short window the page list scrolls; Settings and the toggle stay. */
   .top {
-    min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    --fade-top: 0px;
-    --fade-bottom: 0px;
-    mask-image: linear-gradient(
-      to bottom,
-      transparent 0,
-      #000 var(--fade-top),
-      #000 calc(100% - var(--fade-bottom)),
-      transparent 100%
-    );
+    min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%);
   }
-
-  .top.more-above {
-    --fade-top: 22px;
-  }
-
-  .top.more-below {
-    --fade-bottom: 22px;
-  }
-
-  .group {
-    display: grid;
-    gap: 2px;
-  }
-
-  .item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    width: 100%;
-    height: 40px;
-    border-radius: var(--radius-md);
-    color: var(--text-2);
-    overflow: hidden;
-    transition:
-      background var(--dur-fast),
-      color var(--dur-fast),
-      scale 140ms var(--ease-out);
-  }
-
-  .item:hover {
-    background: var(--hover);
-    color: var(--text-1);
-  }
-
-  .item:active {
-    scale: 0.96;
-    background: var(--press);
-    transition-duration: var(--dur-fast), var(--dur-fast), 50ms;
-  }
-
+  .top.more-above { --fade-top: 22px; }
+  .top.more-below { --fade-bottom: 22px; }
+  .group { display: grid; gap: 2px; }
+  .item { position: relative; display: flex; align-items: center; width: 100%; height: 40px; border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out); }
+  .item:hover { background: var(--hover); color: var(--text-1); }
+  .item:active { scale: 0.96; background: var(--press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms; }
   /* Inside the rounded item, so the ring is never cut by the panel's edge. */
-  .item:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
-    outline-offset: -2px;
-  }
-
-  .item.active {
-    background: var(--selected);
-    color: var(--text-1);
-    font-weight: 600;
-    box-shadow: var(--btn-sheen);
-  }
-
-  /* Glowing accent pill on the active item */
-  .item.active::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 50%;
-    width: 3px;
-    height: 18px;
-    margin-top: -9px;
-    border-radius: 0 3px 3px 0;
-    background: var(--accent);
-  }
-
-  /* The owner's pages: the same items with a faint warm tint, so they read
-     as "mine, not everyone's" without shouting. */
-  .item.owner:hover {
-    background: rgb(var(--owner-rgb) / 0.07);
-  }
-
-  .item.owner.active {
-    background: rgb(var(--owner-rgb) / 0.13);
-  }
-
-  .item.owner.active::before {
-    background: rgb(var(--owner-rgb));
-  }
-
-  .item.owner:focus-visible {
-    outline-color: rgb(var(--owner-rgb) / 0.7);
-  }
-
+  .item:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: -2px; }
+  .item.active { background: var(--selected); color: var(--text-1); font-weight: 600; box-shadow: var(--btn-sheen); }
+  /* Glowing accent pill on the active item. */
+  .item.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  /* The owner's pages: the same items with a faint warm tint, so they read as "mine, not everyone's". */
+  .item.owner:hover { background: rgb(var(--owner-rgb) / 0.07); }
+  .item.owner.active { background: rgb(var(--owner-rgb) / 0.13); }
+  .item.owner.active::before { background: rgb(var(--owner-rgb)); }
+  .item.owner:focus-visible { outline-color: rgb(var(--owner-rgb) / 0.7); }
   /* The icon column is exactly as wide as the collapsed item, so icons never move. */
-  .icon {
-    position: relative;
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 48px;
-  }
-
-  .glyph {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-  }
-
-  .glyph :global(.custom-nav-icon) {
-    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35));
-  }
-
+  .icon { position: relative; flex: none; display: grid; place-items: center; width: 48px; }
+  .glyph { display: grid; place-items: center; width: 32px; height: 32px; }
+  .glyph :global(.custom-nav-icon) { filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35)); }
   /* A small shield on the icon's lower corner marks an owner-only page. */
-  .lock {
-    position: absolute;
-    bottom: -2px;
-    left: 29px;
-    display: grid;
-    place-items: center;
-    width: 13px;
-    height: 13px;
-    border-radius: 999px;
-    background: rgb(var(--owner-rgb) / 0.22);
-    color: rgb(var(--owner-rgb));
-    box-shadow: 0 0 0 2px var(--bg-1);
-    opacity: 0.85;
-  }
-
-  .item:hover .lock,
-  .item.active .lock {
-    opacity: 1;
-  }
-
+  .lock { position: absolute; bottom: -2px; left: 29px; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 999px; background: rgb(var(--owner-rgb) / 0.22); color: rgb(var(--owner-rgb)); box-shadow: 0 0 0 2px var(--bg-1); opacity: 0.85; }
+  .item:hover .lock, .item.active .lock { opacity: 1; }
   /* Count on the right while expanded; on the icon's corner while collapsed. */
-  .badge {
-    flex: none;
-    min-width: 19px;
-    margin: 0 10px 0 auto;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: var(--accent-grad);
-    color: #fff;
-    font-size: 10.5px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-    box-shadow: 0 0 10px var(--accent-glow);
-    transition: opacity var(--dur-med) var(--ease-out);
-  }
-
-  /* The icon is 20px, centered in 48 x 40: the count sits on its top-right
-     corner, cut out of it by a ring in the sidebar's colour, the way badges
-     on icons look everywhere else, instead of a dot lying over the glyph. */
+  .badge { flex: none; min-width: 19px; margin: 0 10px 0 auto; padding: 1px 6px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; box-shadow: 0 0 10px var(--accent-glow); transition: opacity var(--dur-med) var(--ease-out); }
+  /* The icon is 20px in 48 x 40: the count sits on its top-right corner, cut out by a ring in the sidebar's colour. */
   .dot {
-    position: absolute;
-    top: -2px;
-    left: 30px;
-    display: grid;
-    place-items: center;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--accent-grad);
-    color: #fff;
-    font-size: 9px;
-    font-style: normal;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    box-shadow:
-      0 0 0 2px var(--bg-1),
-      0 0 8px var(--accent-glow);
-    opacity: 0;
-    transform: scale(0.6);
-    transition:
-      opacity var(--dur-med) var(--ease-out),
-      transform var(--dur-med) var(--ease-out);
+    position: absolute; top: -2px; left: 30px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
+    background: var(--accent-grad); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+    box-shadow: 0 0 0 2px var(--bg-1), 0 0 8px var(--accent-glow); opacity: 0; transform: scale(0.6);
+    transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
   }
-
-  .collapsed .badge {
-    opacity: 0;
-  }
-
-  .collapsed .dot {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  .label {
-    white-space: nowrap;
-    font-weight: 500;
-    transition:
-      opacity var(--dur-med) var(--ease-out),
-      transform var(--dur-med) var(--ease-out);
-  }
-
-  .item.active .label {
-    font-weight: 600;
-  }
-
-  .collapsed .label {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-
-  .divider {
-    height: 1px;
-    margin: 6px 8px;
-    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.08), transparent);
-  }
-
+  .collapsed .badge { opacity: 0; }
+  .collapsed .dot { opacity: 1; transform: scale(1); }
+  .label { white-space: nowrap; font-weight: 500; transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
+  .item.active .label { font-weight: 600; }
+  .collapsed .label { opacity: 0; transform: translateX(-6px); }
+  .divider { height: 1px; margin: 6px 8px; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.08), transparent); }
   /* "Owner" between two hairlines; only the hairline when collapsed. */
-  .owner-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 13px;
-    margin: 6px 8px;
-  }
-
-  .owner-head .rule {
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgb(var(--owner-rgb) / 0.22));
-  }
-
-  .owner-head .rule:last-child {
-    background: linear-gradient(90deg, rgb(var(--owner-rgb) / 0.22), transparent);
-  }
-
-  .owner-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: rgb(var(--owner-rgb) / 0.72);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    transition: opacity var(--dur-med) var(--ease-out);
-  }
-
-  .collapsed .owner-label {
-    display: none;
-  }
-
-  .tooltip {
-    position: fixed;
-    z-index: 50;
-    max-width: 280px;
-    transform: translateY(-50%);
-    padding: 7px 10px 8px;
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: var(--radius-sm);
-    background: var(--tooltip-bg);
-    box-shadow: var(--elev-1);
-    font-size: 12.5px;
-    pointer-events: none;
-    animation: tip-in var(--dur-fast) var(--ease-out);
-  }
-
-  .tip-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    white-space: nowrap;
-  }
-
-  .tip-head strong {
-    color: var(--text-1);
-    font-weight: 600;
-  }
-
-  .tooltip kbd {
-    padding: 1px 5px;
-    border: 1px solid rgb(255 255 255 / 0.12);
-    border-radius: 5px;
-    background: rgb(255 255 255 / 0.05);
-    color: var(--text-2);
-    font-family: var(--font-sans);
-    font-size: 10.5px;
-  }
-
-  .tooltip p {
-    margin: 3px 0 0;
-    color: var(--text-2);
-    line-height: 1.35;
-  }
-
-  .tooltip .tip-owner {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: rgb(var(--owner-rgb) / 0.9);
-  }
-
-  @keyframes tip-in {
-    from {
-      opacity: 0;
-      transform: translate(-4px, -50%);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .tooltip {
-      animation: none;
-    }
-  }
+  .owner-head { display: flex; align-items: center; gap: 6px; height: 13px; margin: 6px 8px; }
+  .owner-head .rule { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--owner-rgb) / 0.22)); }
+  .owner-head .rule:last-child { background: linear-gradient(90deg, rgb(var(--owner-rgb) / 0.22), transparent); }
+  .owner-label { display: inline-flex; align-items: center; gap: 4px; color: rgb(var(--owner-rgb) / 0.72); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; transition: opacity var(--dur-med) var(--ease-out); }
+  .collapsed .owner-label { display: none; }
+  .tooltip { position: fixed; z-index: 50; max-width: 280px; transform: translateY(-50%); padding: 7px 10px 8px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: var(--radius-sm); background: var(--tooltip-bg); box-shadow: var(--elev-1); font-size: 12.5px; pointer-events: none; animation: tip-in var(--dur-fast) var(--ease-out); }
+  .tip-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; white-space: nowrap; }
+  .tip-head strong { color: var(--text-1); font-weight: 600; }
+  .tooltip kbd { padding: 1px 5px; border: 1px solid rgb(255 255 255 / 0.12); border-radius: 5px; background: rgb(255 255 255 / 0.05); color: var(--text-2); font-family: var(--font-sans); font-size: 10.5px; }
+  .tooltip p { margin: 3px 0 0; color: var(--text-2); line-height: 1.35; }
+  .tooltip .tip-owner { display: flex; align-items: center; gap: 5px; color: rgb(var(--owner-rgb) / 0.9); }
+  @keyframes tip-in { from { opacity: 0; transform: translate(-4px, -50%); } }
+  @media (prefers-reduced-motion: reduce) { .tooltip { animation: none; } }
 </style>

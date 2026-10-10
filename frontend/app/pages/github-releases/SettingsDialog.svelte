@@ -26,25 +26,20 @@
   import { githubReleasesApi as api, messageOf, problemOf, type GhStatus, type ProviderId, type ProviderView } from "./api";
   import GithubMark from "./GithubMark.svelte";
   import { githubReleases as gr, installTool } from "./state.svelte";
-
   let { section, onclose }: { section: "account" | "ai"; onclose: () => void } = $props();
-
   let current = $state<"account" | "ai">(untrack(() => section));
   const account = $derived(gr.page?.account ?? null);
   const ai = $derived(gr.page?.ai ?? null);
-
   // ─── Account ───
   let gh = $state<GhStatus | null>(null);
   let connecting = $state(false);
   let token = $state("");
   let waitingForLogin = $state(false);
   let poll: ReturnType<typeof setInterval> | undefined;
-
   onMount(() => {
     void loadGh();
   });
   onDestroy(() => clearInterval(poll));
-
   async function loadGh() {
     try {
       gh = await api.ghStatus();
@@ -52,7 +47,6 @@
       gh = { installed: !!gr.page?.gh, signedIn: false };
     }
   }
-
   async function connectGh() {
     connecting = true;
     try {
@@ -65,7 +59,6 @@
       connecting = false;
     }
   }
-
   async function ghLogin() {
     try {
       await api.ghLogin();
@@ -90,7 +83,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function connectToken() {
     if (!token.trim()) return;
     connecting = true;
@@ -105,7 +97,6 @@
       connecting = false;
     }
   }
-
   async function disconnect() {
     const ok = await confirm({
       title: "Disconnect GitHub?",
@@ -120,9 +111,7 @@
       toast.error(messageOf(error));
     }
   }
-
   const missingWorkflow = $derived(!!account && account.scopes.length > 0 && !account.scopes.includes("workflow"));
-
   // ─── AI ───
   let keys = $state<Partial<Record<ProviderId, string>>>({});
   let models = $state<Partial<Record<ProviderId, string>>>({});
@@ -130,35 +119,27 @@
   let testing = $state<ProviderId | null>(null);
   let ollamaModels = $state<string[] | null>(null);
   let ollamaUrl = $state(gr.page?.ai.ollamaUrl ?? "");
-
   $effect(() => {
     if (!ai) return;
     for (const p of ai.providers) {
       if (models[p.id] === undefined) models[p.id] = p.model === p.defaultModel ? "" : p.model;
     }
   });
-
   // Dragging a row by its handle previews the new order; it is saved on drop.
   let dragging = $state<ProviderId | null>(null);
   let preview = $state<ProviderId[] | null>(null);
-
   const ordered = $derived.by<ProviderView[]>(() => {
     if (!ai) return [];
     return (preview ?? ai.order).map((id) => ai.providers.find((p) => p.id === id)).filter((p): p is ProviderView => !!p);
   });
-
   /** The provider AI features use first: the first one set up. */
   const active = $derived(ordered.find((p) => p.ready)?.id ?? null);
-
   /** One row open at a time; with nothing set up, the first one. */
   let expanded = $state<ProviderId | null>(untrack(() => (gr.page?.ai.providers.some((p) => p.ready) ? null : (gr.page?.ai.order[0] ?? null))));
-
   function toggle(id: ProviderId) {
     expanded = expanded === id ? null : id;
   }
-
   type Status = { tone: "ok" | "warn" | "off"; text: string };
-
   function statusOf(p: ProviderView): Status {
     const limit = gr.aiLimits[p.id];
     if (limit && limit > now) {
@@ -169,13 +150,11 @@
     if (p.ready) return { tone: "ok", text: p.keyHint ? `Key ${p.keyHint}` : "Ready" };
     return { tone: "off", text: "Not set" };
   }
-
   let now = $state(Date.now());
   onMount(() => {
     const timer = setInterval(() => (now = Date.now()), 5000);
     return () => clearInterval(timer);
   });
-
   function startDrag(event: PointerEvent, id: ProviderId) {
     if (!ai || event.button !== 0) return;
     event.preventDefault();
@@ -183,7 +162,6 @@
     dragging = id;
     preview = ai.order.slice();
   }
-
   function dragMove(event: PointerEvent) {
     if (!dragging || !preview) return;
     const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-provider]");
@@ -194,7 +172,6 @@
     next.splice(next.indexOf(over) + (preview.indexOf(over) > preview.indexOf(dragging) ? 1 : 0), 0, dragging);
     preview = next;
   }
-
   async function endDrag() {
     const order = preview;
     dragging = null;
@@ -207,18 +184,15 @@
       toast.error(messageOf(error));
     }
   }
-
   function handleKey(event: KeyboardEvent, id: ProviderId) {
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       void move(id, event.key === "ArrowUp" ? -1 : 1);
     }
   }
-
   function setAi(view: typeof ai) {
     if (gr.page && view) gr.page.ai = view;
   }
-
   async function saveKey(p: ProviderView) {
     const key = keys[p.id]?.trim();
     if (!key) return;
@@ -233,7 +207,6 @@
       saving = null;
     }
   }
-
   async function removeKey(p: ProviderView) {
     try {
       setAi(await api.aiRemoveKey(p.id));
@@ -241,7 +214,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function move(id: ProviderId, by: number) {
     if (!ai) return;
     const order = ai.order.slice();
@@ -255,7 +227,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function saveModel(p: ProviderView) {
     const all: Partial<Record<ProviderId, string>> = {};
     for (const [id, value] of Object.entries(models)) if (value?.trim()) all[id as ProviderId] = value.trim();
@@ -266,7 +237,6 @@
     }
     void p;
   }
-
   async function setOllama(enabled: boolean) {
     try {
       setAi(await api.aiSetSettings({ ollamaEnabled: enabled, ollamaUrl: ollamaUrl.trim() || null }));
@@ -275,7 +245,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function saveOllamaUrl() {
     try {
       setAi(await api.aiSetSettings({ ollamaUrl: ollamaUrl.trim() || null }));
@@ -284,7 +253,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function listOllama() {
     try {
       ollamaModels = await api.aiOllamaModels();
@@ -293,7 +261,6 @@
       toast.error(messageOf(error));
     }
   }
-
   async function test(p: ProviderView) {
     testing = p.id;
     try {
@@ -306,9 +273,7 @@
     }
   }
 </script>
-
 <svelte:window onkeydown={(e) => e.key === "Escape" && !connecting && onclose()} />
-
 <div class="backdrop" role="presentation" transition:fade={{ duration: 140 }} {@attach portal}>
   <div class="dialog glass glass--3" role="dialog" aria-modal="true" aria-labelledby="gr-settings-title" transition:scale={{ start: 0.96, duration: 180, easing: cubicOut }}>
     <header>
@@ -328,7 +293,6 @@
         {#if active}<i class="tick ok" aria-hidden="true"></i>{:else}<i class="tick" aria-hidden="true"></i>{/if}
       </button>
     </nav>
-
     <div class="body">
       {#if current === "account"}
         {#if account}
@@ -431,7 +395,6 @@
                 </span>
                 <button class="icon-btn chev-btn" aria-label={open ? "Close" : "Edit"} onclick={() => toggle(p.id)}><ChevronDown size={15} /></button>
               </div>
-
               {#if open}
                 <div class="p-edit">
                   {#if p.needsKey}
@@ -481,7 +444,6 @@
                       <button class="link" onclick={() => void openUrl(p.keyUrl)}>Get Ollama <ExternalLink size={11} /></button>
                     {/if}
                   {/if}
-
                   {#if p.ready}
                     <div class="row model">
                       <span>Model</span>
@@ -502,7 +464,6 @@
     </div>
   </div>
 </div>
-
 <style>
   .backdrop {
     position: fixed;
@@ -513,7 +474,6 @@
     padding: 24px;
     background: var(--scrim);
   }
-
   .dialog {
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
@@ -523,25 +483,21 @@
     padding: 20px;
     border-radius: var(--radius-xl);
   }
-
   header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
   }
-
   h2 {
     margin: 0 0 3px;
     font-size: 17px;
   }
-
   header p {
     margin: 0;
     color: var(--text-3);
     font-size: 12px;
   }
-
   .seg {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -551,7 +507,6 @@
     border-radius: 11px;
     background: rgb(0 0 0 / 0.18);
   }
-
   .seg button {
     display: flex;
     align-items: center;
@@ -562,28 +517,23 @@
     color: var(--text-2);
     font-size: 12.5px;
   }
-
   .seg button:hover {
     color: var(--text-1);
   }
-
   .seg button.active {
     background: rgb(var(--accent-rgb) / 0.18);
     color: var(--text-1);
     box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.35);
   }
-
   .tick {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: rgb(255 255 255 / 0.2);
   }
-
   .tick.ok {
     background: #3ecf8e;
   }
-
   .body {
     display: grid;
     align-content: start;
@@ -592,18 +542,15 @@
     padding-right: 4px;
     overflow: auto;
   }
-
   .lead {
     margin: 0;
     color: var(--text-2);
     font-size: 12.3px;
     line-height: 1.5;
   }
-
   .lead :global(svg) {
     vertical-align: -2px;
   }
-
   .note {
     display: flex;
     gap: 7px;
@@ -612,12 +559,10 @@
     font-size: 11.3px;
     line-height: 1.45;
   }
-
   .note :global(svg) {
     flex: none;
     margin-top: 1px;
   }
-
   .warn {
     display: flex;
     align-items: center;
@@ -629,7 +574,6 @@
     color: #ffd08a;
     font-size: 12px;
   }
-
   /* Account */
   .who {
     display: flex;
@@ -640,11 +584,9 @@
     border-radius: 12px;
     background: linear-gradient(135deg, rgb(62 207 142 / 0.07), rgb(255 255 255 / 0.02));
   }
-
   .who img {
     border-radius: 50%;
   }
-
   .who-mark {
     display: grid;
     place-items: center;
@@ -653,23 +595,19 @@
     border-radius: 50%;
     background: rgb(255 255 255 / 0.06);
   }
-
   .who-text {
     display: grid;
     flex: 1;
     gap: 1px;
     min-width: 0;
   }
-
   .who-text strong {
     font-size: 14px;
   }
-
   .who-text span {
     color: var(--text-3);
     font-size: 12px;
   }
-
   .facts {
     display: grid;
     margin: 0;
@@ -677,7 +615,6 @@
     border-radius: 12px;
     background: rgb(0 0 0 / 0.12);
   }
-
   .facts > div {
     display: grid;
     grid-template-columns: 120px minmax(0, 1fr);
@@ -685,26 +622,21 @@
     padding: 9px 13px;
     font-size: 12.2px;
   }
-
   .facts > div + div {
     border-top: 1px solid rgb(255 255 255 / 0.05);
   }
-
   dt {
     color: var(--text-3);
   }
-
   dd {
     margin: 0;
     color: var(--text-1);
   }
-
   .scopes {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
   }
-
   .scopes code {
     padding: 0 6px;
     border-radius: 5px;
@@ -712,12 +644,10 @@
     color: var(--text-2);
     line-height: 18px;
   }
-
   .scopes code.need {
     background: rgb(var(--accent-rgb) / 0.16);
     color: #c9cffb;
   }
-
   .steps {
     display: grid;
     margin: 0;
@@ -727,22 +657,18 @@
     background: rgb(0 0 0 / 0.12);
     list-style: none;
   }
-
   .steps li {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 11px 13px;
   }
-
   .steps li + li {
     border-top: 1px solid rgb(255 255 255 / 0.05);
   }
-
   .steps li.off {
     opacity: 0.55;
   }
-
   .num {
     display: grid;
     flex: none;
@@ -755,33 +681,27 @@
     font-size: 12px;
     font-weight: 600;
   }
-
   .done .num {
     border-color: rgb(62 207 142 / 0.4);
     color: #6fdba5;
   }
-
   .steps li > div {
     display: grid;
     flex: 1;
     gap: 1px;
     min-width: 0;
   }
-
   .steps strong {
     font-size: 12.8px;
   }
-
   .steps li > div span {
     color: var(--text-3);
     font-size: 11.6px;
   }
-
   .token {
     color: var(--text-2);
     font-size: 12.3px;
   }
-
   .token summary {
     display: inline-flex;
     align-items: center;
@@ -789,15 +709,12 @@
     cursor: pointer;
     list-style: none;
   }
-
   .token summary::-webkit-details-marker {
     display: none;
   }
-
   .token:not([open]) :global(.chev) {
     transform: rotate(-90deg);
   }
-
   .token-body {
     display: grid;
     gap: 8px;
@@ -806,13 +723,11 @@
     border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 11px;
   }
-
   .token-body p {
     margin: 0;
     color: var(--text-3);
     font-size: 11.6px;
   }
-
   /* AI */
   .providers {
     display: grid;
@@ -823,24 +738,19 @@
     background: rgb(0 0 0 / 0.12);
     list-style: none;
   }
-
   .providers li + li {
     border-top: 1px solid rgb(255 255 255 / 0.05);
   }
-
   .providers li.open {
     background: rgb(255 255 255 / 0.025);
   }
-
   .providers li.is-dragging {
     background: rgb(var(--accent-rgb) / 0.1);
   }
-
   .providers.dragging {
     cursor: grabbing;
     user-select: none;
   }
-
   .p-row {
     display: flex;
     align-items: center;
@@ -848,7 +758,6 @@
     min-height: 52px;
     padding: 6px 8px 6px 4px;
   }
-
   .grip {
     display: grid;
     flex: none;
@@ -860,13 +769,11 @@
     cursor: grab;
     touch-action: none;
   }
-
   .grip:hover,
   .grip:focus-visible {
     background: rgb(255 255 255 / 0.05);
     color: var(--text-1);
   }
-
   .rank {
     flex: none;
     width: 16px;
@@ -875,7 +782,6 @@
     font-variant-numeric: tabular-nums;
     text-align: center;
   }
-
   .p-main {
     display: grid;
     flex: 1;
@@ -884,17 +790,14 @@
     padding: 4px 2px;
     text-align: left;
   }
-
   .p-name {
     display: flex;
     align-items: center;
     gap: 7px;
   }
-
   .p-name strong {
     font-size: 13px;
   }
-
   .used {
     padding: 0 6px;
     border-radius: 5px;
@@ -904,7 +807,6 @@
     font-style: normal;
     line-height: 16px;
   }
-
   .p-main small {
     overflow: hidden;
     color: var(--text-3);
@@ -912,7 +814,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .pill {
     display: inline-flex;
     flex: none;
@@ -924,70 +825,56 @@
     line-height: 22px;
     white-space: nowrap;
   }
-
   .pill.ok {
     background: rgb(62 207 142 / 0.12);
     color: #6fdba5;
   }
-
   .pill.warn {
     background: rgb(255 180 84 / 0.12);
     color: #ffd08a;
   }
-
   .pill.off {
     background: rgb(255 255 255 / 0.05);
     color: var(--text-3);
   }
-
   .chev-btn {
     width: 28px;
     height: 28px;
   }
-
   .chev-btn :global(svg) {
     transition: transform var(--dur-fast);
   }
-
   li.open .chev-btn :global(svg) {
     transform: rotate(180deg);
   }
-
   .p-edit {
     display: grid;
     gap: 9px;
     padding: 2px 14px 13px 52px;
   }
-
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-
   .row .input {
     flex: 1;
     min-width: 0;
   }
-
   .row.small {
     gap: 14px;
   }
-
   .save:disabled {
     opacity: 0.55;
   }
-
   .mono {
     font-family: var(--font-mono);
     font-size: 11.8px;
   }
-
   .model span {
     color: var(--text-3);
     font-size: 11.8px;
   }
-
   .privacy {
     display: flex;
     align-items: center;
@@ -996,7 +883,6 @@
     color: var(--text-3);
     font-size: 11px;
   }
-
   .link {
     display: inline-flex;
     align-items: center;
@@ -1008,27 +894,22 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-
   .link.danger {
     color: #ff9d9d;
   }
-
   .switch-row {
     color: var(--text-2);
     font-size: 12.3px;
   }
-
   .models {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
   }
-
   .hint {
     color: var(--text-3);
     font-size: 11.8px;
   }
-
   code {
     font-family: var(--font-mono);
     font-size: 11px;

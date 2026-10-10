@@ -17,9 +17,7 @@
   import { toast } from "../../../lib/toast.svelte";
   import { githubReleasesApi as api, messageOf, type Deleted, type EntryStatus, type LoneTag, type Release } from "./api";
   import { formatRelative, githubReleases as gr, type ListItem } from "./state.svelte";
-
   let { item, entry }: { item: ListItem; entry: EntryStatus } = $props();
-
   const repoId = $derived(item.repo.id);
   let releases = $state<Release[] | null>(null);
   let error = $state<string | null>(null);
@@ -33,14 +31,11 @@
   let tags = $state<LoneTag[] | null>(null);
   let tagsError = $state<string | null>(null);
   let pickedTags = $state<string[]>([]);
-
   /** The release being edited (or the combined notes being saved). */
   let editor = $state<{ id: number; title: string; notes: string; prerelease: boolean; combined: number[] | null } | null>(null);
-
   onMount(() => {
     void load();
   });
-
   async function load() {
     if (!gr.page?.account) {
       error = "Connect your GitHub account to see the releases.";
@@ -59,7 +54,6 @@
       loading = false;
     }
   }
-
   async function loadTags() {
     try {
       tags = await api.loneTags(repoId);
@@ -69,33 +63,27 @@
       tagsError = messageOf(e);
     }
   }
-
   /** This app's releases: its own tags, and the shared v… tags before them. */
   function mine(release: Release): boolean {
     if (!entry.monorepo) return true;
     if (release.tagName.startsWith(entry.tagPrefix)) return true;
     return entry.lastTag?.legacy === true && /^v\d/.test(release.tagName) && release.tagName.split(".")[0] === entry.lastTag.name.split(".")[0];
   }
-
   /** The same for a tag. */
   function mineTag(name: string): boolean {
     if (!entry.monorepo || name.startsWith(entry.tagPrefix)) return true;
     return entry.lastTag?.legacy === true && /^v\d/.test(name) && name.split(".")[0] === entry.lastTag.name.split(".")[0];
   }
-
   const shown = $derived((releases ?? []).filter((r) => all || mine(r)));
   const shownTags = $derived((tags ?? []).filter((t) => all || mineTag(t.name)));
   const pickedLone = $derived(shownTags.filter((t) => pickedTags.includes(t.name)));
   const allTagsPicked = $derived(shownTags.length > 0 && pickedLone.length === shownTags.length);
-
   function toggleTag(name: string) {
     pickedTags = pickedTags.includes(name) ? pickedTags.filter((n) => n !== name) : [...pickedTags, name];
   }
-
   function where(tag: LoneTag): string {
     return tag.local && tag.remote ? "on GitHub and this PC" : tag.remote ? "only on GitHub" : "only on this PC";
   }
-
   async function removeTags(names: string[]) {
     const list = shownTags.filter((t) => names.includes(t.name));
     if (!list.length) return;
@@ -123,11 +111,9 @@
     }
   }
   const pickedReleases = $derived(shown.filter((r) => picked.includes(r.id)));
-
   function toggle(id: number) {
     picked = picked.includes(id) ? picked.filter((p) => p !== id) : [...picked, id];
   }
-
   async function remove(ids: number[]) {
     const list = (releases ?? []).filter((r) => ids.includes(r.id));
     if (!list.length) return;
@@ -156,11 +142,9 @@
       working = false;
     }
   }
-
   function edit(release: Release) {
     editor = { id: release.id, title: release.name ?? release.tagName, notes: release.body ?? "", prerelease: release.prerelease, combined: null };
   }
-
   async function save() {
     if (!editor) return;
     if (editor.combined) return saveCombined();
@@ -176,21 +160,17 @@
       working = false;
     }
   }
-
   /** The releases a combine deletes (all picked but the one getting the notes). */
   const combineOthers = $derived(editor?.combined ? (releases ?? []).filter((r) => editor!.combined!.includes(r.id) && r.id !== editor!.id) : []);
-
   /** Why a release's tag stays when its release goes, if it does. */
   function tagStays(release: Release, target: Release, combined: number[]): string | null {
     if (release.tagName === target.tagName) return `the combined release uses it`;
     if ((releases ?? []).some((r) => r.tagName === release.tagName && !combined.includes(r.id))) return "another release uses it";
     return null;
   }
-
   /** What a combine couldn't delete, to try again. */
   let leftovers = $state<{ targetId: number; targetTag: string; failures: Deleted[] } | null>(null);
   let retrying = $state(false);
-
   function report(results: Deleted[], targetId: number, targetTag: string, combinedInto: string | null) {
     const failures = results.filter((d) => d.error);
     const releasesGone = results.filter((d) => d.ok && d.releaseId).length;
@@ -205,7 +185,6 @@
     for (const kept of results.filter((d) => d.tagKept)) toast.info(`${kept.tag}: ${kept.tagKept}`);
     leftovers = failures.length ? { targetId, targetTag, failures } : null;
   }
-
   async function saveCombined() {
     if (!editor?.combined) return;
     const combined = editor.combined;
@@ -243,7 +222,6 @@
       working = false;
     }
   }
-
   async function retryLeftovers() {
     if (!leftovers) return;
     const { targetId, targetTag, failures } = leftovers;
@@ -264,7 +242,6 @@
       retrying = false;
     }
   }
-
   function combine() {
     // The notes go on the newest one.
     const byDate = [...pickedReleases].sort((a, b) => Date.parse(b.publishedAt ?? b.createdAt ?? "") - Date.parse(a.publishedAt ?? a.createdAt ?? "") || 0);
@@ -279,10 +256,8 @@
       setBusy: (value) => (combining = value),
     });
   }
-
   const downloads = (r: Release) => r.assets.reduce((sum, a) => sum + a.downloadCount, 0);
 </script>
-
 <div class="history">
   <div class="bar">
     <div class="views" role="tablist" aria-label="Show">
@@ -301,7 +276,6 @@
       <RefreshCw size={14} class={loading ? "spin" : ""} />
     </button>
   </div>
-
   {#if view === "tags"}
     {#if tagsError}
       <div class="quiet">
@@ -349,7 +323,6 @@
       <button class="icon-btn" aria-label="Clear the selection" onclick={() => (picked = [])}><X size={13} /></button>
     </div>
   {/if}
-
   {#if leftovers}
     <div class="leftovers" role="alert">
       <div class="leftovers-head">
@@ -370,7 +343,6 @@
       </div>
     </div>
   {/if}
-
   {#if editor}
     <div class="editor">
       <div class="editor-head">
@@ -390,7 +362,6 @@
       </div>
     </div>
   {/if}
-
   {#if error}
     <div class="quiet">
       <span>{error}</span>
@@ -425,7 +396,6 @@
   {/if}
   {/if}
 </div>
-
 <style>
   .history {
     display: flex;
@@ -436,7 +406,6 @@
     padding: 12px 16px 16px;
     overflow: auto;
   }
-
   .bar,
   .selection,
   .editor-head,
@@ -445,19 +414,15 @@
     align-items: center;
     gap: 9px;
   }
-
   .editor-foot {
     flex-wrap: wrap;
   }
-
   .editor-foot .opt {
     white-space: nowrap;
   }
-
   .grow {
     flex: 1;
   }
-
   .views {
     display: flex;
     gap: 2px;
@@ -466,7 +431,6 @@
     border-radius: 10px;
     background: rgb(255 255 255 / 0.03);
   }
-
   .views button {
     display: flex;
     align-items: center;
@@ -480,16 +444,13 @@
     font-size: 12.3px;
     cursor: pointer;
   }
-
   .views button:hover {
     color: var(--text-1);
   }
-
   .views button.active {
     background: rgb(var(--accent-rgb) / 0.16);
     color: var(--text-1);
   }
-
   .views span {
     padding: 0 6px;
     border-radius: 99px;
@@ -498,21 +459,17 @@
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
-
   .views span.warn {
     background: rgb(255 196 92 / 0.16);
     color: #ffd08a;
   }
-
   .selection.idle {
     border-color: rgb(255 255 255 / 0.06);
     background: rgb(255 255 255 / 0.03);
   }
-
   .tag-name {
     font-size: 12.5px;
   }
-
   .opt {
     display: flex;
     align-items: center;
@@ -520,7 +477,6 @@
     color: var(--text-2);
     font-size: 12.3px;
   }
-
   .selection {
     padding: 7px 10px;
     border: 1px solid rgb(var(--accent-rgb) / 0.3);
@@ -528,7 +484,6 @@
     background: rgb(var(--accent-rgb) / 0.08);
     font-size: 12.3px;
   }
-
   .editor {
     display: grid;
     gap: 8px;
@@ -537,12 +492,10 @@
     border-radius: 12px;
     background: rgb(255 255 255 / 0.03);
   }
-
   .editor-head strong {
     flex: 1;
     font-size: 13px;
   }
-
   .notes {
     min-height: 160px;
     resize: vertical;
@@ -550,7 +503,6 @@
     font-size: 12px;
     line-height: 1.5;
   }
-
   .leftovers {
     display: grid;
     gap: 6px;
@@ -560,18 +512,15 @@
     background: rgb(255 120 120 / 0.06);
     font-size: 12.3px;
   }
-
   .leftovers-head,
   .leftovers-foot {
     display: flex;
     align-items: center;
     gap: 9px;
   }
-
   .leftovers-head strong {
     flex: 1;
   }
-
   .leftovers ul {
     display: grid;
     gap: 3px;
@@ -579,12 +528,10 @@
     padding-left: 16px;
     color: var(--text-2);
   }
-
   .hint {
     color: var(--text-3);
     font-size: 11.5px;
   }
-
   .list {
     display: grid;
     gap: 3px;
@@ -592,7 +539,6 @@
     padding: 0;
     list-style: none;
   }
-
   .list li {
     display: flex;
     align-items: center;
@@ -601,23 +547,19 @@
     border: 1px solid transparent;
     border-radius: 10px;
   }
-
   .list li:hover {
     background: var(--hover);
   }
-
   .list li.picked {
     border-color: rgb(var(--accent-rgb) / 0.3);
     background: rgb(var(--accent-rgb) / 0.1);
   }
-
   .text {
     display: grid;
     flex: 1;
     gap: 2px;
     min-width: 0;
   }
-
   .text strong {
     overflow: hidden;
     font-size: 13px;
@@ -625,7 +567,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .text small {
     display: flex;
     align-items: center;
@@ -633,12 +574,10 @@
     color: var(--text-3);
     font-size: 11.3px;
   }
-
   code {
     font-family: var(--font-mono);
     font-size: 11px;
   }
-
   .badge {
     margin-left: 6px;
     padding: 1px 6px;
@@ -646,26 +585,21 @@
     font-size: 10px;
     font-weight: 600;
   }
-
   .draft {
     background: rgb(255 255 255 / 0.1);
     color: var(--text-2);
   }
-
   .pre {
     background: rgb(255 196 92 / 0.16);
     color: #ffd08a;
   }
-
   .list .icon-btn {
     width: 28px;
     height: 28px;
   }
-
   .icon-btn.danger:hover {
     color: #ff9d9d;
   }
-
   .quiet {
     display: grid;
     place-items: center;

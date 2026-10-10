@@ -4,7 +4,6 @@
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import type { GameSaveEntry, GameSaveStatus, GameSavesTab } from "./api";
   import { formatBytes, formatDate, formatRelative, gameSavesState as state } from "./state.svelte";
-
   let { game, tab }: { game: GameSaveEntry; tab: GameSavesTab } = $props();
   const uid = $props.id();
   const selected = $derived(state.isSelected(game));
@@ -17,10 +16,8 @@
       label: `${formatDate(snapshot.timestamp)}${snapshot.label ? ` · ${snapshot.label}` : ""}${snapshot.isSafety ? " · Safety" : ""}`,
     })),
   );
-
   /** The backend lists at most this many of a game's save folders. */
   const PATHS_LISTED = 8;
-
   /** The folder a game's save folders are all in: "…/DeathStrandingDC/1122762396"
    *  for its eight autosave folders, rather than the first one and "+7",
    *  which read as seven changes. Nothing when they share only the drive. */
@@ -33,14 +30,12 @@
     }
     return shared > 1 ? first.slice(0, shared).join(paths[0].includes("\\") ? "\\" : "/") : null;
   }
-
   const shownPath = $derived(
     game.paths.length > 1 ? (commonFolder(game.paths) ?? game.paths[0]) : (game.paths[0] ?? "No local path available"),
   );
   const folderCount = $derived(
     game.paths.length > 1 ? `${game.paths.length >= PATHS_LISTED ? `${PATHS_LISTED}+` : game.paths.length} folders` : null,
   );
-
   /** Two letters and a colour of its own for each game, so the list is not
    *  one icon repeated: "AC" for Assassin's Creed. */
   const monogram = $derived.by(() => {
@@ -50,7 +45,6 @@
     for (const char of game.title) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
     return { letters, hue: hash % 360 };
   });
-
   const statusInfo: Record<GameSaveStatus, { label: string; tone: string }> = {
     notBackedUp: { label: "First backup needed", tone: "warning" },
     backedUp: { label: "Backed up", tone: "success" },
@@ -61,7 +55,6 @@
     error: { label: "Needs attention", tone: "danger" },
   };
 </script>
-
 <article class="card surface" class:selected class:problem={game.status === "error"}>
   <input
     id="{uid}-check"
@@ -72,7 +65,6 @@
     aria-label={`Select ${game.title}`}
     onchange={() => state.toggleSelected(game)}
   />
-
   <div class="identity">
     {#if game.steamId && state.covers[game.steamId]}
       <img class="cover" src={state.covers[game.steamId]} alt="" aria-hidden="true" loading="lazy" decoding="async" />
@@ -96,7 +88,6 @@
       {/if}
     </span>
   </div>
-
   <dl class="stats" aria-label={`Save details for ${game.title}`}>
     <div>
       <dt>Size</dt>
@@ -111,7 +102,6 @@
       <dd class:never={!game.lastBackupAt} title={formatDate(game.lastBackupAt)}>{#if game.lastBackupAt}<small aria-hidden="true">Backed up</small> {formatRelative(game.lastBackupAt)}{:else}Never backed up{/if}</dd>
     </div>
   </dl>
-
   <div class="actions">
     {#if tab === "backup" && game.snapshots.length}
       <div class="snapshot">
@@ -127,7 +117,6 @@
         />
       </div>
     {/if}
-
     <label
       class="auto"
       class:on={game.autoBackup}
@@ -158,7 +147,6 @@
     </button>
   </div>
 </article>
-
 <style>
   /* Identity takes what is left; the stats keep the same widths on every
      row, so the columns line up down the list. */
@@ -174,24 +162,19 @@
       border-color var(--dur-fast),
       background var(--dur-fast);
   }
-
   .card:hover {
     border-color: rgb(255 255 255 / 0.11);
   }
-
   .card.selected {
     border-color: rgb(var(--accent-rgb) / 0.34);
     background: linear-gradient(180deg, rgb(var(--accent-rgb) / 0.085), rgb(var(--accent-rgb) / 0.025));
   }
-
   .card.problem {
     border-color: rgb(229 72 77 / 0.2);
   }
-
   .check {
     grid-area: check;
   }
-
   .identity {
     grid-area: identity;
     display: flex;
@@ -199,7 +182,6 @@
     gap: 10px;
     min-width: 0;
   }
-
   /* Steam's portrait art; the monogram takes the same place without one. */
   .cover {
     width: 28px;
@@ -210,7 +192,6 @@
     background: rgb(255 255 255 / 0.04);
     box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08), 0 6px 14px -8px rgb(0 0 0 / 0.8);
   }
-
   .monogram {
     display: grid;
     place-items: center;
@@ -227,13 +208,11 @@
     letter-spacing: 0.02em;
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07);
   }
-
   .title-wrap {
     display: grid;
     gap: 3px;
     min-width: 0;
   }
-
   .title-line,
   .meta-line {
     display: flex;
@@ -241,7 +220,6 @@
     gap: 7px;
     min-width: 0;
   }
-
   .title {
     cursor: pointer;
     min-width: 0;
@@ -251,7 +229,6 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-
   .status,
   .platform {
     display: inline-flex;
@@ -269,11 +246,9 @@
     line-height: 1;
     white-space: nowrap;
   }
-
   .platform {
     font-weight: 500;
   }
-
   .status i {
     width: 6px;
     height: 6px;
@@ -281,31 +256,26 @@
     background: currentColor;
     opacity: 0.9;
   }
-
   .status.success {
     border-color: rgb(62 207 142 / 0.14);
     background: rgb(62 207 142 / 0.05);
     color: rgb(92 218 166 / 0.85);
   }
-
   .status.warning {
     border-color: rgb(245 176 65 / 0.16);
     background: rgb(245 176 65 / 0.05);
     color: rgb(245 188 95 / 0.86);
   }
-
   .status.changed {
     border-color: rgb(77 163 255 / 0.16);
     background: rgb(77 163 255 / 0.05);
     color: rgb(112 183 255 / 0.86);
   }
-
   .status.danger {
     border-color: rgb(229 72 77 / 0.2);
     background: rgb(229 72 77 / 0.05);
     color: rgb(255 145 145 / 0.86);
   }
-
   .path {
     min-width: 0;
     overflow: hidden;
@@ -315,7 +285,6 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-
   .more-paths {
     flex: none;
     padding: 1px 7px;
@@ -325,7 +294,6 @@
     font-size: 10px;
     white-space: nowrap;
   }
-
   .error {
     display: inline-flex;
     align-items: center;
@@ -337,7 +305,6 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-
   .stats {
     grid-area: stats;
     display: grid;
@@ -345,11 +312,9 @@
     gap: 12px;
     margin: 0;
   }
-
   .stats div {
     min-width: 0;
   }
-
   /* For screen readers: each value says what it is on screen. */
   dt {
     position: absolute;
@@ -359,7 +324,6 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-
   dd {
     margin: 0;
     overflow: hidden;
@@ -370,17 +334,14 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-
   dd small {
     color: var(--text-3);
     font-size: 11px;
     font-weight: 400;
   }
-
   dd.never {
     color: rgb(245 188 95 / 0.75);
   }
-
   .actions {
     grid-area: actions;
     display: flex;
@@ -388,7 +349,6 @@
     justify-content: flex-end;
     gap: 10px;
   }
-
   .auto {
     display: flex;
     align-items: center;
@@ -406,33 +366,27 @@
       background var(--dur-fast),
       color var(--dur-fast);
   }
-
   .auto.on {
     border-color: rgb(var(--accent-rgb) / 0.2);
     background: rgb(var(--accent-rgb) / 0.06);
     color: rgb(var(--accent-soft-rgb) / 0.95);
   }
-
   .auto.saving { border-color: rgb(var(--accent-rgb) / .4); }
-
   /* Both words take the same room, so the switch does not move. */
   .auto-label {
     min-width: 58px;
     text-align: right;
   }
-
   .snapshot {
     display: grid;
     gap: 3px;
     color: var(--text-3);
     font-size: 10.5px;
   }
-
   button:disabled {
     opacity: 0.35;
     pointer-events: none;
   }
-
   /* Narrower: the values go under the name, on one short line. */
   @container (max-width: 860px) {
     .card {
@@ -441,7 +395,6 @@
         "check identity actions"
         ". stats stats";
     }
-
     .stats {
       display: flex;
       flex-wrap: wrap;
@@ -449,7 +402,6 @@
       padding-left: 38px;
     }
   }
-
   /* Very narrow: the switch and the folder go under the values. */
   @container (max-width: 480px) {
     .card {
@@ -459,11 +411,9 @@
         ". stats"
         ". actions";
     }
-
     .stats {
       padding-left: 0;
     }
-
     .actions {
       justify-content: flex-start;
       flex-wrap: wrap;

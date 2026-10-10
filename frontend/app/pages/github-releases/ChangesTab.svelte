@@ -19,14 +19,11 @@
   import { githubReleasesApi as api, messageOf, type ChangeKind, type FileChange, type FileDiff, type GitStatus } from "./api";
   import CleanOverview from "./CleanOverview.svelte";
   import { githubReleases as gr, type ListItem } from "./state.svelte";
-
   let { item }: { item: ListItem } = $props();
-
   const repoId = $derived(item.repo.id);
   const entry = $derived(item.entry);
   const status = $derived(item.status);
   const MODE_KEY = "myle.githubReleases.diffMode";
-
   let git = $state<GitStatus | null>(null);
   let loadError = $state<string | null>(null);
   let onlyApp = $state(true);
@@ -38,16 +35,13 @@
   let staging = $state(false);
   let generating = $state(false);
   let outputOpen = $state(false);
-
   /** The message box keeps its text per repository while MYLE is open. */
   let message = $state(untrack(() => gr.drafts[item.repo.id] ?? ""));
   $effect(() => {
     gr.drafts[repoId] = message;
   });
-
   const busy = $derived(gr.running(repoId));
   const output = $derived(gr.gitOutput[repoId] ?? null);
-
   const changes = $derived.by<FileChange[]>(() => {
     const all = git?.changes ?? [];
     if (!entry?.monorepo || !onlyApp || !entry.sub) return all;
@@ -61,7 +55,6 @@
   const someStaged = $derived(staged.length > 0 && !allStaged);
   const selected = $derived(changes.find((c) => c.path === selectedPath) ?? null);
   const conflicted = $derived(changes.some((c) => c.kind === "conflicted"));
-
   async function load() {
     try {
       git = await api.changes(repoId);
@@ -73,11 +66,9 @@
       loadError = messageOf(error);
     }
   }
-
   onMount(() => {
     void load();
   });
-
   // The status changed (a refresh, a commit): read the files again.
   let seen = "";
   $effect(() => {
@@ -88,7 +79,6 @@
       if (!first) void load();
     }
   });
-
   async function open(path: string, quiet = false) {
     selectedPath = path;
     if (!quiet) {
@@ -105,7 +95,6 @@
       if (selectedPath === path) diffLoading = false;
     }
   }
-
   async function stage(paths: string[], on: boolean) {
     if (!paths.length || staging) return;
     staging = true;
@@ -117,12 +106,10 @@
       staging = false;
     }
   }
-
   function toggleAll() {
     if (allStaged) void stage(changes.map((c) => c.path), false);
     else void stage(changes.filter((c) => c.staged !== "all").map((c) => c.path), true);
   }
-
   async function commit(push: boolean) {
     if (!message.trim()) {
       document.getElementById("gr-commit-message")?.focus();
@@ -139,7 +126,6 @@
       await load();
     }
   }
-
   function generate() {
     void gr.ai({
       run: (provider) => api.aiCommitMessage(repoId, provider),
@@ -150,11 +136,9 @@
       setBusy: (value) => (generating = value),
     });
   }
-
   let aiNote = $state<string | null>(null);
   const providerName = (id: string) => gr.page?.ai.providers.find((p) => p.id === id)?.name ?? id;
   const firstAi = $derived(gr.page?.ai.order.map((id) => gr.page?.ai.providers.find((p) => p.id === id)).find((p) => p?.ready) ?? null);
-
   const letters: Record<ChangeKind, string> = {
     added: "A",
     modified: "M",
@@ -175,12 +159,10 @@
     untracked: "New, not tracked yet",
     conflicted: "Merge conflict",
   };
-
   function split(path: string): [string, string] {
     const at = path.lastIndexOf("/");
     return at < 0 ? ["", path] : [path.slice(0, at + 1), path.slice(at + 1)];
   }
-
   /** DiffView's view of a git change. */
   const change = $derived.by<Change | null>(() => {
     if (!selected || !diff) return null;
@@ -198,19 +180,16 @@
       stillInSource: false,
     };
   });
-
   function setMode(next: "split" | "unified") {
     mode = next;
     writeJson(MODE_KEY, next);
   }
-
   function onMessageKey(event: KeyboardEvent) {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       void commit(event.shiftKey);
     }
   }
-
   let checkboxes = $state<Record<string, HTMLInputElement>>({});
   let allBox = $state<HTMLInputElement>();
   $effect(() => {
@@ -221,7 +200,6 @@
     }
   });
 </script>
-
 <div class="changes">
   {#if status && status.branch.behind > 0}
     <div class="notice">
@@ -232,7 +210,6 @@
       </button>
     </div>
   {/if}
-
   {#if git && !loadError && !changes.length}
     <CleanOverview {item} {hidden} onShowHidden={entry?.monorepo ? () => (onlyApp = false) : undefined} />
   {:else}
@@ -285,7 +262,6 @@
           {/each}
         {/if}
       </div>
-
       <div class="composer">
         <textarea
           id="gr-commit-message"
@@ -326,7 +302,6 @@
         </div>
       </div>
     </section>
-
     <section class="diff">
       {#if selected}
         <div class="diff-head">
@@ -353,7 +328,6 @@
     </section>
   </div>
   {/if}
-
   {#if output}
     <div class="output" class:open={outputOpen}>
       <button class="output-head" onclick={() => (outputOpen = !outputOpen)}>
@@ -371,7 +345,6 @@
     </div>
   {/if}
 </div>
-
 <style>
   .changes {
     display: flex;
@@ -383,12 +356,10 @@
     overflow-y: auto;
     container: changes / inline-size;
   }
-
   .notice,
   .output {
     flex: none;
   }
-
   .notice {
     display: flex;
     align-items: center;
@@ -400,12 +371,10 @@
     color: #9fdcff;
     font-size: 12.5px;
   }
-
   .notice span {
     flex: 1;
     color: var(--text-2);
   }
-
   .grid {
     display: grid;
     flex: 1;
@@ -413,7 +382,6 @@
     gap: 12px;
     min-height: 0;
   }
-
   /* Too narrow for side by side: the files, then the diff, and the tab
      scrolls. */
   @container changes (max-width: 760px) {
@@ -422,17 +390,14 @@
       flex: none;
       flex-direction: column;
     }
-
     .file-list {
       max-height: 240px;
     }
-
     .diff {
       flex: none;
       min-height: 320px;
     }
   }
-
   section {
     display: flex;
     flex-direction: column;
@@ -442,7 +407,6 @@
     border-radius: 12px;
     background: rgb(0 0 0 / 0.15);
   }
-
   .files-head {
     display: flex;
     align-items: center;
@@ -452,20 +416,17 @@
     font-size: 12.5px;
     font-weight: 550;
   }
-
   .all {
     display: flex;
     flex: 1;
     align-items: center;
     gap: 10px;
   }
-
   .picked {
     color: var(--text-3);
     font-size: 11.5px;
     font-weight: 400;
   }
-
   .only {
     display: flex;
     align-items: center;
@@ -475,7 +436,6 @@
     color: var(--text-2);
     font-size: 11.8px;
   }
-
   .file-list {
     flex: 1;
     min-height: 120px;
@@ -485,7 +445,6 @@
     flex-direction: column;
     gap: 2px;
   }
-
   .file {
     display: flex;
     align-items: center;
@@ -494,15 +453,12 @@
     border-radius: 8px;
     transition: background 0.15s ease;
   }
-
   .file:hover {
     background: var(--hover);
   }
-
   .file.selected {
     background: rgb(var(--accent-rgb) / 0.18);
   }
-
   .file-name {
     display: flex;
     flex: 1;
@@ -517,7 +473,6 @@
     border: none;
     cursor: pointer;
   }
-
   .name {
     flex: none;
     max-width: 100%;
@@ -527,7 +482,6 @@
     font-weight: 500;
     text-overflow: ellipsis;
   }
-
   .dir {
     min-width: 0;
     overflow: hidden;
@@ -538,7 +492,6 @@
     text-align: left;
     opacity: 0.8;
   }
-
   .kind {
     flex: none;
     padding: 1px 6px;
@@ -549,35 +502,29 @@
     text-align: center;
     line-height: 1.4;
   }
-
   .k-added,
   .k-untracked {
     background: rgb(111 219 165 / 0.14);
     color: #6fdba5;
   }
-
   .k-modified,
   .k-typeChanged {
     background: rgb(255 198 107 / 0.14);
     color: #ffc66b;
   }
-
   .k-deleted {
     background: rgb(255 143 143 / 0.14);
     color: #ff8f8f;
   }
-
   .k-renamed,
   .k-copied {
     background: rgb(159 180 255 / 0.14);
     color: #9fb4ff;
   }
-
   .k-conflicted {
     background: rgb(255 107 107 / 0.2);
     color: #ff6b6b;
   }
-
   .composer {
     display: grid;
     gap: 10px;
@@ -586,7 +533,6 @@
     background: rgb(0 0 0 / 0.1);
     border-radius: 0 0 12px 12px;
   }
-
   textarea {
     min-height: 78px;
     resize: vertical;
@@ -595,14 +541,12 @@
     padding: 10px 12px;
     border-radius: 8px;
   }
-
   .ai-row {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
   }
-
   .ai-note {
     overflow: hidden;
     color: var(--text-3);
@@ -610,19 +554,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .commit-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
-
   .commit-row .btn {
     height: 36px;
     font-weight: 550;
     border-radius: 8px;
   }
-
   .diff-head {
     display: flex;
     align-items: center;
@@ -632,7 +573,6 @@
     background: rgb(0 0 0 / 0.1);
     border-radius: 12px 12px 0 0;
   }
-
   .diff-head code {
     flex: 1;
     overflow: hidden;
@@ -645,24 +585,20 @@
     border-radius: 6px;
     background: rgb(255 255 255 / 0.04);
   }
-
   .modes {
     display: flex;
     gap: 3px;
   }
-
   .modes .icon-btn {
     width: 28px;
     height: 28px;
   }
-
   .diff-body {
     flex: 1;
     min-height: 0;
     padding: 12px;
     overflow: auto;
   }
-
   .quiet {
     display: grid;
     place-items: center;
@@ -674,34 +610,28 @@
     font-size: 12.3px;
     text-align: center;
   }
-
   .clean {
     color: #7fe0b0;
   }
-
   .clean strong {
     color: var(--text-1);
     font-size: 13px;
   }
-
   .clean span {
     max-width: 30ch;
     color: var(--text-3);
   }
-
   .error {
     margin: 8px;
     color: #ff9d9d;
     font-size: 12px;
   }
-
   .output {
     position: relative;
     border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 10px;
     background: rgb(0 0 0 / 0.2);
   }
-
   .output-head {
     display: flex;
     align-items: center;
@@ -711,15 +641,12 @@
     color: var(--text-2);
     font-size: 12px;
   }
-
   .grow {
     flex: 1;
   }
-
   .output:not(.open) :global(.chev) {
     transform: rotate(-90deg);
   }
-
   .output pre {
     max-height: 180px;
     margin: 0;
@@ -731,7 +658,6 @@
     line-height: 1.5;
     white-space: pre-wrap;
   }
-
   .close {
     position: absolute;
     right: 34px;
