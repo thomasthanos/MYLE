@@ -67,10 +67,19 @@ pub struct ReleaseRequest {
     /// release (its name without the remote: `feature/x`).
     #[serde(default)]
     pub merge_branch: Option<String>,
+    /// Delete the merged branch from GitHub and locally after release push.
+    #[serde(default)]
+    pub delete_merged_branch: bool,
     /// Actions mode: what the workflows build, written into the tag's
     /// message as `Build: windows` or `Build: full` for them to read.
     #[serde(default)]
     pub target: Option<String>,
+}
+
+/// Branches that must never be deleted after a release merge.
+pub(crate) fn is_protected_branch(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    matches!(lower.as_str(), "main" | "master" | "old")
 }
 
 /// A branch name safe to hand to git: no option, no range, no oddities.
@@ -990,6 +999,50 @@ pub(crate) async fn run(
     }
     run.step("push", StepState::Done, None);
 
+    // 5.1 If a branch was merged in and delete was requested, clean it up.
+    if request.delete_merged_branch
+        && let Some(branch) = request.merge_branch.as_deref().filter(|b| !b.is_empty())
+    {
+        if is_protected_branch(branch) {
+            run.log(format!("Branch '{branch}' is protected and will not be deleted."));
+        } else {
+            run.log(format!("Cleaning up merged branch '{branch}'…"));
+            if let Ok(remote) = ops::require_remote(&entry.root).await {
+                // Delete from remote (origin)
+                match ops::network(
+                    &entry.root,
+                    &["push", &remote.name, "--delete", branch],
+                    &remote,
+                    false,
+                    "push",
+                    cancel.clone(),
+                    &on_line,
+                )
+                .await
+                {
+                    Ok((_, outcome)) if outcome.ok => {
+                        run.log(format!("Deleted remote branch '{branch}' from {}.", remote.name));
+                    }
+                    Ok((_, outcome)) => {
+                        if let Some(p) = outcome.problem {
+                            run.log(format!("Notice: Could not delete remote branch '{branch}': {}", p.message));
+                        }
+                    }
+                    Err(err) => {
+                        run.log(format!("Notice: Could not delete remote branch '{branch}': {err}"));
+                    }
+                }
+                // Delete local branch if it exists
+                let del_local = git::run(&entry.root, &["branch", "-D", branch]).await;
+                if del_local.is_ok_and(|o| o.ok()) {
+                    run.log(format!("Deleted local branch '{branch}'."));
+                }
+                // Prune tracking branches
+                let _ = ops::fetch(&entry.root, true, cancel.clone()).await;
+            }
+        }
+    }
+
     // 6. Tag.
     finish_from_tag(
         &run,
@@ -1664,6 +1717,7 @@ pub(crate) async fn resume(
             make_latest: resume.make_latest,
             notes_file: None,
             merge_branch: None,
+            delete_merged_branch: false,
             target: None,
         };
         outcome.tag = tag.clone();
@@ -1801,6 +1855,14 @@ mod tests {
         assert!(!valid_branch("--upload-pack=x"));
         assert!(!valid_branch("a..b"));
         assert!(!valid_branch("a b"));
+        assert!(is_protected_branch("main"));
+        assert!(is_protected_branch("Main"));
+        assert!(is_protected_branch("master"));
+        assert!(is_protected_branch("old"));
+        assert!(is_protected_branch("OLD"));
+        assert!(is_protected_branch("Old"));
+        assert!(!is_protected_branch("codex/something"));
+        assert!(!is_protected_branch("feature/branch"));
         assert_eq!(target_line(Some("windows")), Some("Build: windows"));
         assert_eq!(target_line(Some("nope")), None);
         let log = "2026-10-10T09:00:00.1234567Z one\n2026-10-10T09:00:01.1234567Z two\nthree";

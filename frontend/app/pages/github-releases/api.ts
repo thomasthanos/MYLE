@@ -463,6 +463,8 @@ export interface ReleaseRequest {
   notesFile: string | null;
   /** A remote branch to merge in before the release; null: none. */
   mergeBranch: string | null;
+  /** Delete the merged branch from GitHub and locally after release push. */
+  deleteMergedBranch: boolean;
   /** Actions mode: "windows" (the .exe only) or "full" (everything). */
   target: BuildTarget | null;
 }

@@ -196,6 +196,8 @@ export class ReleaseSession {
   touched = $state(false);
   /** Merged into the branch before the release; "" for none. */
   mergeBranch = $state("");
+  /** Delete the merged branch from GitHub and locally after release push. */
+  deleteMergedBranch = $state(true);
   target = $state<BuildTarget>("full");
 
   // The run.

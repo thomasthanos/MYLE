@@ -35,6 +35,7 @@
     type StepId,
   } from "./api";
   import BuildLog from "./BuildLog.svelte";
+  import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import {
     actionsSteps,
     formatBytes,
@@ -63,6 +64,13 @@
   let finding = $state(false);
 
   let branches = $state<string[] | null>(null);
+  const branchOptions = $derived<SelectOption<string>[]>([
+    { value: "", label: "None" },
+    ...(branches ?? []).map((b) => ({ value: b, label: b })),
+  ]);
+  const isProtectedBranch = $derived(
+    ["main", "master", "old"].includes(s.mergeBranch.trim().toLowerCase())
+  );
 
   onMount(() => {
     void load();
@@ -259,6 +267,7 @@
           makeLatest: s.makeLatest && !s.prerelease,
           notesFile: s.mode === "actions" && s.notesFile ? s.notesFile : null,
           mergeBranch: s.mergeBranch || null,
+          deleteMergedBranch: s.mergeBranch ? s.deleteMergedBranch && !isProtectedBranch : false,
           target: s.mode === "actions" ? s.target : null,
         },
         (event) => s.apply(event),
@@ -284,6 +293,7 @@
       s.commitMessage = "";
       s.assets = null;
       found = null;
+      void loadBranches();
       const url = outcome.release?.htmlUrl ?? outcome.run?.htmlUrl;
       toast.success(`${outcome.tag} is out.`, url ? { label: "Open", run: () => void openUrl(url) } : undefined);
     }
@@ -398,14 +408,18 @@
         </button>
       </div>
       <div class="row wrap pick">
-        <label class="field">
+        <div class="field branch-field">
           <span>Merge first</span>
-          <select class="input select" bind:value={s.mergeBranch} disabled={branches === null}>
-            <option value="">None</option>
-            {#each branches ?? [] as b (b)}<option value={b}>{b}</option>{/each}
-          </select>
+          <Select
+            bind:value={s.mergeBranch}
+            options={branchOptions}
+            disabled={branches === null}
+            ariaLabel="Merge branch first"
+            size="sm"
+            minWidth="170px"
+          />
           <button class="icon-btn" title="Fetch the branches again" aria-label="Fetch the branches again" onclick={() => void loadBranches()}><RefreshCw size={12} /></button>
-        </label>
+        </div>
         {#if s.mode === "actions"}
           <span class="field">
             <span>Build</span>
@@ -417,7 +431,19 @@
         {/if}
       </div>
       {#if s.mergeBranch}
-        <p class="sub">origin/{s.mergeBranch} is merged into {info.branch ?? "the branch"} (a merge commit) before anything else. A conflict stops the release and changes nothing.</p>
+        <div class="merge-summary">
+          <p class="sub">origin/{s.mergeBranch} is merged into {info.branch ?? "the branch"} (a merge commit) before anything else. A conflict stops the release and changes nothing.</p>
+          {#if isProtectedBranch}
+            <p class="sub protected-branch-note">
+              <code>{s.mergeBranch}</code> is a protected branch and will be kept (not deleted).
+            </p>
+          {:else}
+            <label class="opt delete-branch-opt">
+              <input type="checkbox" class="switch" bind:checked={s.deleteMergedBranch} />
+              <span>Delete <code>{s.mergeBranch}</code> (GitHub &amp; local) after release</span>
+            </label>
+          {/if}
+        </div>
       {/if}
       {#if s.mode === "local"}
         <label class="opt">
@@ -1132,6 +1158,36 @@
     align-items: center;
     gap: 6px;
     color: var(--text-2);
+    font-size: 11.5px;
+  }
+
+  .branch-field {
+    position: relative;
+  }
+
+  .merge-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+  }
+
+  .delete-branch-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .delete-branch-opt code {
+    color: var(--accent);
+  }
+
+  .protected-branch-note {
+    color: var(--text-3);
     font-size: 11.5px;
   }
 
