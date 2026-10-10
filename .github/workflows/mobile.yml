@@ -6,6 +6,9 @@
 # builds these, with the same version in backend/mobile/tauri.conf.json and
 # backend/mobile/Cargo.toml, into the same GitHub release. On its own: the tag
 # mobile-v1.2.3, a release of its own that is never GitHub's "latest".
+# A tag v1.2.3 whose message has the line "Build: windows" (MYLE's Release
+# Hub, "Windows .exe only") skips the phone builds; "Build: full" or no such
+# line builds everything.
 # Either way it publishes to Cloudflare R2 (downloads.thomast.uk)
 # MYLE-Passwords-<version>.apk and .ipa (and the same files without the
 # version, for links), sidestore.json (the SideStore source) and, last,
@@ -24,6 +27,12 @@ on:
     tags: ["mobile-v*", "v*"]
     branches: ["mobile/**"]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "full: build the phone apps; windows: skip them"
+        type: choice
+        options: [full, windows]
+        default: full
 
 permissions:
   contents: write
@@ -68,6 +77,19 @@ jobs:
               echo "::notice::MYLE Passwords is $version, not ${tag#v}: no phone builds for $tag"
               build=false
             fi
+            # MYLE's Release Hub writes "Build: windows" into the tag's
+            # message for a Windows-only release: no phone builds then.
+            if [[ "$tag" == v* ]] && [ "$build" = true ]; then
+              git fetch --force --depth=1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || true
+              if git tag -l --format='%(contents)' "$tag" | grep -qi '^Build: *windows'; then
+                echo "::notice::$tag is a Windows-only release (Build: windows): no phone builds"
+                build=false
+              fi
+            fi
+          fi
+          if [ "${{ inputs.target }}" = "windows" ]; then
+            echo "::notice::Run by hand for Windows only: no phone builds"
+            build=false
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"

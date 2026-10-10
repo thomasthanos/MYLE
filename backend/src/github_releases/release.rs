@@ -63,6 +63,35 @@ pub struct ReleaseRequest {
     /// Actions mode: write the notes to this file (from the repository's
     /// top) and commit it, for a workflow that reads it.
     pub notes_file: Option<String>,
+    /// A branch of the remote to merge into the current one before the
+    /// release (its name without the remote: `feature/x`).
+    #[serde(default)]
+    pub merge_branch: Option<String>,
+    /// Actions mode: what the workflows build, written into the tag's
+    /// message as `Build: windows` or `Build: full` for them to read.
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+/// A branch name safe to hand to git: no option, no range, no oddities.
+pub(crate) fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && !name.starts_with('-')
+        && !name.contains("..")
+        && !name.ends_with(".lock")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+}
+
+/// The tag message's line for the workflows, from the chosen target.
+pub(crate) fn target_line(target: Option<&str>) -> Option<&'static str> {
+    match target {
+        Some("windows") => Some("Build: windows"),
+        Some("full") => Some("Build: full"),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -100,6 +129,10 @@ pub enum ReleaseEvent {
     },
     Log {
         text: String,
+    },
+    /// A workflow run failed (or one of its jobs did): what and where.
+    Failure {
+        jobs: Vec<FailedJob>,
     },
 }
 
@@ -599,6 +632,14 @@ pub(crate) async fn run(
         ..ReleaseOutcome::default()
     };
 
+    // 0. The chosen branch, merged in first.
+    if let Some(branch) = request.merge_branch.as_deref().filter(|b| !b.is_empty())
+        && let Err(problem) = merge_branch(&run, &entry, branch).await
+    {
+        outcome.problem = Some(problem);
+        return outcome;
+    }
+
     // 1. Checks.
     run.step("check", StepState::Running, None);
     let context = match context(entry.clone(), true).await {
@@ -1021,11 +1062,17 @@ async fn finish_from_tag(
         }
     }
     if !exists {
-        let message = if request.title.trim().is_empty() {
+        let mut message = if request.title.trim().is_empty() {
             tag.to_string()
         } else {
             request.title.trim().to_string()
         };
+        if request.mode == Mode::Actions
+            && let Some(line) = target_line(request.target.as_deref())
+        {
+            message.push_str("\n\n");
+            message.push_str(line);
+        }
         let made = git::run_with(
             &entry.root,
             &["tag", "-a", tag, "--file=-", commit],
@@ -1383,6 +1430,112 @@ async fn tag_workflow(entry: &Entry, tag: &str) -> Option<Workflow> {
     project::workflow_for_tag(&workflows, tag).cloned()
 }
 
+/// Merges `origin/<branch>` into the checked-out branch. A conflict is
+/// undone (`merge --abort`) and reported with the files in conflict.
+async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<(), Problem> {
+    run.step("merge", StepState::Running, Some(branch.to_string()));
+    let fail = |message: String| {
+        run.step("merge", StepState::Failed, Some(message.clone()));
+        Problem::new("MERGE_FAILED", message)
+    };
+    if !valid_branch(branch) {
+        return Err(fail(format!("{branch:?} is not a branch name.")));
+    }
+    let remote = ops::require_remote(&entry.root).await.map_err(fail)?;
+    match ops::fetch(&entry.root, false, run.cancel.clone()).await {
+        Ok(result) if result.ok => {}
+        Ok(result) => {
+            return Err(fail(
+                result.problem.map(|p| p.message).unwrap_or_else(|| "The fetch failed.".into()),
+            ))
+        }
+        Err(error) => return Err(fail(error)),
+    }
+    let theirs = format!("{}/{branch}", remote.name);
+    let message = format!("Merge {branch}");
+    let merged = git::run_with(
+        &entry.root,
+        &["merge", "--no-ff", "--no-edit", "-m", &message, &theirs],
+        None,
+        &git::GitEnv::default(),
+        Duration::from_secs(120),
+    )
+    .await
+    .map_err(fail)?;
+    if merged.ok() {
+        run.log(merged.all());
+        run.step("merge", StepState::Done, Some(format!("{branch} merged")));
+        return Ok(());
+    }
+    let conflicts = git::read(&entry.root, &["diff", "--name-only", "--diff-filter=U"])
+        .await
+        .unwrap_or_default();
+    let files: Vec<&str> = conflicts.lines().filter(|l| !l.trim().is_empty()).collect();
+    let _ = git::run(&entry.root, &["merge", "--abort"]).await;
+    run.log(merged.all());
+    Err(fail(if files.is_empty() {
+        format!("Merging {branch} failed: {}", git::first_error(&merged.all()))
+    } else {
+        format!(
+            "Merging {branch} has conflicts in {}: {}. Nothing was changed; resolve them in the branch and try again.",
+            if files.len() == 1 { "1 file".to_string() } else { format!("{} files", files.len()) },
+            files.join(", ")
+        )
+    }))
+}
+
+/// What went wrong in a failed run: per failed job, the failed step, the
+/// error annotations and the end of the job's log.
+async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Job]) -> Vec<FailedJob> {
+    let mut out = Vec::new();
+    for job in jobs.iter().filter(|j| matches!(j.conclusion.as_deref(), Some("failure" | "timed_out" | "startup_failure"))) {
+        let step = job
+            .steps
+            .iter()
+            .find(|s| s.conclusion.as_deref() == Some("failure"))
+            .map(|s| s.name.clone());
+        let errors = github::job_annotations(token, owner, repo, job.id).await.unwrap_or_default();
+        let log_tail = github::job_log(token, owner, repo, job.id)
+            .await
+            .map(|log| log_tail(&log, 40))
+            .unwrap_or_default();
+        out.push(FailedJob {
+            job: job.name.clone(),
+            step,
+            errors,
+            log_tail,
+            url: job.html_url.clone(),
+        });
+        if out.len() >= 4 {
+            break;
+        }
+    }
+    out
+}
+
+/// The last `lines` lines of a job log, with GitHub's timestamps cut off.
+pub(crate) fn log_tail(log: &str, lines: usize) -> String {
+    let all: Vec<&str> = log.lines().collect();
+    all[all.len().saturating_sub(lines)..]
+        .iter()
+        .map(|line| match line.split_once(' ') {
+            Some((stamp, rest)) if stamp.len() >= 20 && stamp.as_bytes()[4] == b'-' && stamp.ends_with('Z') => rest,
+            _ => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedJob {
+    job: String,
+    step: Option<String>,
+    errors: Vec<String>,
+    log_tail: String,
+    url: Option<String>,
+}
+
 /// Follows the workflow run a push of `commit` (and `tag`) started, to its
 /// end. Cancel stops watching, not the run.
 async fn watch(
@@ -1419,15 +1572,32 @@ async fn watch(
         sleep_unless_cancelled(&run.cancel, Duration::from_secs(5)).await;
     };
     let mut current = found;
+    let mut reported: Vec<u64> = Vec::new();
     loop {
         let jobs = github::run_jobs(token, owner, repo, current.id)
             .await
             .unwrap_or_default();
+        // A job that failed while others still run: told right away.
+        let failed_now: Vec<u64> = jobs
+            .iter()
+            .filter(|j| j.conclusion.as_deref() == Some("failure"))
+            .map(|j| j.id)
+            .collect();
+        if failed_now.iter().any(|id| !reported.contains(id)) && current.status.as_deref() != Some("completed") {
+            reported.extend(failed_now.iter().copied());
+            let failed = failure_report(token, owner, repo, &jobs).await;
+            (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+        }
         (run.on_event)(ReleaseEvent::Workflow {
             run: Some(current.clone()),
             jobs,
         });
         if current.status.as_deref() == Some("completed") {
+            if !matches!(current.conclusion.as_deref(), Some("success" | "skipped" | "neutral")) {
+                let fresh = github::run_jobs(token, owner, repo, current.id).await.unwrap_or_default();
+                let failed = failure_report(token, owner, repo, &fresh).await;
+                (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+            }
             return Ok(current);
         }
         if run.cancelled() {
@@ -1493,6 +1663,8 @@ pub(crate) async fn resume(
             prerelease: false,
             make_latest: resume.make_latest,
             notes_file: None,
+            merge_branch: None,
+            target: None,
         };
         outcome.tag = tag.clone();
         let assets = resume.pending_assets.iter().map(PathBuf::from).collect();
@@ -1621,6 +1793,18 @@ mod tests {
             "path": path,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn branch_names_targets_and_log_tails() {
+        assert!(valid_branch("feature/x-1.2"));
+        assert!(!valid_branch("--upload-pack=x"));
+        assert!(!valid_branch("a..b"));
+        assert!(!valid_branch("a b"));
+        assert_eq!(target_line(Some("windows")), Some("Build: windows"));
+        assert_eq!(target_line(Some("nope")), None);
+        let log = "2026-10-10T09:00:00.1234567Z one\n2026-10-10T09:00:01.1234567Z two\nthree";
+        assert_eq!(log_tail(log, 2), "two\nthree");
     }
 
     #[test]

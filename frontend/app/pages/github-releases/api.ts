@@ -461,9 +461,24 @@ export interface ReleaseRequest {
   prerelease: boolean;
   makeLatest: boolean;
   notesFile: string | null;
+  /** A remote branch to merge in before the release; null: none. */
+  mergeBranch: string | null;
+  /** Actions mode: "windows" (the .exe only) or "full" (everything). */
+  target: BuildTarget | null;
 }
 
-export type StepId = "check" | "version" | "build" | "commit" | "push" | "tag" | "release" | "upload" | "publish" | "workflow";
+export type BuildTarget = "windows" | "full";
+
+/** A failed job of a workflow run: where it broke and what it said. */
+export interface FailedJob {
+  job: string;
+  step: string | null;
+  errors: string[];
+  logTail: string;
+  url: string | null;
+}
+
+export type StepId = "merge" | "check" | "version" | "build" | "commit" | "push" | "tag" | "release" | "upload" | "publish" | "workflow";
 export type StepState = "running" | "done" | "failed" | "skipped";
 
 export type ReleaseEvent =
@@ -471,7 +486,8 @@ export type ReleaseEvent =
   | { event: "build"; data: { event: BuildEvent } }
   | { event: "upload"; data: { name: string; sent: number; total: number; index: number; count: number } }
   | { event: "workflow"; data: { run: Run | null; jobs: WorkflowJob[] } }
-  | { event: "log"; data: { text: string } };
+  | { event: "log"; data: { text: string } }
+  | { event: "failure"; data: { jobs: FailedJob[] } };
 
 export interface Resume {
   releaseId: number | null;
@@ -594,6 +610,7 @@ export const githubReleasesApi = {
     invoke<ReleaseOutcome>("github_releases_release", { request, onEvent: channel(on) }),
   resume: (entryId: string, resume: Resume, on: (e: ReleaseEvent) => void) =>
     invoke<ReleaseOutcome>("github_releases_resume", { entryId, resume, onEvent: channel(on) }),
+  branches: (repoId: string) => invoke<string[]>("github_releases_branches", { repoId }),
   watch: (entryId: string, commit: string, tag: string | null, on: (e: ReleaseEvent) => void) =>
     invoke<Run>("github_releases_watch", { entryId, commit, tag, onEvent: channel(on) }),
 

@@ -62,9 +62,21 @@
   let found = $state<Artifact[] | null>(null);
   let finding = $state(false);
 
+  let branches = $state<string[] | null>(null);
+
   onMount(() => {
     void load();
+    void loadBranches();
   });
+
+  async function loadBranches() {
+    try {
+      branches = await api.branches(repoId);
+      if (s.mergeBranch && !branches.includes(s.mergeBranch)) s.mergeBranch = "";
+    } catch {
+      branches = [];
+    }
+  }
 
   async function load() {
     try {
@@ -83,7 +95,10 @@
 
   const tag = $derived(`${info?.tagPrefix ?? entry.tagPrefix}${s.version.trim()}`);
   const hasWorkflow = $derived(!!entry.releaseWorkflow);
-  const steps = $derived<StepId[]>(s.mode === "actions" ? actionsSteps : localSteps);
+  const steps = $derived<StepId[]>([
+    ...(s.mergeBranch ? (["merge"] as StepId[]) : []),
+    ...(s.mode === "actions" ? actionsSteps : localSteps),
+  ]);
   const versionFiles = $derived(info?.versions.files ?? []);
   const ownChanges = $derived(entry.changes);
 
@@ -211,12 +226,13 @@
     const version = s.version.trim();
     const local = s.mode === "local";
     const parts = [
+      s.mergeBranch ? `${s.mergeBranch} is merged into ${info?.branch ?? "the branch"}` : "",
       `The version files become ${version}`,
       local && s.build ? "the project is built" : "",
       `a commit and the tag ${tag} are pushed to ${info?.branch ?? "the branch"}`,
       local
         ? `a ${s.draft ? "draft " : ""}release with ${local && !s.build ? (s.assets?.length ?? 0) : "the built"} files is ${s.draft ? "made" : "published"}`
-        : `GitHub Actions (${entry.releaseWorkflow ?? "the workflow"}) builds and publishes it`,
+        : `GitHub Actions (${entry.releaseWorkflow ?? "the workflow"}) builds ${s.target === "windows" ? "the Windows .exe only" : "everything"} and publishes it`,
     ].filter(Boolean);
     const ok = await confirm({
       title: `Release ${tag}?`,
@@ -242,6 +258,8 @@
           prerelease: s.prerelease,
           makeLatest: s.makeLatest && !s.prerelease,
           notesFile: s.mode === "actions" && s.notesFile ? s.notesFile : null,
+          mergeBranch: s.mergeBranch || null,
+          target: s.mode === "actions" ? s.target : null,
         },
         (event) => s.apply(event),
       );
@@ -379,6 +397,28 @@
           <span>{hasWorkflow ? `Pushing ${tag} starts ${entry.releaseWorkflow}; it builds and publishes.` : "No tag-triggered workflow found."}</span>
         </button>
       </div>
+      <div class="row wrap pick">
+        <label class="field">
+          <span>Merge first</span>
+          <select class="input select" bind:value={s.mergeBranch} disabled={branches === null}>
+            <option value="">None</option>
+            {#each branches ?? [] as b (b)}<option value={b}>{b}</option>{/each}
+          </select>
+          <button class="icon-btn" title="Fetch the branches again" aria-label="Fetch the branches again" onclick={() => void loadBranches()}><RefreshCw size={12} /></button>
+        </label>
+        {#if s.mode === "actions"}
+          <span class="field">
+            <span>Build</span>
+            <span class="seg" role="radiogroup" aria-label="What the workflows build">
+              <button role="radio" aria-checked={s.target === "windows"} class:active={s.target === "windows"} onclick={() => (s.target = "windows")} title="The tag says Build: windows; mobile.yml skips the phone apps">Windows .exe only</button>
+              <button role="radio" aria-checked={s.target === "full"} class:active={s.target === "full"} onclick={() => (s.target = "full")} title="Every workflow of the tag builds: Windows, phones and the rest">Full build</button>
+            </span>
+          </span>
+        {/if}
+      </div>
+      {#if s.mergeBranch}
+        <p class="sub">origin/{s.mergeBranch} is merged into {info.branch ?? "the branch"} (a merge commit) before anything else. A conflict stops the release and changes nothing.</p>
+      {/if}
       {#if s.mode === "local"}
         <label class="opt">
           <input type="checkbox" class="switch" bind:checked={s.build} onchange={() => (s.touched = true)} disabled={!info.buildCommand} />
@@ -448,7 +488,7 @@
         </div>
       </div>
       <input class="input" bind:value={s.title} placeholder={defaultTitle} aria-label="Release title" oninput={() => (s.touched = true)} />
-      <textarea class="input notes" bind:value={s.notes} rows="9" placeholder="What changed (Markdown)" oninput={() => (s.touched = true)}></textarea>
+      <textarea class="input notes" bind:value={s.notes} rows="6" placeholder="What changed (Markdown)" oninput={() => (s.touched = true)}></textarea>
       <div class="row wrap">
         <input class="input commit" bind:value={s.commitMessage} placeholder={entry.monorepo ? `${entry.name} ${s.version.trim()}` : `Release ${s.version.trim()}`} aria-label="Commit message" />
         {#if s.mode === "local"}
@@ -533,6 +573,22 @@
         {/each}
       </ol>
 
+      {#if s.failures.length}
+        <div class="failures" role="alert">
+          {#each s.failures as f (f.job)}
+            <div class="failure">
+              <p class="f-head">
+                <CircleX size={14} />
+                <strong>{f.job}</strong>{#if f.step}<span>failed at <b>{f.step}</b></span>{/if}
+                {#if f.url}<button class="link" onclick={() => void openUrl(f.url!)}>Open the job <ExternalLink size={11} /></button>{/if}
+              </p>
+              {#each f.errors.slice(0, 5) as e (e)}<p class="f-error selectable">{e}</p>{/each}
+              {#if f.logTail}<pre class="f-log selectable">{f.logTail}</pre>{/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
       {#if s.steps.build && s.mode === "local" && (s.steps.build.state === "running" || s.steps.build.state === "failed")}
         <div class="build-log"><BuildLog session={s.buildLog} entryId={entry.id} compact /></div>
       {/if}
@@ -579,16 +635,16 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     min-height: 0;
-    padding: 14px 16px 18px;
+    padding: 10px 12px 12px;
     overflow: auto;
   }
 
   section {
     display: grid;
-    gap: 9px;
-    padding: 12px 14px;
+    gap: 6px;
+    padding: 8px 11px;
     border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 12px;
     background: rgb(255 255 255 / 0.025);
@@ -829,7 +885,7 @@
   }
 
   .notes {
-    min-height: 150px;
+    min-height: 110px;
     resize: vertical;
     font-family: var(--font-mono);
     font-size: 12px;
@@ -897,8 +953,8 @@
   .steps li {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 5px 2px;
+    gap: 8px;
+    padding: 2px;
     color: var(--text-3);
     font-size: 12.5px;
   }
@@ -1064,5 +1120,94 @@
     .modes {
       grid-template-columns: minmax(0, 1fr);
     }
+  }
+
+  /* Merge, target, failures */
+  .pick {
+    gap: 14px;
+  }
+
+  .field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
+    font-size: 11.5px;
+  }
+
+  .select {
+    height: 28px;
+    min-width: 170px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--btn-border);
+    border-radius: 8px;
+  }
+
+  .seg button {
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .seg button.active {
+    background: rgb(var(--accent-rgb) / 0.18);
+    color: var(--text-1);
+  }
+
+  .failures {
+    display: grid;
+    gap: 8px;
+  }
+
+  .failure {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid rgb(229 72 77 / 0.35);
+    border-radius: 10px;
+    background: rgb(229 72 77 / 0.07);
+  }
+
+  .f-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    color: #f1a7a9;
+    font-size: 12px;
+  }
+
+  .f-head span {
+    color: var(--text-2);
+  }
+
+  .f-error {
+    margin: 0;
+    color: var(--text-1);
+    font-size: 11.5px;
+  }
+
+  .f-log {
+    max-height: 180px;
+    margin: 0;
+    padding: 6px 8px;
+    overflow: auto;
+    border-radius: 6px;
+    background: rgb(0 0 0 / 0.35);
+    color: var(--text-2);
+    font-size: 10.5px;
+    line-height: 1.4;
+    white-space: pre-wrap;
   }
 </style>

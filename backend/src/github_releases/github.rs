@@ -705,6 +705,38 @@ pub(crate) async fn run_jobs(
     Ok(get_json::<Jobs>(token, &url).await?.jobs)
 }
 
+/// A job's whole log (plain text; GitHub redirects to a signed address).
+pub(crate) async fn job_log(token: &str, owner: &str, repo: &str, job_id: u64) -> Result<String, String> {
+    let url = format!("{API}/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
+    let (_, body) = send(request(&client()?, reqwest::Method::GET, &url, token)).await?;
+    Ok(body)
+}
+
+#[derive(Deserialize)]
+struct Annotation {
+    #[serde(default)]
+    annotation_level: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// The error annotations of a job (its check run): `::error::` lines and
+/// the "Process completed with exit code" one.
+pub(crate) async fn job_annotations(token: &str, owner: &str, repo: &str, job_id: u64) -> Result<Vec<String>, String> {
+    let url = format!("{API}/repos/{owner}/{repo}/check-runs/{job_id}/annotations?per_page=20");
+    let list: Vec<Annotation> = get_json(token, &url).await?;
+    Ok(list
+        .into_iter()
+        .filter(|a| a.annotation_level == "failure")
+        .map(|a| match a.title.filter(|t| !t.is_empty()) {
+            Some(title) => format!("{title}: {}", a.message),
+            None => a.message,
+        })
+        .collect())
+}
+
 pub(crate) async fn run(token: &str, owner: &str, repo: &str, run_id: u64) -> Result<Run, String> {
     get_json(
         token,

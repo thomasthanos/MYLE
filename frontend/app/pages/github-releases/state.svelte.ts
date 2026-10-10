@@ -10,6 +10,8 @@ import {
   messageOf,
   problemOf,
   type Artifact,
+  type BuildTarget,
+  type FailedJob,
   type BuildEvent,
   type BuildKind,
   type BuildOutcome,
@@ -160,6 +162,7 @@ export const stepLabels: Record<StepId, string> = {
   upload: "Upload files",
   publish: "Publish",
   workflow: "GitHub Actions",
+  merge: "Merge branch",
 };
 
 export const localSteps: StepId[] = ["check", "version", "build", "commit", "push", "tag", "release", "upload", "publish"];
@@ -191,6 +194,9 @@ export class ReleaseSession {
   /** Paths of the files to attach; null: the build's own choice. */
   assets = $state<string[] | null>(null);
   touched = $state(false);
+  /** Merged into the branch before the release; "" for none. */
+  mergeBranch = $state("");
+  target = $state<BuildTarget>("full");
 
   // The run.
   running = $state(false);
@@ -199,6 +205,8 @@ export class ReleaseSession {
   run = $state<Run | null>(null);
   jobs = $state.raw<WorkflowJob[]>([]);
   log = $state.raw<string[]>([]);
+  /** The failed jobs of the run, told as soon as they fail. */
+  failures = $state.raw<FailedJob[]>([]);
   outcome = $state<ReleaseOutcome | null>(null);
   buildLog = new BuildSession();
 
@@ -209,6 +217,7 @@ export class ReleaseSession {
     this.run = null;
     this.jobs = [];
     this.log = [];
+    this.failures = [];
     this.outcome = null;
   }
 
@@ -227,6 +236,9 @@ export class ReleaseSession {
       case "workflow":
         this.run = event.data.run;
         this.jobs = event.data.jobs;
+        break;
+      case "failure":
+        this.failures = event.data.jobs;
         break;
       case "log":
         this.log = [...this.log.slice(-300), event.data.text];

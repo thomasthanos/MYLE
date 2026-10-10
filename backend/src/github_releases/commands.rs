@@ -1514,6 +1514,27 @@ pub async fn github_releases_resume(
     Ok(release::resume(entry, resume, running.cancel.clone(), &sink).await)
 }
 
+/// The remote's branches to merge before a release: all but the checked-out
+/// one and the default (main/master). Fetched first, quietly.
+#[tauri::command]
+pub async fn github_releases_branches(repo_id: String) -> Result<Vec<String>, String> {
+    let root = repo_root(&repo_id).await?;
+    let remote = ops::require_remote(&root).await?;
+    let _ = ops::fetch(&root, true, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).await;
+    let current = git::read(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).await.unwrap_or_default();
+    let prefix = format!("refs/remotes/{}/", remote.name);
+    let list = git::read(&root, &["for-each-ref", "--format=%(refname)", &prefix]).await?;
+    let mut branches: Vec<String> = list
+        .lines()
+        .filter_map(|line| line.strip_prefix(&prefix))
+        .filter(|b| !matches!(*b, "HEAD" | "main" | "master") && *b != current.trim())
+        .filter(|b| release::valid_branch(b))
+        .map(str::to_string)
+        .collect();
+    branches.sort();
+    Ok(branches)
+}
+
 /// Follows the newest workflow run of `commit` (the page was reopened).
 #[tauri::command]
 pub async fn github_releases_watch(
