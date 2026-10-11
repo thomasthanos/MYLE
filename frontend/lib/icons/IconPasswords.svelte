@@ -4,37 +4,58 @@
   const uid = $props.id();
 </script>
 
-<!-- Password Manager: a vault key with a glowing shield bow -->
+<!-- Password Manager: Sculpted Security Shield with glowing Vault Lock -->
 <IconCanvas {size} class={cls}>
   <defs>
-    <linearGradient id="{uid}-fill" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#C4B5FD" stop-opacity="0.32" />
+    <linearGradient id="{uid}-fill" x1="4" y1="2" x2="20" y2="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C4B5FD" stop-opacity="0.28" />
       <stop offset="100%" stop-color="#6366F1" stop-opacity="0.08" />
     </linearGradient>
-    <linearGradient id="{uid}-stroke" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+    <linearGradient id="{uid}-stroke" x1="3" y1="2" x2="21" y2="22" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#EDE9FE" />
-      <stop offset="50%" stop-color="#A5B4FC" />
-      <stop offset="100%" stop-color="#818CF8" />
+      <stop offset="50%" stop-color="#A78BFA" />
+      <stop offset="100%" stop-color="#6366F1" />
+    </linearGradient>
+    <linearGradient id="{uid}-lock" x1="8" y1="5" x2="16" y2="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#C4B5FD" />
+    </linearGradient>
+    <linearGradient id="{uid}-body" x1="8" y1="10" x2="16" y2="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A78BFA" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.2" />
     </linearGradient>
   </defs>
 
-  <!-- Shield-shaped bow -->
+  <!-- Solid Sculpted Shield Silhouette -->
   <path
-    d="M9 2.75 13.75 4.4v3.55c0 3.05-1.95 5.2-4.75 6.3-2.8-1.1-4.75-3.25-4.75-6.3V4.4Z"
+    d="M12 2.2L19.6 5.4C19.6 11.6 16.4 16.8 12 21.8C7.6 16.8 4.4 11.6 4.4 5.4L12 2.2Z"
     fill="url(#{uid}-fill)"
     stroke="url(#{uid}-stroke)"
-    stroke-width="1.6"
+    stroke-width="1.65"
     stroke-linejoin="round"
   />
-  <!-- Keyhole -->
-  <circle cx="9" cy="7.4" r="1.25" fill="#EDE9FE" />
-  <path d="M9 8.5v2.1" stroke="#EDE9FE" stroke-width="1.4" stroke-linecap="round" />
 
-  <!-- Key blade and teeth -->
+  <!-- Vault Lock Shackle -->
   <path
-    d="M12.6 12.6 20.25 20.25M16.9 16.9l1.9-1.9M18.9 18.9l1.35-1.35"
-    stroke="url(#{uid}-stroke)"
-    stroke-width="1.65"
+    d="M9.4 10.2V7.8C9.4 6.36 10.56 5.2 12 5.2C13.44 5.2 14.6 6.36 14.6 7.8V10.2"
+    stroke="url(#{uid}-lock)"
+    stroke-width="1.5"
     stroke-linecap="round"
   />
+
+  <!-- Vault Lock Solid Core -->
+  <rect
+    x="8"
+    y="10.2"
+    width="8"
+    height="6.4"
+    rx="1.6"
+    fill="url(#{uid}-body)"
+    stroke="url(#{uid}-lock)"
+    stroke-width="1.35"
+  />
+
+  <!-- Illuminated Keyhole Dot & Bar -->
+  <circle cx="12" cy="12.7" r="0.9" fill="#EDE9FE" />
+  <path d="M12 13.6V15" stroke="#EDE9FE" stroke-width="1.2" stroke-linecap="round" />
 </IconCanvas>

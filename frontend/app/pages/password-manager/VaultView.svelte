@@ -4,6 +4,7 @@
   import ArrowDownAZ from "@lucide/svelte/icons/arrow-down-a-z";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Check from "@lucide/svelte/icons/check";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Clock from "@lucide/svelte/icons/clock";
   import Copy from "@lucide/svelte/icons/copy";
   import KeySquare from "@lucide/svelte/icons/key-square";
@@ -355,8 +356,17 @@
         {:else}
           <div class="overview">
             <div class="overview-main">
-              <div class="overview-symbol" aria-hidden="true"><KeyRound size={34} strokeWidth={1.5} /></div>
+              <div class="overview-symbol" aria-hidden="true">
+                <div class="symbol-glow"></div>
+                <KeyRound size={42} strokeWidth={1.75} />
+              </div>
               <div class="overview-copy">
+                {#if p.entries.length}
+                  <div class="overview-pill">
+                    <ShieldCheck size={12} strokeWidth={2} />
+                    <span>{p.entries.length} {p.entries.length === 1 ? "login" : "logins"} secured</span>
+                  </div>
+                {/if}
                 <h2>{p.entries.length ? "Your logins, all in one place" : "Start your password vault"}</h2>
                 <p>{p.entries.length ? "Choose a login from the list to see its details, copy a password, or open its website." : "Add your first login, or bring existing passwords into your vault."}</p>
                 <div class="overview-actions">
@@ -374,19 +384,60 @@
             {#if p.entries.length}
               <div class="overview-health">
                 <div class="overview-health-heading">
-                  <strong>Password health</strong>
+                  <div class="health-title-group">
+                    <ShieldCheck size={15} class="health-title-icon" />
+                    <strong>Password health</strong>
+                  </div>
                   <span>Review passwords that need attention</span>
                 </div>
                 <div class="overview-health-items">
-                  <button disabled={p.counts.weak === 0} onclick={() => ((p.query = ""), (p.filter = "weak"))}>
-                    <span class="health-count weak">{p.counts.weak}</span>
-                    <span>Weak passwords</span>
-                    <span class="health-action">{p.counts.weak ? "Review" : "None"}</span>
+                  <button
+                    class="health-card weak"
+                    class:has-issues={p.counts.weak > 0}
+                    disabled={p.counts.weak === 0}
+                    onclick={() => ((p.query = ""), (p.filter = "weak"))}
+                  >
+                    <div class="health-icon-box weak">
+                      <ShieldAlert size={19} strokeWidth={1.8} />
+                    </div>
+                    <div class="health-info">
+                      <span class="health-name">Weak passwords</span>
+                      <span class="health-desc">
+                        {p.counts.weak ? "Easy to guess or crack" : "All passwords strong"}
+                      </span>
+                    </div>
+                    <div class="health-status">
+                      {#if p.counts.weak > 0}
+                        <span class="health-badge weak">{p.counts.weak}</span>
+                        <ChevronRight size={15} class="health-arrow" />
+                      {:else}
+                        <span class="health-badge safe"><Check size={12} strokeWidth={2.5} /> Good</span>
+                      {/if}
+                    </div>
                   </button>
-                  <button disabled={p.counts.reused === 0} onclick={() => ((p.query = ""), (p.filter = "reused"))}>
-                    <span class="health-count reused">{p.counts.reused}</span>
-                    <span>Reused passwords</span>
-                    <span class="health-action">{p.counts.reused ? "Review" : "None"}</span>
+                  <button
+                    class="health-card reused"
+                    class:has-issues={p.counts.reused > 0}
+                    disabled={p.counts.reused === 0}
+                    onclick={() => ((p.query = ""), (p.filter = "reused"))}
+                  >
+                    <div class="health-icon-box reused">
+                      <Copy size={18} strokeWidth={1.8} />
+                    </div>
+                    <div class="health-info">
+                      <span class="health-name">Reused passwords</span>
+                      <span class="health-desc">
+                        {p.counts.reused ? "Used on multiple accounts" : "No reused passwords"}
+                      </span>
+                    </div>
+                    <div class="health-status">
+                      {#if p.counts.reused > 0}
+                        <span class="health-badge reused">{p.counts.reused}</span>
+                        <ChevronRight size={15} class="health-arrow" />
+                      {:else}
+                        <span class="health-badge safe"><Check size={12} strokeWidth={2.5} /> Good</span>
+                      {/if}
+                    </div>
                   </button>
                 </div>
               </div>
@@ -533,47 +584,305 @@
 
   .back:hover { background: var(--hover); color: var(--text-1); }
 
-  .overview { display: flex; flex-direction: column; justify-content: center; gap: clamp(26px, 5vh, 54px); width: min(100%, 730px); min-height: 100%; margin: 0 auto; }
+  .overview {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(28px, 5.5vh, 52px);
+    width: min(100%, 720px);
+    min-height: 100%;
+    margin: 0 auto;
+    padding: clamp(10px, 2vh, 24px) 0;
+  }
 
-  .overview-main { display: flex; align-items: center; gap: clamp(22px, 4vw, 48px); }
+  .overview-main {
+    display: flex;
+    align-items: center;
+    gap: clamp(24px, 4vw, 44px);
+  }
 
-  .overview-symbol { display: grid; place-items: center; width: clamp(86px, 11vw, 132px); aspect-ratio: 1; flex: none; border: 1px solid rgb(var(--accent-rgb) / 0.27); border-radius: 32px; background: radial-gradient(circle at 28% 24%, rgb(255 255 255 / 0.13), transparent 50%), linear-gradient(145deg, rgb(var(--accent-rgb) / 0.21), rgb(111 179 198 / 0.07)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 20px 45px -28px rgb(var(--accent-rgb) / 0.45); color: #c5cafd; }
+  .overview-symbol {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: clamp(92px, 10.5vw, 126px);
+    aspect-ratio: 1;
+    flex: none;
+    border: 1px solid rgb(var(--accent-rgb) / 0.32);
+    border-radius: 28px;
+    background:
+      radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.16), transparent 50%),
+      linear-gradient(150deg, rgb(var(--accent-rgb) / 0.24) 0%, rgb(18 22 36 / 0.88) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.18),
+      inset 0 -1px 0 rgb(0 0 0 / 0.4),
+      0 18px 38px -18px rgb(var(--accent-rgb) / 0.5),
+      0 4px 12px rgb(0 0 0 / 0.35);
+    color: #d6dcff;
+  }
+
+  .symbol-glow {
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.28), transparent 70%);
+    filter: blur(14px);
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: -1;
+  }
 
   .overview-copy { min-width: 0; }
 
-  .overview-copy h2 { max-width: 20ch; margin: 0; font-family: var(--font-brand); font-size: clamp(24px, 2.4vw, 34px); font-weight: 600; line-height: 1.15; letter-spacing: -0.025em; }
+  .overview-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 9px;
+    padding: 3px 10px 3px 8px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.28);
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.15), rgb(var(--accent-rgb) / 0.05));
+    color: rgb(var(--accent-soft-rgb) / 0.95);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
 
-  .overview-copy p { max-width: 47ch; margin: 12px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+  .overview-copy h2 {
+    max-width: 22ch;
+    margin: 0;
+    font-family: var(--font-brand);
+    font-size: clamp(23px, 2.3vw, 32px);
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: -0.025em;
+    color: #fff;
+  }
 
-  .overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .overview-copy p {
+    max-width: 46ch;
+    margin: 10px 0 0;
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1.55;
+  }
 
-  .overview-actions .btn { height: 36px; }
+  .overview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+  }
 
-  .overview-health { border-top: 1px solid rgb(255 255 255 / 0.09); padding-top: 22px; }
+  .overview-actions .btn {
+    height: 38px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
 
-  .overview-health-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .overview-actions .btn.primary {
+    box-shadow: 0 6px 18px -4px rgb(var(--accent-rgb) / 0.45);
+  }
 
-  .overview-health-heading strong { font-size: 13px; font-weight: 620; }
+  .overview-health {
+    border-top: 1px solid rgb(255 255 255 / 0.08);
+    padding-top: 22px;
+  }
 
-  .overview-health-heading span { color: var(--text-3); font-size: 11.5px; }
+  .overview-health-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 13px;
+  }
 
-  .overview-health-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .health-title-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
 
-  .overview-health-items button { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 55px; padding: 10px 12px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 11px; background: rgb(255 255 255 / 0.035); font-size: 12px; text-align: left; transition: background var(--dur-fast), border-color var(--dur-fast); }
+  :global(.health-title-icon) {
+    color: rgb(var(--accent-soft-rgb) / 0.9);
+  }
 
-  .overview-health-items button:not(:disabled):hover { border-color: rgb(var(--accent-rgb) / 0.3); background: rgb(var(--accent-rgb) / 0.09); }
+  .overview-health-heading strong {
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--text-1);
+    letter-spacing: -0.01em;
+  }
 
-  .overview-health-items button:disabled { cursor: default; opacity: 0.68; }
+  .overview-health-heading span {
+    color: var(--text-3);
+    font-size: 11.5px;
+  }
 
-  .overview-health-items button:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: 2px; }
+  .overview-health-items {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 11px;
+  }
 
-  .health-count { display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border-radius: 9px; font-family: var(--font-brand); font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .health-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    min-height: 64px;
+    padding: 10px 14px;
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 13px;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0.018) 100%),
+      rgb(16 19 28 / 0.6);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 12px -4px rgb(0 0 0 / 0.4);
+    text-align: left;
+    transition:
+      transform var(--dur-fast),
+      background var(--dur-fast),
+      border-color var(--dur-fast),
+      box-shadow var(--dur-fast);
+  }
 
-  .health-count.weak { background: rgb(255 143 143 / 0.12); color: #ffb3b3; }
+  .health-card:not(:disabled) {
+    cursor: pointer;
+  }
 
-  .health-count.reused { background: rgb(255 196 102 / 0.12); color: #ffd18f; }
+  .health-card:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
 
-  .health-action { margin-left: auto; color: #b7bef5; font-size: 11px; }
+  .health-card.weak:not(:disabled):hover {
+    border-color: rgb(255 125 125 / 0.35);
+    background:
+      radial-gradient(circle at 18% 50%, rgb(255 125 125 / 0.12), transparent 70%),
+      linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%),
+      rgb(18 20 30 / 0.8);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 100 100 / 0.25);
+  }
+
+  .health-card.reused:not(:disabled):hover {
+    border-color: rgb(255 190 90 / 0.35);
+    background:
+      radial-gradient(circle at 18% 50%, rgb(255 190 90 / 0.12), transparent 70%),
+      linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%),
+      rgb(18 20 30 / 0.8);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 180 60 / 0.25);
+  }
+
+  .health-card:not(:disabled):hover :global(.health-arrow) {
+    transform: translateX(2px);
+    color: var(--text-1);
+  }
+
+  .health-card:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+
+  .health-card:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
+    outline-offset: 2px;
+  }
+
+  .health-icon-box {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    transition: transform var(--dur-fast);
+  }
+
+  .health-icon-box.weak {
+    background: linear-gradient(145deg, rgb(255 110 110 / 0.18), rgb(255 70 70 / 0.08));
+    border-color: rgb(255 110 110 / 0.25);
+    color: #ff9b9b;
+  }
+
+  .health-icon-box.reused {
+    background: linear-gradient(145deg, rgb(255 185 85 / 0.18), rgb(255 150 40 / 0.08));
+    border-color: rgb(255 185 85 / 0.25);
+    color: #ffc97a;
+  }
+
+  .health-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .health-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .health-desc {
+    font-size: 11px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .health-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex: none;
+  }
+
+  .health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 7px;
+    font-family: var(--font-brand);
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .health-badge.weak {
+    background: rgb(255 110 110 / 0.16);
+    color: #ffa4a4;
+    border: 1px solid rgb(255 110 110 / 0.25);
+  }
+
+  .health-badge.reused {
+    background: rgb(255 185 85 / 0.16);
+    color: #ffd285;
+    border: 1px solid rgb(255 185 85 / 0.25);
+  }
+
+  .health-badge.safe {
+    background: rgb(62 207 142 / 0.14);
+    color: #72e4b3;
+    border: 1px solid rgb(62 207 142 / 0.22);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  :global(.health-arrow) {
+    color: var(--text-3);
+    transition: transform var(--dur-fast), color var(--dur-fast);
+  }
 
   @container vault (max-width: 760px) {
     .split {
@@ -610,11 +919,12 @@
     .overview-main {
       align-items: flex-start;
       flex-direction: column;
+      gap: 16px;
     }
 
     .overview-symbol {
-      width: 72px;
-      border-radius: 22px;
+      width: 68px;
+      border-radius: 20px;
     }
 
     .overview-health-items {

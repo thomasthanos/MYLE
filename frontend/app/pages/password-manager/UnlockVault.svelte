@@ -101,12 +101,14 @@
   }
 </script>
 
-<section class="unlock glass" class:recovering aria-busy={p.busy}>
-  {#if !recovering}
-    <span class="lock" class:open={p.busy}>
-      {#if p.busy}<LockKeyholeOpen size={26} />{:else}<LockKeyhole size={26} />{/if}
-    </span>
-    <h2>Your vault is locked</h2>
+<div class="unlock-stage">
+  <div class="ambient-glow" aria-hidden="true"></div>
+  <section class="unlock glass" class:recovering aria-busy={p.busy}>
+    {#if !recovering}
+      <span class="lock" class:open={p.busy}>
+        {#if p.busy}<LockKeyholeOpen size={28} strokeWidth={1.8} />{:else}<LockKeyhole size={28} strokeWidth={1.8} />{/if}
+      </span>
+      <h2>Your vault is locked</h2>
     {#if p.siteWaiting}
       <p class="site-waiting" role="status">A sign-in in your browser is waiting for your passkey. Unlock to carry on: it finishes by itself.</p>
     {/if}
@@ -206,40 +208,191 @@
     <button class="link back-link" disabled={p.busy} onclick={() => setRecovering(false)}><ArrowLeft size={14} /> Back to unlock</button>
   {/if}
 </section>
+</div>
 
 <style>
-  .unlock { display: grid; justify-items: center; gap: 10px; width: min(400px, 100%); margin: 40px auto 0; padding: 30px 28px 22px; text-align: center; }
+  .unlock-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: clamp(480px, calc(100vh - 200px), 940px);
+    padding: clamp(16px, 3vh, 48px) clamp(16px, 2.5vw, 36px) clamp(24px, 5vh, 64px);
+  }
 
-  .lock { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 4px; border-radius: 18px; color: #cfd6ff; background: radial-gradient(circle at 50% 20%, rgb(var(--accent-rgb) / 0.32), transparent 70%), rgb(var(--accent-rgb) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.25), 0 10px 30px -12px var(--accent-glow); transition: transform var(--dur-med) var(--ease-out); }
+  .ambient-glow {
+    position: absolute;
+    width: min(580px, 88vw);
+    height: min(440px, 65vh);
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 50% 45%,
+      rgb(var(--accent-rgb) / 0.16) 0%,
+      rgb(111 179 198 / 0.05) 45%,
+      transparent 72%
+    );
+    filter: blur(52px);
+    pointer-events: none;
+    z-index: 0;
+  }
 
-  .lock.open { transform: scale(1.06); }
+  .unlock {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: center;
+    gap: clamp(10px, 1.4vh, 16px);
+    width: min(clamp(400px, 28vw, 470px), 100%);
+    margin: 0 auto;
+    padding: clamp(30px, 3.5vh, 44px) clamp(24px, 2.5vw, 38px) clamp(24px, 2.8vh, 32px);
+    text-align: center;
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: clamp(18px, 1.6vw, 24px);
+    background:
+      radial-gradient(circle at 50% 0%, rgb(var(--accent-rgb) / 0.12), transparent 60%),
+      linear-gradient(180deg, var(--solid-fill-top), var(--solid-fill-bottom));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      inset 0 -1px 0 rgb(0 0 0 / 0.35),
+      0 24px 60px -20px rgb(0 0 0 / 0.75),
+      0 10px 30px -10px rgb(var(--accent-rgb) / 0.3);
+    transition: width var(--dur-med) var(--ease-out), padding var(--dur-med) var(--ease-out);
+  }
 
-  h2 { font-size: 18px; }
+  .lock {
+    display: grid;
+    place-items: center;
+    width: clamp(62px, 4.4vw, 74px);
+    height: clamp(62px, 4.4vw, 74px);
+    margin-bottom: 2px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.35);
+    border-radius: clamp(18px, 1.3vw, 22px);
+    color: #d6dcff;
+    background:
+      radial-gradient(circle at 35% 25%, rgb(255 255 255 / 0.18), transparent 55%),
+      linear-gradient(150deg, rgb(var(--accent-rgb) / 0.28) 0%, rgb(18 22 36 / 0.9) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.2),
+      inset 0 -1px 0 rgb(0 0 0 / 0.4),
+      0 14px 32px -10px rgb(var(--accent-rgb) / 0.5),
+      0 4px 10px rgb(0 0 0 / 0.3);
+    transition: transform var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+  }
 
-  p { color: var(--text-2); font-size: 12.5px; }
+  .lock.open {
+    transform: scale(1.08);
+    box-shadow: 0 18px 40px -8px rgb(var(--accent-rgb) / 0.65);
+  }
 
-  form { display: grid; gap: 10px; width: 100%; margin-top: 8px; }
+  h2 {
+    margin: 4px 0 0;
+    font-family: var(--font-brand);
+    font-size: clamp(20px, 1.4vw, 24px);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--text-1);
+  }
 
-  .input { height: 38px; text-align: center; }
+  p {
+    max-width: 35ch;
+    margin: 0;
+    color: var(--text-2);
+    font-size: clamp(12.5px, 0.9vw, 13.5px);
+    line-height: 1.5;
+  }
+
+  form {
+    display: grid;
+    gap: 11px;
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  .input {
+    height: clamp(40px, 2.9vw, 46px);
+    font-size: clamp(13px, 0.9vw, 14.5px);
+    border-radius: 11px;
+    text-align: center;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    background: rgb(0 0 0 / 0.24);
+    color: var(--text-1);
+    transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+  }
+
+  .input:focus {
+    border-color: rgb(var(--accent-rgb) / 0.6);
+    box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.22);
+  }
 
   .mono { font-family: var(--font-mono); letter-spacing: 0.04em; }
 
   .error { color: #ff9d9d; font-size: 12px; }
 
-  .btn.primary { height: 38px; }
+  .btn {
+    height: clamp(40px, 2.9vw, 46px);
+    font-size: clamp(13px, 0.9vw, 14.5px);
+    font-weight: 600;
+    border-radius: 11px;
+  }
 
-  .hello { width: 100%; height: 42px; margin-top: 8px; font-size: 13.5px; }
+  .btn.primary {
+    box-shadow: 0 6px 20px -5px rgb(var(--accent-rgb) / 0.45);
+  }
 
-  .or { display: flex; align-items: center; gap: 10px; width: 100%; color: var(--text-3); font-size: 11.5px; }
+  .hello {
+    width: 100%;
+    height: clamp(44px, 3.1vw, 50px);
+    margin-top: 4px;
+    font-size: clamp(13.5px, 0.95vw, 15px);
+    box-shadow: 0 8px 24px -6px rgb(var(--accent-rgb) / 0.5);
+  }
+
+  .or {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    color: var(--text-3);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 
   .or::before,
-  .or::after { content: ""; flex: 1; height: 1px; background: rgb(255 255 255 / 0.08); }
+  .or::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.12), transparent);
+  }
 
-  .link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-3); font-size: 12px; }
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 4px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    color: var(--text-3);
+    font-size: clamp(12px, 0.85vw, 13px);
+    transition: color var(--dur-fast), background var(--dur-fast);
+  }
 
-  .link:hover { color: var(--text-1); }
+  .link:hover {
+    color: var(--text-1);
+    background: rgb(255 255 255 / 0.04);
+  }
 
-  .unlock.recovering { width: min(470px, 100%); margin-top: 12px; padding: 20px; gap: 12px; text-align: left; }
+  /* Recovery view styling */
+  .unlock.recovering {
+    width: min(clamp(480px, 34vw, 560px), 100%);
+    padding: clamp(24px, 3vh, 32px) clamp(22px, 2.4vw, 34px);
+    gap: 14px;
+    text-align: left;
+  }
 
   .recovery-intro { display: flex; align-items: flex-start; gap: 14px; width: 100%; }
 
@@ -312,10 +465,59 @@
 
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-  @media (max-width: 560px) {
+  .site-waiting { margin: 0 0 4px; padding: 8px 12px; border: 1px solid rgb(var(--accent-rgb) / 0.4); border-radius: 10px; background: rgb(var(--accent-rgb) / 0.12); color: var(--text-1); font-size: 12.5px; }
+
+  /* Tier 1: 4K / Ultrawide / Large screens (> 1700px or > 1050px height) */
+  @media (min-width: 1700px), (min-height: 1050px) {
+    .unlock {
+      width: min(480px, 100%);
+      padding: 44px 38px 32px;
+      gap: 16px;
+    }
+
     .unlock.recovering {
-      padding: 22px 18px 16px;
-      margin-top: 12px;
+      width: min(560px, 100%);
+    }
+
+    .ambient-glow {
+      width: 640px;
+      height: 500px;
+    }
+  }
+
+  /* Tier 3: Compact laptops / tablets / low height (< 820px height or < 600px width) */
+  @media (max-height: 820px), (max-width: 600px) {
+    .unlock-stage {
+      min-height: auto;
+      padding: 10px 14px 24px;
+    }
+
+    .unlock {
+      width: min(390px, 100%);
+      padding: 24px 20px 18px;
+      gap: 10px;
+      border-radius: 18px;
+    }
+
+    .lock {
+      width: 54px;
+      height: 54px;
+    }
+
+    .hello {
+      height: 40px;
+      font-size: 13px;
+    }
+
+    .input,
+    .btn {
+      height: 38px;
+      font-size: 13px;
+    }
+
+    .unlock.recovering {
+      padding: 20px 16px 16px;
+      margin-top: 10px;
     }
 
     .recovery-intro {
@@ -326,6 +528,4 @@
       font-size: 19px;
     }
   }
-
-  .site-waiting { margin: 0 0 4px; padding: 8px 12px; border: 1px solid rgb(var(--accent-rgb) / 0.4); border-radius: 10px; background: rgb(var(--accent-rgb) / 0.12); color: var(--text-1); font-size: 12.5px; }
 </style>
