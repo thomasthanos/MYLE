@@ -122,7 +122,7 @@
   header { min-width: 0; }
   .title { display: flex; align-items: center; gap: 9px; }
   .title-icon { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(62 207 142 / 0.18); border-radius: 9px; background: rgb(62 207 142 / 0.065); color: rgb(92 218 166 / 0.85); }
-  h1 { font-size: 26px; line-height: 1.2; }
+  h1 { font-family: var(--font-handwritten); font-size: 26px; font-weight: 700; font-synthesis: none; line-height: 1.25; letter-spacing: 0; background: linear-gradient(180deg, #ffffff 15%, #c5cde0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.45)); margin: 0; }
   header p { margin-top: 4px; color: var(--text-2); }
   .mutex { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-top: 4px; padding: 5px 10px; border: 1px solid rgb(62 207 142 / 0.22); border-radius: 999px; background: rgb(62 207 142 / 0.07); color: rgb(102 222 171 / 0.86); font-size: 11px; }
 

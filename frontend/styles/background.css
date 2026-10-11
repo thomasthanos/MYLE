@@ -3,33 +3,12 @@
  * rasterizes it once. A soft glow of the accent around the window, never
  * colour showing through: the panels are opaque.
  */
-.app-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  contain: strict;
-  background:
-    radial-gradient(46% 56% at 8% 4%, rgb(var(--accent-rgb) / 0.16), transparent 72%),
-    radial-gradient(36% 44% at 94% 8%, rgb(106 170 196 / 0.1), transparent 72%),
-    radial-gradient(52% 58% at 78% 104%, rgb(122 108 200 / 0.09), transparent 72%),
-    linear-gradient(180deg, #0c0f16 0%, #090b10 100%);
-}
+.app-backdrop { position: fixed; inset: 0; z-index: -1; pointer-events: none; contain: strict; background: radial-gradient(46% 56% at 8% 4%, rgb(var(--accent-rgb) / 0.08), transparent 72%), radial-gradient(36% 44% at 94% 8%, rgb(var(--accent-rgb) / 0.05), transparent 72%), linear-gradient(180deg, var(--bg-0), var(--bg-1)); }
 
-/* Film grain removes gradient banding on 8-bit panels. */
-.app-backdrop::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: var(--noise);
-  opacity: 0.035;
-}
+/* Film grain / noise disabled for a clean, artifact-free surface */
+.app-backdrop::after { display: none; }
 
-/* Dark stays matte: contrast comes from the surface layers, not glows. */
-:root.dark .app-backdrop {
-  background: var(--bg-0);
-}
+/* Navy stays matte: contrast comes from the surface layers, not glows. */
+:root.dark .app-backdrop { background: var(--bg-0); }
 
-:root.dark .app-backdrop::after {
-  opacity: 0;
-}
+:root.dark .app-backdrop::after { display: none; }

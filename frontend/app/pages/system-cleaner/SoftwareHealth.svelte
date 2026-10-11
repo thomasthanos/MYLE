@@ -13,6 +13,7 @@
   import MapPin from "@lucide/svelte/icons/map-pin";
   import AppWindow from "@lucide/svelte/icons/app-window";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
+  import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import { formatSize } from "./api";
   import { cleanerState } from "./state.svelte";
   import { ACTION_LABELS, MODULES, health, type HealthAction } from "./health.svelte";
@@ -22,6 +23,23 @@
   let query = $state("");
   let filter = $state<ListFilter>("all");
   let sort = $state<"name" | "size">("name");
+
+  const sortOptions: readonly SelectOption<"name" | "size">[] = [
+    { value: "name", label: "Name" },
+    { value: "size", label: "Largest first" },
+  ];
+
+  const categoryOptions = $derived<readonly SelectOption<string>[]>([
+    { value: "cleanup", label: "All cleanup results" },
+    ...MODULES.filter((m) => CLEANUP_MODULES.has(m.id)).map((m) => ({ value: m.id, label: m.title })),
+    { value: "controls", label: "All app controls" },
+    ...MODULES.filter((m) => !CLEANUP_MODULES.has(m.id)).map((m) => ({ value: m.id, label: m.title })),
+  ]);
+
+  const cleanupActionOptions: readonly SelectOption<HealthAction>[] = [
+    { value: "deleteKey", label: "Remove registry entry only (backup first)" },
+    { value: "forceClean", label: "Force clean: entry and remaining folders" },
+  ];
   let showRestore = $state(false);
   let page = $state(1);
   let resultsSummary: HTMLSpanElement | undefined;
@@ -121,11 +139,13 @@
 
     <div class="results">
       <div class="mobile-category">
-        <label>Category <select class="input" bind:value={category}><option value="cleanup">All cleanup results</option>{#each MODULES.filter((m) => CLEANUP_MODULES.has(m.id)) as m}<option value={m.id}>{m.title}</option>{/each}<option value="controls">All app controls</option>{#each MODULES.filter((m) => !CLEANUP_MODULES.has(m.id)) as m}<option value={m.id}>{m.title}</option>{/each}</select></label>
+        <label>Category
+          <Select bind:value={category} options={categoryOptions} ariaLabel="Category" fullWidth />
+        </label>
       </div>
       <div class="search-row">
         <label class="search"><Search size={16} /><input class="input" type="search" bind:value={query} aria-label="Search software results" placeholder="Search apps or paths…" /></label>
-        <select class="input" aria-label="Sort results" bind:value={sort}><option value="name">Name</option><option value="size">Largest first</option></select>
+        <Select bind:value={sort} options={sortOptions} ariaLabel="Sort results" minWidth="135px" align="end" />
       </div>
       <div class="filters" aria-label="Result filters">
         {#each filters as f}<button class="chip" class:active={filter === f.id} aria-pressed={filter === f.id} onclick={() => filter = f.id}>{f.label}</button>{/each}
@@ -168,7 +188,18 @@
                   {#if f.reviewReason}<p>{f.reviewReason}</p>{/if}
                   {#if f.flags.length}<p>{f.flags.join(" · ")}</p>{/if}
                   {#if f.cleanupAction && f.actions.includes("forceClean")}
-                    <label>Cleanup action <select class="input" disabled={disabled} value={health.overrides[f.id] ?? f.cleanupAction} onchange={(e) => health.overrides = { ...health.overrides, [f.id]: e.currentTarget.value as HealthAction }}><option value="deleteKey">Remove registry entry only (backup first)</option><option value="forceClean">Force clean: entry and remaining folders</option></select></label>
+                    <label class="cleanup-label">Cleanup action
+                      <Select
+                        value={(health.overrides[f.id] ?? f.cleanupAction) as HealthAction}
+                        options={cleanupActionOptions}
+                        disabled={disabled}
+                        ariaLabel="Cleanup action"
+                        fullWidth
+                        onchange={(val) => {
+                          health.overrides = { ...health.overrides, [f.id]: val };
+                        }}
+                      />
+                    </label>
                     <p>Force clean moves remaining installation folders to the Recycle Bin.</p>
                   {/if}
                 </div>

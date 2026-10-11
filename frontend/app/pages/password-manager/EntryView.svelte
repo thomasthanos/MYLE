@@ -184,16 +184,20 @@
 <style>
   .icon-btn.done { color: var(--ok); }
 
-  /* A readable width however wide the window: the buttons stay by their values. */
-  .view { display: grid; gap: 18px; width: min(100%, 760px); margin: 0 auto; container: entry / inline-size; }
+  /* Scale with the detail panel, including when the sidebar is expanded. */
+  .view { --entry-icon: 56px; --entry-title: 24px; --entry-value: 15px; --entry-label: 13px; --entry-row: 60px; --entry-gap: 20px; --entry-padding: 12px; --entry-label-width: 116px; --entry-action: 36px; display: grid; gap: var(--entry-gap); width: 100%; min-width: 0; container: entry / inline-size; }
 
   header { display: flex; align-items: center; gap: 14px; }
+  header :global(.favicon) { --size: var(--entry-icon) !important; }
+
+  .icon-btn { width: var(--entry-action); height: var(--entry-action); }
+  .icon-btn :global(svg) { width: 18px; height: 18px; }
 
   .titles { display: grid; flex: 1; gap: 4px; min-width: 0; }
 
-  h2 { overflow: hidden; font-size: 20px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  h2 { overflow: hidden; font-size: var(--entry-title); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 
-  .subtitle { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: 12.5px; }
+  .subtitle { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: var(--entry-label); }
 
   .subtitle > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -205,11 +209,11 @@
 
   .star.on { color: #ffd166; }
 
-  .warning { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgb(255 180 84 / 0.25); border-radius: 10px; background: rgb(255 180 84 / 0.08); color: #ffd08a; font-size: 12px; }
+  .warning { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgb(255 180 84 / 0.25); border-radius: 10px; background: rgb(255 180 84 / 0.08); color: #ffd08a; font-size: var(--entry-label); }
 
-  .fields { display: grid; gap: 2px; margin: 0; padding: 6px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 14px; background: rgb(0 0 0 / 0.14); }
+  .fields { display: grid; gap: 4px; margin: 0; padding: var(--entry-padding); border: 1px solid rgb(255 255 255 / 0.06); border-radius: 18px; background: rgb(0 0 0 / 0.14); }
 
-  .row { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-height: 42px; padding: 0 4px 0 12px; border-radius: 10px; }
+  .row { display: grid; grid-template-columns: var(--entry-label-width) minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: var(--entry-row); padding: 4px 4px 4px 12px; border-radius: 10px; }
 
   /* A narrow panel: each label above its value. */
   @container entry (max-width: 420px) {
@@ -231,11 +235,13 @@
 
   .row:not(.meta):hover { background: rgb(255 255 255 / 0.035); }
 
-  .row.meta { min-height: 0; margin-top: -6px; }
+  .row.meta { min-height: 24px; margin-top: -10px; padding-block: 0 8px; }
+  .row.meta :global(.meter) { font-size: var(--entry-label); gap: 9px; }
+  .row.meta :global(.meter i) { width: 18px; height: 5px; }
 
-  dt { color: var(--text-3); font-size: 12px; }
+  dt { color: var(--text-3); font-size: var(--entry-label); }
 
-  dd { margin: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  dd { margin: 0; overflow: hidden; font-size: var(--entry-value); text-overflow: ellipsis; white-space: nowrap; }
 
   .secret { font-family: var(--font-mono); letter-spacing: 0.02em; }
 
@@ -249,7 +255,7 @@
 
   .passkeys { display: grid; gap: 4px; }
 
-  .passkeys h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .passkeys h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; color: var(--text-2); font-size: var(--entry-label); font-weight: 600; }
 
   .passkey { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 4px 4px 12px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 10px; background: rgb(0 0 0 / 0.14); }
 
@@ -258,11 +264,11 @@
   .passkey-text strong,
   .passkey-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .passkey-text strong { font-size: 13px; font-weight: 600; }
+  .passkey-text strong { font-size: var(--entry-value); font-weight: 600; }
 
-  .passkey-text small { color: var(--text-3); font-size: 11.5px; }
+  .passkey-text small { color: var(--text-3); font-size: var(--entry-label); }
 
-  .history-toggle { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-3); font-size: 12px; }
+  .history-toggle { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-3); font-size: var(--entry-label); }
 
   .history-toggle:hover { color: var(--text-1); }
 
@@ -272,48 +278,58 @@
 
   .history span { color: var(--text-3); }
 
-  footer { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid rgb(255 255 255 / 0.06); }
+  footer { display: flex; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid rgb(255 255 255 / 0.06); }
+  footer .btn { min-height: var(--entry-action); padding-inline: 14px; font-size: var(--entry-label); }
+  footer :global(svg) { width: 16px; height: 16px; }
 
-  .updated { flex: 1; color: var(--text-3); font-size: 11.5px; }
+  .updated { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--entry-label); }
 
   .danger-text { color: #ff9d9d; }
 
-  /* A big screen: a little more room, and larger type. */
-  @container vault (min-width: 1700px) {
+  @container entry-panel (min-width: 1100px) {
     .view {
-      width: min(100%, 880px);
-      gap: 22px;
-    }
-
-    .row {
-      min-height: 48px;
-    }
-
-    dd {
-      font-size: 14px;
+      --entry-icon: 68px;
+      --entry-title: 28px;
+      --entry-value: 18px;
+      --entry-label: 15px;
+      --entry-row: 76px;
+      --entry-gap: 26px;
+      --entry-padding: 18px;
+      --entry-label-width: 144px;
+      --entry-action: 42px;
     }
   }
 
-  /* A 1080p screen (and anything short): tighter, so it all shows at once. */
-  @media (max-height: 1000px) {
+  @container entry-panel (min-width: 1800px) {
     .view {
-      gap: 12px;
+      --entry-icon: 80px;
+      --entry-title: 34px;
+      --entry-value: 21px;
+      --entry-label: 17px;
+      --entry-row: 96px;
+      --entry-gap: 32px;
+      --entry-padding: 24px;
+      --entry-label-width: 176px;
+      --entry-action: 48px;
     }
+    .icon-btn :global(svg) { width: 22px; height: 22px; }
+    header { gap: 20px; }
+  }
 
-    header :global(.favicon) {
-      --size: 42px !important;
+  /* Keep phone panels and short desktop windows comfortable to scroll. */
+  @container entry-panel (max-width: 480px) {
+    .view {
+      --entry-icon: 48px;
+      --entry-title: 22px;
+      --entry-label-width: 96px;
+      --entry-padding: 8px;
+      --entry-gap: 18px;
     }
+    footer { gap: 6px; }
+    footer .btn { padding-inline: 10px; }
+  }
 
-    h2 {
-      font-size: 18px;
-    }
-
-    .row {
-      min-height: 36px;
-    }
-
-    footer {
-      padding-top: 6px;
-    }
+  @media (max-height: 700px) {
+    .view { --entry-row: 48px; --entry-gap: 16px; }
   }
 </style>

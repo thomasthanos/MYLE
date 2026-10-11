@@ -255,7 +255,7 @@
   .title-text { display: grid; gap: 2px; min-width: 0; }
   .title-text p { color: var(--text-2); font-size: 12px; }
   .title-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: 11px; background: rgb(var(--accent-rgb) / 0.1); color: rgb(var(--accent-soft-rgb)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
-  h1 { font-size: 21px; }
+  h1 { font-family: var(--font-handwritten); font-size: 22px; font-weight: 700; font-synthesis: none; line-height: 1.25; letter-spacing: 0; background: linear-gradient(180deg, #ffffff 15%, #c5cde0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.45)); margin: 0; }
   .warning, .error-banner, .lock-banner { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 10px 12px; color: rgb(229 218 176 / 0.78); font-size: 11.5px; }
   .warning :global(svg) { color: rgb(241 187 84 / 0.9); flex: none; }
   .error-banner { color: rgb(255 170 170 / 0.9); }

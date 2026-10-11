@@ -22,13 +22,17 @@
 
   /** This phone has a vault: null until known. */
   let hasVault = $state<boolean | null>(null);
-  /** The user chose a vault on this phone only, without an account. */
-  let local = $state(false);
   /** Out of sight: the page is covered, so the app switcher's picture of
    *  it shows no passwords. */
   let away = $state(false);
 
-  const welcome = $derived(account.loaded && !account.profile && hasVault === false && !local);
+  const welcome = $derived(account.loaded && !account.profile);
+
+  $effect(() => {
+    if (account.resetVersion) {
+      hasVault = false;
+    }
+  });
 
   onMount(() => {
     void account.init();
@@ -112,7 +116,7 @@
     {#if !account.loaded || hasVault === null}
       <!-- A moment: whether this phone has a vault and an account. -->
     {:else if welcome}
-      <Welcome onlocal={() => (local = true)} />
+      <Welcome />
     {:else}
       <PasswordManager />
     {/if}
@@ -125,60 +129,20 @@
 <Scanner />
 
 <style>
-  .shell {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    padding-right: env(safe-area-inset-right);
-    padding-left: env(safe-area-inset-left);
-  }
+  .shell { display: flex; flex-direction: column; height: 100%; padding-right: env(safe-area-inset-right); padding-left: env(safe-area-inset-left); }
 
   /* The bar: frosted glass over the page, lit along its lower edge, the
      same panel colours as MYLE's title bar on Windows. */
-  .bar {
-    position: relative;
-    z-index: 5;
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 6px;
-    padding: calc(env(safe-area-inset-top) + 10px) 12px 10px 16px;
-    border-bottom: 1px solid var(--glass-border);
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.01)), color-mix(in srgb, var(--bg-1) 82%, transparent);
-    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.04), 0 10px 28px -18px rgb(0 0 0 / 0.7);
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
-  }
+  .bar { position: relative; z-index: 5; display: flex; flex: none; align-items: center; gap: 6px; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px 16px; border-bottom: 1px solid var(--glass-border); background: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.01)), color-mix(in srgb, var(--bg-1) 82%, transparent); box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.04), 0 10px 28px -18px rgb(0 0 0 / 0.7); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
 
-  .brand :global(svg) {
-    filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.35));
-  }
+  .brand :global(svg) { filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.35)); }
 
-  .brand {
-    display: inline-flex;
-    flex: 1;
-    align-items: center;
-    gap: 10px;
-    font-family: var(--font-display);
-    font-size: 17px;
-    font-weight: 650;
-  }
+  .brand { display: inline-flex; flex: 1; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 17px; font-weight: 650; }
 
-  .account.signed-in {
-    color: #8fe3b6;
-  }
+  .account.signed-in { color: #8fe3b6; }
 
-  main {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-    padding: 14px 14px calc(env(safe-area-inset-bottom) + 12px);
-    overflow: auto;
-  }
+  main { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 14px 14px calc(env(safe-area-inset-bottom) + 12px); overflow: auto; }
 
   /* Out of sight: nothing readable in the app switcher. */
-  .away main {
-    filter: blur(18px);
-  }
+  .away main { filter: blur(18px); }
 </style>

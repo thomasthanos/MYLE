@@ -5,9 +5,11 @@
   import LifeBuoy from "@lucide/svelte/icons/life-buoy";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import { passwordsApi as api, type Strength } from "./api";
   import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
-  import { shell } from "../../../mobile/shell.svelte";
   import { passwords as p } from "./state.svelte";
   import StrengthMeter from "./StrengthMeter.svelte";
 
@@ -18,6 +20,8 @@
   let saved = $state(false);
   /** Also open the vault with Windows Hello (or the phone's biometrics) here. */
   let useHello = $state(true);
+  let showMaster = $state(false);
+  let showConfirmation = $state(false);
 
   const mismatch = $derived(confirmation.length > 0 && confirmation !== master);
   const ready = $derived(master.length >= 10 && strength !== "weak" && confirmation === master);
@@ -40,45 +44,49 @@
   }
 </script>
 
-<section class="setup glass">
+<section class="setup glass" class:mobile={MOBILE}>
   {#if code === null}
     <div class="intro">
       <span class="badge"><ShieldCheck size={22} /></span>
-      <h2>Create your password vault</h2>
+      <h2>{MOBILE ? "Create your vault." : "Create your password vault"}</h2>
       <p>
+        {#if MOBILE}
+          Choose one strong master password. It protects every password you save in MYLE.
+        {:else}
         Everything is encrypted on this {DEVICE} with your master password before it is saved or synced. Nobody else can
         read it: not the sync server, and not us.
+        {/if}
       </p>
     </div>
 
     <form onsubmit={create}>
       <label class="field">
         <span>Master password</span>
-        <input class="input" type="password" autocomplete="new-password" bind:value={master} placeholder="At least 10 characters" />
+        <span class="password-input">
+          <input class="input" type={showMaster ? "text" : "password"} autocomplete="new-password" bind:value={master} placeholder="At least 10 characters" aria-label="Master password" aria-describedby="master-hint" />
+          {#if MOBILE}<button type="button" class="reveal" aria-label={showMaster ? "Hide master password" : "Show master password"} aria-pressed={showMaster} onclick={() => (showMaster = !showMaster)}>{#if showMaster}<EyeOff size={19} />{:else}<Eye size={19} />{/if}</button>{/if}
+        </span>
       </label>
       <div class="meter-row">
         <StrengthMeter {strength} />
-        <small>A few unrelated words make a strong, memorable password.</small>
+        <small id="master-hint">{MOBILE ? "Try a few unrelated words you can remember." : "A few unrelated words make a strong, memorable password."}</small>
       </div>
       <label class="field">
-        <span>Type it again</span>
-        <input class="input" class:bad={mismatch} type="password" autocomplete="new-password" bind:value={confirmation} />
+        <span>{MOBILE ? "Confirm master password" : "Type it again"}</span>
+        <span class="password-input">
+          <input class="input" class:bad={mismatch} type={showConfirmation ? "text" : "password"} autocomplete="new-password" bind:value={confirmation} placeholder={MOBILE ? "Enter it once more" : undefined} aria-label={MOBILE ? "Confirm master password" : "Type it again"} aria-invalid={mismatch} />
+          {#if MOBILE}<button type="button" class="reveal" aria-label={showConfirmation ? "Hide confirmation password" : "Show confirmation password"} aria-pressed={showConfirmation} onclick={() => (showConfirmation = !showConfirmation)}>{#if showConfirmation}<EyeOff size={19} />{:else}<Eye size={19} />{/if}</button>{/if}
+        </span>
       </label>
       {#if mismatch}<p class="error">The two passwords are not the same.</p>{/if}
       {#if p.error}<p class="error">{p.error}</p>{/if}
-      {#if p.sync.kind === "signedOut"}
-        {#if MOBILE}
-          <p class="note">
-            <button type="button" class="link" onclick={() => (shell.accountOpen = true)}>Sign in</button> to keep this vault
-            the same here and on your PC. You can do it later too.
-          </p>
-        {:else}
+      {#if p.sync.kind === "signedOut" && !MOBILE}
           <p class="note">Sign in on the Settings page to keep this vault on all your PCs. You can do it later too.</p>
-        {/if}
       {/if}
       <button class="btn primary" type="submit" disabled={!ready || p.busy}>
         {#if p.busy}<LoaderCircle size={15} class="spin" /> Creating…{:else}<KeyRound size={15} /> Create vault{/if}
       </button>
+      {#if MOBILE}<p class="security-note"><LockKeyhole size={15} /><span>Encrypted on your phone before it syncs.<br />Only you can unlock your vault.</span></p>{/if}
     </form>
   {:else}
     <div class="intro">
@@ -127,6 +135,10 @@
   .field { display: grid; gap: 6px; }
 
   .field span { color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .password-input { position: relative; display: block; }
+  .password-input .input { width: 100%; }
+  .reveal { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; color: var(--text-3); }
+  .reveal:hover { color: var(--text-1); background: var(--hover); }
 
   .input.bad { border-color: rgb(255 120 120 / 0.55); }
 
@@ -146,5 +158,21 @@
 
   .saved { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 12.5px; }
 
-  .note .link { color: #b7bef5; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .security-note { display: flex; align-items: flex-start; justify-content: center; gap: 8px; color: var(--text-3); font-size: 12px; line-height: 1.5; }
+  .security-note :global(svg) { flex: none; margin-top: 2px; }
+  .mobile { width: min(520px, 100%); margin: auto; padding: 28px 24px; gap: 28px; border-radius: 26px; background: linear-gradient(155deg, rgb(255 255 255 / .055), transparent 50%), var(--bg-solid-panel); box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), 0 22px 44px -26px #000; }
+  .mobile .intro { justify-items: start; text-align: left; gap: 16px; }
+  .mobile .badge { width: 56px; height: 56px; border-radius: 18px; }
+  .mobile h2 { max-width: 340px; font-size: clamp(26px, 7vw, 32px); line-height: 1.18; letter-spacing: -.4px; }
+  .mobile .intro p { font-size: 14px; line-height: 1.6; }
+  .mobile form { gap: 16px; }
+  .mobile .field { gap: 9px; }
+  .mobile .field > span:first-child { font-family: var(--font-sans); font-size: 13px; }
+  .mobile .input { min-height: 56px; padding-right: 52px; border-radius: 14px; font-size: 16px; font-family: var(--font-sans); background: rgb(0 0 0 / .2); }
+  .mobile .meter-row { display: grid; gap: 8px; margin-top: -4px; }
+  .mobile .meter-row small { text-align: left; font-size: 12px; line-height: 1.5; }
+  .mobile .btn.primary { min-height: 52px; margin-top: 6px; border-radius: 14px; font-family: var(--font-sans); font-size: 15px; }
+  .mobile .error { font-size: 13px; }
+  .mobile .saved { font-size: 14px; line-height: 1.5; }
+  @media (max-width: 360px) { .mobile { padding: 24px 18px; gap: 22px; } }
 </style>

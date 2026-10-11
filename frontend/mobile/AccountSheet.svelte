@@ -45,7 +45,7 @@
       <div class="sync"><SyncStatus /></div>
       <div class="actions">
         <button class="btn" disabled={p.sync.kind === "syncing"} onclick={() => p.syncNow()}><RefreshCw size={15} /> Sync now</button>
-        <button class="btn ghost" onclick={() => (close(), account.signOut())}><LogOut size={15} /> Sign out</button>
+        <button class="btn ghost" disabled={account.signingOut} onclick={() => (close(), account.signOut())}><LogOut size={15} /> Sign out</button>
       </div>
     {:else}
       <h2>Sync with your PC</h2>
@@ -56,102 +56,34 @@
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    background: rgb(0 0 0 / 0.5);
-  }
+  .backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.5); }
 
-  .sheet {
-    position: fixed;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 61;
-    display: grid;
-    gap: 16px;
-    padding: 10px 20px calc(env(safe-area-inset-bottom) + 22px);
-    border-top: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: 20px 20px 0 0;
-    background: var(--bg-1);
-  }
+  .sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 61; display: grid; gap: 16px; padding: 10px 20px calc(env(safe-area-inset-bottom) + 22px); border-top: 1px solid rgb(255 255 255 / 0.1); border-radius: 20px 20px 0 0; background: var(--bg-1); }
 
-  .grip {
-    justify-self: center;
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: rgb(255 255 255 / 0.2);
-  }
+  .grip { justify-self: center; width: 40px; height: 4px; border-radius: 2px; background: rgb(255 255 255 / 0.2); }
 
-  h2 {
-    font-size: 18px;
-  }
+  h2 { font-size: 18px; }
 
-  p {
-    color: var(--text-2);
-    font-size: 14px;
-  }
+  p { color: var(--text-2); font-size: 14px; }
 
-  .profile {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
+  .profile { display: flex; align-items: center; gap: 14px; }
 
-  .avatar {
-    width: 52px;
-    height: 52px;
-    flex: none;
-  }
+  .avatar { width: 52px; height: 52px; flex: none; }
 
   .avatar img,
-  .initials {
-    width: 100%;
-    height: 100%;
-    border: 2px solid rgb(var(--accent-rgb) / 0.4);
-    border-radius: 50%;
-  }
+  .initials { width: 100%; height: 100%; border: 2px solid rgb(var(--accent-rgb) / 0.4); border-radius: 50%; }
 
-  .avatar img {
-    object-fit: cover;
-  }
+  .avatar img { object-fit: cover; }
 
-  .initials {
-    display: grid;
-    place-items: center;
-    background: var(--accent-grad);
-    color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-  }
+  .initials { display: grid; place-items: center; background: var(--accent-grad); color: #fff; font-size: 18px; font-weight: 700; }
 
-  .who {
-    display: grid;
-    min-width: 0;
-    gap: 2px;
-  }
+  .who { display: grid; min-width: 0; gap: 2px; }
 
-  .who strong {
-    font-size: 16px;
-  }
+  .who strong { font-size: 16px; }
 
-  .who small {
-    overflow: hidden;
-    color: var(--text-2);
-    font-size: 13px;
-    text-overflow: ellipsis;
-  }
+  .who small { overflow: hidden; color: var(--text-2); font-size: 13px; text-overflow: ellipsis; }
 
-  .actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-  .sync :global(.sync) {
-    margin-left: -10px;
-    font-size: 13px;
-  }
+  .sync :global(.sync) { margin-left: -10px; font-size: 13px; }
 </style>

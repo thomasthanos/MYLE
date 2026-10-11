@@ -56,93 +56,39 @@
 </div>
 
 <style>
-  .icon-btn.done {
-    color: var(--ok);
-  }
+  .icon-btn.done { color: var(--ok); }
 
   /* Lays out like the entry's other rows (EntryView's .row). */
-  .row {
-    display: grid;
-    grid-template-columns: 96px minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 6px;
-    min-height: 42px;
-    padding: 0 4px 0 12px;
-    border-radius: 10px;
-  }
+  .row { display: grid; grid-template-columns: var(--entry-label-width, 96px) minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: var(--entry-row, 42px); padding: 4px 4px 4px 12px; border-radius: 10px; }
 
-  .row:hover {
-    background: rgb(255 255 255 / 0.035);
-  }
+  .row:hover { background: rgb(255 255 255 / 0.035); }
 
-  dt {
-    color: var(--text-3);
-    font-size: 12px;
-  }
+  dt { color: var(--text-3); font-size: var(--entry-label, 12px); }
 
-  dd {
-    margin: 0;
-  }
+  dd { margin: 0; }
 
-  .code {
-    color: #c9d0ff;
-    font-family: var(--font-mono);
-    font-size: 17px;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.08em;
-    transition: color var(--dur-med);
-  }
+  .code { color: #c9d0ff; font-family: var(--font-mono); font-size: calc(var(--entry-value, 13px) + 4px); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; transition: color var(--dur-med); }
 
-  .code.soon {
-    color: #ffcf8f;
-  }
+  .code.soon { color: #ffcf8f; }
 
-  .failed {
-    color: var(--text-3);
-    font-family: var(--font-sans);
-    font-size: 12px;
-    letter-spacing: 0;
-  }
+  .icon-btn { width: var(--entry-action, 30px); height: var(--entry-action, 30px); }
+  .icon-btn :global(svg) { width: 18px; height: 18px; }
 
-  .ring {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-  }
+  .failed { color: var(--text-3); font-family: var(--font-sans); font-size: 12px; letter-spacing: 0; }
 
-  .ring svg {
-    position: absolute;
-    inset: 0;
-    transform: rotate(-90deg);
-  }
+  .ring { position: relative; display: grid; place-items: center; width: 26px; height: 26px; }
 
-  circle {
-    fill: none;
-    stroke-width: 2.2;
-  }
+  .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
 
-  .track {
-    stroke: rgb(255 255 255 / 0.09);
-  }
+  circle { fill: none; stroke-width: 2.2; }
 
-  .left {
-    stroke: rgb(var(--accent-rgb));
-    stroke-dasharray: 50.27;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 1s linear, stroke var(--dur-med);
-  }
+  .track { stroke: rgb(255 255 255 / 0.09); }
 
-  .ring.soon .left {
-    stroke: #ffb35c;
-  }
+  .left { stroke: rgb(var(--accent-rgb)); stroke-dasharray: 50.27; stroke-linecap: round; transition: stroke-dashoffset 1s linear, stroke var(--dur-med); }
 
-  .ring small {
-    color: var(--text-3);
-    font-size: 9.5px;
-    font-variant-numeric: tabular-nums;
-  }
+  .ring.soon .left { stroke: #ffb35c; }
+
+  .ring small { color: var(--text-3); font-size: 9.5px; font-variant-numeric: tabular-nums; }
 
   /* A narrow panel: the label above the code, as in the other rows. */
   @container entry (max-width: 420px) {
@@ -157,7 +103,7 @@
     }
   }
 
-  @media (max-height: 1000px) {
+  @media (max-height: 700px) {
     .row {
       min-height: 36px;
     }

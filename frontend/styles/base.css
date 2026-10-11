@@ -1,66 +1,35 @@
+@import "./fonts.css";
+
 *,
 *::before,
-*::after {
-  box-sizing: border-box;
-}
+*::after { box-sizing: border-box; }
 
 html,
-body {
-  margin: 0;
-  height: 100%;
-  overflow: hidden;
-}
+body { margin: 0; height: 100%; overflow: hidden; }
 
 /* Only the root paints a background: a body background would cover the
    z-index:-1 .app-backdrop. */
-html {
-  background: var(--bg-0);
-}
+html { background: var(--bg-0); }
 
-html.main-window {
-  background: transparent;
-}
+html.main-window { background: transparent; }
 
-body {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--text-1);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  /* Desktop app feel: chrome text is not selectable; opt in with .selectable. */
-  user-select: none;
-  cursor: default;
-}
+body { font-family: var(--font-sans); font-size: 14.5px; line-height: 1.5; color: var(--text-1); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; /* Desktop app feel: chrome text is not selectable; opt in with .selectable. */ user-select: none; cursor: default; }
 
 .selectable,
 input,
-textarea {
-  user-select: text;
-}
+textarea { user-select: text; }
 
 h1,
 h2,
 h3,
-p {
-  margin: 0;
-}
+p { margin: 0; }
 
-h1,
+h1 { font-family: var(--font-handwritten); font-weight: 700; letter-spacing: 0; background: linear-gradient(180deg, #ffffff 15%, #c5cde0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.45)); }
+
 h2,
-h3 {
-  font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+h3 { font-family: var(--font-brand); font-weight: 700; letter-spacing: 0; }
 
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
 
 /* The hand cursor on everything that can be clicked. */
 button,
@@ -76,50 +45,28 @@ label:has(> input:not([type="text"], [type="search"])),
 [role="switch"],
 input[type="checkbox"],
 input[type="radio"],
-input[type="range"] {
-  cursor: pointer;
-}
+input[type="range"] { cursor: pointer; }
 
 :is(button, input, select):disabled,
-[aria-disabled="true"] {
-  cursor: not-allowed;
-}
+[aria-disabled="true"] { cursor: not-allowed; }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Slim overlay-style scrollbars without arrow buttons, on every scrolling
    area. No component sets the standard scrollbar-width/scrollbar-color:
    in Chromium (WebView2) either one turns these styles off for that element
    and brings back Windows' own scrollbar. */
-::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
+::-webkit-scrollbar { width: 12px; height: 12px; }
 
 ::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
+::-webkit-scrollbar-corner { background: transparent; }
 
-::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
-::-webkit-scrollbar-thumb {
-  border: 4px solid transparent;
-  border-radius: 999px;
-  background: var(--scroll-thumb) padding-box;
-}
+::-webkit-scrollbar-thumb { border: 4px solid transparent; border-radius: 999px; background: var(--scroll-thumb) padding-box; }
 
 ::-webkit-scrollbar-thumb:hover,
-::-webkit-scrollbar-thumb:active {
-  background-color: var(--scroll-thumb-hover);
-}
+::-webkit-scrollbar-thumb:active { background-color: var(--scroll-thumb-hover); }
 
 @media (prefers-reduced-motion: reduce) {
   *,

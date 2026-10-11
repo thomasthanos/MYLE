@@ -98,14 +98,13 @@ pub async fn passwords_hello_enable(app: AppHandle, state: State<'_, PasswordsSt
 pub async fn passwords_hello_disable(app: AppHandle, state: State<'_, PasswordsState>) -> Result<(), String> {
     let file = path(&app)?;
     let id = read(&file).map(|stored| stored.vault_id).or_else(|| vault_id(&state).ok());
-    let _ = std::fs::remove_file(&file);
     if let Some(id) = id {
         blocking(move || {
-            store::remove(&app, &id);
-            Ok(())
+            store::remove(&app, &id)
         })
         .await?;
     }
+    crate::account::remove_private(&file)?;
     Ok(())
 }
 
@@ -185,11 +184,16 @@ mod store {
             .map_err(|e| e.to_string())
     }
 
-    pub fn remove(app: &AppHandle, name: &str) {
-        let _ = app.biometry().remove_data(DataOptions {
+    pub fn remove(app: &AppHandle, name: &str) -> Result<(), String> {
+        let present = app.biometry().has_data(DataOptions {
             domain: DOMAIN.into(),
             name: name.into(),
-        });
+        }).map_err(|e| e.to_string())?;
+        if !present { return Ok(()); }
+        app.biometry().remove_data(DataOptions {
+            domain: DOMAIN.into(),
+            name: name.into(),
+        }).map(|_| ()).map_err(|e| e.to_string())
     }
 }
 
@@ -221,5 +225,5 @@ mod store {
         Err(NONE.into())
     }
 
-    pub fn remove(_: &AppHandle, _: &str) {}
+    pub fn remove(_: &AppHandle, _: &str) -> Result<(), String> { Ok(()) }
 }

@@ -17,11 +17,11 @@
   </div>
 {:else}
   <div class="providers">
-    <button class="provider discord" onclick={() => account.signIn("discord")}>
-      <BrandIcon brand="discord" size={19} /> Continue with Discord
+    <button class="provider discord" disabled={account.signingOut} onclick={() => account.signIn("discord")}>
+      <span class="provider-icon"><BrandIcon brand="discord" size={22} /></span><span>Continue with Discord</span>
     </button>
-    <button class="provider google" onclick={() => account.signIn("google")}>
-      <BrandIcon brand="google" size={17} /> Continue with Google
+    <button class="provider google" disabled={account.signingOut} onclick={() => account.signIn("google")}>
+      <span class="provider-icon"><BrandIcon brand="google" size={21} /></span><span>Continue with Google</span>
     </button>
   </div>
 {/if}
@@ -35,32 +35,43 @@
   .provider {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
-    height: 48px;
-    border-radius: 12px;
-    font-size: 15px;
+    justify-content: flex-start;
+    gap: 14px;
+    min-height: 58px;
+    padding: 9px 14px;
+    border-radius: 16px;
+    font-family: var(--font-sans);
+    font-size: 14px;
     font-weight: 600;
   }
 
-  .provider:active {
+  .provider:active:not(:disabled) {
     filter: brightness(0.92);
   }
 
   .discord {
     border: 1px solid rgb(255 255 255 / 0.14);
-    background: linear-gradient(180deg, #6875f5, #5865f2);
+    background: linear-gradient(145deg, #626fef, #4b58d4);
     color: #fff;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), 0 6px 16px -10px #5865f2;
   }
 
   .google {
-    border: 1px solid rgb(0 0 0 / 0.08);
-    background: linear-gradient(180deg, #ffffff, #eef0f5);
-    color: #1f2330;
+    border: 1px solid rgb(255 255 255 / .13);
+    background: linear-gradient(145deg, rgb(255 255 255 / .06), rgb(255 255 255 / .025));
+    color: var(--text-1);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .05);
   }
 
+  .provider-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 10px; background: rgb(255 255 255 / .12); }
+  .google .provider-icon { background: #fff; }
+  .provider:hover:not(:disabled) { filter: brightness(1.08); }
+  .provider:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .provider:disabled { opacity: .5; }
+
   .waiting {
-    display: flex;
+    display: grid;
+    grid-template-columns: 18px 1fr;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -79,4 +90,5 @@
     color: var(--text-2);
     font-size: 12.5px;
   }
+  .waiting .btn { grid-column: 2; justify-self: start; min-height: 36px; }
 </style>

@@ -29,7 +29,7 @@ const SYNC_EVERY: Duration = Duration::from_secs(5 * 60);
 const AWAY_LOCK: Duration = Duration::from_secs(60);
 
 /// One sync at a time: a background pass and "Sync now" must not interleave.
-static SYNCING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static SYNCING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone)]
 pub struct PasswordsState {
@@ -69,6 +69,12 @@ impl PasswordsState {
 
     fn hidden_since(&self) -> std::sync::MutexGuard<'_, Option<Instant>> {
         self.hidden_at.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    pub(crate) fn clear_local(&self) -> Result<(), String> {
+        self.cell.clear_local()?;
+        *self.hidden_since() = None;
+        Ok(())
     }
 
     /// Back in sight: locks the vault if the app was away a while (and the

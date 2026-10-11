@@ -24,9 +24,10 @@ use crate::vault::CachedIcon;
 
 /// Sent to the page for each icon fetched in the background.
 pub const ICON_EVENT: &str = "passwords-icon";
-/// A found icon is fetched again after a month; a site without one, a week.
+/// A found icon is fetched again after a month; a failed request, five minutes.
 const KEEP_FOUND: u64 = 30 * 24 * 3600;
-const KEEP_MISSING: u64 = 7 * 24 * 3600;
+const KEEP_MISSING: u64 = 5 * 60;
+const DISCOVERY_REVISION: u8 = 2;
 /// Read of a home page: enough for its `<head>`.
 const MAX_PAGE: usize = 512 * 1024;
 const MAX_ICON: usize = 200 * 1024;
@@ -145,7 +146,22 @@ impl Pending {
     /// Fetches the icons, keeps them in the vault's icon cache and passes
     /// each one found to `on_icon`.
     pub async fn fetch(self, state: &VaultCell, on_icon: impl Fn(Fetched)) {
-        fetch_all(state, &self.hosts, on_icon).await;
+        let mut hosts = self.hosts.clone();
+        let mut attempted = HashSet::new();
+        loop {
+            attempted.extend(hosts.iter().cloned());
+            if !fetch_all(state, &hosts, &on_icon).await { break; }
+            // A login added while this batch was running is picked up too.
+            // Each site is attempted once, even if a very large batch outlasts
+            // the negative cache's lifetime.
+            match cached_icons(state, &HashSet::new()) {
+                Ok((_, wanted)) => {
+                    hosts = wanted.into_iter().filter(|host| !attempted.contains(host)).collect();
+                    if hosts.is_empty() { break; }
+                }
+                _ => break,
+            }
+        }
     }
 }
 
@@ -159,7 +175,16 @@ impl Drop for Pending {
 /// (`skip`), and the missing and old ones to fetch (see `Pending`).
 pub fn lookup(state: &VaultCell, skip: Vec<String>) -> Result<(HashMap<String, String>, Option<Pending>), String> {
     let skip: HashSet<String> = skip.into_iter().collect();
-    let (known, wanted) = state.with_quiet(|vault| {
+    let (known, wanted) = cached_icons(state, &skip)?;
+    // Construct the owner only when the gate was acquired. An eagerly made
+    // Pending would release somebody else's gate in Drop on a skipped lookup.
+    let pending = (!wanted.is_empty() && !FETCHING.swap(true, Ordering::SeqCst))
+        .then(|| Pending { hosts: wanted });
+    Ok((known, pending))
+}
+
+fn cached_icons(state: &VaultCell, skip: &HashSet<String>) -> Result<(HashMap<String, String>, Vec<String>), String> {
+    state.with_quiet(|vault| {
         if !vault.prefs().website_icons {
             return Ok((HashMap::new(), Vec::new()));
         }
@@ -173,6 +198,15 @@ pub fn lookup(state: &VaultCell, skip: Vec<String>) -> Result<(HashMap<String, S
         let mut known = HashMap::new();
         let mut wanted = Vec::new();
         for host in hosts {
+            if let Some(icon) = bundled_icon(&host) {
+                if cache.icons.get(&host).and_then(|cached| cached.data.as_ref()) != Some(&icon) {
+                    wanted.push(host.clone());
+                }
+                if !skip.contains(&host) {
+                    known.insert(host, icon);
+                }
+                continue;
+            }
             match cache.icons.get(&host) {
                 Some(cached) => {
                     if let Some(data) = &cached.data
@@ -180,8 +214,7 @@ pub fn lookup(state: &VaultCell, skip: Vec<String>) -> Result<(HashMap<String, S
                     {
                         known.insert(host.clone(), data.clone());
                     }
-                    let keep = if cached.data.is_some() { KEEP_FOUND } else { KEEP_MISSING };
-                    if now.saturating_sub(cached.at) >= keep {
+                    if needs_refresh(cached, now) {
                         wanted.push(host);
                     }
                 }
@@ -189,14 +222,17 @@ pub fn lookup(state: &VaultCell, skip: Vec<String>) -> Result<(HashMap<String, S
             }
         }
         Ok((known, wanted))
-    })?;
-    let pending = (!wanted.is_empty() && !FETCHING.swap(true, Ordering::SeqCst))
-        .then_some(Pending { hosts: wanted });
-    Ok((known, pending))
+    })
 }
 
-async fn fetch_all(state: &VaultCell, hosts: &[String], on_icon: impl Fn(Fetched)) {
-    let Ok(client) = client() else { return };
+fn needs_refresh(cached: &CachedIcon, now: u64) -> bool {
+    let missing = cached.data.is_none();
+    (missing && cached.revision < DISCOVERY_REVISION)
+        || now.saturating_sub(cached.at) >= if missing { KEEP_MISSING } else { KEEP_FOUND }
+}
+
+async fn fetch_all(state: &VaultCell, hosts: &[String], on_icon: impl Fn(Fetched)) -> bool {
+    let Ok(client) = client() else { return false };
     let mut results = futures_util::stream::iter(hosts.iter().cloned())
         .map(|host| {
             let client = client.clone();
@@ -217,12 +253,12 @@ async fn fetch_all(state: &VaultCell, hosts: &[String], on_icon: impl Fn(Fetched
             let data = icon
                 .clone()
                 .or_else(|| cache.icons.get(&host).and_then(|old| old.data.clone()));
-            cache.icons.insert(host.clone(), CachedIcon { data, at: now() });
+            cache.icons.insert(host.clone(), CachedIcon { data, at: now(), revision: DISCOVERY_REVISION });
             Ok(())
         });
         // Locked, or the icons were turned off: stop, and keep nothing.
         if stored.is_err() {
-            return;
+            return false;
         }
         if let Some(icon) = icon {
             on_icon(Fetched { host, icon });
@@ -235,6 +271,7 @@ async fn fetch_all(state: &VaultCell, hosts: &[String], on_icon: impl Fn(Fetched
         }
     }
     let _ = state.with_quiet(|vault| vault.save_icons());
+    true
 }
 
 fn client() -> Result<reqwest::Client, reqwest::Error> {
@@ -279,20 +316,78 @@ async fn get(client: &reqwest::Client, url: &Url, accept: &str) -> Option<reqwes
     None
 }
 
-/// A website's icon as a `data:` URL: from its own host, else from the site
-/// it belongs to (`mail.example.com` → `example.com`).
+/// Official icons for sites that reject background clients. Domain matching
+/// uses the public suffix list, so lookalike hosts never inherit a brand.
+fn bundled_icon(host: &str) -> Option<String> {
+    let bytes: &[u8] = match psl::domain_str(host)? {
+        "epicgames.com" => include_bytes!("site-icons/epic-games.ico"),
+        "sony.com" => include_bytes!("site-icons/sony.ico"),
+        "nordaccount.com" => include_bytes!("site-icons/nord-account.png"),
+        "stoiximan.gr" => include_bytes!("site-icons/stoiximan.png"),
+        "trovo.live" => include_bytes!("site-icons/trovo.ico"),
+        "samsung.com" | "samsung.gr" => include_bytes!("site-icons/samsung.png"),
+        _ => return None,
+    };
+    as_data_url(bytes)
+}
+
+fn site_hosts(host: &str) -> Vec<String> {
+    let mut hosts = vec![host.to_string()];
+    if let Some(site) = psl::domain_str(host) {
+        for candidate in [site.to_string(), format!("www.{site}")] {
+            if !hosts.contains(&candidate) {
+                hosts.push(candidate);
+            }
+        }
+    }
+    hosts
+}
+
+/// From its own host, then the parent website and its www host. Bound the
+/// whole search so an unresponsive website cannot hold up the icon queue.
 async fn fetch_icon(client: &reqwest::Client, host: &str) -> Option<String> {
-    if let Some(icon) = icon_of(client, host).await {
+    if let Some(icon) = bundled_icon(host) {
         return Some(icon);
     }
-    let site = psl::domain_str(host).filter(|site| *site != host)?;
-    icon_of(client, site).await
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for candidate in site_hosts(host) {
+            if let Ok(Some(icon)) = tokio::time::timeout(Duration::from_secs(6), icon_of(client, &candidate)).await {
+                return Some(icon);
+            }
+        }
+        None
+    }).await.ok().flatten()
 }
 
 async fn icon_of(client: &reqwest::Client, host: &str) -> Option<String> {
     let home = Url::parse(&format!("https://{host}/")).ok()?;
+    first_icon(discover_page_icon(client, &home), async {
+        // Give the page's declared, higher-resolution icon a head start. A
+        // stalled page must not stop a working favicon at its usual address.
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        for link in default_icons(&home) {
+            if let Some(icon) = image(client, &link).await {
+                return Some(icon);
+            }
+        }
+        None
+    }).await
+}
+
+async fn first_icon(
+    first: impl std::future::Future<Output = Option<String>>,
+    second: impl std::future::Future<Output = Option<String>>,
+) -> Option<String> {
+    tokio::pin!(first, second);
+    tokio::select! {
+        icon = &mut first => match icon { Some(_) => icon, None => second.await },
+        icon = &mut second => match icon { Some(_) => icon, None => first.await },
+    }
+}
+
+async fn discover_page_icon(client: &reqwest::Client, home: &Url) -> Option<String> {
     let mut tried = Vec::new();
-    let mut found = page(client, &home).await;
+    let mut found = page(client, home).await;
     // A page that only sends the browser on (`<meta http-equiv="refresh">`).
     if let Some((base, html)) = &found
         && icon_links(html, base).is_empty()
@@ -302,8 +397,7 @@ async fn icon_of(client: &reqwest::Client, host: &str) -> Option<String> {
         found = Some(next_page);
     }
     if let Some((base, html)) = found {
-        let fallback = base.join("/favicon.ico").ok();
-        for link in icon_links(&html, &base).into_iter().chain(fallback) {
+        for link in icon_links(&html, &base) {
             if tried.contains(&link) {
                 continue;
             }
@@ -312,12 +406,98 @@ async fn icon_of(client: &reqwest::Client, host: &str) -> Option<String> {
             }
             tried.push(link);
         }
+        for link in manifest_links(&html, &base) {
+            if let Some((manifest_base, json)) = manifest(client, &link).await {
+                for link in manifest_icons(&json, &manifest_base) {
+                    if !tried.contains(&link) {
+                        if let Some(icon) = image(client, &link).await {
+                            return Some(icon);
+                        }
+                        tried.push(link);
+                    }
+                }
+            }
+        }
+        for link in default_icons(&base) {
+            if !tried.contains(&link) {
+                if let Some(icon) = image(client, &link).await {
+                    return Some(icon);
+                }
+                tried.push(link);
+            }
+        }
     }
-    let fallback = home.join("/favicon.ico").ok()?;
-    if tried.contains(&fallback) {
+    None
+}
+
+fn default_icons(base: &Url) -> impl Iterator<Item = Url> + '_ {
+    ["/favicon.ico", "/favicon.png", "/apple-touch-icon.png"].into_iter().filter_map(|path| base.join(path).ok())
+}
+
+async fn manifest(client: &reqwest::Client, url: &Url) -> Option<(Url, String)> {
+    let mut response = get(client, url, "application/manifest+json,application/json").await?;
+    if !response.status().is_success() || response.content_length().is_some_and(|n| n > MAX_PAGE as u64) {
         return None;
     }
-    image(client, &fallback).await
+    let base = response.url().clone();
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        body.extend_from_slice(&chunk);
+        if body.len() > MAX_PAGE {
+            return None;
+        }
+    }
+    Some((base, String::from_utf8_lossy(&body).into_owned()))
+}
+
+fn manifest_links(html: &str, base: &Url) -> Vec<Url> {
+    let base = document_base(html, base);
+    let lower = html.to_ascii_lowercase();
+    let mut from = 0;
+    let mut links = Vec::new();
+    while let Some(at) = lower[from..].find("<link") {
+        let start = from + at;
+        let Some(length) = lower[start..].find('>') else { break };
+        from = start + length;
+        let attrs = attributes(&html[start..start + length]);
+        if attrs.get("rel").is_some_and(|rel| rel.split_ascii_whitespace().any(|word| word.eq_ignore_ascii_case("manifest")))
+            && let Some(href) = attrs.get("href")
+            && let Ok(url) = base.join(&href.trim().replace("&amp;", "&"))
+            && may_ask(&url)
+            && !links.contains(&url)
+        {
+            links.push(url);
+            if links.len() == 2 { break; }
+        }
+    }
+    links
+}
+
+fn manifest_icons(json: &str, base: &Url) -> Vec<Url> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
+    let Some(icons) = value.get("icons").and_then(|icons| icons.as_array()) else { return Vec::new() };
+    let mut found = Vec::new();
+    for icon in icons {
+        let purpose = icon.get("purpose").and_then(|value| value.as_str()).unwrap_or("any");
+        if !purpose.split_ascii_whitespace().any(|word| matches!(word, "any" | "maskable")) {
+            continue;
+        }
+        let Some(src) = icon.get("src").and_then(|value| value.as_str()) else { continue };
+        let Ok(url) = base.join(src) else { continue };
+        if !may_ask(&url) && url.scheme() != "data" { continue; }
+        let size = icon.get("sizes").and_then(|value| value.as_str()).and_then(largest).unwrap_or(0);
+        let score = match size {
+            48..=256 => 100 - size.abs_diff(96) / 8,
+            32..=47 => 80,
+            257.. => 60,
+            0 => 50,
+            _ => 40,
+        };
+        found.push((score, url));
+    }
+    found.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    let mut seen = HashSet::new();
+    found.into_iter().filter_map(|(_, url)| seen.insert(url.clone()).then_some(url)).take(4).collect()
 }
 
 /// The start of a website's home page (up to its `</head>`), and where it
@@ -357,6 +537,7 @@ fn contains_ignoring_case(haystack: &[u8], needle: &[u8]) -> bool {
 /// The icons a page names in `<link rel="icon">` (and Apple's touch icons),
 /// best first: a scalable or a larger one over a tiny one.
 fn icon_links(html: &str, base: &Url) -> Vec<Url> {
+    let base = document_base(html, base);
     // ASCII lowercasing keeps every byte where it was.
     let lower = html.to_ascii_lowercase();
     let mut found: Vec<(u32, Url)> = Vec::new();
@@ -400,6 +581,24 @@ fn icon_links(html: &str, base: &Url) -> Vec<Url> {
         .filter_map(|(_, url)| seen.insert(url.clone()).then_some(url))
         .take(4)
         .collect()
+}
+
+/// Browsers resolve relative icon/manifest links against the first base href.
+/// Keep the same public-HTTPS rules as all other discovered addresses.
+fn document_base(html: &str, fallback: &Url) -> Url {
+    let lower = html.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("<base") {
+        let start = from + at;
+        let Some(length) = lower[start..].find('>') else { break };
+        from = start + length;
+        let attrs = attributes(&html[start..start + length]);
+        if let Some(href) = attrs.get("href") {
+            return fallback.join(&href.trim().replace("&amp;", "&"))
+                .ok().filter(may_ask).unwrap_or_else(|| fallback.clone());
+        }
+    }
+    fallback.clone()
 }
 
 /// Where a `<meta http-equiv="refresh" content="0; url=…">` sends the browser.
@@ -684,11 +883,15 @@ mod tests {
     #[ignore = "uses the network"]
     async fn real_websites_give_their_icons() {
         let client = client().unwrap();
-        for host in ["github.com", "www.wikipedia.org", "accounts.google.com", "cosmote.gr"] {
+        let mut missing = Vec::new();
+        for host in ["nordaccount.com", "stoiximan.gr", "samsung.gr", "epicgames.com", "my.account.sony.com", "github.com", "www.wikipedia.org", "accounts.google.com", "cosmote.gr", "paypal.com", "trovo.live", "vodafonecu.gr", "www.nerdom.gr"] {
             let icon = fetch_icon(&client, host).await;
             println!("{host}: {}", icon.as_deref().map_or("none".into(), |i| i[..40.min(i.len())].to_string()));
-            assert!(icon.is_some_and(|i| i.starts_with("data:image/")), "{host}");
+            if !icon.is_some_and(|i| i.starts_with("data:image/")) {
+                missing.push(host);
+            }
         }
+        assert!(missing.is_empty(), "missing icons: {missing:?}");
     }
 
     #[test]
@@ -697,5 +900,128 @@ mod tests {
         assert!(data_url_image(svg).unwrap().starts_with("data:image/svg+xml;base64,"));
         let html = format!("data:text/html;base64,{}", STANDARD.encode("<html><script>alert(1)</script></html>"));
         assert_eq!(data_url_image(&html), None);
+    }
+
+    #[test]
+    fn blocked_sites_have_official_icons_without_network_requests() {
+        for host in ["epicgames.com", "store.epicgames.com", "my.account.sony.com", "nordaccount.com", "my.nordaccount.com", "stoiximan.gr", "www.samsung.gr", "account.samsung.com", "trovo.live"] {
+            assert!(bundled_icon(host).is_some_and(|icon| icon.starts_with("data:image/")), "{host}");
+        }
+        for host in ["epicgames.com.example.org", "sony.com.example.org", "nordaccount.com.example.org", "stoiximan.gr.example.org", "samsung.gr.example.org", "payzy.com"] {
+            assert!(bundled_icon(host).is_none(), "{host}");
+        }
+    }
+
+    #[test]
+    fn discovery_also_checks_the_sites_www_host() {
+        assert_eq!(site_hosts("account.example.co.uk"), ["account.example.co.uk", "example.co.uk", "www.example.co.uk"]);
+        assert_eq!(site_hosts("example.com"), ["example.com", "www.example.com"]);
+        assert_eq!(site_hosts("www.example.com"), ["www.example.com", "example.com"]);
+    }
+
+    #[test]
+    fn manifest_icons_resolve_from_the_manifest_and_prefer_displayable_sizes() {
+        let base = Url::parse("https://cdn.example.com/assets/site.webmanifest").unwrap();
+        let json = r#"{"icons":[
+            {"src":"tiny.png","sizes":"16x16"},
+            {"src":"app.png","sizes":"192x192","purpose":"any maskable"},
+            {"src":"mono.svg","sizes":"any","purpose":"monochrome"},
+            {"src":"http://example.com/icon.png","sizes":"96x96"}
+        ]}"#;
+        let urls: Vec<_> = manifest_icons(json, &base).iter().map(Url::as_str).map(str::to_string).collect();
+        assert_eq!(urls, ["https://cdn.example.com/assets/app.png", "https://cdn.example.com/assets/tiny.png"]);
+        assert!(manifest_icons("not json", &base).is_empty());
+        let home = Url::parse("https://example.com/").unwrap();
+        assert_eq!(manifest_links(r#"<link rel="manifest" href="/app.webmanifest">"#, &home)[0].as_str(), "https://example.com/app.webmanifest");
+    }
+
+    #[test]
+    fn old_missing_icons_are_retried_without_discarding_successful_ones() {
+        let old: CachedIcon = serde_json::from_str(r#"{"data":null,"at":1000}"#).unwrap();
+        assert!(needs_refresh(&old, 1001));
+        let current = CachedIcon { revision: DISCOVERY_REVISION, ..old };
+        assert!(!needs_refresh(&current, 1001));
+        assert!(needs_refresh(&current, 1000 + KEEP_MISSING));
+        let found = CachedIcon { data: Some("data:image/png;base64,AAAA".into()), revision: 0, at: 1000 };
+        assert!(!needs_refresh(&found, 1001));
+        assert!(needs_refresh(&found, 1000 + KEEP_FOUND));
+    }
+
+    #[tokio::test]
+    async fn bundled_icons_replace_fresh_cached_misses_and_respect_the_preference() {
+        let path = std::env::temp_dir().join(format!("myle-icon-test-{}.vault", uuid::Uuid::new_v4()));
+        let cell_path = path.clone();
+        let state = VaultCell::new(move || Ok(cell_path.clone()));
+        state.with_quiet(|vault| {
+            vault.create("test", crate::crypto::KdfParams::cheap_for_tests())?;
+            let entry = serde_json::from_str(r#"{"title":"Epic Games","urls":["https://epicgames.com/"]}"#).unwrap();
+            vault.save(&entry)?;
+            vault.icons()?.icons.insert("epicgames.com".into(), CachedIcon {
+                data: None, at: now(), revision: DISCOVERY_REVISION,
+            });
+            Ok(())
+        }).unwrap();
+        let (known, pending) = lookup(&state, Vec::new()).unwrap();
+        assert_eq!(known.get("epicgames.com"), bundled_icon("epicgames.com").as_ref());
+        assert!(pending.is_some());
+        let (_, overlap) = lookup(&state, Vec::new()).unwrap();
+        assert!(overlap.is_none());
+        assert!(FETCHING.load(Ordering::SeqCst), "an overlapping lookup must not release the active fetch");
+        let (_, overlap) = lookup(&state, Vec::new()).unwrap();
+        assert!(overlap.is_none(), "the first fetch still owns the queue");
+        drop(pending);
+        let (known, pending) = lookup(&state, vec!["epicgames.com".into()]).unwrap();
+        assert!(known.is_empty(), "do not resend icons already on the page");
+        drop(pending);
+        state.with_quiet(|vault| {
+            let mut prefs = vault.prefs();
+            prefs.website_icons = false;
+            vault.set_prefs(prefs)
+        }).unwrap();
+        let (known, pending) = lookup(&state, Vec::new()).unwrap();
+        assert!(known.is_empty() && pending.is_none(), "icons off applies to bundled icons too");
+        state.with_quiet(|vault| {
+            let mut prefs = vault.prefs();
+            prefs.website_icons = true;
+            vault.set_prefs(prefs)
+        }).unwrap();
+        let (_, pending) = lookup(&state, Vec::new()).unwrap();
+        let found = std::sync::Mutex::new(Vec::new());
+        pending.unwrap().fetch(&state, |icon| {
+            found.lock().unwrap().push(icon.host.clone());
+            if icon.host == "epicgames.com" {
+                state.with_quiet(|vault| {
+                    let entry = serde_json::from_str(r#"{"title":"Nord Account","urls":["https://nordaccount.com/"]}"#).unwrap();
+                    vault.save(&entry)?;
+                    Ok(())
+                }).unwrap();
+                assert!(lookup(&state, Vec::new()).unwrap().1.is_none());
+            }
+        }).await;
+        assert_eq!(*found.lock().unwrap(), ["epicgames.com", "nordaccount.com"], "new sites join the running queue");
+        assert!(!FETCHING.load(Ordering::SeqCst));
+        state.with_quiet(|vault| { vault.forget_icons(); Ok(()) }).unwrap();
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn relative_icons_and_manifests_follow_the_pages_base_href() {
+        let home = Url::parse("https://example.com/login/").unwrap();
+        let html = r#"<base href="https://cdn.example.com/assets/"><link rel="icon" href="brand.png"><link rel="manifest" href="app.json">"#;
+        assert_eq!(icon_links(html, &home)[0].as_str(), "https://cdn.example.com/assets/brand.png");
+        assert_eq!(manifest_links(html, &home)[0].as_str(), "https://cdn.example.com/assets/app.json");
+        let html = r#"<base href="http://127.0.0.1/"><link rel="icon" href="brand.png">"#;
+        assert_eq!(icon_links(html, &home)[0].as_str(), "https://example.com/login/brand.png");
+    }
+
+    #[tokio::test]
+    async fn a_slow_or_failed_discovery_does_not_hide_a_working_fallback() {
+        let icon = first_icon(std::future::pending(), async { Some("fallback".into()) }).await;
+        assert_eq!(icon.as_deref(), Some("fallback"));
+        let icon = first_icon(async { None }, async { Some("fallback".into()) }).await;
+        assert_eq!(icon.as_deref(), Some("fallback"));
+        let icon = first_icon(async { Some("declared".into()) }, std::future::pending()).await;
+        assert_eq!(icon.as_deref(), Some("declared"));
+        assert_eq!(first_icon(async { None }, async { None }).await, None);
     }
 }

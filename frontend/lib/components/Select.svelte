@@ -86,46 +86,24 @@
 </div>
 
 <style>
-  .select {
-    display: inline-flex;
-    min-width: 130px;
-  }
+  .select { display: inline-flex; min-width: 130px; }
 
   .select.full,
-  .select :global(.popover) {
-    width: 100%;
-  }
+  .select :global(.popover) { width: 100%; }
 
-  .select-btn {
-    justify-content: space-between;
-    width: 100%;
-    font-size: 12.5px;
-  }
+  .select-btn { justify-content: space-between; width: 100%; height: 34px; padding: 0 11px; border-radius: 9px; font-size: 12.5px; background: var(--input-fill); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2); transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast); }
 
-  .select-btn.open {
-    border-color: rgb(var(--accent-rgb) / 0.28);
-    background: var(--selected);
-  }
+  .select-btn.small { height: 28px; padding: 0 9px; font-size: 12px; border-radius: 8px; }
 
-  .label {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
+  .select-btn:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.45); background: var(--hover); }
 
-  .select-btn :global(.chevron) {
-    flex: none;
-    color: var(--text-3);
-    transition: transform var(--dur-fast) var(--ease-out);
-  }
+  .select-btn.open { border-color: rgb(var(--accent-rgb) / 0.65); background: var(--selected); box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.15); }
 
-  .select-btn.open :global(.chevron) {
-    transform: rotate(180deg);
-  }
+  .label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-  .select-menu {
-    min-width: 100%;
-    max-height: 240px;
-    overflow-y: auto;
-  }
+  .select-btn :global(.chevron) { flex: none; color: var(--text-3); transition: transform var(--dur-fast) var(--ease-out); }
+
+  .select-btn.open :global(.chevron) { transform: rotate(180deg); color: rgb(var(--accent-soft-rgb)); }
+
+  .select-menu { min-width: 100%; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 10px; background: var(--float-bg); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 10px 28px -6px rgb(0 0 0 / 0.75); }
 </style>

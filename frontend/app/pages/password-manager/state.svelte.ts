@@ -11,6 +11,8 @@ export type Sort = "name" | "recent";
 const SORT_KEY = "myle.passwords.sort";
 /** How long a Copy button shows that it worked. */
 const COPIED_FOR = 1600;
+/** Missing icons are tried again while the vault stays open. */
+const ICON_RETRY_AFTER = 5 * 60_000;
 /** The words of a search, lowercased: every one has to match somewhere. */
 export function searchWords(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -104,12 +106,15 @@ class PasswordsState {
   siteWaiting = $state(false);
   helloForSite = $state(false);
   /** Hosts already asked about since the vault opened. */
-  #askedIcons = new Set<string>();
+  #askedIcons = new Map<string, number>();
+  #iconRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  #iconEpoch = 0;
   #unlistenIcon: (() => void) | null = null;
   #unlisten: (() => void) | null = null;
   #unlistenSync: (() => void) | null = null;
   #unlistenChanged: (() => void) | null = null;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
+  #dataEpoch = 0;
   readonly visible = $derived.by(() => {
     const words = searchWords(this.query);
     const byName = (a: Summary, b: Summary) =>
@@ -150,8 +155,11 @@ class PasswordsState {
     return this.entries.find((e) => e.id === id) ?? null;
   }
   async load() {
+    const epoch = this.#dataEpoch;
     this.#unlisten ??= await api.onLocked(() => this.#onLocked(true)).catch(() => null);
-    this.#unlistenSync ??= await api.onSynced((result) => void this.#afterSync(result)).catch(() => null);
+    this.#unlistenSync ??= await api.onSynced((result) => {
+      if (this.checkedAccount || this.status !== "new") void this.#afterSync(result);
+    }).catch(() => null);
     this.#unlistenIcon ??= await api
       .onIcon(({ host, icon }) => {
         if (this.status === "unlocked" && this.websiteIcons) this.icons[host] = icon;
@@ -164,14 +172,19 @@ class PasswordsState {
         this.#syncSoon();
       })
       .catch(() => null);
+    if (epoch !== this.#dataEpoch) return;
     await this.#readStatus();
+    if (epoch !== this.#dataEpoch) return;
     await this.syncNow();
-    this.checkedAccount = true;
+    if (epoch === this.#dataEpoch) this.checkedAccount = true;
   }
   async #readStatus() {
+    const epoch = this.#dataEpoch;
     await this.#readHello();
+    if (epoch !== this.#dataEpoch) return;
     try {
       const info = await api.status();
+      if (epoch !== this.#dataEpoch) return;
       this.autoLockMinutes = info.autoLockMinutes;
       this.damaged = info.damaged;
       this.websiteIcons = info.websiteIcons;
@@ -179,14 +192,16 @@ class PasswordsState {
       this.status = info.status;
       if (info.status === "unlocked") await this.refresh();
     } catch (error) {
-      this.error = message(error);
+      if (epoch === this.#dataEpoch) this.error = message(error);
     }
   }
   async #readHello() {
+    const epoch = this.#dataEpoch;
     try {
-      this.hello = await api.helloStatus();
+      const hello = await api.helloStatus();
+      if (epoch === this.#dataEpoch) this.hello = hello;
     } catch {
-      this.hello = { available: false, enabled: false };
+      if (epoch === this.#dataEpoch) this.hello = { available: false, enabled: false };
     }
   }
   /** The browser extension wants the vault for a sign-in. */
@@ -201,6 +216,7 @@ class PasswordsState {
   /** The user came to the page. */
   pageOpened() {
     this.#helloOnOpenUntil = Date.now() + 4000;
+    void this.#loadIcons();
   }
   /** Whether the lock screen should ask Windows Hello by itself: once, just
    *  after the page was opened, with the window in front. */
@@ -243,10 +259,12 @@ class PasswordsState {
     clearTimeout(this.#syncTimer);
     if (this.sync.kind === "syncing") return;
     this.sync = { kind: "syncing" };
+    const epoch = this.#dataEpoch;
     try {
-      await this.#afterSync(await api.sync());
+      const result = await api.sync();
+      if (epoch === this.#dataEpoch) await this.#afterSync(result);
     } catch (error) {
-      this.sync = { kind: "error", message: message(error) };
+      if (epoch === this.#dataEpoch) this.sync = { kind: "error", message: message(error) };
     }
   }
   /** Soon after a change, so a burst of edits goes up together. */
@@ -302,9 +320,13 @@ class PasswordsState {
     }
   }
   async refresh() {
+    const epoch = this.#dataEpoch;
     try {
-      this.entries = await api.list();
+      const entries = await api.list();
+      if (epoch !== this.#dataEpoch) return;
+      this.entries = entries;
     } catch (error) {
+      if (epoch !== this.#dataEpoch) return;
       if (message(error).includes("locked")) this.#onLocked(false);
       else toast.error(message(error));
       return;
@@ -315,20 +337,37 @@ class PasswordsState {
    *  missing ones in the background and sends each as it arrives. */
   async #loadIcons() {
     if (!this.websiteIcons || this.status !== "unlocked") return;
-    const hosts = this.entries.flatMap((e) => e.urls.map(iconHost)).filter((h): h is string => !!h);
-    if (hosts.every((host) => this.#askedIcons.has(host))) return;
-    for (const host of hosts) this.#askedIcons.add(host);
+    const hosts = [...new Set(this.entries.flatMap((e) => e.urls.map(iconHost)).filter((h): h is string => !!h))];
+    const now = Date.now();
+    const wanted = hosts.filter((host) => !this.icons[host] &&
+      (!this.#askedIcons.has(host) || now - this.#askedIcons.get(host)! >= ICON_RETRY_AFTER));
+    if (!wanted.length) return;
+    for (const host of wanted) this.#askedIcons.set(host, now);
+    const epoch = this.#iconEpoch;
+    let retryAfter = ICON_RETRY_AFTER;
     try {
       const known = await api.icons(Object.keys(this.icons));
+      if (epoch !== this.#iconEpoch) return;
       if (this.status === "unlocked" && this.websiteIcons) Object.assign(this.icons, known);
     } catch {
-      // Icons are a nicety: the letters stay.
+      if (epoch !== this.#iconEpoch) return;
+      // A failed IPC call must not mark these sites as permanently requested.
+      for (const host of wanted) this.#askedIcons.delete(host);
+      retryAfter = 20_000;
+    }
+    if (epoch === this.#iconEpoch && this.status === "unlocked" && this.websiteIcons) {
+      clearTimeout(this.#iconRetryTimer);
+      if (hosts.some((host) => !this.icons[host])) {
+        this.#iconRetryTimer = setTimeout(() => void this.#loadIcons(), retryAfter);
+      }
     }
   }
   async setWebsiteIcons(on: boolean) {
     try {
       await api.setWebsiteIcons(on);
       this.websiteIcons = on;
+      this.#iconEpoch++;
+      clearTimeout(this.#iconRetryTimer);
       this.icons = {};
       this.#askedIcons.clear();
       if (on) await this.#loadIcons();
@@ -346,15 +385,17 @@ class PasswordsState {
   }
   /** Runs `work` with the page marked busy; the error goes to `this.error`. */
   async #run<T>(work: () => Promise<T>): Promise<T | null> {
+    const epoch = this.#dataEpoch;
     this.busy = true;
     this.error = null;
     try {
-      return await work();
+      const result = await work();
+      return epoch === this.#dataEpoch ? result : null;
     } catch (error) {
-      this.error = message(error);
+      if (epoch === this.#dataEpoch) this.error = message(error);
       return null;
     } finally {
-      this.busy = false;
+      if (epoch === this.#dataEpoch) this.busy = false;
     }
   }
   /** Returns the recovery code to show once. */
@@ -411,12 +452,44 @@ class PasswordsState {
     await api.lock().catch(() => {});
     this.#onLocked(false);
   }
+  /** After the phone removed its local files: forget all in-memory UI data. */
+  resetLocal() {
+    this.#dataEpoch++;
+    this.#iconEpoch++;
+    this.#hideAll();
+    clearTimeout(this.#copiedTimer);
+    clearTimeout(this.#syncTimer);
+    clearTimeout(this.#iconRetryTimer);
+    this.#askedIcons.clear();
+    this.#helloOnOpenUntil = 0;
+    this.status = "new";
+    this.entries = [];
+    this.icons = {};
+    this.panel = { kind: "none" };
+    this.query = "";
+    this.filter = "all";
+    this.sort = "name";
+    this.copied = null;
+    this.windowsTarget = null;
+    this.busy = false;
+    this.error = null;
+    this.damaged = 0;
+    this.autoLockMinutes = 5;
+    this.hello = { available: false, enabled: false };
+    this.websiteIcons = true;
+    this.siteWaiting = false;
+    this.helloForSite = false;
+    this.checkedAccount = false;
+    this.sync = { kind: "signedOut" };
+  }
   #onLocked(automatic: boolean) {
     if (this.status !== "unlocked") return;
     this.status = "locked";
     this.entries = [];
     this.#hideAll();
     this.icons = {};
+    this.#iconEpoch++;
+    clearTimeout(this.#iconRetryTimer);
     this.#askedIcons.clear();
     this.panel = { kind: "none" };
     if (automatic) toast.info("The password vault locked itself.");

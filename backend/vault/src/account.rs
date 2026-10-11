@@ -146,8 +146,17 @@ pub async fn refresh(client: &reqwest::Client, refresh_token: String) -> Result<
 /// Revokes the session's refresh token. Best effort: signing out on the
 /// device happens regardless.
 pub async fn logout(client: &reqwest::Client, session: &Session) {
+    logout_scoped(client, session, "global").await;
+}
+
+/// Signs out this device without revoking the PC's or other devices' sessions.
+pub async fn logout_local(client: &reqwest::Client, session: &Session) {
+    logout_scoped(client, session, "local").await;
+}
+
+async fn logout_scoped(client: &reqwest::Client, session: &Session, scope: &str) {
     let _ = client
-        .post(format!("{SUPABASE_URL}/auth/v1/logout"))
+        .post(format!("{SUPABASE_URL}/auth/v1/logout?scope={scope}"))
         .header("apikey", SUPABASE_ANON_KEY)
         .bearer_auth(&session.access_token)
         .timeout(Duration::from_secs(8))

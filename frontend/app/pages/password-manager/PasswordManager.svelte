@@ -20,7 +20,7 @@
   <PageHeader title="Password Manager" subtitle="Your logins, encrypted on this {DEVICE} before they are saved or synced." />
 {/if}
 
-{#if p.status === null || (p.status === "new" && !p.checkedAccount)}
+{#if p.status === null || (p.status === "new" && (!p.checkedAccount || p.sync.kind === "syncing"))}
   <div class="loading">
     <LoaderCircle size={20} class="spin" />
     {#if p.status === "new"}<span>Checking your account for a vault…</span>{/if}

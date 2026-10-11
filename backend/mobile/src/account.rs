@@ -89,12 +89,25 @@ impl AccountState {
         match &session {
             Some(session) => write_private(&path, &serde_json::to_vec(session).map_err(err)?)?,
             None => {
-                let _ = std::fs::remove_file(&path);
+                remove_private(&path)?;
             }
         }
         let mut inner = self.lock();
         inner.session = session;
         inner.loaded = true;
+        Ok(())
+    }
+
+    fn clear_local(&self) -> Result<(), String> {
+        self.store(None)?;
+        for name in [PENDING_FILE, "account.tmp", "sign-in.tmp"] {
+            remove_private(&self.dir.join(name))?;
+        }
+        let mut inner = self.lock();
+        inner.returning = false;
+        if let Some(waiter) = inner.waiting.take() {
+            let _ = waiter.send(Err("Sign-in was cancelled.".into()));
+        }
         Ok(())
     }
 
@@ -141,6 +154,15 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp);
         e.to_string()
     })
+}
+
+/// Missing files are already clean; all other errors must reach the user.
+pub(crate) fn remove_private(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Could not clear {}: {error}", path.display())),
+    }
 }
 
 fn client() -> Result<reqwest::Client, String> {
@@ -199,6 +221,7 @@ fn returned(app: &AppHandle, url: Url) {
 }
 
 async fn finish(state: &AccountState, url: &Url) -> Result<Profile, String> {
+    let _account = state.gate.lock().await;
     let pending = state
         .take_pending()
         .ok_or("That sign-in is over. Tap Sign in again.")?;
@@ -320,12 +343,26 @@ pub async fn account_cancel_sign_in(app: AppHandle, state: State<'_, AccountStat
 }
 
 #[tauri::command]
-pub async fn account_sign_out(state: State<'_, AccountState>) -> Result<(), String> {
-    if let Some(session) = state.session() {
-        // Revokes the refresh token; the sign-out here happens regardless.
-        supabase::logout(&client()?, &session).await;
+pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>, passwords: State<'_, crate::passwords::PasswordsState>) -> Result<(), String> {
+    // Same lock order as sync: finish any running pass before deleting its
+    // local files, and prevent refresh/OAuth from recreating the session.
+    let _sync = crate::passwords::SYNCING.lock().await;
+    let _account = state.gate.lock().await;
+    let session = state.session();
+    crate::unlock::passwords_hello_disable(app.clone(), passwords.clone()).await?;
+    passwords.clear_local()?;
+    remove_private(&state.dir.join("passwords-biometry.tmp"))?;
+    let export = app.path().app_cache_dir().map_err(err)?.join("export/MYLE Passwords.csv");
+    remove_private(&export)?;
+    state.clear_local()?;
+    crate::clipboard::clear(&app);
+    if let Some(session) = session {
+        // Local cleanup works offline; token revocation is best effort.
+        tauri::async_runtime::spawn(async move {
+            if let Ok(client) = client() { supabase::logout_local(&client, &session).await; }
+        });
     }
-    state.store(None)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -370,5 +407,26 @@ mod tests {
         write_private(&dir.join(PENDING_FILE), &serde_json::to_vec(&old).unwrap()).unwrap();
         assert!(state.take_pending().is_none(), "a sign-in left long ago");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn clearing_local_auth_forgets_the_session_and_cancels_pending_sign_in() {
+        let dir = std::env::temp_dir().join(format!("myle-signout-{}", supabase::pkce_pair().0));
+        let state = AccountState::new(dir.clone());
+        let session: Session = serde_json::from_str(r#"{"access_token":"fixture","refresh_token":"fixture","expires_at":9999999999,"profile":{"id":"fixture","name":"Fixture","email":null,"avatarUrl":null,"provider":"google"}}"#).unwrap();
+        state.store(Some(session)).unwrap();
+        state.save_pending("fixture verifier").unwrap();
+        for name in ["account.tmp", "sign-in.tmp"] { std::fs::write(dir.join(name), "fixture").unwrap(); }
+        let (waiter, waiting) = oneshot::channel();
+        state.lock().waiting = Some(waiter);
+        state.clear_local().unwrap();
+        assert!(state.session().is_none());
+        assert!(AccountState::new(dir.clone()).session().is_none(), "restart stays signed out");
+        assert!(waiting.await.unwrap().is_err());
+        for name in [SESSION_FILE, PENDING_FILE, "account.tmp", "sign-in.tmp"] { assert!(!dir.join(name).exists()); }
+        let late = Url::parse(&format!("{REDIRECT_URL}?code=fixture")).unwrap();
+        assert!(finish(&state, &late).await.is_err(), "late OAuth cannot sign in again");
+        state.clear_local().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

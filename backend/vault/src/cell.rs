@@ -53,4 +53,59 @@ impl VaultCell {
         self.with_quiet(|vault| Ok(vault.status() != crate::vault::Status::New))
             .unwrap_or(false)
     }
+
+    /// Removes this device's copy only. No tombstones or cloud writes are
+    /// produced. Hold the cell lock so background icon writers cannot race it.
+    pub fn clear_local(&self) -> Result<(), String> {
+        let mut slot = self.lock();
+        *slot = None; // Dropping the vault zeroizes its decrypted entries/key.
+        let path = (self.path)()?;
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+        let icons = path.with_file_name(format!("{stem}-icons.bin"));
+        let mut failure = None;
+        for file in [path.with_extension("tmp"), icons.with_extension("tmp"), icons, path] {
+            if let Err(error) = std::fs::remove_file(&file)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                failure.get_or_insert_with(|| format!("Could not clear {}: {error}", file.display()));
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::KdfParams;
+    use crate::vault::Status;
+
+    #[test]
+    fn clearing_a_device_removes_its_vault_cache_and_temporary_files() {
+        let dir = std::env::temp_dir().join(format!("myle-clear-local-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("passwords.vault");
+        let cell_path = path.clone();
+        let state = VaultCell::new(move || Ok(cell_path.clone()));
+        state.with(|vault| {
+            vault.create("fixture", KdfParams::cheap_for_tests())?;
+            let entry = serde_json::from_str(r#"{"title":"Fixture","password":"local secret"}"#).unwrap();
+            vault.save(&entry)?;
+            vault.icons()?;
+            vault.save_icons()
+        }).unwrap();
+        for name in ["passwords.tmp", "passwords-icons.tmp", "unrelated.txt"] {
+            std::fs::write(dir.join(name), b"fixture").unwrap();
+        }
+        state.clear_local().unwrap();
+        assert!(state.lock().is_none(), "decrypted entries and keys are dropped");
+        assert!(!state.has_vault());
+        assert_eq!(state.with_quiet(|vault| Ok(vault.status())).unwrap(), Status::New);
+        for name in ["passwords.vault", "passwords.tmp", "passwords-icons.bin", "passwords-icons.tmp"] {
+            assert!(!dir.join(name).exists(), "{name}");
+        }
+        assert!(dir.join("unrelated.txt").exists());
+        state.clear_local().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

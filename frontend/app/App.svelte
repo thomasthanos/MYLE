@@ -9,7 +9,7 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { canOpen, pages, type PageId } from "./pages/registry";
-  import { pageForShortcut } from "../lib/sidebar";
+  import { isSidebarToggle, pageForShortcut } from "../lib/sidebar";
   import { nav } from "../lib/nav.svelte";
   import { account } from "./account/account.svelte";
   import { gameSavesState } from "./pages/game-saves/state.svelte";
@@ -67,12 +67,12 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (e.defaultPrevented) return;
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+    if (isSidebarToggle(e)) {
       e.preventDefault();
       nav.toggleSidebar();
       return;
     }
-    // Ctrl+1 … Ctrl+9 and Ctrl+, (lib/sidebar.ts), unless a dialog is open.
+    // Ctrl+1 … Ctrl+9, Ctrl+0 and Ctrl+. (lib/sidebar.ts), unless a dialog is open.
     const page = pageForShortcut(
       pages.filter((p) => canOpen(p, account.owner)),
       e,

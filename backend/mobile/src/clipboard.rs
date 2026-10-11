@@ -15,6 +15,13 @@ const CLEAR_AFTER: Duration = Duration::from_secs(30);
 /// Counts copies: only the last one clears the clipboard.
 static COPIES: AtomicU64 = AtomicU64::new(0);
 
+/// Invalidate scheduled clears and empty a clipboard used by this app.
+pub fn clear(app: &AppHandle) {
+    if COPIES.fetch_add(1, Ordering::SeqCst) > 0 {
+        let _ = app.clipboard().write_text(String::new());
+    }
+}
+
 pub fn copy_secret(app: &AppHandle, text: &str) -> Result<(), String> {
     app.clipboard()
         .write_text(text.to_string())

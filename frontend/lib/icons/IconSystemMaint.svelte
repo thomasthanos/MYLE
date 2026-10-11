@@ -1,33 +1,13 @@
 <script lang="ts">
   import IconCanvas from "./IconCanvas.svelte";
-  let { size = 20, class: cls = "" }: { size?: number; strokeWidth?: number; class?: string } = $props();
-  const uid = $props.id();
+  let { size = 20, strokeWidth = 1.75, class: cls = "" }: {
+    size?: number;
+    strokeWidth?: number;
+    class?: string;
+  } = $props();
 </script>
 
-<!-- System Maintenance: Precision Engineering Wrench with Duotone Handle -->
-<IconCanvas {size} class={cls}>
-  <defs>
-    <linearGradient id="{uid}-fill" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#93C5FD" stop-opacity="0.28" />
-      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.08" />
-    </linearGradient>
-    <linearGradient id="{uid}-stroke" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#E0F2FE" />
-      <stop offset="50%" stop-color="#93C5FD" />
-      <stop offset="100%" stop-color="#818CF8" />
-    </linearGradient>
-  </defs>
-
-  <!-- Exact Circular-Arc Open-End Spanner Silhouette -->
-  <path
-    d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"
-    fill="url(#{uid}-fill)"
-    stroke="url(#{uid}-stroke)"
-    stroke-width="1.65"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-
-  <!-- Handle Grip Dot Accent -->
-  <circle cx="5.25" cy="18.75" r="0.85" fill="#E0F2FE" />
+<IconCanvas {size} {strokeWidth} class={cls}>
+  <path d="m14.7 6.3 2.4 2.4 3.4-3.4a5.5 5.5 0 0 1-7.3 7.3l-7.4 7.4a2.1 2.1 0 0 1-3-3l7.4-7.4a5.5 5.5 0 0 1 7.3-7.3l-2.8 2.8v1.2Z" />
+  <path d="m4 3 4 4M3 4l2-2M15 16l4 4a1.4 1.4 0 0 0 2-2l-4-4M4.5 18.5h.01" />
 </IconCanvas>

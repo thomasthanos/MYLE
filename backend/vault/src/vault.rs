@@ -264,6 +264,9 @@ pub struct CachedIcon {
     pub data: Option<String>,
     /// When it was fetched (seconds since 1970).
     pub at: u64,
+    /// Discovery version, so previously missed icons can be tried after an upgrade.
+    #[serde(default)]
+    pub revision: u8,
 }
 
 const ICONS_AAD: &str = "myle-vault|icons";
@@ -1986,7 +1989,7 @@ mod tests {
         vault.create("m", KdfParams::cheap_for_tests()).unwrap();
         vault.icons().unwrap().icons.insert(
             "github.com".into(),
-            CachedIcon { data: Some("data:image/png;base64,AAAA".into()), at: 1 },
+            CachedIcon { data: Some("data:image/png;base64,AAAA".into()), at: 1, revision: 0 },
         );
         vault.save_icons().unwrap();
         let on_disk = std::fs::read_to_string(vault.icons_path()).unwrap();

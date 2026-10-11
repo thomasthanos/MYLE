@@ -32,51 +32,13 @@
 </header>
 
 <style>
-  .titlebar {
-    position: relative;
-    z-index: 2;
-    display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    height: 42px;
-    padding-left: 16px;
-    background:
-      radial-gradient(70% 180% at 0% 0%, rgb(98 111 231 / 0.1), transparent 58%),
-      linear-gradient(180deg, rgb(24 30 45 / 0.5), rgb(13 18 29 / 0.2));
-    box-shadow: inset 0 -1px 0 var(--titlebar-divider);
-  }
+  .titlebar { position: relative; z-index: 2; display: flex; align-items: stretch; justify-content: space-between; height: 42px; padding-left: 16px; background: radial-gradient(70% 180% at 0% 0%, rgb(98 111 231 / 0.1), transparent 58%), linear-gradient(180deg, rgb(24 30 45 / 0.5), rgb(13 18 29 / 0.2)); box-shadow: inset 0 -1px 0 var(--titlebar-divider); }
 
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-family: var(--font-brand);
-    font-size: 13.5px;
-    pointer-events: none;
-  }
+  .brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-titlebar); font-size: 16px; font-weight: 400; font-synthesis: none; line-height: 1.4; pointer-events: none; }
 
-  .name {
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    background: linear-gradient(180deg, #fff 30%, rgb(var(--accent-soft-rgb)) 130%);
-    background-clip: text;
-    color: transparent;
-  }
+  .name { flex: none; font-weight: 400; letter-spacing: 0.01em; background: linear-gradient(180deg, #fff 30%, rgb(var(--accent-soft-rgb)) 130%); background-clip: text; color: transparent; }
 
-  .badge {
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #cfd6ff;
-    background: rgb(var(--accent-rgb) / 0.14);
-    box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.22);
-  }
+  .badge { padding: 2px 8px; border-radius: 999px; font-family: var(--font-brand); font-size: 11px; font-weight: 600; color: #cfd6ff; background: rgb(var(--accent-rgb) / 0.14); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.22); }
 
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-right: 11px;
-  }
+  .controls { display: flex; align-items: center; gap: 2px; padding-right: 11px; }
 </style>

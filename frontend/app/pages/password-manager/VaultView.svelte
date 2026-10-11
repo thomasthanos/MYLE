@@ -533,6 +533,8 @@
   .list-scroll,
   .panel-scroll { flex: 1; min-height: 0; overflow: auto; }
 
+  .panel-scroll { container: entry-panel / inline-size; }
+
   .list-scroll { display: grid; align-content: start; gap: 2px; margin: 0; padding: 8px; list-style: none; }
 
   .item { display: flex; align-items: center; min-width: 0; border: 1px solid transparent; border-radius: 10px; transition: background var(--dur-fast), border-color var(--dur-fast); }
@@ -589,305 +591,81 @@
 
   .back:hover { background: var(--hover); color: var(--text-1); }
 
-  .overview {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: clamp(28px, 5.5vh, 52px);
-    width: min(100%, 720px);
-    min-height: 100%;
-    margin: 0 auto;
-    padding: clamp(10px, 2vh, 24px) 0;
-  }
+  .overview { display: flex; flex-direction: column; justify-content: center; gap: clamp(28px, 5.5vh, 52px); width: min(100%, 720px); min-height: 100%; margin: 0 auto; padding: clamp(10px, 2vh, 24px) 0; }
 
-  .overview-main {
-    display: flex;
-    align-items: center;
-    gap: clamp(24px, 4vw, 44px);
-  }
+  .overview-main { display: flex; align-items: center; gap: clamp(24px, 4vw, 44px); }
 
-  .overview-symbol {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: clamp(92px, 10.5vw, 126px);
-    aspect-ratio: 1;
-    flex: none;
-    border: 1px solid rgb(var(--accent-rgb) / 0.32);
-    border-radius: 28px;
-    background:
-      radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.16), transparent 50%),
-      linear-gradient(150deg, rgb(var(--accent-rgb) / 0.24) 0%, rgb(18 22 36 / 0.88) 100%);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.18),
-      inset 0 -1px 0 rgb(0 0 0 / 0.4),
-      0 18px 38px -18px rgb(var(--accent-rgb) / 0.5),
-      0 4px 12px rgb(0 0 0 / 0.35);
-    color: #d6dcff;
-  }
+  .overview-symbol { position: relative; display: grid; place-items: center; width: clamp(92px, 10.5vw, 126px); aspect-ratio: 1; flex: none; border: 1px solid rgb(var(--accent-rgb) / 0.32); border-radius: 28px; background: radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.16), transparent 50%), linear-gradient(150deg, rgb(var(--accent-rgb) / 0.24) 0%, rgb(18 22 36 / 0.88) 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 -1px 0 rgb(0 0 0 / 0.4), 0 18px 38px -18px rgb(var(--accent-rgb) / 0.5), 0 4px 12px rgb(0 0 0 / 0.35); color: #d6dcff; }
 
-  .symbol-glow {
-    position: absolute;
-    inset: -2px;
-    border-radius: inherit;
-    background: radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.28), transparent 70%);
-    filter: blur(14px);
-    opacity: 0.7;
-    pointer-events: none;
-    z-index: -1;
-  }
+  .symbol-glow { position: absolute; inset: -2px; border-radius: inherit; background: radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.28), transparent 70%); filter: blur(14px); opacity: 0.7; pointer-events: none; z-index: -1; }
 
   .overview-copy { min-width: 0; }
 
-  .overview-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 9px;
-    padding: 3px 10px 3px 8px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.28);
-    border-radius: 999px;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.15), rgb(var(--accent-rgb) / 0.05));
-    color: rgb(var(--accent-soft-rgb) / 0.95);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
+  .overview-pill { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 9px; padding: 3px 10px 3px 8px; border: 1px solid rgb(var(--accent-rgb) / 0.28); border-radius: 999px; background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.15), rgb(var(--accent-rgb) / 0.05)); color: rgb(var(--accent-soft-rgb) / 0.95); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
 
-  .overview-copy h2 {
-    max-width: 22ch;
-    margin: 0;
-    font-family: var(--font-brand);
-    font-size: clamp(23px, 2.3vw, 32px);
-    font-weight: 700;
-    line-height: 1.18;
-    letter-spacing: -0.025em;
-    color: #fff;
-  }
+  .overview-copy h2 { max-width: 22ch; margin: 0; font-family: var(--font-brand); font-size: clamp(23px, 2.3vw, 32px); font-weight: 700; line-height: 1.18; letter-spacing: -0.025em; color: #fff; }
 
-  .overview-copy p {
-    max-width: 46ch;
-    margin: 10px 0 0;
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 1.55;
-  }
+  .overview-copy p { max-width: 46ch; margin: 10px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
 
-  .overview-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-top: 20px;
-  }
+  .overview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
 
-  .overview-actions .btn {
-    height: 38px;
-    padding: 0 16px;
-    font-size: 13px;
-  }
+  .overview-actions .btn { height: 38px; padding: 0 16px; font-size: 13px; }
 
-  .overview-actions .btn.primary {
-    box-shadow: 0 6px 18px -4px rgb(var(--accent-rgb) / 0.45);
-  }
+  .overview-actions .btn.primary { box-shadow: 0 6px 18px -4px rgb(var(--accent-rgb) / 0.45); }
 
-  .overview-health {
-    border-top: 1px solid rgb(255 255 255 / 0.08);
-    padding-top: 22px;
-  }
+  .overview-health { border-top: 1px solid rgb(255 255 255 / 0.08); padding-top: 22px; }
 
-  .overview-health-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 13px;
-  }
+  .overview-health-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
 
-  .health-title-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-  }
+  .health-title-group { display: inline-flex; align-items: center; gap: 7px; }
 
-  :global(.health-title-icon) {
-    color: rgb(var(--accent-soft-rgb) / 0.9);
-  }
+  :global(.health-title-icon) { color: rgb(var(--accent-soft-rgb) / 0.9); }
 
-  .overview-health-heading strong {
-    font-size: 13.5px;
-    font-weight: 650;
-    color: var(--text-1);
-    letter-spacing: -0.01em;
-  }
+  .overview-health-heading strong { font-size: 13.5px; font-weight: 650; color: var(--text-1); letter-spacing: -0.01em; }
 
-  .overview-health-heading span {
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
+  .overview-health-heading span { color: var(--text-3); font-size: 11.5px; }
 
-  .overview-health-items {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 11px;
-  }
+  .overview-health-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 
-  .health-card {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    min-height: 64px;
-    padding: 10px 14px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 13px;
-    background:
-      linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0.018) 100%),
-      rgb(16 19 28 / 0.6);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 12px -4px rgb(0 0 0 / 0.4);
-    text-align: left;
-    transition:
-      transform var(--dur-fast),
-      background var(--dur-fast),
-      border-color var(--dur-fast),
-      box-shadow var(--dur-fast);
-  }
+  .health-card { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 64px; padding: 10px 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 13px; background: linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0.018) 100%), rgb(16 19 28 / 0.6); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 12px -4px rgb(0 0 0 / 0.4); text-align: left; transition: transform var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast); }
 
-  .health-card:not(:disabled) {
-    cursor: pointer;
-  }
+  .health-card:not(:disabled) { cursor: pointer; }
 
-  .health-card:not(:disabled):hover {
-    transform: translateY(-1px);
-  }
+  .health-card:not(:disabled):hover { transform: translateY(-1px); }
 
-  .health-card.weak:not(:disabled):hover {
-    border-color: rgb(255 125 125 / 0.35);
-    background:
-      radial-gradient(circle at 18% 50%, rgb(255 125 125 / 0.12), transparent 70%),
-      linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%),
-      rgb(18 20 30 / 0.8);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 100 100 / 0.25);
-  }
+  .health-card.weak:not(:disabled):hover { border-color: rgb(255 125 125 / 0.35); background: radial-gradient(circle at 18% 50%, rgb(255 125 125 / 0.12), transparent 70%), linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%), rgb(18 20 30 / 0.8); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 100 100 / 0.25); }
 
-  .health-card.reused:not(:disabled):hover {
-    border-color: rgb(255 190 90 / 0.35);
-    background:
-      radial-gradient(circle at 18% 50%, rgb(255 190 90 / 0.12), transparent 70%),
-      linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%),
-      rgb(18 20 30 / 0.8);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 180 60 / 0.25);
-  }
+  .health-card.reused:not(:disabled):hover { border-color: rgb(255 190 90 / 0.35); background: radial-gradient(circle at 18% 50%, rgb(255 190 90 / 0.12), transparent 70%), linear-gradient(180deg, rgb(255 255 255 / 0.05) 0%, rgb(255 255 255 / 0.02) 100%), rgb(18 20 30 / 0.8); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 8px 20px -8px rgb(255 180 60 / 0.25); }
 
-  .health-card:not(:disabled):hover :global(.health-arrow) {
-    transform: translateX(2px);
-    color: var(--text-1);
-  }
+  .health-card:not(:disabled):hover :global(.health-arrow) { transform: translateX(2px); color: var(--text-1); }
 
-  .health-card:disabled {
-    cursor: default;
-    opacity: 0.65;
-  }
+  .health-card:disabled { cursor: default; opacity: 0.65; }
 
-  .health-card:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb) / 0.75);
-    outline-offset: 2px;
-  }
+  .health-card:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: 2px; }
 
-  .health-icon-box {
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    flex: none;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    transition: transform var(--dur-fast);
-  }
+  .health-icon-box { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; border: 1px solid transparent; transition: transform var(--dur-fast); }
 
-  .health-icon-box.weak {
-    background: linear-gradient(145deg, rgb(255 110 110 / 0.18), rgb(255 70 70 / 0.08));
-    border-color: rgb(255 110 110 / 0.25);
-    color: #ff9b9b;
-  }
+  .health-icon-box.weak { background: linear-gradient(145deg, rgb(255 110 110 / 0.18), rgb(255 70 70 / 0.08)); border-color: rgb(255 110 110 / 0.25); color: #ff9b9b; }
 
-  .health-icon-box.reused {
-    background: linear-gradient(145deg, rgb(255 185 85 / 0.18), rgb(255 150 40 / 0.08));
-    border-color: rgb(255 185 85 / 0.25);
-    color: #ffc97a;
-  }
+  .health-icon-box.reused { background: linear-gradient(145deg, rgb(255 185 85 / 0.18), rgb(255 150 40 / 0.08)); border-color: rgb(255 185 85 / 0.25); color: #ffc97a; }
 
-  .health-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    flex: 1;
-  }
+  .health-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 
-  .health-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-1);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  .health-name { font-size: 13px; font-weight: 600; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .health-desc {
-    font-size: 11px;
-    color: var(--text-3);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  .health-desc { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .health-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    flex: none;
-  }
+  .health-status { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
-  .health-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border-radius: 7px;
-    font-family: var(--font-brand);
-    font-size: 13px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
+  .health-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 7px; font-family: var(--font-brand); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 
-  .health-badge.weak {
-    background: rgb(255 110 110 / 0.16);
-    color: #ffa4a4;
-    border: 1px solid rgb(255 110 110 / 0.25);
-  }
+  .health-badge.weak { background: rgb(255 110 110 / 0.16); color: #ffa4a4; border: 1px solid rgb(255 110 110 / 0.25); }
 
-  .health-badge.reused {
-    background: rgb(255 185 85 / 0.16);
-    color: #ffd285;
-    border: 1px solid rgb(255 185 85 / 0.25);
-  }
+  .health-badge.reused { background: rgb(255 185 85 / 0.16); color: #ffd285; border: 1px solid rgb(255 185 85 / 0.25); }
 
-  .health-badge.safe {
-    background: rgb(62 207 142 / 0.14);
-    color: #72e4b3;
-    border: 1px solid rgb(62 207 142 / 0.22);
-    font-size: 11px;
-    font-weight: 600;
-  }
+  .health-badge.safe { background: rgb(62 207 142 / 0.14); color: #72e4b3; border: 1px solid rgb(62 207 142 / 0.22); font-size: 11px; font-weight: 600; }
 
-  :global(.health-arrow) {
-    color: var(--text-3);
-    transition: transform var(--dur-fast), color var(--dur-fast);
-  }
+  :global(.health-arrow) { color: var(--text-3); transition: transform var(--dur-fast), color var(--dur-fast); }
 
   @container vault (max-width: 760px) {
     .split {
