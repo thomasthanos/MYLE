@@ -137,17 +137,17 @@
         {#if withPasskeys}Passkeys are deleted too.{:else}Logins with a passkey stay, with the passkey and without the password; import your passwords again later and they join those logins.{/if}
       </p>
       {#if !MOBILE}
-        <button type="button" class="btn ghost small" onclick={() => (dialog = { kind: "export" })}>Export an encrypted backup first…</button>
+        <div class="row"><button type="button" class="btn secondary" onclick={() => (dialog = { kind: "export" })}>Export an encrypted backup first</button></div>
       {:else if IOS}
-        <button type="button" class="btn ghost small" onclick={() => (dialog = { kind: "apple" })}>Export for Apple Passwords first…</button>
+        <div class="row"><button type="button" class="btn secondary" onclick={() => (dialog = { kind: "apple" })}>Export for Apple Passwords first</button></div>
       {/if}
-      <label class="check">
-        <input type="checkbox" bind:checked={withPasskeys} />
-        <span>Also delete passkeys ({passkeyCount}) — not recommended</span>
-      </label>
-      {#if withPasskeys}
-        <p class="hint">Passkeys cannot be exported or imported again: sites where you sign in with one may lock you out until you set up a new one there.</p>
-      {/if}
+      <div class="option">
+        <label class="opt-line">
+          <input type="checkbox" class="check" bind:checked={withPasskeys} />
+          <span>Also delete passkeys ({passkeyCount})</span>
+        </label>
+        <small class="warn">Not recommended{#if withPasskeys}: passkeys cannot be exported or imported again, so sites where you sign in with one may lock you out until you set up a new one there{/if}.</small>
+      </div>
       <input class="input" type="password" autocomplete="current-password" bind:value={master} placeholder="Your master password" />
       <input class="input" bind:value={typed} placeholder="Type DELETE to confirm" autocapitalize="characters" autocomplete="off" />
     {:else if dialog.kind === "apple"}
@@ -198,7 +198,13 @@
   .hint { color: #ffd08a; font-size: 11.5px; }
 
   .error { color: #ff9d9d; }
-  .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .row { display: flex; }
+  .btn.secondary { border: 1px solid var(--glass-border); background: var(--surface-fill); color: var(--text-1); }
+  .option { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgb(0 0 0 / 0.12); }
+  .opt-line { display: flex; align-items: center; gap: 9px; width: 100%; color: var(--text-1); font-size: 12.5px; cursor: pointer; }
+  .opt-line span { flex: 1; min-width: 0; }
+  .opt-line :global(.check) { flex: none; }
+  .warn { padding-left: 25px; color: #ff8f8f; font-size: 11px; line-height: 1.45; }
   .btn.danger { background: #c9383e; border-color: #c9383e; color: #fff; }
 
   footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

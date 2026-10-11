@@ -91,6 +91,8 @@
   }
 </script>
 
+<div class="app-backdrop" aria-hidden="true"></div>
+
 <div class="shell" class:away>
   <header class="bar">
     <span class="brand"><Logo size={26} /> MYLE Passwords</span>
@@ -131,14 +133,25 @@
     padding-left: env(safe-area-inset-left);
   }
 
+  /* The bar: frosted glass over the page, lit along its lower edge, the
+     same panel colours as MYLE's title bar on Windows. */
   .bar {
+    position: relative;
+    z-index: 5;
     display: flex;
     flex: none;
     align-items: center;
     gap: 6px;
-    padding: calc(env(safe-area-inset-top) + 8px) 12px 8px 16px;
-    border-bottom: 1px solid rgb(255 255 255 / 0.06);
-    background: var(--bg-1);
+    padding: calc(env(safe-area-inset-top) + 10px) 12px 10px 16px;
+    border-bottom: 1px solid var(--glass-border);
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.01)), color-mix(in srgb, var(--bg-1) 82%, transparent);
+    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.04), 0 10px 28px -18px rgb(0 0 0 / 0.7);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  .brand :global(svg) {
+    filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.35));
   }
 
   .brand {

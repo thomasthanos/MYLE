@@ -372,3 +372,42 @@ jobs:
              ! gh release create "$tag" "${files[@]}" --title "$title" "${body[@]}" "${latest[@]}"; then
             gh release upload "$tag" "${files[@]}" --clobber
           fi
+
+      # SideStore reads docs/sidestore.json from the repository too: point it
+      # at this release's IPA (version, date, size) and commit it to main.
+      - name: Update docs/sidestore.json
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          size=$(stat -c %s out/MYLE-Passwords.ipa)
+          git fetch --depth=1 origin main
+          git checkout -B sidestore-update origin/main
+          node -e '
+            const fs = require("fs");
+            const file = "docs/sidestore.json";
+            const source = JSON.parse(fs.readFileSync(file, "utf8"));
+            const app = source.apps[0];
+            const old = app.versions[0] || {};
+            app.versions = [{
+              ...old,
+              version: process.env.VERSION,
+              date: new Date().toISOString().slice(0, 10),
+              downloadURL: `https://github.com/thomasthanos/MYLE/releases/download/${process.env.TAG}/MYLE-Passwords.ipa`,
+              size: Number(process.argv[1]),
+              minOSVersion: old.minOSVersion || "15.0",
+            }];
+            fs.writeFileSync(file, JSON.stringify(source, null, 2) + "\n");
+          ' "$size"
+          if git diff --quiet docs/sidestore.json; then
+            echo "docs/sidestore.json is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "SideStore source: MYLE Passwords $VERSION [skip ci]" docs/sidestore.json
+          for attempt in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          echo "::warning::Could not push docs/sidestore.json; update it by hand."

@@ -16,9 +16,9 @@
       "category": "utilities",
       "versions": [
         {
-          "version": "9.19.0",
+          "version": "10.0.0",
           "date": "2026-10-11",
-          "downloadURL": "https://github.com/thomasthanos/MYLE/releases/download/v9.19.0/MYLE-Passwords.ipa",
+          "downloadURL": "https://github.com/thomasthanos/MYLE/releases/download/v10.0.0/MYLE-Passwords.ipa",
           "size": 6129414,
           "minOSVersion": "15.0"
         }
