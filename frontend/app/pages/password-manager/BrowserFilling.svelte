@@ -16,19 +16,19 @@
   import { toast } from "../../../lib/toast.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { passwordsApi as api, type BrowserSetup } from "./api";
+  import { EXTENSION_URL } from "../../../lib/extension";
 
-  /** The extension's store page, once it is published (package.json). */
-  const storeUrl: string = import.meta.env.VITE_EXTENSION_URL ?? "";
+  /** The extension's store page (package.json "myle.extensionUrl"). */
+  const storeUrl = EXTENSION_URL;
 
   let { onclose }: { onclose: () => void } = $props();
 
   let setup = $state<BrowserSetup | null>(null);
   let saving = $state(false);
   let loadError = $state<string | null>(null);
-  /** The steps to add the extension, shown until a browser has connected. */
+  /** Loading the extension from MYLE's folder (Firefox, or for testing):
+   *  shown on request, or at once when there is no store page. */
   let showSteps = $state<boolean | null>(null);
-  /** Loading it from a folder (for testing), shown on request. */
-  let showFolder = $state(false);
   /** The extensions page of the browser that connected. */
   const extensionsPage = $derived(
     { Edge: "edge://extensions", Brave: "brave://extensions" }[setup?.lastContact?.browser ?? ""] ?? "chrome://extensions",
@@ -43,7 +43,7 @@
       setup = await api.browserGet();
       loadedAt = clock = Date.now();
       loadError = null;
-      showSteps ??= !setup.lastContact;
+      showSteps ??= !setup.lastContact && !storeUrl.startsWith("https://");
     } catch (error) {
       loadError = error instanceof Error ? error.message : String(error);
     }
@@ -53,17 +53,29 @@
     void load();
     const tick = setInterval(() => (clock = Date.now()), 30_000);
     let stop: (() => void) | undefined;
+    // Closed before the listener was in place: it is removed as soon as it is.
+    let closed = false;
     void api
       .onBrowserContact((contact) => {
         if (setup) setup = { ...setup, lastContact: contact, now: contact.at };
         loadedAt = clock = Date.now();
       })
-      .then((unlisten) => (stop = unlisten));
+      .then((unlisten) => (closed ? unlisten() : (stop = unlisten)));
     return () => {
+      closed = true;
       clearInterval(tick);
       stop?.();
     };
   });
+
+  /** The extension's page in the Chrome Web Store, in the default browser. */
+  async function openStore() {
+    try {
+      await openUrl(storeUrl);
+    } catch (error) {
+      toast.error(`Could not open the Chrome Web Store: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   function ago(at: number): string {
     if (!setup) return "";
@@ -83,7 +95,7 @@
     setup?.lastRefusal && (!setup.lastContact || setup.lastRefusal.at > setup.lastContact.at) ? setup.lastRefusal : null,
   );
 
-  async function toggle(enabled: boolean) {
+  async function toggle(enabled: boolean, input: HTMLInputElement) {
     if (!setup) return;
     saving = true;
     try {
@@ -91,6 +103,8 @@
       await load();
       toast.success(enabled ? "Browser filling is on." : "Browser filling is off.");
     } catch (error) {
+      // Not changed: the switch shows what is really set.
+      input.checked = setup.enabled;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       saving = false;
@@ -165,7 +179,7 @@
           aria-label="Browser filling"
           checked={setup?.enabled ?? false}
           disabled={!setup || saving}
-          onchange={(e) => toggle(e.currentTarget.checked)}
+          onchange={(e) => toggle(e.currentTarget.checked, e.currentTarget)}
         />
       </div>
 
@@ -199,7 +213,7 @@
             {setup.lastContact.browser} uses the copy loaded from a folder, which never updates. Install the one from the store, then
             remove the folder copy in <button type="button" class="link" onclick={() => copy(extensionsPage)}><code>{extensionsPage}</code></button>.
           </span>
-          <button type="button" class="btn small primary" onclick={() => void openUrl(storeUrl).catch(() => {})}><Download size={13} /> Store</button>
+          <button type="button" class="btn small primary" onclick={openStore}><Download size={13} /> Store</button>
         </div>
       {/if}
 
@@ -210,29 +224,25 @@
         </p>
       {/if}
 
+      {#if storeUrl.startsWith("https://")}
+        <div class="store-row">
+          <button type="button" class="btn primary store" onclick={openStore}>
+            <Download size={14} /> Install from Chrome Web Store
+          </button>
+          <p class="or">
+            MYLE Passwords for Chrome, Edge and Brave; it updates itself. In Edge, allow extensions from other stores when
+            it asks.
+          </p>
+        </div>
+      {/if}
+      <LocalExtensionUpdate {setup} />
+
       <section>
         <button type="button" class="steps-toggle" aria-expanded={!!showSteps} onclick={() => (showSteps = !showSteps)}>
-          <h3>Add the extension</h3>
+          <h3>{storeUrl.startsWith("https://") ? "Firefox, or a copy from MYLE's folder" : "Add the extension"}</h3>
           <span class="chevron" class:open={showSteps}><ChevronDown size={14} /></span>
         </button>
         {#if showSteps}
-          {#if storeUrl.startsWith("https://")}
-            <div class="store-row">
-              <button type="button" class="btn primary store" onclick={() => void openUrl(storeUrl).catch(() => {})}>
-                <Download size={14} /> Get MYLE Passwords
-              </button>
-              <p class="or">
-                From the Chrome Web Store, for Chrome, Edge and Brave; it updates itself. In Edge, allow extensions from
-                other stores when it asks.
-              </p>
-            </div>
-            <button type="button" class="more" aria-expanded={showFolder} onclick={() => (showFolder = !showFolder)}>
-              <span class="chevron" class:open={showFolder}><ChevronDown size={12} /></span>
-              Firefox, or a copy from MYLE's folder (for testing)
-            </button>
-          {/if}
-          <LocalExtensionUpdate {setup} />
-          {#if showFolder || !storeUrl.startsWith("https://")}
           <div class="path">
             <code class="selectable" title={setup?.extensionDir ?? undefined}>{setup?.extensionDir ?? "The extension's folder was not found."}</code>
             {#if setup?.extensionDir}
@@ -268,7 +278,6 @@
               <p class="hint">Firefox keeps it until it restarts; a signed version that stays comes later.</p>
             </div>
           </div>
-          {/if}
         {/if}
       </section>
 
@@ -345,9 +354,7 @@
 
   .store { height: 36px; }
 
-  .more { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-3); font-size: 12px; }
 
-  .more:hover { color: var(--text-1); }
 
   .folder-copy { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid rgb(255 196 102 / 0.3); border-radius: 10px; background: rgb(255 196 102 / 0.08); color: #ffd18f; font-size: 12px; line-height: 1.45; }
 

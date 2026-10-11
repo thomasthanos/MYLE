@@ -13,6 +13,7 @@
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
   import PanelBottomClose from "@lucide/svelte/icons/panel-bottom-close";
+  import Puzzle from "@lucide/svelte/icons/puzzle";
   import Power from "@lucide/svelte/icons/power";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Rocket from "@lucide/svelte/icons/rocket";
@@ -26,7 +27,12 @@
   import { settingsUpdater } from "../../../lib/updater-state.svelte";
   import AccountCard from "./AccountCard.svelte";
   import SyncedData from "./SyncedData.svelte";
+  import { passwordsApi, type BrowserSetup } from "../password-manager/api";
+  import { EXTENSION_URL } from "../../../lib/extension";
   const REPO_URL = "https://github.com/thomasthanos/MYLE";
+  /** How the browsers reach MYLE, for the extension's line; null until known. */
+  let browser = $state<BrowserSetup | null>(null);
+  let browserError = $state("");
   let version = $state("");
   const update = $derived(settingsUpdater.view);
   /** Starting with Windows (the Startup shortcut), and how the app opens then. */
@@ -39,6 +45,19 @@
     void getVersion().then((v) => (version = v));
     void invoke<typeof startup>("startup_get").then((value) => (startup = value));
     void invoke<boolean>("tray_get").then((value) => (keepInTray = value));
+    void passwordsApi.browserGet().then(
+      (setup) => (browser = setup),
+      (error) => (browserError = message(error)),
+    );
+  });
+  /** The extension's state in a few words: what the user can do next. */
+  const extensionState = $derived.by(() => {
+    if (browserError) return { title: "Browser connection unknown", detail: browserError };
+    if (!browser) return { title: "Checking the browser connection…", detail: "" };
+    if (!browser.enabled) return { title: "Browser filling is off", detail: "Turn it on in Password Manager → ⋯ → Browser filling." };
+    if (browser.registrationError) return { title: "The browsers cannot reach MYLE", detail: browser.registrationError };
+    if (browser.lastContact) return { title: `Connected to ${browser.lastContact.browser}`, detail: "Click a sign-in field on a website to fill in a login." };
+    return { title: "Not connected yet", detail: "Install the extension, then click a sign-in field on a website." };
   });
   async function setKeepInTray(value: boolean) {
     keepInTray = value;
@@ -75,7 +94,7 @@
     return settingsUpdater.install(latest, asset);
   }
   // --- Sections, the side navigation and the search ---------------------
-  type SectionId = "account" | "appearance" | "startup" | "updates" | "about";
+  type SectionId = "account" | "appearance" | "extension" | "startup" | "updates" | "about";
   /** The words each setting is found by, beyond its title. */
   const words: Record<string, string> = {
     account: "account sign in sign out discord google sync cloud profile saved data preferences backup login",
@@ -84,6 +103,7 @@
     startMinimized: "startup minimized minimised tray hidden background launch",
     tray: "tray close quit background notification area clock shortcut ctrl shift l browser filling",
     updates: "updates update version check install download release",
+    extension: "browser extension chrome web store edge brave firefox passwords autofill fill passkeys 2fa install",
     about: "about github repository releases what's new changelog notes version",
   };
   let query = $state("");
@@ -101,11 +121,13 @@
     startMinimized: shows("startMinimized", "Start minimized"),
     tray: shows("tray", "Keep running in the tray"),
     updates: shows("updates", "Updates"),
+    extension: shows("extension", "Browser extension"),
     about: shows("about", "About MYLE"),
   });
   const sectionShown = $derived<Record<SectionId, boolean>>({
     account: showing.account,
     appearance: showing.theme,
+    extension: showing.extension,
     startup: showing.startWindows || showing.startMinimized || showing.tray,
     updates: showing.updates,
     about: showing.about,
@@ -295,6 +317,28 @@
               <span class="tick" aria-hidden="true"><CircleCheck size={16} /></span>
             </button>
           </div>
+        </div>
+      </section>
+      <section id="settings-extension" class="group" hidden={hiddenSection("extension")} aria-labelledby="extension-heading">
+        <header class="group-head">
+          <h2 id="extension-heading">Browser extension</h2>
+          <p>MYLE Passwords fills your logins, passkeys and 2FA codes in Chrome, Edge and Brave.</p>
+        </header>
+        <div class="panel">
+          <div class="setting-head">
+            <span class="row-icon"><Puzzle size={15} /></span>
+            <span class="text">
+              <strong>{extensionState.title}</strong>
+              {#if extensionState.detail}<small>{extensionState.detail}</small>{/if}
+            </span>
+          </div>
+          {#if EXTENSION_URL.startsWith("https://")}
+            <div class="links">
+              <button class="btn small primary" onclick={() => open(EXTENSION_URL)}>
+                <Download size={13} /> Install from Chrome Web Store
+              </button>
+            </div>
+          {/if}
         </div>
       </section>
       <section id="settings-updates" class="group" hidden={hiddenSection("updates")} aria-labelledby="updates-heading">
