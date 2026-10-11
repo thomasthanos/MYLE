@@ -4,6 +4,7 @@
 //! all come from the fixed table in `targets.rs`.
 
 pub mod downloads;
+pub mod health;
 mod elevated;
 mod recycle_bin;
 mod targets;

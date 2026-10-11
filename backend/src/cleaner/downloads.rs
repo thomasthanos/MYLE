@@ -70,7 +70,7 @@ pub struct Outcome {
 
 /// Windows' Downloads folder (FOLDERID_Downloads).
 #[cfg(windows)]
-fn downloads_folder() -> Result<PathBuf, String> {
+pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
     unsafe {
@@ -84,7 +84,7 @@ fn downloads_folder() -> Result<PathBuf, String> {
 }
 
 #[cfg(not(windows))]
-fn downloads_folder() -> Result<PathBuf, String> {
+pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
     Err("Only on Windows.".into())
 }
 

@@ -10,6 +10,7 @@
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
   import DownloadsCard from "./DownloadsCard.svelte";
+  import SoftwareHealth from "./SoftwareHealth.svelte";
   import { cleanerState } from "./state.svelte";
 
   onMount(() => void cleanerState.load());
@@ -100,6 +101,8 @@
 </div>
 
 <DownloadsCard />
+
+<SoftwareHealth />
 
 <style>
   .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px 24px; margin-bottom: 16px; padding: 16px 20px; }
