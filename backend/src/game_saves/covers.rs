@@ -34,11 +34,17 @@ const IMAGES: &str = "https://shared.fastly.steamstatic.com/store_item_assets/st
 /// `online`, the ones not on this PC are fetched from Steam first.
 #[tauri::command]
 pub async fn game_saves_covers(ids: Vec<u32>, online: bool) -> Result<HashMap<u32, String>, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static CLEANED: AtomicBool = AtomicBool::new(false);
+    let folder = crate::storage::local_dir()?.join("game-saves").join("covers");
+    if !CLEANED.swap(true, Ordering::Relaxed) {
+        let f = folder.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || cleanup_legacy_markers(&f)).await;
+    }
     let mut ids: Vec<u32> = ids.into_iter().filter(|id| *id > 0).collect();
     ids.sort_unstable();
     ids.dedup();
     ids.truncate(5000);
-    let folder = crate::storage::local_dir()?.join("game-saves").join("covers");
     let (mut found, missing) = {
         let folder = folder.clone();
         tauri::async_runtime::spawn_blocking(move || on_this_pc(&ids, &folder))
@@ -88,7 +94,9 @@ fn on_this_pc(ids: &[u32], folder: &Path) -> (HashMap<u32, String>, Vec<u32>) {
             .or_else(|| read_cover(&folder.join(format!("{id}.jpg"))));
         if let Some(bytes) = cover {
             found.insert(id, data_url(&bytes));
-        } else if !recently_missing(&folder.join(format!("{id}.missing"))) {
+        } else if !recently_missing(&folder.join(format!("{id}.missing")))
+            && !recently_missing(&folder.join(format!("{id}.none")))
+        {
             missing.push(id);
         }
     }
@@ -200,6 +208,28 @@ fn data_url(bytes: &[u8]) -> String {
     format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes))
 }
 
+/// Removes `.none` files left by an earlier version: if the cover was since
+/// downloaded (`.jpg` exists), the `.none` is just clutter; otherwise it is
+/// replaced with a `.missing` marker the current code understands.
+fn cleanup_legacy_markers(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("none") { continue }
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        if folder.join(format!("{stem}.jpg")).exists() {
+            let _ = std::fs::remove_file(&path);
+        } else if !folder.join(format!("{stem}.missing")).exists() {
+            let _ = std::fs::rename(&path, folder.join(format!("{stem}.missing")));
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +304,31 @@ mod tests {
             assert!(cover.is_some_and(|cover| is_cover(&cover)), "{id}: {path}");
         }
         assert!(fetch(&client, 1, COVER).await.is_none(), "no such app");
+    }
+
+    #[test]
+    fn legacy_none_markers_are_cleaned_up() {
+        let folder = std::env::temp_dir().join(format!("myle-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        // .none with a .jpg already present -> .none removed
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        jpeg.resize(4096, 0);
+        std::fs::write(folder.join("100.jpg"), &jpeg).unwrap();
+        std::fs::write(folder.join("100.none"), b"").unwrap();
+        // .none without .jpg or .missing -> migrated to .missing
+        std::fs::write(folder.join("200.none"), b"").unwrap();
+        // .none with .missing already present -> .none removed
+        std::fs::write(folder.join("300.none"), b"").unwrap();
+        std::fs::write(folder.join("300.missing"), b"").unwrap();
+
+        cleanup_legacy_markers(&folder);
+
+        assert!(!folder.join("100.none").exists(), "redundant .none not removed");
+        assert!(folder.join("100.jpg").exists(), "jpg must stay");
+        assert!(!folder.join("200.none").exists(), "orphan .none not migrated");
+        assert!(folder.join("200.missing").exists(), "orphan .none should become .missing");
+        assert!(!folder.join("300.none").exists(), "duplicate .none not removed");
+        assert!(folder.join("300.missing").exists(), ".missing must stay");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }
