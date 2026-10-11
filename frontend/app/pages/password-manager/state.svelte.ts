@@ -533,6 +533,25 @@ class PasswordsState {
       toast.error(message(error));
     }
   }
+  /** "Delete all passwords", then sync so the account and other devices follow. */
+  async deleteAll(master: string, withPasskeys: boolean) {
+    this.error = null;
+    try {
+      const r = await api.deleteAll(master, withPasskeys);
+      this.panel = { kind: "none" };
+      await this.refresh();
+      await this.syncNow();
+      const parts = [`${r.deleted} ${r.deleted === 1 ? "entry" : "entries"} deleted`];
+      if (r.stripped) parts.push(`${r.stripped} kept for their passkeys, password removed`);
+      if (r.damaged) parts.push(`${r.damaged} damaged left as they were`);
+      const synced = this.sync.kind === "error" ? ` Sync failed: ${this.sync.message}. It is sent next time the account is reached.` : "";
+      (synced ? toast.error : toast.success)(`${parts.join(" · ")}.${synced}`);
+      return r;
+    } catch (e) {
+      this.error = message(e);
+      return null;
+    }
+  }
   async remove(id: string) {
     const e = this.entry(id);
     if (!e) return;

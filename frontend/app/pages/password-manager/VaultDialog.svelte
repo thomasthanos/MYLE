@@ -1,7 +1,12 @@
 <script lang="ts" module>
   import type { ImportPreview } from "./api";
 
-  export type DialogKind = { kind: "import"; preview: ImportPreview } | { kind: "export" } | { kind: "master" };
+  export type DialogKind =
+    | { kind: "import"; preview: ImportPreview }
+    | { kind: "export" }
+    | { kind: "master" }
+    | { kind: "deleteAll" }
+    | { kind: "apple" };
 </script>
 
 <script lang="ts">
@@ -12,6 +17,7 @@
   import { portal } from "../../../lib/portal";
   import { toast } from "../../../lib/toast.svelte";
   import { passwordsApi as api } from "./api";
+  import { DEVICE, IOS, MOBILE } from "../../../lib/platform";
   import { afterImport, passwords as p } from "./state.svelte";
 
   let { dialog, onclose }: { dialog: DialogKind; onclose: () => void } = $props();
@@ -23,13 +29,26 @@
   /** The master password again, before every password leaves in a backup. */
   let master = $state("");
   let working = $state(false);
+  /** "Delete all": the word typed, and whether passkeys go too (not advised). */
+  let typed = $state("");
+  let withPasskeys = $state(false);
   let error = $state<string | null>(null);
 
   const titles = {
     import: "Import passwords",
     export: "Export an encrypted backup",
     master: "Change master password",
+    deleteAll: "Delete all passwords",
+    apple: "Export for Apple Passwords",
   };
+  const passkeyCount = $derived(p.entries.reduce((n, e) => n + e.passkeys.length, 0));
+  const ready = $derived(
+    dialog.kind === "deleteAll" ? typed === "DELETE" && !!master
+    : dialog.kind === "apple" ? !!master
+    : dialog.kind === "import" ? !(dialog.preview.backup && !first)
+    : dialog.kind === "export" ? !!first && !!second && !!master
+    : !!first && !!second && !!again,
+  );
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -44,6 +63,15 @@
         if (count) toast.success(`Imported ${count} ${count === 1 ? "entry" : "entries"}.`);
         else toast.info("Everything in the file is already in your vault.");
         onclose();
+      } else if (dialog.kind === "deleteAll") {
+        const r = await p.deleteAll(master, withPasskeys);
+        if (r) onclose();
+        else error = p.error;
+      } else if (dialog.kind === "apple") {
+        if (await api.exportApple(master)) {
+          toast.success("Exported. Import it in Passwords, then delete the file from Files.");
+          onclose();
+        }
       } else if (dialog.kind === "export") {
         if (first !== second) throw new Error("The two passwords are not the same.");
         const path = await api.exportBackup(first, master);
@@ -103,6 +131,29 @@
       <input class="input" type="password" autocomplete="current-password" bind:value={master} placeholder="Your master password" />
       <input class="input" type="password" autocomplete="new-password" bind:value={first} placeholder="Backup password (10+ characters)" />
       <input class="input" type="password" autocomplete="new-password" bind:value={second} placeholder="Type it again" />
+    {:else if dialog.kind === "deleteAll"}
+      <p>
+        Removes every password from this {DEVICE}, your account and every device that syncs with it.
+        {#if withPasskeys}Passkeys are deleted too.{:else}Logins with a passkey stay, with the passkey and without the password; import your passwords again later and they join those logins.{/if}
+      </p>
+      {#if !MOBILE}
+        <button type="button" class="btn ghost small" onclick={() => (dialog = { kind: "export" })}>Export an encrypted backup first…</button>
+      {:else if IOS}
+        <button type="button" class="btn ghost small" onclick={() => (dialog = { kind: "apple" })}>Export for Apple Passwords first…</button>
+      {/if}
+      <label class="check">
+        <input type="checkbox" bind:checked={withPasskeys} />
+        <span>Also delete passkeys ({passkeyCount}) — not recommended</span>
+      </label>
+      {#if withPasskeys}
+        <p class="hint">Passkeys cannot be exported or imported again: sites where you sign in with one may lock you out until you set up a new one there.</p>
+      {/if}
+      <input class="input" type="password" autocomplete="current-password" bind:value={master} placeholder="Your master password" />
+      <input class="input" bind:value={typed} placeholder="Type DELETE to confirm" autocapitalize="characters" autocomplete="off" />
+    {:else if dialog.kind === "apple"}
+      <p>Makes a CSV in the layout Apple Passwords imports and opens the share sheet. Choose <strong>Save to Files</strong>, then in the Passwords app: <strong>⋯ › Import Passwords</strong> (or Settings › Apps › Passwords › Import) and pick the file.</p>
+      <p class="hint">The file holds every password in plain text. Delete it from Files right after the import. Passkeys are not included: iOS only moves passkeys between password managers itself.</p>
+      <input class="input" type="password" autocomplete="current-password" bind:value={master} placeholder="Your master password" />
     {:else}
       <p>Your entries stay as they are; only the key that opens them is re-sealed.</p>
       <input class="input" type="password" autocomplete="current-password" bind:value={first} placeholder="Current master password" />
@@ -114,9 +165,9 @@
 
     <footer>
       <button type="button" class="btn ghost" onclick={onclose} disabled={working}>Cancel</button>
-      <button type="submit" class="btn primary" disabled={working || (dialog.kind !== "import" && (!first || !second)) || (dialog.kind === "export" && !master) || (dialog.kind === "master" && !again) || (dialog.kind === "import" && dialog.preview.backup && !first)}>
+      <button type="submit" class="btn primary" class:danger={dialog.kind === "deleteAll"} disabled={working || !ready}>
         {#if working}<LoaderCircle size={14} class="spin" />{/if}
-        {dialog.kind === "import" ? "Import" : dialog.kind === "export" ? "Save backup" : "Change"}
+        {({ import: "Import", export: "Save backup", master: "Change", deleteAll: "Delete all", apple: "Export" })[dialog.kind]}
       </button>
     </footer>
   </form>
@@ -147,6 +198,8 @@
   .hint { color: #ffd08a; font-size: 11.5px; }
 
   .error { color: #ff9d9d; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .btn.danger { background: #c9383e; border-color: #c9383e; color: #fff; }
 
   footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 </style>

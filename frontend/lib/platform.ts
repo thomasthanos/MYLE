@@ -6,7 +6,8 @@
 /** MYLE Passwords on a phone. */
 export const MOBILE: boolean = import.meta.env.MYLE_MOBILE === true;
 
-const IOS = MOBILE && /iPhone|iPad|iPod/.test(navigator.userAgent);
+/** MYLE Passwords on an iPhone or iPad. */
+export const IOS = MOBILE && /iPhone|iPad|iPod/.test(navigator.userAgent);
 
 /** This device, as the page names it ("this PC", "this phone"). */
 export const DEVICE = MOBILE ? "phone" : "PC";

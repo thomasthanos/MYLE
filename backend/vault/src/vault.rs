@@ -149,6 +149,20 @@ pub struct OldPassword {
     pub changed_at: u64,
 }
 
+/// What "Delete all passwords" did.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAll {
+    /// Entries removed everywhere.
+    pub deleted: usize,
+    /// Entries kept for their passkeys whose password was removed.
+    pub stripped: usize,
+    /// Entries kept because they hold passkeys.
+    pub kept_with_passkeys: usize,
+    /// Entries that do not open with this vault's key: left untouched.
+    pub damaged: usize,
+}
+
 /// Kept in memory as `Zeroizing<Entry>`, which wipes it when dropped.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Zeroize)]
 #[serde(rename_all = "camelCase", default)]
@@ -883,19 +897,64 @@ impl Vault {
     }
 
     pub fn delete(&mut self, id: &str) -> Result<(), String> {
-        let unlocked = self.unlocked.as_mut().ok_or("The vault is locked.")?;
-        unlocked.entries.remove(id);
-        let file = self.file.as_mut().ok_or("There is no vault yet.")?;
-        if let Some(record) = file.records.iter_mut().find(|r| r.id == id) {
-            record.revision += 1;
-            record.deleted = true;
-            // Sealed: proof for the other PCs that the deletion is real.
-            record.ciphertext =
-                crypto::seal(&unlocked.key, &tombstone_aad(id, record.revision), TOMBSTONE)?;
-            record.updated_at = now();
-            record.dirty = true;
-        }
+        self.bury(&[id.to_string()])?;
         self.write()
+    }
+
+    /// "Delete all passwords". Entries with passkeys stay, with their
+    /// password and its history removed (and resealed, so other devices get
+    /// the change), unless `with_passkeys`; every other entry becomes a
+    /// sealed tombstone that the next sync sends up, so every device deletes
+    /// it too and nothing comes back. Entries that did not open are left.
+    pub fn delete_all(&mut self, with_passkeys: bool) -> Result<DeleteAll, String> {
+        let unlocked = self.unlocked()?;
+        let mut bury = Vec::new();
+        let mut strip = Vec::new();
+        for (id, entry) in &unlocked.entries {
+            if entry.passkeys.is_empty() || with_passkeys {
+                bury.push(id.clone());
+            } else if !entry.password.is_empty() || !entry.history.is_empty() {
+                strip.push((id.clone(), (**entry).clone()));
+            }
+        }
+        let kept = unlocked.entries.values().filter(|e| !e.passkeys.is_empty()).count();
+        let damaged = self.damaged();
+        let deleted = self.bury(&bury)?;
+        let stripped = strip.len();
+        for (id, mut entry) in strip {
+            entry.password.zeroize();
+            entry.history.clear();
+            entry.updated_at = now();
+            self.put_unwritten(&id, entry)?;
+        }
+        self.write()?;
+        Ok(DeleteAll {
+            deleted,
+            stripped,
+            kept_with_passkeys: if with_passkeys { 0 } else { kept },
+            damaged,
+        })
+    }
+
+    /// Turns `ids` into tombstones (not yet written). Returns how many.
+    fn bury(&mut self, ids: &[String]) -> Result<usize, String> {
+        let unlocked = self.unlocked.as_mut().ok_or("The vault is locked.")?;
+        let file = self.file.as_mut().ok_or("There is no vault yet.")?;
+        let mut count = 0;
+        for id in ids {
+            unlocked.entries.remove(id);
+            if let Some(record) = file.records.iter_mut().find(|r| &r.id == id) {
+                record.revision += 1;
+                record.deleted = true;
+                // Sealed: proof for the other PCs that the deletion is real.
+                record.ciphertext =
+                    crypto::seal(&unlocked.key, &tombstone_aad(id, record.revision), TOMBSTONE)?;
+                record.updated_at = now();
+                record.dirty = true;
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     /// Adds entries (an import). Returns how many.
@@ -911,15 +970,56 @@ impl Vault {
                 && a.password == b.password
                 && a.urls == b.urls
         };
+        // An entry kept for its passkey (no password) takes the imported
+        // password back, instead of a second entry for the same login.
+        let mut merges: Vec<(String, Entry)> = Vec::new();
         let mut new: Vec<Entry> = Vec::new();
         for entry in entries {
-            if !unlocked.entries.values().any(|had| same(had, &entry)) && !new.iter().any(|had| same(had, &entry)) {
-                new.push(entry);
+            if unlocked.entries.values().any(|had| same(had, &entry)) || new.iter().any(|had| same(had, &entry)) {
+                continue;
+            }
+            let home = unlocked
+                .entries
+                .iter()
+                .filter(|(id, had)| had.password.is_empty() && !merges.iter().any(|(m, _)| m == *id))
+                .find(|(_, had)| same_login(had, &entry))
+                .map(|(id, had)| (id.clone(), (**had).clone()));
+            match home {
+                Some((id, mut had)) => {
+                    had.password = entry.password.clone();
+                    for url in &entry.urls {
+                        if !had.urls.contains(url) {
+                            had.urls.push(url.clone());
+                        }
+                    }
+                    if had.username.trim().is_empty() {
+                        had.username = entry.username.clone();
+                    }
+                    if had.notes.trim().is_empty() {
+                        had.notes = entry.notes.clone();
+                    }
+                    if had.totp.is_empty() {
+                        had.totp = entry.totp.clone();
+                    }
+                    if !entry.passkeys.is_empty() {
+                        for key in &entry.passkeys {
+                            if !had.passkeys.iter().any(|k| k.credential_id == key.credential_id) {
+                                had.passkeys.push(key.clone());
+                            }
+                        }
+                    }
+                    merges.push((id, had));
+                }
+                None => new.push(entry),
             }
         }
-        let count = new.len();
+        let count = new.len() + merges.len();
         if count == 0 {
             return Ok(0);
+        }
+        for (id, mut entry) in merges {
+            entry.updated_at = now();
+            self.put_unwritten(&id, entry)?;
         }
         for mut entry in new {
             let now = now();
@@ -1334,6 +1434,51 @@ mod tests {
             folder: String::new(),
             totp: None,
         }
+    }
+
+    #[test]
+    fn delete_all_keeps_passkey_logins_and_a_reimport_fills_them_back_in() {
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        let plain = vault.save(&input("Example", "p1")).unwrap();
+        let mut google = input("Google", "g1");
+        google.urls = vec!["https://accounts.google.com".into()];
+        let google = vault.save(&google).unwrap();
+        let key = crate::passkeys::Passkey {
+            credential_id: "cred".into(),
+            rp_id: "google.com".into(),
+            user_name: "me@example.com".into(),
+            ..Default::default()
+        };
+        vault.add_passkey(Some(&google), key, "Google", "https://accounts.google.com").unwrap();
+
+        let done = vault.delete_all(false).unwrap();
+        assert_eq!((done.deleted, done.stripped, done.kept_with_passkeys), (1, 1, 1));
+        let list = vault.all_entries().unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].password.is_empty() && list[0].history.is_empty());
+        assert_eq!(list[0].passkeys.len(), 1);
+        let file = vault.file.as_ref().unwrap();
+        assert!(file.records.iter().find(|r| r.id == plain).unwrap().deleted, "tombstone for sync");
+        assert!(file.records.iter().all(|r| r.dirty), "both changes go up");
+
+        // A CSV from another manager: same site and account, so it joins.
+        let imported = Entry {
+            title: "google.com".into(),
+            username: "ME@example.com".into(),
+            password: "g2".into(),
+            urls: vec!["https://www.google.com/".into()],
+            ..Default::default()
+        };
+        assert_eq!(vault.add_all(vec![imported]).unwrap(), 1);
+        let list = vault.all_entries().unwrap();
+        assert_eq!(list.len(), 1, "no duplicate");
+        assert_eq!(list[0].password, "g2");
+        assert_eq!(list[0].passkeys.len(), 1);
+
+        assert_eq!(vault.delete_all(true).unwrap().deleted, 1);
+        assert!(vault.all_entries().unwrap().is_empty());
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -1850,4 +1995,35 @@ mod tests {
         assert!(vault.for_app("notepad.exe", "Notepad").unwrap().is_empty());
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// The site of an address or passkey relying party, as its registrable
+/// domain: `https://accounts.google.com/x` and `google.com` are one site.
+fn site_of(text: &str) -> Option<String> {
+    let host = super::import::host_of(text)?;
+    Some(psl::domain_str(&host).unwrap_or(&host).to_string())
+}
+
+/// The same account on the same site: a kept passkey entry and an imported
+/// login with its password.
+fn same_login(had: &Entry, imported: &Entry) -> bool {
+    let theirs: Vec<String> = imported.urls.iter().filter_map(|u| site_of(u)).collect();
+    if theirs.is_empty() {
+        return false;
+    }
+    let ours: Vec<String> = had
+        .urls
+        .iter()
+        .filter_map(|u| site_of(u))
+        .chain(had.passkeys.iter().filter_map(|k| site_of(&k.rp_id)))
+        .collect();
+    if !theirs.iter().any(|t| ours.contains(t)) {
+        return false;
+    }
+    let user = imported.username.trim();
+    if user.is_empty() {
+        return false;
+    }
+    had.username.trim().eq_ignore_ascii_case(user)
+        || had.passkeys.iter().any(|k| k.user_name.trim().eq_ignore_ascii_case(user))
 }

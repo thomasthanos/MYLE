@@ -358,6 +358,7 @@ pub fn run() {
             passwords::passwords_passkey_delete,
             passwords::passwords_save,
             passwords::passwords_delete,
+            passwords::passwords_delete_all,
             passwords::passwords_generate,
             passwords::passwords_strength,
             passwords::passwords_import_pick,

@@ -25,9 +25,10 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Star from "@lucide/svelte/icons/star";
   import Timer from "@lucide/svelte/icons/timer";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import Upload from "@lucide/svelte/icons/upload";
   import Popover from "../../../lib/components/Popover.svelte";
-  import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
+  import { DEVICE, IOS, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
   import { toast } from "../../../lib/toast.svelte";
   import { passwordsApi as api } from "./api";
   import EntryEditor from "./EntryEditor.svelte";
@@ -202,6 +203,10 @@
               {p.hello.enabled ? `Stop using ${QUICK_UNLOCK}` : `Open with ${QUICK_UNLOCK}…`}
             </button>
           {/if}
+          {#if IOS}
+            <button class="menu-item" onclick={() => (close(), (dialog = { kind: "apple" }))}><Upload size={15} /> Export for Apple Passwords…</button>
+          {/if}
+          <button class="menu-item danger" onclick={() => (close(), (dialog = { kind: "deleteAll" }))}><Trash2 size={15} /> Delete all passwords…</button>
           <div class="menu-label"><Timer size={11} /> Lock after</div>
           <div class="lock-times">
             {#each lockTimes as minutes (minutes)}
@@ -1029,4 +1034,5 @@
       padding: 14px 20px;
     }
   }
+  .menu-item.danger { color: #ff9d9d; }
 </style>

@@ -11,8 +11,9 @@ use std::time::{Duration, Instant};
 use myle_vault::VaultCell;
 use myle_vault::crypto::KdfParams;
 use myle_vault::vault::{EntryInput, OldPassword, Status, StatusInfo, Summary, Vault, check_master};
-use myle_vault::{generator, icons, sync, totp};
-use tauri::{AppHandle, Emitter, State};
+use myle_vault::{generator, icons, import, sync, totp};
+use tauri_plugin_myle_mobile::MobileExt;
+use tauri::{AppHandle, Emitter, Manager, State};
 use zeroize::Zeroizing;
 
 /// Sent to the page when the vault locks itself.
@@ -325,6 +326,24 @@ pub fn passwords_save(state: State<'_, PasswordsState>, entry: EntryInput) -> Re
     state.with(|vault| vault.save(&entry))
 }
 
+/// "Delete all passwords": asks for the master password again, then removes
+/// every password (entries with passkeys stay unless `with_passkeys`). The
+/// page syncs right after, so the account and other devices follow.
+#[tauri::command]
+pub async fn passwords_delete_all(
+    state: State<'_, PasswordsState>,
+    master: String,
+    with_passkeys: bool,
+) -> Result<myle_vault::vault::DeleteAll, String> {
+    let master = zeroize::Zeroizing::new(master);
+    state
+        .with_blocking(move |vault| {
+            vault.verify_master(&master)?;
+            vault.delete_all(with_passkeys)
+        })
+        .await
+}
+
 #[tauri::command(async)]
 pub fn passwords_delete(state: State<'_, PasswordsState>, id: String) -> Result<(), String> {
     state.with(|vault| vault.delete(&id))
@@ -371,4 +390,32 @@ mod tests {
         assert!(!unlocked());
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Every login as a CSV in Apple Passwords' import layout, handed to the
+/// share sheet ("Save to Files", then Passwords › Import). The master
+/// password is asked again first; the app's own copy is deleted as soon as
+/// the sheet closes. Answers whether the user shared it.
+#[tauri::command]
+pub async fn passwords_export_apple(
+    app: AppHandle,
+    state: State<'_, PasswordsState>,
+    master: String,
+) -> Result<bool, String> {
+    let master = Zeroizing::new(master);
+    let csv = state
+        .with_blocking(move |vault| {
+            vault.verify_master(&master)?;
+            Ok(Zeroizing::new(import::apple_csv(&vault.all_entries()?)))
+        })
+        .await?;
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("export");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("MYLE Passwords.csv");
+    std::fs::write(&path, csv.as_bytes()).map_err(|e| e.to_string())?;
+    let shown = path.to_string_lossy().into_owned();
+    let handle = app.clone();
+    let shared = tauri::async_runtime::spawn_blocking(move || handle.myle_mobile().share(&shown)).await;
+    let _ = std::fs::remove_file(&path);
+    shared.map_err(|e| e.to_string())?
 }

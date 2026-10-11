@@ -180,6 +180,13 @@ export interface ImportPreview {
   count: number;
   sample: [string, string][];
 }
+export interface DeleteAllResult {
+  deleted: number;
+  stripped: number;
+  keptWithPasskeys: number;
+  damaged: number;
+}
+
 export interface PasswordsApi {
   status(): Promise<StatusInfo>;
   create(master: string): Promise<string>;
@@ -218,6 +225,10 @@ export interface PasswordsApi {
   importFile(path: string, backupPassword?: string): Promise<number>;
   /** Every entry, encrypted with `password`; the master password again first. */
   exportBackup(password: string, master: string): Promise<string | null>;
+  /** "Delete all passwords" (the master password again); passkeys stay unless asked. */
+  deleteAll(master: string, withPasskeys: boolean): Promise<DeleteAllResult>;
+  /** iPhone: a CSV for Apple Passwords through the share sheet. True when shared. */
+  exportApple(master: string): Promise<boolean>;
   sync(): Promise<SyncResult>;
   helloStatus(): Promise<HelloStatus>;
   helloEnable(): Promise<void>;
@@ -287,6 +298,8 @@ const tauriApi: PasswordsApi = {
   importPick: () => invoke("passwords_import_pick"),
   importFile: (path, backupPassword) => invoke("passwords_import", { path, backupPassword }),
   exportBackup: (password, master) => invoke("passwords_export", { password, master }),
+  deleteAll: (master, withPasskeys) => invoke("passwords_delete_all", { master, withPasskeys }),
+  exportApple: (master) => invoke("passwords_export_apple", { master }),
   sync: () => invoke("passwords_sync"),
   helloStatus: () => invoke("passwords_hello_status"),
   helloEnable: () => invoke("passwords_hello_enable"),
@@ -485,6 +498,15 @@ function previewApi(): PasswordsApi {
     async importFile() {
       await wait(400);
       return 42;
+    },
+    async deleteAll(_master, withPasskeys) {
+      const keep = withPasskeys ? [] : items.filter((i) => i.passkeys.length);
+      const deleted = items.length - keep.length;
+      items = keep.map((i) => ({ ...i, hasPassword: false }));
+      return { deleted, stripped: keep.length, keptWithPasskeys: keep.length, damaged: 0 };
+    },
+    async exportApple() {
+      return true;
     },
     async exportBackup() {
       await wait(400);

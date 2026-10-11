@@ -9,6 +9,10 @@ class SignInArgs: Decodable {
   let callbackScheme: String
 }
 
+class ShareArgs: Decodable {
+  let path: String
+}
+
 /// MYLE Passwords' own native code on iPhone: the sign-in sheet.
 class MyleMobilePlugin: Plugin {
   private var session: ASWebAuthenticationSession?
@@ -46,6 +50,34 @@ class MyleMobilePlugin: Plugin {
     }
   }
 
+  /// The share sheet over one file (the Apple Passwords export). Answers
+  /// `completed` once it closes: true when the user saved or sent it.
+  @objc public func share(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(ShareArgs.self)
+    let url = URL(fileURLWithPath: args.path)
+    DispatchQueue.main.async {
+      let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+      sheet.completionWithItemsHandler = { _, completed, _, error in
+        if let error = error {
+          invoke.reject(error.localizedDescription)
+        } else {
+          invoke.resolve(["completed": completed])
+        }
+      }
+      guard let root = keyWindow()?.rootViewController else {
+        invoke.reject("The share sheet could not open.")
+        return
+      }
+      var top = root
+      while let shown = top.presentedViewController { top = shown }
+      // iPad: the sheet is a popover and needs an anchor.
+      sheet.popoverPresentationController?.sourceView = top.view
+      sheet.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+      sheet.popoverPresentationController?.permittedArrowDirections = []
+      top.present(sheet, animated: true)
+    }
+  }
+
   /// Closes the sheet when the app stopped waiting for it.
   @objc public func cancelSignIn(_ invoke: Invoke) throws {
     DispatchQueue.main.async {
@@ -56,12 +88,17 @@ class MyleMobilePlugin: Plugin {
   }
 }
 
+/// The app's window: what sheets are shown over.
+func keyWindow() -> UIWindow? {
+  let windows = UIApplication.shared.connectedScenes
+    .compactMap { $0 as? UIWindowScene }
+    .flatMap { $0.windows }
+  return windows.first { $0.isKeyWindow } ?? windows.first
+}
+
 extension MyleMobilePlugin: ASWebAuthenticationPresentationContextProviding {
   func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-    let windows = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .flatMap { $0.windows }
-    return windows.first { $0.isKeyWindow } ?? windows.first ?? ASPresentationAnchor()
+    return keyWindow() ?? ASPresentationAnchor()
   }
 }
 

@@ -330,3 +330,53 @@ mod tests {
         assert_eq!(host_of(""), None);
     }
 }
+
+/// Every entry as a CSV in the layout Apple's Passwords app imports
+/// (Settings › Apps › Passwords, or Passwords › Import):
+/// `Title,URL,Username,Password,Notes,OTPAuth`. Passwords sees one web
+/// address per login, so any others go into the notes. Plain text: the
+/// caller must say so and have the file deleted after the import.
+pub fn apple_csv(entries: &[Entry]) -> String {
+    fn field(text: &str) -> String {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    }
+    let mut out = String::from("Title,URL,Username,Password,Notes,OTPAuth\n");
+    for entry in entries {
+        let url = entry.urls.first().map(String::as_str).unwrap_or("");
+        let mut notes = entry.notes.clone();
+        if entry.urls.len() > 1 {
+            if !notes.is_empty() {
+                notes.push('\n');
+            }
+            notes.push_str(&format!("Other sites: {}", entry.urls[1..].join(", ")));
+        }
+        let row = [&entry.title, url, &entry.username, &entry.password, &notes, &entry.totp]
+            .iter()
+            .map(|t| field(t))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
+#[cfg(test)]
+mod apple_tests {
+    use super::*;
+
+    #[test]
+    fn apple_csv_quotes_and_keeps_extra_sites() {
+        let entry = Entry {
+            title: "Git\"Hub".into(),
+            username: "me".into(),
+            password: "a,b".into(),
+            urls: vec!["https://github.com".into(), "https://gist.github.com".into()],
+            totp: "otpauth://totp/x?secret=ABC".into(),
+            ..Default::default()
+        };
+        let csv = apple_csv(&[entry]);
+        assert!(csv.starts_with("Title,URL,Username,Password,Notes,OTPAuth\n"));
+        assert!(csv.contains("\"Git\"\"Hub\",\"https://github.com\",\"me\",\"a,b\",\"Other sites: https://gist.github.com\",\"otpauth://totp/x?secret=ABC\""));
+    }
+}

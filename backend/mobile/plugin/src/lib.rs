@@ -44,6 +44,19 @@ struct SignInAnswer {
     callback_url: Option<String>,
 }
 
+#[cfg(target_os = "ios")]
+#[derive(serde::Serialize)]
+struct ShareArgs<'a> {
+    path: &'a str,
+}
+
+#[cfg(target_os = "ios")]
+#[derive(serde::Deserialize)]
+struct ShareAnswer {
+    #[serde(default)]
+    completed: bool,
+}
+
 #[cfg(target_os = "android")]
 #[derive(serde::Serialize)]
 struct InstallArgs<'a> {
@@ -71,6 +84,22 @@ impl<R: Runtime> Mobile<R> {
         let _ = self.0.run_mobile_plugin::<serde::de::IgnoredAny>("cancelSignIn", ());
     }
 
+    /// iOS's share sheet over the file at `path`; waits until it closes and
+    /// answers whether the user sent or saved it. Blocks.
+    pub fn share(&self, path: &str) -> Result<bool, String> {
+        #[cfg(target_os = "ios")]
+        return self
+            .0
+            .run_mobile_plugin::<ShareAnswer>("share", ShareArgs { path })
+            .map(|answer| answer.completed)
+            .map_err(|e| e.to_string());
+        #[cfg(target_os = "android")]
+        {
+            let _ = path;
+            Err("Exporting for Apple Passwords is for iPhone.".into())
+        }
+    }
+
     /// Opens Android's package installer over the APK at `path`, or answers
     /// an error with `ALLOW_INSTALLS` after showing the setting that allows it.
     pub fn install(&self, path: &str) -> Result<(), String> {
@@ -95,6 +124,10 @@ impl<R: Runtime> Mobile<R> {
     }
 
     pub fn cancel_sign_in(&self) {}
+
+    pub fn share(&self, _path: &str) -> Result<bool, String> {
+        Err("Exporting for Apple Passwords is for iPhone.".into())
+    }
 
     pub fn install(&self, _path: &str) -> Result<(), String> {
         Err("Installing updates in the app is for Android.".into())

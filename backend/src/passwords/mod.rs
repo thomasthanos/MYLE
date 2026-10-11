@@ -765,6 +765,24 @@ pub fn passwords_save(
     state.with(|vault| vault.save(&entry))
 }
 
+/// "Delete all passwords": asks for the master password again, then removes
+/// every password (entries with passkeys stay unless `with_passkeys`). The
+/// page syncs right after, so the account and other devices follow.
+#[tauri::command]
+pub async fn passwords_delete_all(
+    state: State<'_, PasswordsState>,
+    master: String,
+    with_passkeys: bool,
+) -> Result<myle_vault::vault::DeleteAll, String> {
+    let master = zeroize::Zeroizing::new(master);
+    state
+        .with_blocking(move |vault| {
+            vault.verify_master(&master)?;
+            vault.delete_all(with_passkeys)
+        })
+        .await
+}
+
 #[tauri::command(async)]
 pub fn passwords_delete(state: State<'_, PasswordsState>, id: String) -> Result<(), String> {
     state.with(|vault| vault.delete(&id))
