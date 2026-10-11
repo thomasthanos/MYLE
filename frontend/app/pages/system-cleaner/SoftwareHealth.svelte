@@ -150,48 +150,48 @@
 </section>
 
 <style>
-  .health { display: grid; gap: 7px; margin-top: 8px; padding: 10px 12px; }
+  .health { display: grid; gap: var(--fluid-gap-2); margin-top: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4); }
   header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
   .title { display: flex; gap: 10px; min-width: 0; flex: 1 1 360px; }
   .title :global(svg) { flex: none; margin-top: 2px; color: var(--accent); }
-  h2 { font-size: 13px; font-weight: 600; }
-  .title p { margin-top: 1px; color: var(--text-3); font-size: 10.75px; }
+  h2 { font-size: var(--fluid-md); font-weight: 600; }
+  .title p { margin-top: 1px; color: var(--text-3); font-size: var(--fluid-xs); }
   .actions, .tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .progress { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; }
+  .progress { display: grid; gap: 4px; color: var(--text-2); font-size: var(--fluid-xs); }
   .progress span { display: flex; gap: 6px; }
   .progress em { margin-left: auto; font-style: normal; font-variant-numeric: tabular-nums; }
-  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); align-items: start; gap: 4px; }
+  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(420px, 30vw, 760px), 1fr)); align-items: start; gap: var(--fluid-gap-1); }
   .module.open { grid-column: 1 / -1; }
   .module { border: 1px solid rgb(255 255 255 / 0.06); border-radius: 8px; background: rgb(255 255 255 / 0.015); }
-  .head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 9px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .head { display: flex; align-items: center; gap: 8px; width: 100%; padding: var(--fluid-gap-2) var(--fluid-gap-3); border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .head:hover { background: rgb(255 255 255 / 0.03); }
   .head :global(.chev) { flex: none; color: var(--text-3); transition: transform 160ms var(--ease-out); }
   .module.open .head :global(.chev) { transform: rotate(90deg); }
-  .name { flex: none; font-size: 12px; font-weight: 600; }
-  .hint { overflow: hidden; flex: 1; color: var(--text-3); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
-  .badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex: none; min-width: 26px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--accent-soft-rgb) / 0.18); color: rgb(var(--accent-soft-rgb)); font-size: 10.5px; font-weight: 600; text-align: center; }
+  .name { flex: none; font-size: var(--fluid-sm); font-weight: 600; }
+  .hint { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--fluid-xs); line-height: 1.35; }
+  .badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex: none; min-width: 26px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--accent-soft-rgb) / 0.18); color: rgb(var(--accent-soft-rgb)); font-size: var(--fluid-xs); font-weight: 600; text-align: center; }
   .badge.clean { background: rgb(62 207 142 / 0.14); color: #98dfbd; }
   .badge.idle { background: rgb(255 255 255 / 0.05); color: var(--text-3); }
-  .body { display: grid; gap: 4px; padding: 2px 9px 8px 29px; }
-  ul { display: grid; gap: 2px; max-height: 340px; overflow: auto; list-style: none; }
-  li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 6px; }
+  .body { display: grid; gap: var(--fluid-gap-1); padding: 2px var(--fluid-gap-3) var(--fluid-gap-3) calc(var(--fluid-gap-3) + 20px); }
+  ul { display: grid; gap: 2px; max-height: 55vh; overflow: auto; list-style: none; }
+  li { display: flex; align-items: center; gap: var(--fluid-gap-2); padding: var(--fluid-gap-1) var(--fluid-gap-2); border-radius: 6px; }
   li:hover { background: rgb(255 255 255 / 0.03); }
   li.off { opacity: 0.65; }
   .grow { flex: 1; min-width: 0; }
   .line { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-  .line strong { overflow: hidden; max-width: 100%; font-size: 12px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
-  li p { overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
-  code { font-size: 10.5px; }
-  .flag { padding: 0 6px; border-radius: 999px; background: rgb(255 255 255 / 0.06); color: var(--text-2); font-size: 9.75px; }
+  .line strong { overflow: hidden; max-width: 100%; font-size: var(--fluid-sm); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+  li p { overflow: hidden; color: var(--text-2); font-size: var(--fluid-xs); white-space: nowrap; text-overflow: ellipsis; }
+  code { font-size: var(--fluid-xs); }
+  .flag { padding: 0 6px; border-radius: 999px; background: rgb(255 255 255 / 0.06); color: var(--text-2); font-size: var(--fluid-xs); }
   .flag.warn { background: rgb(245 165 36 / 0.14); color: #f5c26b; }
-  .conf { flex: none; color: #98dfbd; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .conf { flex: none; color: #98dfbd; font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
   .conf.low { color: #f5c26b; }
-  .size { flex: none; min-width: 58px; color: var(--text-2); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
-  .muted { color: var(--text-3); font-size: 11px; }
-  .error { color: #ffb4b0; font-size: 11px; white-space: normal; }
+  .size { flex: none; min-width: 58px; color: var(--text-2); font-size: var(--fluid-xs); text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--text-3); font-size: var(--fluid-xs); }
+  .error { color: #ffb4b0; font-size: var(--fluid-xs); white-space: normal; }
   .restore { display: grid; gap: 2px; max-height: 220px; overflow: auto; padding: 6px; border-radius: 8px; background: rgb(255 255 255 / 0.02); }
-  .row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 11.5px; }
-  .row em { color: var(--text-3); font-style: normal; font-size: 10.5px; }
-  .btn.small { padding: 3px 9px; font-size: 11px; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: var(--fluid-xs); }
+  .row em { color: var(--text-3); font-style: normal; font-size: var(--fluid-xs); }
+  .btn.small { padding: 3px 9px; font-size: var(--fluid-xs); }
   @media (max-width: 760px) { .hint { display: none; } }
 </style>

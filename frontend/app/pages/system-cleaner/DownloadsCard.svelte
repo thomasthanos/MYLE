@@ -45,9 +45,9 @@
 <style>
   .downloads {
     display: grid;
-    gap: 6px;
-    margin-top: 8px;
-    padding: 9px 12px;
+    gap: var(--fluid-gap-2);
+    margin-top: var(--fluid-gap-3);
+    padding: var(--fluid-gap-3) var(--fluid-gap-4);
   }
 
   header {
@@ -60,8 +60,8 @@
     display: grid;
     flex: none;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--fluid-icon);
+    height: var(--fluid-icon);
     border-radius: 9px;
     background: rgb(var(--accent-rgb) / 0.14);
     color: rgb(var(--accent-rgb));
@@ -74,13 +74,13 @@
   }
 
   .text strong {
-    font-size: 13px;
+    font-size: var(--fluid-md);
   }
 
   .text small,
   .date {
     color: var(--text-3);
-    font-size: 11.5px;
+    font-size: var(--fluid-xs);
   }
 
 
@@ -102,12 +102,12 @@
     gap: 10px;
     justify-content: space-between;
     padding: 4px 6px;
-    font-size: 12px;
+    font-size: var(--fluid-sm);
   }
 
   .kept summary {
     color: var(--text-2);
-    font-size: 11.5px;
+    font-size: var(--fluid-xs);
     cursor: pointer;
   }
 

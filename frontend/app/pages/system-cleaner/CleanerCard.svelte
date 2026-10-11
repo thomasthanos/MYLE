@@ -40,7 +40,7 @@
 
 <article class="card" class:on={checked} class:done class:partly class:working={cleanerState.phase === "cleaning" && checked}>
   <div class="head">
-    <span class="icon"><Icon size={15} strokeWidth={1.7} /></span>
+    <span class="icon"><Icon size={18} strokeWidth={1.7} /></span>
     <div class="titles">
       <h3 title={category.description}>{category.title}</h3>
       <p title={category.description}>{category.description}</p>
@@ -71,20 +71,20 @@
 </article>
 
 <style>
-  .card { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 8px 10px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 10px; background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)); transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .card { display: flex; flex-direction: column; gap: var(--fluid-gap-2); min-width: 0; padding: var(--fluid-gap-3) var(--fluid-gap-4); border: 1px solid rgb(255 255 255 / 0.07); border-radius: 12px; background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)); transition: border-color var(--dur-fast), background var(--dur-fast); }
   .card:hover { border-color: rgb(255 255 255 / 0.14); background: rgb(255 255 255 / 0.04); }
   .card.on { border-color: rgb(var(--accent-rgb) / 0.32); }
   .card.working { border-color: rgb(var(--accent-rgb) / 0.55); }
   .card.done .head { opacity: 0.6; }
   .card.done .hint { color: var(--ok); }
   .card.partly .hint { color: rgb(245 188 95 / 0.9); }
-  .head { display: flex; align-items: center; gap: 8px; }
-  .icon { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 7px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
+  .head { display: flex; align-items: flex-start; gap: var(--fluid-gap-3); }
+  .icon { display: grid; place-items: center; width: var(--fluid-icon); height: var(--fluid-icon); flex: none; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
   .titles { flex: 1; min-width: 0; }
-  h3, .titles p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  h3 { font-size: 12.25px; font-weight: 600; line-height: 1.25; }
-  .titles p { color: var(--text-3); font-size: 10.5px; line-height: 1.3; }
-  .size { flex: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 16px; padding-left: 34px; }
-  .hint { display: flex; align-items: center; gap: 4px; overflow: hidden; color: var(--text-3); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
+  h3 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  h3 { font-size: var(--fluid-sm); font-weight: 600; line-height: 1.25; }
+  .titles p { margin-top: 2px; color: var(--text-2); line-height: 1.4; font-size: var(--fluid-xs); line-height: 1.3; }
+  .size { flex: none; font-size: var(--fluid-md); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; padding-top: var(--fluid-gap-2); border-top: 1px solid rgb(255 255 255 / 0.05); }
+  .hint { display: flex; align-items: center; gap: 4px; overflow: hidden; color: var(--text-3); font-size: var(--fluid-xs); white-space: nowrap; text-overflow: ellipsis; }
 </style>

@@ -2,6 +2,19 @@
 :root {
   color-scheme: dark;
 
+  /* Fluid scale: grows with the window (1080p → 1440p → 4K), so pages that
+     use it stay readable and fill the space. Opt-in; fixed sizes elsewhere. */
+  --fluid-xs: clamp(11.5px, 0.3vw + 6px, 14.5px);
+  --fluid-sm: clamp(12.5px, 0.35vw + 6px, 16px);
+  --fluid-md: clamp(13.5px, 0.4vw + 6.5px, 18px);
+  --fluid-lg: clamp(16px, 0.6vw + 6px, 24px);
+  --fluid-xl: clamp(20px, 0.8vw + 7px, 32px);
+  --fluid-gap-1: clamp(4px, 0.25vw, 8px);
+  --fluid-gap-2: clamp(6px, 0.4vw, 12px);
+  --fluid-gap-3: clamp(10px, 0.6vw, 18px);
+  --fluid-gap-4: clamp(14px, 0.85vw, 26px);
+  --fluid-icon: clamp(32px, 1.9vw, 46px);
+
   /* Typography: Segoe UI Variable ships with Windows 11, so it costs 0 bytes. */
   --font-sans: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;

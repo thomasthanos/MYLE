@@ -105,30 +105,35 @@
 <SoftwareHealth />
 
 <style>
-  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 10px; padding: 10px 14px; }
+  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-3) var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4); }
   .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 28px; }
   .stat { display: grid; gap: 3px; }
-  .label { color: var(--text-3); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-  .value { font-size: 18px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .value.small { font-size: 13px; font-weight: 500; line-height: 1.35; }
+  .label { color: var(--text-3); font-size: var(--fluid-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .value { font-size: var(--fluid-lg); font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: var(--fluid-md); font-weight: 500; line-height: 1.35; }
   .value.accent { color: var(--accent); }
   .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex: 1 1 380px; gap: 10px 16px; }
-  .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fluid-sm); }
   .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: 13px; }
+  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: var(--fluid-md); }
   /* The scan just ticked everything: say so, so the ticks are not a surprise. */
-  .picked { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: 11.5px; animation: fade-in 260ms var(--ease-out) both; }
+  .picked { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: var(--fluid-xs); animation: fade-in 260ms var(--ease-out) both; }
   .picked :global(svg) { flex: none; color: rgb(62 207 142 / 0.75); }
   /* The running clean: what is being removed and how far along it is. */
   .work { display: grid; flex-basis: 100%; gap: 7px; margin-top: 4px; padding-top: 13px; border-top: 1px solid rgb(255 255 255 / 0.06); animation: fade-in 220ms var(--ease-out) both; }
-  .work-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; }
+  .work-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: var(--fluid-xs); }
   .work-what { overflow: hidden; color: var(--text-2); white-space: nowrap; text-overflow: ellipsis; }
   .work-what em { color: rgb(var(--accent-soft-rgb)); font-style: normal; }
-  .work-count { padding: 1px 7px; border-radius: 999px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
-  .work-pct { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .work-count { padding: 1px 7px; border-radius: 999px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
+  .work-pct { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
   .work-pct.settled { color: #98dfbd; }
-  .work-note { color: var(--text-3); font-size: 10.75px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); align-items: stretch; gap: 6px; }
+  .work-note { color: var(--text-3); font-size: var(--fluid-xs); }
+  /* Columns follow the window: ~3 at 1080p, 4 at 1440p, 5 at 4K. */
+  .grid { --cols: 3; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); align-items: stretch; gap: var(--fluid-gap-3); }
+  @media (max-width: 760px) { .grid { --cols: 1; } }
+  @media (min-width: 761px) and (max-width: 1199px) { .grid { --cols: 2; } }
+  @media (min-width: 2200px) { .grid { --cols: 4; } }
+  @media (min-width: 3200px) { .grid { --cols: 5; } }
 
   @keyframes fade-in { from { opacity: 0; } }
   @media (max-width: 860px) { .bar { flex-basis: 100%; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.06); } }
