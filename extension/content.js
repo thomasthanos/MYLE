@@ -21,11 +21,69 @@
   window.__myleFill = true;
   // Two copies installed (the store's, and one loaded from a folder): the
   // first one in a page serves it, so nothing shows twice.
+  // A copy left behind by an update of this same extension (its value is our
+  // id) has lost its extension, so this one takes the page over.
   const COPY = "data-myle-passwords";
-  if (document.documentElement.hasAttribute(COPY)) return;
-  document.documentElement.setAttribute(COPY, "");
+  const owner = document.documentElement.getAttribute(COPY);
+  if (owner !== null && owner !== ext.runtime.id) return;
+  document.documentElement.setAttribute(COPY, ext.runtime.id);
 
-  const send = (message) => ext.runtime.sendMessage(message).catch(() => ({ ok: false, error: "noHost" }));
+  /** After the extension is updated or reloaded, this copy in a page that was
+   *  already open has no extension any more: the browser refuses it at once
+   *  ("Extension context invalidated"). Every request then answers
+   *  "reloaded" (passkey calls go back to the browser's own instead of
+   *  waiting forever), and a fresh copy may take the page over. */
+  function orphaned() {
+    try {
+      if (document.documentElement.getAttribute(COPY) === owned) document.documentElement.removeAttribute(COPY);
+    } catch {
+      // The page is going away.
+    }
+  }
+  const owned = ext.runtime.id;
+  const lost = () => ({ ok: false, error: ext.runtime?.id ? "noHost" : "reloaded" });
+
+  function send(message) {
+    try {
+      return ext.runtime.sendMessage(message).catch(lost);
+    } catch {
+      orphaned();
+      return Promise.resolve({ ok: false, error: "reloaded" });
+    }
+  }
+
+  /** Signs in or makes a passkey on a port of its own: the browser closes the
+   *  port when this page goes away, which cancels the request in MYLE. */
+  function passkeyCall(message) {
+    return new Promise((resolve) => {
+      let port;
+      try {
+        port = ext.runtime.connect({ name: "myle-passkey" });
+      } catch {
+        orphaned();
+        return resolve({ ok: false, error: "reloaded" });
+      }
+      let answered = false;
+      port.onMessage.addListener((answer) => {
+        answered = true;
+        resolve(answer);
+        try {
+          port.disconnect();
+        } catch {
+          // Closed already.
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        void ext.runtime.lastError;
+        if (!answered) resolve(lost());
+      });
+      try {
+        port.postMessage(message);
+      } catch {
+        resolve({ ok: false, error: "reloaded" });
+      }
+    });
+  }
 
   // --- Debug log --------------------------------------------------------------
   //
@@ -400,18 +458,28 @@
     guard.disconnect();
     for (const name of host.getAttributeNames()) if (name !== "popover") host.removeAttribute(name);
     if (topLayer) host.setAttribute("popover", "manual");
-    hidePanel();
-    hide(bar);
+    interfered();
     guard.observe(host, { attributes: true });
   });
   guard.observe(host, { attributes: true });
   host.addEventListener("toggle", (event) => {
     // Closed by the page rather than by us.
-    if (event.isTrusted && topLayer && !host.matches(":popover-open") && !(panel.hidden && bar.hidden)) {
-      hidePanel();
+    if (event.isTrusted && topLayer && !host.matches(":popover-open") && !(panel.hidden && bar.hidden)) interfered();
+  });
+
+  /** The page changed or closed MYLE's element. A passkey request whose prompt
+   *  was up is answered (refused) rather than left waiting with no prompt;
+   *  anything else simply closes. */
+  function interfered() {
+    hidePanel();
+    const id = prompted;
+    if (!bar.hidden && isPasskeyRequest(id)) {
+      closePrompt();
+      refuse(id, "cancelled");
+    } else {
       hide(bar);
     }
-  });
+  }
 
   function place(field) {
     if (!field?.isConnected) return hidePanel();
@@ -566,6 +634,7 @@
     notRunning: "MYLE is not running. Open it, then try again.",
     noTotp: "That login has no 2FA key in MYLE any more.",
     badKey: "MYLE could not read that 2FA key.",
+    reloaded: "MYLE Passwords was updated. Reload this page to use it.",
   };
 
   function entryButton(login) {
@@ -817,31 +886,44 @@
 
   addEventListener("scroll", () => !panel.hidden && anchor && place(anchor), true);
   addEventListener("resize", () => !panel.hidden && anchor && place(anchor));
-  addEventListener("pagehide", () => {
-    const requests = new Set([prompted, waitingPasskey?.id].filter(Boolean));
+  addEventListener("pagehide", (event) => {
+    // Kept in the back/forward cache, the page's waiting sign-in form (a
+    // conditional request) is still there when the user comes back.
+    const kept = event?.persisted === true;
+    const requests = new Set([prompted, kept ? null : waitingPasskey?.id].filter(Boolean));
     prompted = null;
-    waitingPasskey = null;
+    if (!kept) waitingPasskey = null;
     for (const requestId of requests) void send({ type: "passkeyCancel", requestId });
     void send({ type: "stopWaiting" });
     hidePanel();
     hide(bar);
   });
 
-  // The popup's "Fill" lands here.
+  /** What the toolbar popup needs to know of this frame's sign-in fields. */
+  function inspection() {
+    const passwords = passwordFields();
+    const usernames = queryAll(document, "input").filter(isUsernameOnly);
+    const fields = [...passwords, ...usernames];
+    const active = document.activeElement;
+    return {
+      fields: fields.length > 0,
+      password: passwords.length > 0,
+      focused: fields.includes(active),
+      // Every sign-in field here sends over plain http: not worth a password.
+      insecure: fields.length > 0 && fields.every(insecureForm),
+    };
+  }
+
+  // The popup's census of the tab's frames, and its "Fill", land here.
   ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== ext.runtime.id) return;
-    if (message?.type === "inspect") {
-      const passwords = passwordFields();
-      const usernames = queryAll(document, "input").filter(isUsernameOnly);
-      const fields = [...passwords, ...usernames];
-      const active = document.activeElement;
-      sendResponse({
-        fields: fields.length > 0,
-        password: passwords.length > 0,
-        focused: fields.includes(active),
-        // Every sign-in field here sends over plain http: not worth a password.
-        insecure: fields.length > 0 && fields.every(insecureForm),
-      });
+    if (message?.type === "census" && typeof message.round === "string") {
+      // Answered with a message of our own, so the browser tells the
+      // extension which frame and address this is; never through
+      // sendResponse, which would end the census at the first frame.
+      void send({ type: "present", round: message.round, ...inspection() });
+    } else if (message?.type === "inspect") {
+      sendResponse(inspection());
     } else if (message?.type === "apply") {
       sendResponse(message.origin === location.origin ?
         fill(message, null) : { applied: false, error: "pageChanged" });
@@ -861,6 +943,18 @@
   let waitingPasskey = null;
   /** The request MYLE's prompt is for. */
   let prompted = null;
+  /** Each time the prompt is drawn: a wait started for an earlier drawing ends
+   *  when the prompt is drawn again ("Try again"), so a request is never
+   *  carried on twice. */
+  let promptToken = {};
+  /** The save-login offer the prompt took the place of, shown again after it;
+   *  and whether an offer came while the prompt was up. */
+  let shownOffer = null;
+  let displacedOffer = null;
+  let offerAfterPrompt = false;
+
+  /** A request from passkeys.js, not one of MYLE's own prompts (2FA keys). */
+  const isPasskeyRequest = (id) => typeof id === "string" && !id.startsWith("totp-");
 
   const answerPage = (id, answer) => window.postMessage({ source: TO_PAGE, id, ...answer }, location.origin);
 
@@ -883,12 +977,23 @@
     hide(bar);
     if (requestId) void send({ type: "passkeyCancel", requestId });
     void send({ type: "stopWaiting" });
+    // A save-login offer the prompt covered comes back; one that arrived
+    // meanwhile is shown now.
+    const offer = displacedOffer;
+    displacedOffer = null;
+    if (offer) offer();
+    else if (offerAfterPrompt) {
+      offerAfterPrompt = false;
+      void offerSave();
+    }
   }
 
   /** MYLE's prompt: a title, a line, what goes between, then the buttons
    *  ([label, primary, run]). Returns the line, to say what happens. */
   function prompt(id, title, line, buttons, between = []) {
+    if (!prompted && shownOffer && !bar.hidden) displacedOffer = shownOffer;
     prompted = id;
+    promptToken = {};
     mount(null);
     const head = document.createElement("div");
     head.className = "title";
@@ -943,12 +1048,13 @@
    *  prompt says how far MYLE is; the page's request stays open all the while. */
   async function carryOnWhenUnlocked(id, text, retry) {
     const started = Date.now();
+    const token = promptToken;
     let opened = false;
-    while (prompted === id) {
+    while (prompted === id && promptToken === token) {
       const left = UNLOCK_WAIT - Math.round((Date.now() - started) / 1000);
       if (left <= 0) break;
       const waited = await send({ type: "waitUnlocked", seconds: Math.min(left, 6) });
-      if (prompted !== id) return;
+      if (prompted !== id || promptToken !== token) return;
       debug("waiting for MYLE", { state: waited?.state ?? waited?.error ?? "noHost", unlocked: waited?.unlocked === true, reply: waited?.detail ?? "" });
       if (!waited?.ok || typeof waited.state !== "string" || !waited.state) {
         text.textContent = problems[waited?.error] ?? "The MYLE extension could not check your vault. Reload the extension and this page, then try again.";
@@ -976,7 +1082,7 @@
         : `Unlock your vault in MYLE (Windows Hello or your master password). The sign-in carries on by itself (${seconds}s).`;
       if (state === "noHost" || state === "disabled") break;
     }
-    if (prompted !== id) return;
+    if (prompted !== id || promptToken !== token) return;
     text.textContent = "MYLE did not open in time. Open and unlock it, then press Try again.";
   }
 
@@ -1052,7 +1158,7 @@
         ["Save in MYLE", true, async (button, text) => {
           button.disabled = true;
           text.textContent = `Saving… ${busyLine}`;
-          const answer = await send({
+          const answer = await passkeyCall({
             type: "passkeyCreate",
             requestId: id,
             rpId: options.rpId,
@@ -1065,7 +1171,8 @@
             exclude: options.exclude,
             userVerification: options.userVerification,
           });
-          if (prompted !== id) return;
+          // The same request is already with MYLE: its own answer comes.
+          if (prompted !== id || answer?.inProgress) return;
           if (answer?.ok && answer.credential) {
             closePrompt();
             answerPage(id, { result: "credential", credential: answer.credential });
@@ -1080,7 +1187,7 @@
       ]);
   }
 
-  const usePasskey = (options, credentialId, requestId) => send({
+  const usePasskey = (options, credentialId, requestId) => passkeyCall({
     type: "passkeyGet",
     requestId,
     rpId: options.rpId,
@@ -1110,7 +1217,7 @@
         for (const other of keys.querySelectorAll("button")) other.disabled = true;
         text.textContent = `Signing in… ${busyLine}`;
         const answer = await usePasskey(options, key.credentialId, id);
-        if (prompted !== id) return;
+        if (prompted !== id || answer?.inProgress) return;
         if (answer?.ok && answer.credential) {
           closePrompt();
           answerPage(id, { result: "credential", credential: answer.credential });
@@ -1126,7 +1233,7 @@
       for (const other of keys.querySelectorAll("button")) other.disabled = true;
       text.textContent = `Signing in as ${only.userName || only.userDisplayName || "your account"}… ${busyLine}`;
       const answer = await usePasskey(options, only.credentialId, id);
-      if (prompted !== id) return;
+      if (prompted !== id || answer?.inProgress) return;
       if (answer?.ok && answer.credential) {
         closePrompt();
         answerPage(id, { result: "credential", credential: answer.credential });
@@ -1198,6 +1305,9 @@
       if (kind !== "abort") {
         if (heard.has(id)) return;
         heard.add(id);
+        if (heard.size > 200) heard.delete(heard.values().next().value);
+        // Heard: passkeys.js stops waiting for this copy to answer at all.
+        window.postMessage({ source: TO_PAGE, kind: "ack", id }, location.origin);
       }
       if (kind === "abort") {
         void send({ type: "passkeyCancel", requestId: id });
@@ -1224,8 +1334,9 @@
         answerPage(id, { result: "native" });
       }
     });
-    // Listening now: the page-world part asks again what it asked before.
-    window.postMessage({ source: TO_PAGE, kind: "hello" }, location.origin);
+    // Listening now: the page-world part asks again what it asked before. It
+    // also learns that this copy says when it heard a question.
+    window.postMessage({ source: TO_PAGE, kind: "hello", acks: true }, location.origin);
   }
 
   // --- Offering to save -------------------------------------------------------
@@ -1299,10 +1410,14 @@
   let offerShown = "";
 
   async function offerSave() {
+    // MYLE's prompt is up (a passkey sign-in, a 2FA key): the offer waits for it.
+    if (prompted) {
+      offerAfterPrompt = true;
+      return;
+    }
     const pending = await send({ type: "pending" });
     if (typeof pending?.nonce !== "string" || offerShown === pending.nonce) return;
     offerShown = pending.nonce;
-    mount(null);
     const title = document.createElement("div");
     title.className = "title";
     title.innerHTML = MARK;
@@ -1316,6 +1431,7 @@
     later.textContent = "Not now";
     later.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
+      if (shownOffer === render) shownOffer = null;
       hide(bar);
       void send({ type: "dismiss", nonce: pending.nonce });
     });
@@ -1331,10 +1447,12 @@
         text.textContent = answer.already ? "It was already in your vault." :
           answer.updated ? "The saved password is updated." : "Saved to your vault.";
         row.remove();
-        setTimeout(() => hide(bar), 2200);
+        if (shownOffer === render) shownOffer = null;
+        setTimeout(() => !prompted && hide(bar), 2200);
       } else if (answer?.error === "expired") {
         text.textContent = "This offer has expired. Add the login in MYLE instead.";
         row.remove();
+        if (shownOffer === render) shownOffer = null;
       } else {
         save.disabled = false;
         text.textContent = answer?.error === "locked" ?
@@ -1343,11 +1461,21 @@
       }
     });
     row.append(later, save);
-    bar.replaceChildren(title, text, row);
-    show(bar);
-    // Still here after a moment (not a page that redirects on): the offer is
-    // made, and not shown again on a reload or another page.
-    setTimeout(() => !document.hidden && void send({ type: "offerSettled", nonce: pending.nonce }), 2000);
+    let settled = false;
+    function render() {
+      shownOffer = render;
+      mount(null);
+      bar.replaceChildren(title, text, row);
+      show(bar);
+      if (settled) return;
+      settled = true;
+      // Still here after a moment (not a page that redirects on): the offer is
+      // made, and not shown again on a reload or another page.
+      setTimeout(() => !document.hidden && void send({ type: "offerSettled", nonce: pending.nonce }), 2000);
+    }
+    // A prompt came up while MYLE was asked: the offer is shown after it.
+    if (prompted) displacedOffer = render;
+    else render();
   }
 
   // The offer shows once, in the page itself, not in its frames.
@@ -1497,10 +1625,11 @@
     void send({ type: "keyDismiss", secret });
   };
 
-  /** Says how it went, then closes. */
-  function settleKey(text, words) {
+  /** Says how it went, then closes, unless another prompt (a passkey
+   *  sign-in) has taken its place meanwhile. */
+  function settleKey(text, words, id) {
     text.textContent = words;
-    setTimeout(closePrompt, 3200);
+    setTimeout(() => prompted === id && closePrompt(), 3200);
   }
 
   async function offerKey(secret) {
@@ -1532,9 +1661,9 @@
       const saved = await send({ type: "saveTotp", id: login?.id ?? null, secret });
       if (prompted !== id) return;
       if (saved?.ok) {
-        settleKey(text, "Saved. When the site asks for a code, click its field: MYLE fills it.");
+        settleKey(text, "Saved. When the site asks for a code, click its field: MYLE fills it.", id);
       } else {
-        settleKey(text, problems[saved?.error] ?? "MYLE could not keep that key. Add it to the login in MYLE instead.");
+        settleKey(text, problems[saved?.error] ?? "MYLE could not keep that key. Add it to the login in MYLE instead.", id);
       }
     };
     const why = "MYLE keeps it in your vault and fills this site's 2FA codes for you.";

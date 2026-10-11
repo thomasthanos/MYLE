@@ -10,8 +10,9 @@ const EXTENSION = "myle-passkeys/extension";
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64url");
 
-/** A page with the browser's own passkeys, and MYLE's part listening. */
-function page() {
+/** A page with the browser's own passkeys, and MYLE's part listening.
+ *  `timers` (optional) stands in for the page's setTimeout/clearTimeout. */
+function page(timers) {
   const posted = [];
   const window = new EventTarget();
   class CredentialsContainer {
@@ -48,6 +49,7 @@ function page() {
     DOMException,
     btoa,
     atob,
+    ...(timers ? { setTimeout: timers.set, clearTimeout: timers.clear } : {}),
   });
   window.top = window;
   const traces = [];
@@ -269,4 +271,109 @@ test("a sign-in asked before MYLE's part of the page started is asked again on i
 test("a site asking for a platform authenticator hears MYLE is one", async () => {
   const { context } = page();
   assert.equal(await context.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(), true);
+});
+
+/** Timers that run only when the test says so. */
+function fakeTimers() {
+  const pending = new Map();
+  let next = 0;
+  return {
+    pending,
+    set: (run, ms) => { pending.set(++next, { run, ms }); return next; },
+    clear: (id) => pending.delete(id),
+    /** Runs every timer of exactly `ms`. */
+    fire(ms) {
+      for (const [id, timer] of [...pending]) {
+        if (timer.ms !== ms) continue;
+        pending.delete(id);
+        timer.run();
+      }
+    },
+  };
+}
+
+const hello = (window, acks) => {
+  const event = new Event("message");
+  Object.assign(event, { source: window, data: { source: EXTENSION, kind: "hello", ...(acks ? { acks: true } : {}) } });
+  window.dispatchEvent(event);
+};
+const ack = (window, id) => {
+  const event = new Event("message");
+  Object.assign(event, { source: window, data: { source: EXTENSION, kind: "ack", id } });
+  window.dispatchEvent(event);
+};
+const signIn = { publicKey: { challenge: new Uint8Array([1]), rpId: "example.com", timeout: 60_000 } };
+
+test("a sign-in MYLE never answers ends at the page's own timeout, as the browser's would", async () => {
+  const timers = fakeTimers();
+  const { context, posted, window } = page(timers);
+  hello(window, true);
+  const pending = context.navigator.credentials.get(signIn);
+  ack(window, posted[0].id);
+  timers.fire(60_000);
+  await assert.rejects(pending, (error) => error.name === "NotAllowedError");
+  assert.equal(posted.at(-1).kind, "abort", "MYLE's prompt is closed too");
+  assert.equal(timers.pending.size, 0);
+});
+
+test("the page's timeout is kept within sane bounds", async () => {
+  const timers = fakeTimers();
+  const { context, window } = page(timers);
+  hello(window, false);
+  void context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]), timeout: 5 } }).catch(() => {});
+  void context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } }).catch(() => {});
+  const delays = [...timers.pending.values()].map((timer) => timer.ms).sort((a, b) => a - b);
+  assert.deepEqual(delays, [30_000, 300_000]);
+});
+
+test("a question MYLE's part of the page never hears goes to the browser's own passkeys", async () => {
+  const timers = fakeTimers();
+  const { context, posted, window } = page(timers);
+  hello(window, true);
+  const pending = context.navigator.credentials.get(signIn);
+  assert.equal(posted.length, 1);
+  timers.fire(2000);
+  const answer = await pending;
+  assert.equal(answer.native, "get", "the browser's own get was called");
+});
+
+test("an older MYLE part of the page (no acks) is waited for as before", async () => {
+  const timers = fakeTimers();
+  const { context, posted, window, answer } = page(timers);
+  hello(window, false);
+  const pending = context.navigator.credentials.get(signIn);
+  timers.fire(2000);
+  answer({ result: "native" });
+  assert.equal((await pending).native, "get");
+  assert.equal(posted.filter((message) => message.kind === "abort").length, 0);
+});
+
+test("a question asked before MYLE's part of the page starts goes native if it never starts", async () => {
+  const timers = fakeTimers();
+  const { context } = page(timers);
+  const pending = context.navigator.credentials.get(signIn);
+  timers.fire(10_000);
+  assert.equal((await pending).native, "get");
+});
+
+test("a page put in the back/forward cache refuses its modal sign-in but keeps a waiting form", async () => {
+  const timers = fakeTimers();
+  const { context, posted, window } = page(timers);
+  hello(window, true);
+  const modal = context.navigator.credentials.get(signIn);
+  const conditional = context.navigator.credentials.get({ ...signIn, mediation: "conditional" });
+  for (const message of posted) if (message.kind !== "abort") ack(window, message.id);
+  const leaving = new Event("pagehide");
+  leaving.persisted = true;
+  window.dispatchEvent(leaving);
+  await assert.rejects(modal, (error) => error.name === "NotAllowedError");
+  const state = await Promise.race([conditional.then(() => "settled", () => "settled"), new Promise((resolve) => setImmediate(() => resolve("waiting")))]);
+  assert.equal(state, "waiting");
+});
+
+test("a conditional create is left to the browser", async () => {
+  const { context, posted } = page();
+  const made = await context.navigator.credentials.create({ ...createOptions(), mediation: "conditional" });
+  assert.equal(made.native, "create");
+  assert.equal(posted.length, 0);
 });

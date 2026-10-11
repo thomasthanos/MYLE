@@ -64,33 +64,53 @@ test("why the browser could not reach MYLE is told apart", async () => {
   assert.equal(hostProblem("Something new"), "noHost");
 });
 
-/** background.js with a tab of two frames, recording what reaches MYLE. */
-async function backgroundWithTab(reply = { ok: true }, scheduling = {}) {
+/** background.js with a tab of two frames, recording what reaches MYLE. Our
+ *  script in each frame answers the popup's census with a message of its own,
+ *  as content.js does; `frames` says what each one sees. */
+async function backgroundWithTab(reply = { ok: true }, scheduling = {}, frames = defaultFrames(), storage = undefined) {
   const asked = [];
-  const navigationListeners = [];
+  const applied = [];
+  const ports = [];
   const listener = { addListener() {} };
-  const context = vm.createContext({
+  const tab = { id: 7, active: true, url: "https://example.com/login" };
+  let context;
+  context = vm.createContext({
     chrome: {
       runtime: {
         getURL: () => "chrome-extension://test/",
         onMessage: listener,
+        onConnect: { addListener: (connect) => ports.push(connect) },
         id: "test",
         sendNativeMessage: async (_host, message) => {
           asked.push(JSON.stringify(message));
           return typeof reply === "function" ? reply(message) : reply;
         },
       },
-      tabs: { onRemoved: listener, get: async () => ({ id: 7, active: true }) },
-      webNavigation: {
-        onCommitted: { addListener: (listener) => navigationListeners.push(listener) },
-        getAllFrames: async () => [
-          { frameId: 0, url: "https://example.com/login" },
-          { frameId: 3, url: "https://auth.other.com/frame" },
-        ],
+      storage,
+      tabs: {
+        onRemoved: listener,
+        get: async () => tab,
+        sendMessage: async (tabId, message, options) => {
+          if (message.type === "census") {
+            for (const frame of frames) {
+              await context.handle({ type: "present", round: message.round, ...frame.sees }, {
+                id: "test", url: frame.url, frameId: frame.frameId, documentId: frame.documentId,
+                documentLifecycle: "active", tab: { ...tab, id: tabId },
+              });
+            }
+            return undefined;
+          }
+          if (message.type === "apply") {
+            applied.push({ message, options });
+            return { applied: true };
+          }
+          throw new Error("no receiver");
+        },
       },
     },
     crypto: globalThis.crypto,
     URL,
+    TextEncoder,
     setTimeout,
     clearTimeout,
     ...scheduling,
@@ -99,7 +119,30 @@ async function backgroundWithTab(reply = { ok: true }, scheduling = {}) {
   for (const file of ["psl.js", "background.js"]) {
     vm.runInContext(await readFile(new URL(file, extension), "utf8"), context, { filename: file });
   }
-  return { context, asked, navigate: (details) => navigationListeners.forEach((listener) => listener(details)) };
+  /** A passkey port from `sender`, as content.js opens one. */
+  const connect = (sender) => {
+    const port = {
+      name: "myle-passkey", sender, posted: [], closed: false,
+      messageListeners: [], disconnectListeners: new Set(),
+      onMessage: { addListener: (fn) => port.messageListeners.push(fn) },
+      onDisconnect: { addListener: (fn) => port.disconnectListeners.add(fn), removeListener: (fn) => port.disconnectListeners.delete(fn) },
+      postMessage: (answer) => port.posted.push(answer),
+      disconnect: () => { port.closed = true; },
+      send: (message) => port.messageListeners.forEach((fn) => fn(message)),
+      // The page went away: the browser closes the port.
+      gone: () => [...port.disconnectListeners].forEach((fn) => fn()),
+    };
+    ports.forEach((onConnect) => onConnect(port));
+    return port;
+  };
+  return { context, asked, applied, connect, tab };
+}
+
+function defaultFrames() {
+  return [
+    { frameId: 0, url: "https://example.com/login", documentId: "top-doc", sees: { fields: true, password: true } },
+    { frameId: 3, url: "https://auth.other.com/frame", documentId: "frame-doc", sees: { fields: true, password: true } },
+  ];
 }
 
 const popup = { url: "chrome-extension://test/popup.html", id: "test" };
@@ -272,7 +315,7 @@ test("native replies release their deadline timer, including transport failures"
       setTimeout(callback) { const token = { callback }; pending.add(token); return token; },
       clearTimeout(token) { pending.delete(token); },
     });
-    await context.ask({ type: "status" });
+    await context.ask({ type: "save" });
     assert.equal(pending.size, 0);
   }
 });
@@ -351,6 +394,7 @@ test("a replacement document cannot cancel the previous document's passkey opera
   await waiting;
 });
 
+
 test("closing a passkey prompt propagates cancellation for its request", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf("  function closePrompt() {");
@@ -358,9 +402,24 @@ test("closing a passkey prompt propagates cancellation for its request", async (
   const sent = [];
   const close = vm.runInNewContext(`(${content.slice(start, end).trim()})`, {
     prompted: "request", bar: {}, hide() {}, send: (message) => sent.push(message),
+    displacedOffer: null, offerAfterPrompt: false, offerSave() {},
   });
   close();
   assert.equal(sent.some((message) => message.type === "passkeyCancel" && message.requestId === "request"), true);
+});
+
+test("a save offer the passkey prompt covered comes back when the prompt closes", async () => {
+  const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
+  const start = content.indexOf("  function closePrompt() {");
+  const end = content.indexOf("\n  }", start) + 4;
+  let shown = 0;
+  const context = vm.createContext({
+    prompted: "request", bar: {}, hide() {}, send() {},
+    displacedOffer: () => shown++, offerAfterPrompt: false, offerSave: () => assert.fail("not asked again"),
+  });
+  vm.runInContext(`(${content.slice(start, end).trim()})()`, context);
+  assert.equal(shown, 1);
+  assert.equal(context.displacedOffer, null);
 });
 
 test("a page abort of a conditional request also cancels native verification", async () => {
@@ -381,9 +440,27 @@ test("a page abort of a conditional request also cancels native verification", a
   assert.equal(sent[0].requestId, "request");
 });
 
-test("the actual pagehide handler cancels prompted and conditional passkey requests", async () => {
+test("a question from the page is acknowledged, so the page knows MYLE heard it", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
-  const start = content.indexOf('  addEventListener("pagehide", () => {');
+  const start = content.indexOf('    addEventListener("message", (event) => {', content.indexOf("  if (window === window.top)"));
+  const end = content.indexOf("\n    });", start) + 8;
+  const posted = [];
+  let listener;
+  const window = { postMessage: (data) => posted.push(data) };
+  vm.runInNewContext(content.slice(start, end), {
+    window, location: { origin: "https://example.com" }, FROM_PAGE: "myle-passkeys/page", TO_PAGE: "myle-passkeys/extension",
+    heard: new Set(), waitingPasskey: null, prompted: null, debug() {},
+    addEventListener: (_kind, handler) => { listener = handler; },
+    send() {}, closePrompt() {}, answerPage() {},
+  });
+  listener({ source: window, data: { source: "myle-passkeys/page", id: "q1", kind: "conditional", options: {} } });
+  assert.equal(JSON.stringify(posted), JSON.stringify([{ source: "myle-passkeys/extension", kind: "ack", id: "q1" }]));
+});
+
+async function pagehide() {
+  const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
+  const start = content.indexOf('  addEventListener("pagehide", (event) => {');
+  assert.ok(start >= 0);
   const end = content.indexOf("\n  });", start) + 7;
   const sent = [];
   let leaving;
@@ -393,68 +470,234 @@ test("the actual pagehide handler cancels prompted and conditional passkey reque
     addEventListener: (_kind, handler) => { leaving = handler; },
   });
   vm.runInContext(content.slice(start, end), context);
-  leaving();
+  return { context, sent, leaving: (event) => leaving(event) };
+}
+
+test("the actual pagehide handler cancels prompted and conditional passkey requests", async () => {
+  const { context, sent, leaving } = await pagehide();
+  leaving({ persisted: false });
   assert.deepEqual(sent.filter((message) => message.type === "passkeyCancel").map((message) => message.requestId).sort(), ["conditional", "prompt"]);
   assert.equal(context.prompted, null);
   assert.equal(context.waitingPasskey, null);
 });
 
-test("a committed navigation cancels only departed document operations", async () => {
-  const releases = [];
-  const { context, asked, navigate } = await backgroundWithTab((message) =>
-    message.type === "passkeyGet" ? new Promise((resolve) => { releases.push(resolve); }) : { ok: true });
-  const request = { type: "passkeyGet", requestId: "request", challenge: "Y2g", credentialId: "a" };
-  const pending = [
-    context.handle(request, { ...page, documentId: "departed" }),
-    context.handle(request, { ...page, documentId: "current" }),
-    context.handle(request, { ...page, tab: { id: 8, active: true }, documentId: "other-tab" }),
-  ];
-  navigate({ tabId: 7, frameId: 3, documentId: "subframe" });
-  assert.equal(asked.length, 3, "a child frame's navigation cannot cancel top-frame operations");
-  navigate({ tabId: 7, frameId: 0, documentId: "current", url: page.url });
-  const messages = asked.map((message) => JSON.parse(message));
-  assert.equal(messages.length, 4);
-  assert.equal(messages[3].type, "passkeyCancel");
-  assert.equal(messages[3].operationId, messages[0].operationId);
-  for (const release of releases) release({ ok: false, error: "cancelled" });
-  await Promise.all(pending);
+test("a page kept in the back/forward cache keeps its waiting sign-in form", async () => {
+  const { context, sent, leaving } = await pagehide();
+  leaving({ persisted: true });
+  assert.deepEqual(sent.filter((message) => message.type === "passkeyCancel").map((message) => message.requestId), ["prompt"]);
+  assert.equal(context.waitingPasskey.id, "conditional");
 });
 
-test("same-document URL changes still allow cancellation when documentId is unavailable", async () => {
+// --- The frames of a tab, without webNavigation -------------------------------------
+
+test("the census takes each frame's address from the browser, never from what it says", async () => {
+  const frames = [
+    ...defaultFrames(),
+    // A frame claiming another site's address in its answer.
+    { frameId: 5, url: "https://ads.example.net/", documentId: "ad", sees: { fields: true, url: "https://bank.com/" } },
+  ];
+  const { context, asked } = await backgroundWithTab({ ok: true, logins: [] }, {}, frames);
+  const answer = await context.handle({ type: "tabLogins", tabId: 7 }, popup);
+  assert.equal(answer.ok, true);
+  const urls = asked.map((message) => JSON.parse(message).url);
+  assert.deepEqual(urls, ["https://example.com/login", "https://auth.other.com/frame", "https://ads.example.net/"]);
+});
+
+test("a census answer for another tab or an old round is ignored", async () => {
+  const { context } = await backgroundWithTab();
+  // No census is being taken: nothing to add to.
+  const stray = await context.handle({ type: "present", round: "made-up", fields: true },
+    { id: "test", url: "https://example.com/", frameId: 0, tab: { id: 7, active: true } });
+  assert.equal(stray.ok, true);
+});
+
+test("Fill goes to the very document the vault was asked about", async () => {
+  const { context, asked, applied } = await backgroundWithTab({ ok: true, username: "me", password: "pw" });
+  const answer = await context.handle({ type: "fillTab", tabId: 7, frameId: 3, id: "abc" }, popup);
+  assert.equal(answer.applied, true);
+  assert.equal(JSON.parse(asked[0]).url, "https://auth.other.com/frame");
+  assert.equal(JSON.stringify(applied[0].options), JSON.stringify({ documentId: "frame-doc" }));
+  assert.equal(applied[0].message.origin, "https://auth.other.com");
+});
+
+test("without document ids (older Firefox) Fill checks the frame again and sends to its number", async () => {
+  const frames = defaultFrames().map(({ documentId, ...frame }) => frame);
+  const { context, applied } = await backgroundWithTab({ ok: true, username: "me", password: "pw" }, {}, frames);
+  const answer = await context.handle({ type: "fillTab", tabId: 7, frameId: 0, id: "abc" }, popup);
+  assert.equal(answer.applied, true);
+  assert.equal(JSON.stringify(applied[0].options), JSON.stringify({ frameId: 0 }));
+});
+
+test("a page whose script is not running (opened before an update) says reload, and asks MYLE nothing", async () => {
+  const { context, asked } = await backgroundWithTab({ ok: true }, {}, []);
+  const answer = await context.handle({ type: "fillTab", tabId: 7, frameId: 0, id: "abc" }, popup);
+  assert.equal(answer.error, "noContent");
+  assert.deepEqual(asked, []);
+});
+
+test("one login in the page and in a sign-in frame of the same site is one row, for the better frame", async () => {
+  const frames = [
+    { frameId: 0, url: "https://example.com/", documentId: "top", sees: { fields: true } },
+    { frameId: 4, url: "https://login.example.com/frame", documentId: "login", sees: { fields: true, password: true, focused: true } },
+  ];
+  const { context } = await backgroundWithTab({ ok: true, logins: [{ id: "a", title: "Example" }] }, {}, frames);
+  const answer = await context.handle({ type: "tabLogins", tabId: 7 }, popup);
+  assert.equal(answer.logins.length, 1);
+  assert.equal(answer.logins[0].frameId, 4);
+  assert.equal(answer.logins[0].embedded, false);
+});
+
+test("a frame of another site inside the page is told apart by the tab's own address", async () => {
+  const { context, asked } = await backgroundWithTab({ ok: true, logins: [] });
+  const sender = (tabUrl) => ({ id: "test", url: "https://auth.other.com/frame", frameId: 3, tab: { id: 7, active: true, url: tabUrl } });
+  const embedded = await context.handle({ type: "logins" }, sender("https://example.com/login"));
+  assert.equal(embedded.error, "embedded");
+  assert.equal(embedded.top, "example.com");
+  const unknown = await context.handle({ type: "logins" }, sender(undefined));
+  assert.equal(unknown.error, "embedded", "no address for the page: treated as another site");
+  const sameSite = await context.handle({ type: "logins" }, sender("https://www.other.com/"));
+  assert.equal(sameSite.ok, true);
+  assert.equal(asked.filter((message) => JSON.parse(message).type === "logins").length, 1);
+});
+
+// --- Passkeys on a port --------------------------------------------------------------
+
+const passkeyGet = { type: "passkeyGet", requestId: "request", challenge: "Y2g", credentialId: "a" };
+
+test("a passkey request on a port is answered there, then the port closes", async () => {
+  const { connect } = await backgroundWithTab((message) =>
+    message.type === "passkeyGet" ? { ok: true, credential: { id: "x" } } : { ok: true });
+  const port = connect({ ...page, documentId: "doc" });
+  port.send(passkeyGet);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(port.posted[0].credential.id, "x");
+  assert.equal(port.closed, true);
+});
+
+test("the page leaving (its port closed) cancels its passkey operation in MYLE", async () => {
+  let release;
+  const { connect, asked } = await backgroundWithTab((message) =>
+    message.type === "passkeyGet" ? new Promise((resolve) => { release = resolve; }) : { ok: true });
+  const port = connect({ ...page, documentId: "doc" });
+  port.send(passkeyGet);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  port.gone();
+  const messages = asked.map((message) => JSON.parse(message));
+  assert.equal(messages[1].type, "passkeyCancel");
+  assert.equal(messages[1].operationId, messages[0].operationId);
+  assert.equal(messages[1].url, page.url);
+  release({ ok: false, error: "cancelled" });
+});
+
+test("a port closed after its answer cancels nothing", async () => {
+  const { connect, asked } = await backgroundWithTab((message) =>
+    message.type === "passkeyGet" ? { ok: false, error: "notVerified" } : { ok: true });
+  const port = connect({ ...page, documentId: "doc" });
+  port.send(passkeyGet);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  port.gone();
+  assert.equal(asked.length, 1);
+});
+
+test("a passkey port from the popup, or from another extension, is refused", async () => {
+  const { connect, asked } = await backgroundWithTab();
+  const fromPopup = connect(popup);
+  const fromOther = connect({ ...page, id: "other" });
+  assert.equal(fromPopup.closed, true);
+  assert.equal(fromOther.closed, true);
+  assert.equal(asked.length, 0);
+});
+
+test("a cancel from a tab the user moved away from still reaches MYLE", async () => {
   let release;
   const { context, asked } = await backgroundWithTab((message) =>
-    message.type === "passkeyGet" ? new Promise((resolve) => { release = resolve; }) : { ok: true });
-  const pending = context.handle({ type: "passkeyGet", requestId: "request", challenge: "Y2g", credentialId: "a" }, page);
-  try {
-    await context.handle({ type: "passkeyCancel", requestId: "request" }, { ...page, url: "https://accounts.google.com/next#passkey" });
-    const messages = asked.map((message) => JSON.parse(message));
-    assert.equal(messages[1]?.type, "passkeyCancel");
-    assert.equal(messages[1].operationId, messages[0].operationId);
-    assert.equal(messages[1].url, page.url, "native cancellation keeps the original authorized URL");
-  } finally {
-    release({ ok: false, error: "cancelled" });
-    await pending;
-  }
+    message.type === "passkeyCreate" ? new Promise((resolve) => { release = resolve; }) : { ok: true });
+  const create = { type: "passkeyCreate", requestId: "request", challenge: "Y2g", userId: "dQ" };
+  const waiting = context.handle(create, page);
+  const away = { ...page, tab: { id: 7, active: false }, documentLifecycle: "pending_deletion" };
+  await context.handle({ type: "passkeyCancel", requestId: "request" }, away);
+  const messages = asked.map((message) => JSON.parse(message));
+  assert.equal(messages[1]?.type, "passkeyCancel");
+  assert.equal(messages[1].operationId, messages[0].operationId);
+  release({ ok: false, error: "cancelled" });
+  await waiting;
 });
 
-test("a delayed navigation event without document IDs preserves operations started afterward", async () => {
-  const releases = [];
-  let now = 100;
-  const { context, asked, navigate } = await backgroundWithTab((message) =>
-    message.type === "passkeyGet" ? new Promise((resolve) => { releases.push(resolve); }) : { ok: true }, {
-    Date: class extends Date { static now() { return now; } },
+test("the same request asked twice while MYLE works on it is not a failure", async () => {
+  let release;
+  const { context } = await backgroundWithTab((message) =>
+    message.type === "passkeyGet" ? new Promise((resolve) => { release = resolve; }) : { ok: true });
+  const first = context.handle(passkeyGet, page);
+  const second = await context.handle(passkeyGet, page);
+  assert.equal(second.inProgress, true);
+  release({ ok: false, error: "cancelled" });
+  await first;
+});
+
+test("operations left by a worker that stopped are cancelled when it starts again", async () => {
+  const stored = { "passkeyOp:left": { id: "left", url: "https://accounts.google.com/signin" }, other: 1 };
+  const storage = {
+    session: {
+      get: async () => ({ ...stored }),
+      set: async (values) => Object.assign(stored, values),
+      remove: async (key) => { delete stored[key]; },
+    },
+  };
+  const { asked } = await backgroundWithTab({ ok: true }, {}, defaultFrames(), storage);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(asked.map((message) => JSON.parse(message)), [
+    { type: "passkeyCancel", url: "https://accounts.google.com/signin", operationId: "left", extVersion: "" },
+  ]);
+  assert.equal(stored["passkeyOp:left"], undefined);
+  assert.equal(stored.other, 1);
+});
+
+// --- Limits, retries, salt --------------------------------------------------------------
+
+test("only the page itself scans pictures for a 2FA code, a few times a minute", async () => {
+  const { context, asked } = await backgroundWithTab({ ok: false, error: "noQr" });
+  const pixels = { type: "qrPixels", width: 1, height: 1, pixels: "AA" };
+  const frame = { ...page, url: "https://ads.example.net/", frameId: 2 };
+  assert.equal((await context.handle(pixels, frame)).error, "badRequest");
+  for (let i = 0; i < 10; i++) await context.handle(pixels, page);
+  assert.equal((await context.handle(pixels, page)).error, "busy");
+  assert.equal(asked.length, 10);
+});
+
+test("a read is asked once more when MYLE is starting; a save never is", async () => {
+  let calls = 0;
+  const { context } = await backgroundWithTab((message) => {
+    calls++;
+    if (message.type === "save") return { ok: false, error: "notRunning" };
+    return calls === 1 ? { ok: false, error: "notRunning" } : { ok: true, state: "unlocked", enabled: true };
   });
-  const request = { type: "passkeyGet", challenge: "Y2g", credentialId: "a" };
-  const old = context.handle({ ...request, requestId: "old" }, page);
-  now = 200;
-  const current = context.handle({ ...request, requestId: "current" }, page);
-  try {
-    navigate({ tabId: 7, frameId: 0, timeStamp: 150, url: page.url });
-    const messages = asked.map((message) => JSON.parse(message));
-    assert.equal(messages.length, 3);
-    assert.equal(messages[2].operationId, messages[0].operationId);
-  } finally {
-    for (const release of releases) release({ ok: false, error: "cancelled" });
-    await Promise.all([old, current]);
-  }
+  const status = await context.ask({ type: "status" });
+  assert.equal(status.ok, true);
+  assert.equal(calls, 2);
+  calls = 0;
+  const save = await context.ask({ type: "save" });
+  assert.equal(save.error, "notRunning");
+  assert.equal(calls, 1);
+});
+
+test("passkey sites made at the same time share one salt", async () => {
+  const local = {};
+  let saltWrites = 0;
+  const storage = {
+    local: {
+      get: async (key) => { await new Promise((resolve) => setTimeout(resolve, 1)); return { [key]: local[key] }; },
+      set: async (values) => { if ("passkeySalt" in values) saltWrites++; Object.assign(local, values); },
+    },
+  };
+  const { context } = await backgroundWithTab({ ok: true }, {}, defaultFrames(), storage);
+  const [a, b] = await Promise.all([context.passkeySiteKey("example.com"), context.passkeySiteKey("example.com")]);
+  assert.equal(a, b);
+  assert.equal(saltWrites, 1);
+});
+
+test("asking to open MYLE twice within two seconds says nothing new happened", async () => {
+  const { context, asked } = await backgroundWithTab();
+  assert.equal((await context.handle({ type: "open" }, popup)).throttled, undefined);
+  assert.equal((await context.handle({ type: "open" }, popup)).throttled, true);
+  assert.equal(asked.length, 1);
 });
