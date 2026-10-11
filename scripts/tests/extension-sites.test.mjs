@@ -701,3 +701,34 @@ test("asking to open MYLE twice within two seconds says nothing new happened", a
   assert.equal((await context.handle({ type: "open" }, popup)).throttled, true);
   assert.equal(asked.length, 1);
 });
+
+// --- 2FA right after signing in --------------------------------------------------------
+
+test("a password filled or sent makes the site's next page watch for its 2FA field, for five minutes", async () => {
+  const stored = {};
+  const storage = {
+    session: {
+      get: async (key) => ({ [key]: stored[key] }),
+      set: async (values) => Object.assign(stored, values),
+      remove: async () => {},
+    },
+  };
+  const { context } = await backgroundWithTab({ ok: true, username: "ana", password: "pw" }, {}, defaultFrames(), storage);
+  const recent = async (sender) => (await context.handle({ type: "recentSignIn" }, sender)).recent;
+  assert.equal(await recent(page), false, "nothing sent yet");
+  await context.handle({ type: "fill", id: "a" }, page);
+  assert.equal(await recent(page), true);
+  // Another host of the same site (the 2FA step on another google.com host).
+  assert.equal(await recent({ ...page, url: "https://myaccount.google.com/2fa" }), true);
+  assert.equal(await recent({ ...page, url: "https://example.net/2fa" }), false, "another site is not told");
+  assert.equal(await recent({ ...page, tab: { ...page.tab, id: 8 } }), false, "nor another tab");
+  stored["signedIn:7"].at -= 6 * 60_000;
+  assert.equal(await recent(page), false, "after five minutes, no longer");
+});
+
+test("without session storage, a fill still works and nothing is watched for", async () => {
+  const { context } = await backgroundWithTab({ ok: true, username: "ana", password: "pw" });
+  assert.equal((await context.handle({ type: "recentSignIn" }, page)).recent, false);
+  const filled = await context.handle({ type: "fillTab", tabId: 7, frameId: 0, id: "a" }, popup);
+  assert.equal(filled.ok, true);
+});

@@ -109,8 +109,79 @@
   // them (<input name="action">), so these come from the prototypes.
   const getAttr = (el, name) => Element.prototype.getAttribute.call(el, name);
   const queryAll = (scope, selector) => [
-    ...(scope instanceof Document ? Document.prototype : Element.prototype).querySelectorAll.call(scope, selector),
+    ...(scope instanceof Document ? Document.prototype : scope instanceof DocumentFragment ?
+      DocumentFragment.prototype : Element.prototype).querySelectorAll.call(scope, selector),
   ];
+
+  // --- Web components -------------------------------------------------------
+  //
+  // Sign-in forms built of web components keep their fields in shadow roots,
+  // out of reach of a plain query. These look inside them too, a few levels
+  // down and over a bounded number of elements, once per task.
+
+  const SHADOW_DEPTH = 6;
+  const SHADOW_BUDGET = 15_000;
+  let knownRoots = null;
+
+  /** An element's shadow root: open ones, and closed ones where the browser
+   *  shows them to extensions. */
+  function openRoot(el) {
+    try {
+      return el.openOrClosedShadowRoot ?? ext.dom?.openOrClosedShadowRoot?.(el) ?? el.shadowRoot ?? null;
+    } catch {
+      return el.shadowRoot ?? null;
+    }
+  }
+
+  function shadowRoots() {
+    if (knownRoots) return knownRoots;
+    const roots = [];
+    let budget = SHADOW_BUDGET;
+    const walk = (scope, depth) => {
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT);
+      for (let el = walker.nextNode(); el && budget > 0; el = walker.nextNode()) {
+        budget--;
+        if (el === host) continue;
+        const shadow = openRoot(el);
+        if (shadow && depth < SHADOW_DEPTH) {
+          roots.push(shadow);
+          walk(shadow, depth + 1);
+        }
+      }
+    };
+    if (document.documentElement) walk(document.documentElement, 1);
+    knownRoots = roots;
+    queueMicrotask(() => (knownRoots = null));
+    return roots;
+  }
+
+  /** Every element matching `selector`, in the page and in its web components. */
+  function deepAll(selector) {
+    const found = queryAll(document, selector);
+    for (const root of shadowRoots()) found.push(...queryAll(root, selector));
+    return found;
+  }
+
+  /** The element that has the focus, inside web components too. */
+  function deepActive() {
+    let el = document.activeElement;
+    for (let depth = 0; el && depth < SHADOW_DEPTH; depth++) {
+      const inner = el === host ? null : openRoot(el)?.activeElement;
+      if (!inner) break;
+      el = inner;
+    }
+    return el;
+  }
+
+  /** `el.closest(selector)`, looking past the web components it sits in. */
+  function closestDeep(el, selector) {
+    for (let node = el, depth = 0; node && depth <= SHADOW_DEPTH; depth++) {
+      const found = node.closest?.(selector);
+      if (found) return found;
+      node = node.getRootNode?.().host ?? null;
+    }
+    return null;
+  }
 
   // --- Fields -------------------------------------------------------------
 
@@ -133,9 +204,32 @@
   const usable = (el) =>
     el instanceof HTMLInputElement && el.isConnected && !el.disabled && !el.readOnly && visible(el);
 
-  const passwordFields = () => queryAll(document, 'input[type="password"]').filter(usable);
-
   const marked = (el, token) => new RegExp(`\\b${token}\\b`, "i").test(getAttr(el, "autocomplete") ?? "");
+
+  /** The page's password fields, web components' included. A one-time code
+   *  field typed as a password is a 2FA field, not one of them. */
+  const passwordFields = () =>
+    deepAll('input[type="password"]').filter((el) => usable(el) && !marked(el, "one-time-code"));
+
+  /** A search box (the site's header search, say): never a user name. */
+  function isSearch(el) {
+    if (el.type === "search" || getAttr(el, "role") === "searchbox") return true;
+    if (/^(q|s|query|search|keywords?)$/i.test(el.name ?? "")) return true;
+    return /search|query/i.test(`${el.id} ${el.name} ${el.placeholder} ${getAttr(el, "aria-label") ?? ""}`);
+  }
+
+  /** For a field outside any form: the part of the page it belongs to (its
+   *  dialog, or the nearest box with another field in it). */
+  function containerOf(field) {
+    const dialog = closestDeep(field, 'dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]');
+    let scope = field.parentElement;
+    for (let depth = 0; scope && depth < 6 && scope !== dialog; depth++, scope = scope.parentElement) {
+      if (queryAll(scope, "input").some((el) => el !== field && usable(el))) return scope;
+    }
+    if (dialog) return dialog;
+    const root = field.getRootNode?.();
+    return root instanceof ShadowRoot ? root : (scope ?? document);
+  }
 
   // Some sites ask for the email before showing a password field.
   function isUsernameOnly(field) {
@@ -147,14 +241,23 @@
   }
 
   /** The user name field that goes with a password field: the nearest
-   *  visible text or email field before it, in the same form if there is one. */
+   *  visible text or email field before it, in the same form; outside a form,
+   *  in the same part of the page and only one that looks like a user name
+   *  (never the site's search box). */
   function usernameFor(password) {
-    const fields = queryAll(password.form ?? document, "input").filter(
-      (el) => ["text", "email", "tel"].includes(el.type) && usable(el),
+    const fields = queryAll(password.form ?? containerOf(password), "input").filter(
+      (el) => ["text", "email", "tel"].includes(el.type) && usable(el) && !isSearch(el),
     );
     const before = fields.filter((el) => el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const preferred = before.filter((el) => /user|mail|login|account|name|id/i.test(`${el.name} ${el.id} ${el.autocomplete}`));
-    return preferred.at(-1) ?? before.at(-1) ?? null;
+    const preferred = before.filter((el) => el.type === "email" || marked(el, "username") ||
+      /user|mail|login|account|name|id|phone/i.test(`${el.name} ${el.id} ${el.autocomplete} ${el.placeholder} ${getAttr(el, "aria-label") ?? ""}`));
+    return preferred.at(-1) ?? (password.form ? before.at(-1) : null) ?? null;
+  }
+
+  /** Whether two fields are parts of one form (or of one formless group). */
+  function together(a, b) {
+    if (a.form || b.form) return a.form === b.form;
+    return containerOf(a).contains(b);
   }
 
   function isLoginField(field) {
@@ -162,8 +265,10 @@
     // The site offers passkeys on it (autocomplete="username webauthn").
     if (marked(field, "webauthn")) return true;
     const passwords = passwordFields();
-    return passwords.includes(field) || passwords.some((p) => usernameFor(p) === field) ||
-      (passwords.length === 0 && isUsernameOnly(field));
+    if (passwords.includes(field) || passwords.some((p) => usernameFor(p) === field)) return true;
+    // An email-first sign-in step: no password field beside it (yet), even
+    // with an unrelated password form elsewhere on the page.
+    return isUsernameOnly(field) && !passwords.some((p) => together(p, field));
   }
 
   /** In a sign-up or password-change form, the fields a new password goes
@@ -184,12 +289,19 @@
   // of one-digit boxes.
   const CODE_WORDS = /one.?time|otp|2fa|mfa|two.?factor|authenticator|verification.?code|security.?code|auth.?code|passcode/i;
 
+  /** A box of a code split into one-character boxes: `maxlength=1`, or a
+   *  narrow box among others of the same width. */
+  const narrow = (el) => el.getBoundingClientRect().width <= 64;
+
   /** The row of one-character boxes a code is split into, around `field`. */
   function codeBoxes(field) {
-    if (field.maxLength !== 1) return [];
+    if (field.maxLength !== 1 && !narrow(field)) return [];
+    const width = field.getBoundingClientRect().width;
+    const box = (el) => usable(el) && ["text", "tel", "number", "password"].includes(el.type) &&
+      (el.maxLength === 1 || (narrow(el) && Math.abs(el.getBoundingClientRect().width - width) <= 4));
     let scope = field.parentElement;
     for (let depth = 0; scope && depth < 3; depth++, scope = scope.parentElement) {
-      const boxes = queryAll(scope, "input").filter((el) => el.maxLength === 1 && usable(el));
+      const boxes = queryAll(scope, "input").filter(box);
       if (boxes.length > 8) return [];
       if (boxes.length >= 4) return boxes;
     }
@@ -203,8 +315,11 @@
     if (codeBoxes(field).length) return true;
     const hint = `${field.name} ${field.id} ${field.placeholder} ${getAttr(field, "aria-label") ?? ""}`;
     if (CODE_WORDS.test(hint)) return true;
+    // A short numeric field on its own: 6 to 8 digits, as codes are, and not
+    // named as a postal code, a phone number or a card's.
+    if (/zip|postal|post.?code|phone|mobile|card|cvc|cvv|amount|year|price|qty|quantity/i.test(hint)) return false;
     const numeric = field.inputMode === "numeric" || field.type !== "text" || /\\d|0-9/.test(getAttr(field, "pattern") ?? "");
-    return numeric && field.maxLength >= 6 && field.maxLength <= 8 && /code|pin/i.test(hint);
+    return numeric && field.maxLength >= 6 && field.maxLength <= 8;
   }
 
   /** Types a 2FA code into its field, or digit by digit into its boxes. */
@@ -235,18 +350,30 @@
     });
   }
 
-  /** Sets a value the way typing does, so the page's own code notices. */
+  /** Sets a value the way typing does, so the page's own code notices:
+   *  through the browser's own setter (React's value tracking sees it),
+   *  between the key and input events frameworks listen to (Vue, Angular,
+   *  jQuery handlers), then change. The field keeps the focus. */
   function setValue(input, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     input.focus();
+    const key = { key: "Unidentified", bubbles: true, composed: true };
+    const typed = { inputType: "insertReplacementText", data: value, bubbles: true, composed: true };
+    input.dispatchEvent(new KeyboardEvent("keydown", { ...key, cancelable: true }));
+    input.dispatchEvent(new InputEvent("beforeinput", typed));
     setter.call(input, value);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new InputEvent("input", typed));
+    input.dispatchEvent(new KeyboardEvent("keyup", key));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function fill(credentials, chosen) {
     const passwords = passwordFields();
-    const selected = [chosen, document.activeElement].find(usable);
+    // From the toolbar, the focused field counts only when it is a sign-in
+    // field: the site's search box having the focus changes nothing.
+    const focused = deepActive();
+    const selected = [chosen, focused].find((el) =>
+      usable(el) && (el === chosen || el.type === "password" || isLoginField(el)));
     const inForm = selected?.form ? passwords.filter((field) => field.form === selected.form) : [];
     const afterSelected = selected && !selected.form ? passwords.filter(
       (field) => selected.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -257,7 +384,7 @@
           passwords.length === 1 ? passwords[0] : null;
     const username = password ? usernameFor(password) :
       (selected && isUsernameOnly(selected) ? selected : (() => {
-        const candidates = queryAll(document, "input").filter(isUsernameOnly);
+        const candidates = deepAll("input").filter(isUsernameOnly);
         return candidates.length === 1 ? candidates[0] : null;
       })());
     // An email-only sign-in step can coexist with an unrelated password form.
@@ -314,7 +441,23 @@
       background: none !important;
     }
     :host(:not(:popover-open)) { display: none !important; }
+    :host::backdrop { display: none !important; }
     [hidden] { display: none !important; }
+    .badge { position: fixed; display: grid; place-items: center; width: 22px; height: 22px;
+      border-radius: 7px; opacity: 0; transform: scale(.8);
+      transition: opacity 140ms cubic-bezier(.22,1,.36,1), transform 140ms cubic-bezier(.22,1,.36,1); }
+    .badge.on { opacity: 1; transform: none; }
+    .badge .mark { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+    .badge:hover .mark, .badge.open .mark { filter: drop-shadow(0 0 5px rgba(132,142,222,.9)); }
+    .badge:focus-visible { box-shadow: 0 0 0 2px rgba(132,142,222,.75); }
+    .panel .item, .bar button { transition: opacity 160ms ease, transform 120ms ease; }
+    .arming .item, .arming .row button, .arming .keys .item { opacity: .55; }
+    .nudge { animation: nudge 220ms ease; }
+    @keyframes nudge { 30% { transform: scale(.97); } 60% { transform: translateX(-2px); } }
+    @media (prefers-reduced-motion: reduce) {
+      .badge, .panel .item, .bar button { transition: none; }
+      .nudge { animation: none; }
+    }
     .panel, .bar { position: fixed; box-sizing: border-box; color: #e8ebf7; background: #171b27;
       font: 13px/1.35 system-ui, "Segoe UI", sans-serif; border: 1px solid rgba(255,255,255,.1);
       box-shadow: 0 18px 44px -14px rgba(0,0,0,.75); color-scheme: dark; }
@@ -377,9 +520,16 @@
   if (topLayer) host.setAttribute("popover", "manual");
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `<style>${STYLE}</style><div class="panel" role="menu" hidden></div>` +
-    '<div class="bar" role="dialog" aria-label="MYLE Passwords" hidden></div>';
+    '<div class="bar" role="dialog" aria-label="MYLE Passwords" hidden></div>' +
+    `<button class="badge" title="MYLE Passwords" aria-label="MYLE Passwords: this site's logins" hidden>${MARK}</button>`;
   const panel = root.querySelector(".panel");
   const bar = root.querySelector(".bar");
+  const badge = root.querySelector(".badge");
+  // A click on MYLE's menu is not a click on the page: dialogs that close on
+  // an outside click (Radix, Headless UI) never hear of it.
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "touchstart"]) {
+    host.addEventListener(type, (event) => event.stopPropagation());
+  }
   /** When each part last appeared, moved or changed. */
   const since = new Map([[panel, 0], [bar, 0]]);
   /** The parts the browser last saw fully visible, nothing over them
@@ -398,11 +548,12 @@
 
   function mount(field) {
     // A login form in a modal dialog: the menu goes inside the dialog, or the
-    // dialog would leave it unclickable.
+    // dialog (or its focus trap) would leave it unclickable. It stays in the
+    // top layer, drawn over everything wherever it sits.
     let parent = document.documentElement;
     try {
-      const dialog = field?.closest("dialog");
-      if (dialog?.matches(":modal")) parent = dialog;
+      const dialog = field ? closestDeep(field, 'dialog,[aria-modal="true"],[role="dialog"],[role="alertdialog"]') : null;
+      if (dialog && (dialog.tagName !== "DIALOG" || dialog.matches(":modal"))) parent = dialog;
     } catch {
       // No :modal in this browser.
     }
@@ -432,9 +583,20 @@
     }
   }
 
+  const armTimers = new Map();
+
+  /** A part just shown or moved waits ARM_MS before a click on it counts,
+   *  and looks it: its items are dimmed until then. */
+  function rearm(part) {
+    since.set(part, performance.now());
+    part.classList.add("arming");
+    clearTimeout(armTimers.get(part));
+    armTimers.set(part, setTimeout(() => part.classList.remove("arming"), ARM_MS));
+  }
+
   function show(part) {
     part.hidden = false;
-    since.set(part, performance.now());
+    rearm(part);
     tracker?.observe(part);
     openLayer();
   }
@@ -443,11 +605,14 @@
     part.hidden = true;
     tracker?.unobserve(part);
     unobscured.delete(part);
-    if (panel.hidden && bar.hidden) closeLayer();
+    if (panel.hidden && bar.hidden && badge.hidden) closeLayer();
   }
 
   function hidePanel() {
     hide(panel);
+    // Nothing of a closed menu is kept (its buttons hold logins' details).
+    panel.replaceChildren();
+    badge.classList.remove("open");
     anchor = null;
     spot = "";
   }
@@ -464,7 +629,7 @@
   guard.observe(host, { attributes: true });
   host.addEventListener("toggle", (event) => {
     // Closed by the page rather than by us.
-    if (event.isTrusted && topLayer && !host.matches(":popover-open") && !(panel.hidden && bar.hidden)) interfered();
+    if (event.isTrusted && topLayer && !host.matches(":popover-open") && !(panel.hidden && bar.hidden && badge.hidden)) interfered();
   });
 
   /** The page changed or closed MYLE's element. A passkey request whose prompt
@@ -472,6 +637,7 @@
    *  anything else simply closes. */
   function interfered() {
     hidePanel();
+    hideBadge();
     const id = prompted;
     if (!bar.hidden && isPasskeyRequest(id)) {
       closePrompt();
@@ -496,9 +662,97 @@
     // A menu that moved (the page scrolled, or moved the field) waits again.
     if (`${left},${top}` !== spot) {
       spot = `${left},${top}`;
-      since.set(panel, performance.now());
+      rearm(panel);
     }
   }
+
+  // --- The badge in the field -------------------------------------------------
+  //
+  // MYLE's mark, drawn over the right end of the focused sign-in or 2FA field
+  // (in MYLE's own layer: the page's layout never changes). A click on it
+  // opens the menu; it fills nothing itself.
+
+  let badgeFor = null;
+  let badgeTimer = 0;
+  let following = 0;
+  const BADGE = 22;
+
+  /** Where the badge goes in `field`, or null when it has no room. A field
+   *  with room kept on its right holds the page's own icon there (show
+   *  password, say): the badge sits just left of it. */
+  function badgeSpot(field) {
+    const r = field.getBoundingClientRect();
+    if (r.width < 90 || r.height < 18 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return null;
+    const padding = parseFloat(getComputedStyle(field).paddingRight) || 0;
+    const right = padding > 24 ? r.right - padding - 2 : r.right - 6;
+    return { left: Math.round(right - BADGE), top: Math.round(r.top + (r.height - BADGE) / 2) };
+  }
+
+  function showBadge(field) {
+    clearTimeout(badgeTimer);
+    const at = badgeSpot(field);
+    if (!at) return hideBadge();
+    badgeFor = field;
+    mount(field);
+    badge.style.left = `${at.left}px`;
+    badge.style.top = `${at.top}px`;
+    if (badge.hidden) {
+      badge.classList.remove("on");
+      badge.hidden = false;
+      openLayer();
+      // Drawn first, then faded in.
+      requestAnimationFrame(() => badgeFor === field && badge.classList.add("on"));
+    } else if (topLayer && !host.matches(":popover-open")) {
+      openLayer();
+    }
+    follow();
+  }
+
+  function hideBadge() {
+    clearTimeout(badgeTimer);
+    badgeFor = null;
+    badge.classList.remove("on", "open");
+    hide(badge);
+  }
+
+  /** While the badge or the menu shows: keeps them on their field, and
+   *  closes them when the field goes away. Stops as soon as neither shows. */
+  function follow() {
+    if (following) return;
+    const step = () => {
+      following = 0;
+      const field = !panel.hidden && anchor ? anchor : badgeFor;
+      if (!field) return;
+      if (!field.isConnected || !visible(field)) {
+        if (field === anchor) hidePanel();
+        if (field === badgeFor) hideBadge();
+        return;
+      }
+      if (badgeFor) {
+        const at = badgeSpot(badgeFor);
+        if (!at) hideBadge();
+        else {
+          badge.style.left = `${at.left}px`;
+          badge.style.top = `${at.top}px`;
+        }
+      }
+      if (!panel.hidden && anchor) place(anchor);
+      following = requestAnimationFrame(step);
+    };
+    following = requestAnimationFrame(step);
+  }
+
+  // Pressing the badge leaves the focus in the field.
+  badge.addEventListener("mousedown", (event) => event.preventDefault());
+  badge.addEventListener("click", (event) => {
+    if (!event.isTrusted || !badgeFor) return;
+    const field = badgeFor;
+    if (!panel.hidden && anchor === field) return hidePanel();
+    if (deepActive() !== field) field.focus();
+    badge.classList.add("open");
+    if (isCodeField(field) && !isLoginField(field)) void showCodesFor(field, true);
+    else void showFor(field, true);
+  });
 
   /** Why a click (or Enter) on the menu does not count, or "" when it is the
    *  user's own, on the menu as they could see it: not made up by a script,
@@ -523,6 +777,12 @@
    *  so (shown again, the menu comes back on top). */
   function genuine(event, part, button) {
     const why = refusal(event, part, button);
+    if (why === "early") {
+      // Seen, but not yet counted: a little shake says to wait a moment.
+      button.classList.remove("nudge");
+      void button.offsetWidth;
+      button.classList.add("nudge");
+    }
     if (why === "covered" && part === panel && anchor) {
       showNote(anchor, "Something on this page covered MYLE's menu, so nothing was filled. " +
         "Click the field again, or use the MYLE button in the toolbar.");
@@ -615,6 +875,7 @@
     panel.replaceChildren(header(), ...children);
     show(panel);
     place(field);
+    follow();
   }
 
   function showNote(field, text, fade) {
@@ -659,6 +920,18 @@
     return button;
   }
 
+  /** A code with this few seconds left is not worth typing: the next one is
+   *  waited for (sites refuse a code that expired on the way). */
+  const CODE_ENDING = 3;
+
+  /** The login's current 2FA code, a fresh one when it is about to change. */
+  async function freshCode(id) {
+    const answer = await send({ type: "totp", id });
+    if (!answer?.ok || !Number.isFinite(answer.remaining) || answer.remaining > CODE_ENDING) return answer;
+    await new Promise((resolve) => setTimeout(resolve, (Math.max(0, answer.remaining) + 0.4) * 1000));
+    return send({ type: "totp", id });
+  }
+
   function codeButton(login) {
     const title = login.title || login.site || "Login";
     const button = item(title, `2FA code · ${login.username || "No user name"}`, avatarFor(login, title),
@@ -667,7 +940,7 @@
       if (!genuine(event, panel, button)) return;
       const field = anchor;
       hidePanel();
-      const answer = await send({ type: "totp", id: login.id });
+      const answer = await freshCode(login.id);
       if (!answer?.ok || typeof answer.code !== "string" || !/^\d{6,8}$/.test(answer.code)) {
         return showNote(field, problems[answer?.error] ?? "MYLE could not make the code just now.");
       }
@@ -676,18 +949,65 @@
     return button;
   }
 
+  /** Fields that showed a menu with nothing to click (only a note): it is
+   *  not shown again on every click there; the badge still shows it. */
+  const noted = new WeakSet();
+
+  /** Shows `items` for `field`, unless they are only a note already shown
+   *  there (`forced`: asked from the badge, shown anyway). */
+  function offer(field, items, forced) {
+    const notesOnly = items.every((el) => el.classList?.contains("note"));
+    if (notesOnly && !forced && noted.has(field)) return hidePanel();
+    if (notesOnly) noted.add(field);
+    render(field, items);
+  }
+
+  /** What the menu says when MYLE did not answer with logins. */
+  function problemItems(answer, field, passkeyLocked = false, unlockLabel = "") {
+    switch (answer?.error) {
+      case "locked":
+        return [openButton(unlockLabel || (passkeyLocked ? "Unlock MYLE to use your passkey" : "Unlock your vault in MYLE"), "lock", field)];
+      case "noVault":
+        return [openButton("Create your vault in MYLE", "lock")];
+      case "notRunning":
+        return [openButton(passkeyLocked ? "Open MYLE to use your passkey" : "Open MYLE to fill in", "open", field)];
+      case "disabled":
+        return [note("Browser filling is off in MYLE. Turn it on: Password Manager → ⋯ → Browser filling.")];
+      case "hostMissing":
+        return [note("This browser is not connected to MYLE: MYLE is not set up for it, or Browser filling is off " +
+          "(Password Manager → ⋯ → Browser filling). Opening MYLE connects your browsers by itself.")];
+      case "hostForbidden":
+        return [note("MYLE does not know this copy of the extension. Update MYLE, or load the copy from MYLE's folder.")];
+      case "hostExited":
+      case "noHost":
+        return [note("MYLE could not answer this browser. Make sure MYLE is installed and up to date.")];
+      case "embedded":
+        return [note(`This sign-in form comes from ${answer.site}, inside ${answer.top}. ` +
+          "To fill it, use the MYLE button in the browser's toolbar.")];
+      case "busy":
+      case "reloaded":
+      case "vaultError":
+        return [note(problems[answer.error])];
+      default:
+        return [];
+    }
+  }
+
   /** On a 2FA code field: the codes of this site's logins that have a key.
    *  Nothing at all when none has (the code may come by SMS or email). */
-  async function showCodesFor(field) {
+  async function showCodesFor(field, forced = false) {
     anchor = field;
     const answer = await send({ type: "logins" });
     if (anchor !== field || !field.isConnected) return;
     if (!answer?.ok) {
-      return answer?.error === "locked" ? render(field, [openButton("Unlock your vault in MYLE for the 2FA code", "lock")]) :
-        hidePanel();
+      const items = problemItems(answer, field, false, "Unlock your vault in MYLE for the 2FA code");
+      return items.length ? offer(field, items, forced) : hidePanel();
     }
     const withCodes = (answer.logins ?? []).filter((login) => login.totp === true);
-    if (!withCodes.length) return hidePanel();
+    if (!withCodes.length) {
+      return forced ? offer(field, [note(`No login for ${siteName} in MYLE has a 2FA key. Add it in MYLE, or use the toolbar button's "2FA from a QR code".`)], true) :
+        hidePanel();
+    }
     // The account the page already names comes first.
     const named = accountsOnPage(withCodes, field);
     const ordered = [...named, ...withCodes.filter((login) => !named.includes(login))];
@@ -744,7 +1064,7 @@
    *  (Google's, say) the account chosen before, from a user name field,
    *  visible or hidden, or the page's own text. Empty when none, or all. */
   function accountsOnPage(logins, field) {
-    const typed = queryAll(document, "input")
+    const typed = deepAll("input")
       .filter((el) => el !== field && el.type !== "password" && el.value &&
         (marked(el, "username") || marked(el, "email") || /user|mail|login|identifier|account/i.test(`${el.name} ${el.id}`)))
       .map((el) => el.value.trim().toLowerCase());
@@ -771,7 +1091,7 @@
     return button;
   }
 
-  async function showFor(field) {
+  async function showFor(field, forced = false) {
     anchor = field;
     const fresh = newPasswordFields(field);
     const [answer, choices] = await Promise.all([send({ type: "logins" }), passkeyChoices()]);
@@ -798,29 +1118,25 @@
       }
       if (suggestion && !fresh.marked) items.push(suggestion);
       if (!items.length) items.push(note(`No saved login for ${siteName}. Add this website to a login in MYLE.`));
-    } else if (answer?.error === "locked") {
-      items.push(openButton(passkeyLocked ? "Unlock MYLE to use your passkey" : "Unlock your vault in MYLE", "lock", field));
-    } else if (answer?.error === "noVault") {
-      items.push(openButton("Create your vault in MYLE", "lock"));
-    } else if (answer?.error === "notRunning") {
-      items.push(openButton(passkeyLocked ? "Open MYLE to use your passkey" : "Open MYLE to fill in", "open", field));
-    } else if (answer?.error === "disabled") {
-      items.push(note("Browser filling is off in MYLE. Turn it on: Password Manager → ⋯ → Browser filling."));
-    } else if (answer?.error === "hostMissing") {
-      items.push(note("This browser cannot reach MYLE yet. Open MYLE once: it connects your browsers by itself."));
-    } else if (answer?.error === "hostForbidden") {
-      items.push(note("MYLE does not know this copy of the extension. Load the one from MYLE: Password Manager → ⋯ → Browser filling."));
-    } else if (answer?.error === "hostExited" || answer?.error === "noHost") {
-      items.push(note("MYLE could not answer this browser. Make sure MYLE is installed and up to date."));
-    } else if (answer?.error === "embedded") {
-      items.push(note(`This sign-in form comes from ${answer.site}, inside ${answer.top}. ` +
-        "To fill it, use the MYLE button in the browser's toolbar."));
-    } else if (answer?.error === "busy") {
-      items.push(note(problems.busy));
-    } else if (!items.length) {
-      return hidePanel();
+    } else {
+      items.push(...problemItems(answer, field, passkeyLocked));
+      if (!items.length) return hidePanel();
     }
-    render(field, items);
+    offer(field, items, forced);
+  }
+
+  /** Opens the menu for a clicked field, if it is a sign-in or 2FA field. */
+  function clicked(field) {
+    if (field && isLoginField(field)) {
+      // Clicked again while the menu shows only a note: look again.
+      if (anchor !== field || panel.hidden || !panel.querySelector(".item")) void showFor(field);
+      return true;
+    }
+    if (field && isCodeField(field)) {
+      if (anchor !== field || panel.hidden || !panel.querySelector(".item")) void showCodesFor(field);
+      return true;
+    }
+    return false;
   }
 
   // A click (not mere focus, which pages move around by themselves) opens it.
@@ -831,14 +1147,38 @@
       const path = event.composedPath();
       if (path.includes(host)) return;
       const field = path.find((el) => el instanceof HTMLInputElement);
-      if (field && isLoginField(field)) {
-        // Clicked again while the menu shows only a note: look again.
-        if (anchor !== field || panel.hidden || !panel.querySelector(".item")) void showFor(field);
-      } else if (field && isCodeField(field)) {
-        if (anchor !== field || panel.hidden || !panel.querySelector(".item")) void showCodesFor(field);
-      } else {
-        hidePanel();
+      if (clicked(field)) return;
+      hidePanel();
+      // Some sign-in forms keep their fields read-only until they get the
+      // focus (against the browser's own autofill): looked at again then.
+      if (field?.readOnly && ["text", "email", "tel", "password"].includes(field.type)) {
+        setTimeout(() => !field.readOnly && deepActive() === field && clicked(field), 0);
       }
+    },
+    true,
+  );
+
+  // The badge shows in the field that has the focus, when a click there
+  // would open the menu; it goes when the focus does.
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      if (!event.isTrusted) return;
+      const path = event.composedPath();
+      if (path.includes(host)) return;
+      const field = path.find((el) => el instanceof HTMLInputElement);
+      if (field && (isLoginField(field) || isCodeField(field)) && !codeBoxes(field).length) showBadge(field);
+      else if (badgeFor) hideBadge();
+    },
+    true,
+  );
+  document.addEventListener(
+    "focusout",
+    (event) => {
+      if (!event.isTrusted || !badgeFor || event.composedPath()[0] !== badgeFor) return;
+      clearTimeout(badgeTimer);
+      // A moment later, so a click on the badge itself still lands.
+      badgeTimer = setTimeout(() => deepActive() !== badgeFor && hideBadge(), 180);
     },
     true,
   );
@@ -851,6 +1191,8 @@
       if (target === host) return; // Keys inside the menu: below.
       if (event.key === "Escape" && !panel.hidden) {
         hidePanel();
+      } else if (event.key === "Escape" && badgeFor) {
+        hideBadge();
       } else if (event.key === "ArrowDown" && !panel.hidden && target === anchor) {
         // From the field into the menu.
         const first = panel.querySelector(".item");
@@ -903,9 +1245,9 @@
   /** What the toolbar popup needs to know of this frame's sign-in fields. */
   function inspection() {
     const passwords = passwordFields();
-    const usernames = queryAll(document, "input").filter(isUsernameOnly);
+    const usernames = deepAll("input").filter(isUsernameOnly);
     const fields = [...passwords, ...usernames];
-    const active = document.activeElement;
+    const active = deepActive();
     return {
       fields: fields.length > 0,
       password: passwords.length > 0,
@@ -1348,9 +1690,10 @@
     "input",
     (event) => {
       const field = event.composedPath()[0];
-      if (event.isTrusted && field instanceof HTMLInputElement && field.type === "password") {
-        approved.set(field, field.value);
-      }
+      if (!event.isTrusted || !(field instanceof HTMLInputElement)) return;
+      if (field.type === "password") approved.set(field, field.value);
+      // Typing in the field: the user fills it in themselves.
+      if (field === anchor && !panel.hidden) hidePanel();
     },
     true,
   );
@@ -1366,7 +1709,7 @@
   let lastSent = "";
 
   function captureFrom(form) {
-    const fields = queryAll(form ?? document, 'input[type="password"]').filter((el) => el.value);
+    const fields = (form ? queryAll(form, 'input[type="password"]') : deepAll('input[type="password"]')).filter((el) => el.value);
     if (!fields.length) return;
     const password = sentPassword(fields);
     // Only what the user typed: a value a script put there is never offered.
@@ -1379,6 +1722,8 @@
     setTimeout(() => lastSent === key && (lastSent = ""), 5000);
     const sentFrom = location.href;
     void send({ type: "submitted", username, password: password.value }).then(() => {
+      // A 2FA step that comes on this same page (a web app): watched for.
+      void watchForCode();
       // A sign-in that stays on this page (a web app changing its own view):
       // once the form is gone or the address changed, the offer shows here.
       if (window !== window.top) return;
@@ -1393,17 +1738,39 @@
     (event) => event.isTrusted && event.target instanceof HTMLFormElement && captureFrom(event.target),
     true,
   );
+  /** What a button that sends a sign-in or sign-up says. */
+  const SEND_WORDS = /log ?in|sign ?in|sign ?on|continue|next|sign ?up|register|create (?:an |your )?account|σύνδεση|είσοδος|εγγραφή|συνέχεια/i;
+
+  /** The part of the page around `el` that holds a password field, if any
+   *  (a link or a div acting as the button of a formless sign-in). */
+  function passwordGroupOf(el) {
+    let scope = el.parentElement;
+    for (let depth = 0; scope && depth < 6; depth++, scope = scope.parentElement) {
+      if (queryAll(scope, 'input[type="password"]').length) return scope;
+    }
+    return null;
+  }
+
   // Many sign-in pages send with a script, not a form: a click on a submit
-  // button, or Enter in the password field, counts too.
+  // button, on a link or element acting as one, or Enter in the password
+  // field, counts too.
   document.addEventListener(
     "click",
     (event) => {
       if (!event.isTrusted) return;
-      const button = event.composedPath().find(
+      const path = event.composedPath();
+      const button = path.find(
         (el) => el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && el.type === "submit"),
       );
-      if (button && (button.type === "submit" || /log ?in|sign ?in|continue|next|σύνδεση|είσοδος/i.test(button.textContent ?? "")))
-        captureFrom(button.form);
+      if (button) {
+        if (button.type === "submit" || SEND_WORDS.test(button.textContent ?? "")) captureFrom(button.form);
+        return;
+      }
+      const control = path.find((el) => el instanceof HTMLAnchorElement ||
+        (el instanceof Element && getAttr(el, "role") === "button"));
+      if (!control || !SEND_WORDS.test((control.textContent ?? "").slice(0, 80))) return;
+      const group = control.closest("form") ?? passwordGroupOf(control);
+      if (group) captureFrom(group);
     },
     true,
   );
@@ -1416,6 +1783,9 @@
       offerAfterPrompt = true;
       return;
     }
+    // The sign-in form is shown again: the password was most likely refused.
+    // The login waits (for the next page) rather than being offered now.
+    if (passwordFields().length) return;
     const pending = await send({ type: "pending" });
     if (typeof pending?.nonce !== "string" || offerShown === pending.nonce) return;
     offerShown = pending.nonce;
@@ -1482,6 +1852,61 @@
   // The offer shows once, in the page itself, not in its frames.
   if (window === window.top) void offerSave();
 
+  // --- 2FA right after signing in ---------------------------------------------
+  //
+  // A password was sent or filled on this site in this tab a moment ago: for
+  // a minute, the first 2FA code field that gets the focus opens the codes
+  // menu by itself, once. Filling still takes the user's click.
+
+  const CODE_WATCH_MS = 60_000;
+  let codeWatch = null;
+  /** The codes menu opened by itself on this page already (once is enough). */
+  let codeOffered = false;
+
+  async function watchForCode() {
+    if (codeWatch || codeOffered) return;
+    codeWatch = {};
+    const recent = await send({ type: "recentSignIn" });
+    if (recent?.recent !== true) {
+      codeWatch = null;
+      return;
+    }
+    let offered = false;
+    let pending = 0;
+    const stop = () => {
+      observer.disconnect();
+      clearTimeout(pending);
+      clearTimeout(timer);
+      document.removeEventListener("focusin", onFocus, true);
+      codeWatch = null;
+    };
+    const offerFor = (field) => {
+      if (offered || !(field instanceof HTMLInputElement) || !isCodeField(field)) return;
+      offered = true;
+      codeOffered = true;
+      stop();
+      // Already showing its codes, or the user is in the page's menu: no.
+      if (anchor !== field || panel.hidden) void showCodesFor(field);
+    };
+    const onFocus = (event) => {
+      if (event.isTrusted) offerFor(event.composedPath().find((el) => el instanceof HTMLInputElement));
+    };
+    // The page changing (the 2FA step drawn): the focused field looked at,
+    // at most a few times a second.
+    const observer = new MutationObserver(() => {
+      if (!pending) pending = setTimeout(() => {
+        pending = 0;
+        offerFor(deepActive());
+      }, 400);
+    });
+    const timer = setTimeout(stop, CODE_WATCH_MS);
+    document.addEventListener("focusin", onFocus, true);
+    if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true });
+    offerFor(deepActive());
+  }
+
+  void watchForCode();
+
   // --- 2FA keys on a setup page -----------------------------------------------
   //
   // A site turning on 2FA shows its key: a QR code, and mostly the key as text
@@ -1489,7 +1914,9 @@
   // so it fills the codes from then on. A QR code alone is read from the
   // toolbar popup.
 
-  const SETUP_WORDS = /authenticator|two.?factor|two.?step|2fa|mfa|setup key|secret key|can.?t scan|scan (?:the|this) (?:qr|code)|enter (?:this|the) (?:key|code)|one.?time|totp/i;
+  // Whole words only: "2fa" inside a hex or base64 blob, or a "one-time
+  // purchase", is no 2FA setup.
+  const SETUP_WORDS = /authenticator|two.?factor|two.?step|\b2fa\b|\bmfa\b|setup key|secret key|can.?t scan|scan (?:the|this) (?:qr|code)|enter (?:this|the) (?:key|code)|one.?time (?:code|password|passcode|pin)|\btotp\b/i;
   /** Words that go with a QR code to scan, in the key's own part of the page. */
   const SCAN_WORDS = /scan|authenticator|setup key|secret key|can.?t scan|manual|2fa|two.?factor|totp/i;
   const offeredKeys = new Set();
@@ -1565,12 +1992,32 @@
     }
   }
 
-  /** A QR code on the page that holds a 2FA link: read by MYLE. */
+  /** Words about scanning near a picture (in its own part of the page). */
+  function scanWordsNear(el) {
+    let scope = el.parentElement;
+    for (let depth = 0; scope && depth < 4; depth++, scope = scope.parentElement) {
+      if (scope === document.body || scope === document.documentElement) break;
+      if (SCAN_WORDS.test((scope.textContent ?? "").slice(0, 4000))) return true;
+    }
+    return false;
+  }
+
+  /** A QR code on the page that holds a 2FA link: read by MYLE. Only a
+   *  QR-shaped picture with words about scanning near it is read at all, and
+   *  each picture once. */
   async function linkInQr() {
     for (const el of queryAll(document, "img, canvas, svg").slice(0, 60)) {
       if (readPictures.has(el) || !qrShaped(el)) continue;
+      if (!scanWordsNear(el)) {
+        readPictures.set(el, false);
+        continue;
+      }
       const grey = await greyOf(el);
-      if (!grey) continue;
+      if (!grey) {
+        // From another site, or not loaded: not tried again and again.
+        readPictures.set(el, false);
+        continue;
+      }
       const answer = await send({ type: "qrPixels", ...grey });
       const link = answer?.ok && typeof answer.link === "string" ? answer.link : null;
       readPictures.set(el, !!link);
@@ -1592,8 +2039,20 @@
     return false;
   }
 
+  /** The page's own text, as a reader sees it: not its scripts or styles. */
+  function pageText(limit = 200_000) {
+    if (!document.body) return "";
+    const skip = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "TEXTAREA"]);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => (skip.has(node.parentElement?.tagName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    let text = "";
+    for (let node = walker.nextNode(); node && text.length < limit; node = walker.nextNode()) text += ` ${node.data}`;
+    return text;
+  }
+
   async function findSetupKey() {
-    if (!SETUP_WORDS.test((document.body?.textContent ?? "").slice(0, 200_000))) return null;
+    if (!SETUP_WORDS.test(pageText())) return null;
     // The QR code itself, where the page lets it be read.
     const fromQr = await linkInQr();
     if (fromQr) return fromQr;
@@ -1705,26 +2164,34 @@
   }
 
   let scanning = false;
+  /** A page that keeps changing is looked at every 2 seconds at most, and a
+   *  limited number of times; then (or once a key was offered) no more. */
+  const KEY_SCAN_EVERY = 2000;
+  const KEY_SCANS = 80;
+  let keyWatcher = null;
 
   function scanForKey() {
-    clearTimeout(keyTimer);
+    if (keyTimer) return;
     keyTimer = setTimeout(async () => {
-      // A page that keeps changing is looked at a limited number of times.
-      if (scanning || ++keyScans > 80 || prompted || !bar.hidden) return;
+      keyTimer = 0;
+      if (scanning || prompted || !bar.hidden) return;
+      if (++keyScans > KEY_SCANS) return keyWatcher?.disconnect();
       scanning = true;
       try {
         const key = await findSetupKey();
         if (!key || offeredKeys.has(key)) return;
         offeredKeys.add(key);
+        keyWatcher?.disconnect();
         await offerKey(key);
       } finally {
         scanning = false;
       }
-    }, 1000);
+    }, KEY_SCAN_EVERY);
   }
 
-  if (window === window.top) {
-    new MutationObserver(scanForKey).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  if (window === window.top && document.documentElement) {
+    keyWatcher = new MutationObserver(scanForKey);
+    keyWatcher.observe(document.documentElement, { childList: true, subtree: true });
     scanForKey();
   }
 })();

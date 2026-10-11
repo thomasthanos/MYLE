@@ -320,8 +320,9 @@ async function fillTab(tabId, frameId, id) {
       username: credentials.username,
       password: credentials.password,
     }, targetOf(frame));
-    return reply?.applied === true ? { ok: true, applied: true } :
-      { ok: false, error: reply?.error ?? "noFields" };
+    if (reply?.applied !== true) return { ok: false, error: reply?.error ?? "noFields" };
+    signedIn(tabId, frame.url);
+    return { ok: true, applied: true };
   } catch {
     return { ok: false, error: "noContent" };
   }
@@ -601,8 +602,43 @@ ext.tabs.onRemoved.addListener((tabId) => {
     passkeyOperations.delete(key);
     cancelOperation(operation);
   }
-  void ext.storage.session.remove([pendingKey(tabId), suggestedKey(tabId)]);
+  void ext.storage.session.remove([pendingKey(tabId), suggestedKey(tabId), signedInKey(tabId)]);
 });
+
+// --- 2FA right after signing in -----------------------------------------------------
+//
+// A password sent or filled in a tab: for a few minutes, the site's next page
+// (or the same page, changed) watches for its 2FA code field, and opens the
+// codes menu by itself when it gets the focus. Kept in the session's storage,
+// so a restarted service worker still knows.
+
+const SIGN_IN_FRESH = 5 * 60_000;
+const signedInKey = (tabId) => `signedIn:${tabId}`;
+
+function signedIn(tabId, url) {
+  const site = siteOf(hostOf(url));
+  if (!Number.isInteger(tabId) || !site) return;
+  try {
+    void ext.storage.session.set({ [signedInKey(tabId)]: { site, at: Date.now() } }).catch(() => {});
+  } catch {
+    // No session storage (an older browser): nothing is watched for.
+  }
+}
+
+/** Whether a password was sent or filled for the sender's site, in its tab,
+ *  in the last few minutes. */
+async function recentSignIn(sender) {
+  const key = signedInKey(sender.tab.id);
+  let found;
+  try {
+    found = (await ext.storage.session.get(key))?.[key];
+  } catch {
+    return { ok: true, recent: false };
+  }
+  const age = Date.now() - (found?.at ?? 0);
+  const recent = !!found && found.site === siteOf(hostOf(sender.url)) && age >= 0 && age < SIGN_IN_FRESH;
+  return { ok: true, recent };
+}
 
 // --- Lookups a page may make on its own ---------------------------------------------
 //
@@ -962,12 +998,18 @@ async function handle(message, sender) {
         return answer;
       }
       if (message.type === "generate") return suggest();
-      return text(message.id, 100) ? ask({ type: message.type, id: message.id, url: sender.url }) : refused;
+      if (!text(message.id, 100)) return refused;
+      const answer = await ask({ type: message.type, id: message.id, url: sender.url });
+      if (message.type === "fill" && answer?.ok) signedIn(sender.tab.id, sender.url);
+      return answer;
     }
+    case "recentSignIn":
+      return recentSignIn(sender);
     case "submitted":
       // A form sent to the app: ask whether the login is new, and if so offer
       // to save it on the next page (the form usually navigates).
       if (embeddedIn(sender)) return { ok: true };
+      signedIn(sender.tab.id, sender.url);
       {
         const work = submitted(message, sender);
         checking.set(sender.tab.id, work);
