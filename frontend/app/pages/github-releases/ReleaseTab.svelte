@@ -5,6 +5,7 @@
   import { onMount, untrack } from "svelte";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Circle from "@lucide/svelte/icons/circle";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
@@ -36,9 +37,11 @@
     type StepId,
   } from "./api";
   import BuildLog from "./BuildLog.svelte";
+  import Popover from "../../../lib/components/Popover.svelte";
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import {
     actionsSteps,
+    failureKey,
     formatBytes,
     formatRelative,
     githubReleases as gr,
@@ -102,6 +105,12 @@
     ...(s.mode === "actions" ? actionsSteps : localSteps),
   ]);
   const versionFiles = $derived(info?.versions.files ?? []);
+  /** The version files the release changes (not the ones skipped). */
+  const activeFiles = $derived(versionFiles.filter((file) => !file.skipped).length);
+  const mismatchedFiles = $derived(info?.versions.mismatched ?? []);
+  const mismatched = $derived(mismatchedFiles.length > 0);
+  const commits = $derived(info?.commits ?? []);
+  const lastTag = $derived(info?.lastTag ?? null);
   const ownChanges = $derived(entry.changes);
   function pickVersion(version: string) {
     s.version = version;
@@ -315,13 +324,59 @@
       void gr.loadRemote(repoId);
     }
   }
+  /** Following the workflow on GitHub: the tag is out, so stopping means
+   *  either no longer following, or cancelling the run there. */
+  const following = $derived(s.mode === "actions" && s.steps.workflow?.state === "running");
+  /** The failures' box: brought into view when a failure is told. */
+  let failuresBox = $state<HTMLElement>();
+  let failuresSeen = 0;
+  $effect(() => {
+    const count = s.failures.length;
+    if (count > failuresSeen) failuresBox?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    failuresSeen = count;
+  });
+  async function stopFollowing() {
+    if (stopping) return;
+    stopping = true;
+    try {
+      await api.cancel(repoId);
+    } catch (error) {
+      toast.error(messageOf(error));
+      stopping = false;
+    }
+  }
+  async function cancelOnGithub() {
+    const run = s.run;
+    if (stopping || !run?.id) return;
+    const ok = await confirm({
+      title: "Cancel the run on GitHub?",
+      message: `${run.name ?? "The workflow"} stops on GitHub, and ${tag} is not published by it. The tag stays pushed.`,
+      confirmLabel: "Cancel the run",
+      danger: true,
+    });
+    if (!ok) return;
+    stopping = true;
+    try {
+      await api.cancelCi(repoId, run.id);
+      await api.cancel(repoId);
+    } catch (error) {
+      toast.error(`The run goes on on GitHub: ${messageOf(error)}`, { label: "Open", run: () => void openUrl(run.htmlUrl) });
+      stopping = false;
+    }
+  }
   async function cancel() {
     if (stopping) return;
     stopping = true;
     try {
       await api.cancel(repoId);
-      if (s.run?.id) {
-        void api.cancelCi(repoId, s.run.id).catch(() => {});
+      const run = s.run;
+      if (run?.id) {
+        void api.cancelCi(repoId, run.id).catch((error) =>
+          toast.error(`The run goes on on GitHub: ${messageOf(error)}`, {
+            label: "Open",
+            run: () => void openUrl(run.htmlUrl),
+          }),
+        );
       }
     } catch (error) {
       toast.error(messageOf(error));
@@ -340,201 +395,212 @@
   {:else if !info}
     <div class="quiet"><LoaderCircle size={16} class="spin" /></div>
   {:else if showForm}
-    <!-- Version -->
-    <section>
-      <h3>Version</h3>
-      <div class="row wrap">
+    <!-- Version: one row; the files and commits behind its summary -->
+    <section class="line">
+      <div class="row">
+        <h3 class="label">Version</h3>
         {#each ["patch", "minor", "major"] as const as bump (bump)}
           {#if info.next[bump]}
-            <button class="chip" class:active={s.version === info.next[bump]} onclick={() => pickVersion(info!.next[bump]!)}>
-              {bump[0].toUpperCase() + bump.slice(1)} <span class="count">{info.next[bump]}</span>
+            <button class="bump" class:active={s.version === info.next[bump]} onclick={() => pickVersion(info!.next[bump]!)} title={`${bump[0].toUpperCase() + bump.slice(1)} release`}>
+              {info.next[bump]}
             </button>
           {/if}
         {/each}
         <input class="input version" value={s.version} oninput={(e) => pickVersion((e.currentTarget as HTMLInputElement).value)} aria-label="Version" spellcheck="false" />
         <span class="tag-preview">tag <code>{tag}</code></span>
+        <span class="spacer"></span>
+        <Popover align="end" bind:open={commitsOpen}>
+          {#snippet trigger({ toggle, open })}
+            <button class="summary" class:warn={!versionFiles.length || mismatched} aria-expanded={open} aria-haspopup="dialog" onclick={toggle}
+              title="{activeFiles} version {activeFiles === 1 ? 'file' : 'files'} · {commits.length} {commits.length === 1 ? 'commit' : 'commits'} since {lastTag?.name ?? 'the start'}">
+              {#if !versionFiles.length}<TriangleAlert size={12} /> No file
+              {:else}{#if mismatched}<CircleAlert size={12} />{/if}{activeFiles} {activeFiles === 1 ? "file" : "files"}{/if}
+              <span class="dim">· {commits.length}</span>
+              <ChevronDown size={12} />
+            </button>
+          {/snippet}
+          {#snippet children()}
+            <div class="pop" role="dialog" aria-label="Version files and commits">
+              <p class="sub">
+                {#if lastTag}Last: <code>{lastTag.name}</code>, {formatRelative(lastTag.date)}{lastTag.legacy ? " (a shared tag from before this app had its own)" : ""}
+                {:else}The first release of this project.{/if}
+              </p>
+              {#if versionFiles.length}
+                <div class="files">
+                  {#each versionFiles as file (file.path)}
+                    <label class="file" class:off={file.skipped}>
+                      <input type="checkbox" class="check" checked={!file.skipped} onchange={() => void toggleSkip(file.path)} />
+                      <code>{file.path}</code>
+                      <span class="from" class:bad={mismatchedFiles.includes(file.path)}>{file.version}</span>
+                      {#if !file.skipped}<ArrowRight size={12} /><span class="to">{s.version || "?"}</span>{/if}
+                    </label>
+                  {/each}
+                  <div class="file"><span class="lock">+ lock files (package-lock.json, Cargo.lock) follow</span></div>
+                </div>
+              {:else}
+                <p class="sub warn"><TriangleAlert size={12} /> No version file: only the tag carries the version.</p>
+              {/if}
+              <div class="pop-label">{commits.length} {commits.length === 1 ? "commit" : "commits"} since {lastTag?.name ?? "the start"}</div>
+              <ul class="commits">
+                {#each commits.slice(0, 80) as c (c.sha)}<li><code>{c.sha.slice(0, 7)}</code> {c.subject}</li>{/each}
+              </ul>
+            </div>
+          {/snippet}
+        </Popover>
       </div>
-      {#if info.lastTag}
-        <p class="sub">
-          Last: <code>{info.lastTag.name}</code>, {formatRelative(info.lastTag.date)}{info.lastTag.legacy ? " (a shared tag from before this app had its own)" : ""} ·
-          <button class="link" onclick={() => (commitsOpen = !commitsOpen)}>{info.commits.length} {info.commits.length === 1 ? "commit" : "commits"} since</button>
-        </p>
-      {:else}
-        <p class="sub">The first release of this project. <button class="link" onclick={() => (commitsOpen = !commitsOpen)}>{info.commits.length} commits</button></p>
-      {/if}
-      {#if commitsOpen}
-        <ul class="commits">
-          {#each info.commits.slice(0, 80) as c (c.sha)}<li><code>{c.sha.slice(0, 7)}</code> {c.subject}</li>{/each}
-        </ul>
-      {/if}
-      {#if versionFiles.length}
-        <div class="files">
-          {#each versionFiles as file (file.path)}
-            <label class="file" class:off={file.skipped}>
-              <input type="checkbox" class="check" checked={!file.skipped} onchange={() => void toggleSkip(file.path)} />
-              <code>{file.path}</code>
-              <span class="from" class:bad={info.versions.mismatched.includes(file.path)}>{file.version}</span>
-              {#if !file.skipped}<ArrowRight size={12} /><span class="to">{s.version || "?"}</span>{/if}
-            </label>
-          {/each}
-          <div class="file"><span class="lock">+ lock files (package-lock.json, Cargo.lock) follow</span></div>
-        </div>
-      {:else}
-        <p class="sub warn"><TriangleAlert size={12} /> No version file: only the tag carries the version.</p>
-      {/if}
     </section>
-    <!-- How -->
-    <section>
-      <h3>How</h3>
-      <div class="modes">
-        <button class="mode" class:active={s.mode === "local"} onclick={() => setMode("local")}>
-          <strong>Build here, upload</strong>
-          <span>MYLE builds, then makes the GitHub release and uploads the files.</span>
-        </button>
-        <button class="mode" class:active={s.mode === "actions"} disabled={!hasWorkflow} onclick={() => setMode("actions")} title={hasWorkflow ? undefined : "No workflow of this repository runs on a pushed tag"}>
-          <strong>GitHub Actions</strong>
-          <span>{hasWorkflow ? `Pushing ${tag} starts ${entry.releaseWorkflow}; it builds and publishes.` : "No tag-triggered workflow found."}</span>
-        </button>
-      </div>
-      <div class="row wrap pick">
-        <div class="field branch-field">
-          <span>Merge first</span>
-          <Select
-            bind:value={s.mergeBranch}
-            options={branchOptions}
-            disabled={branches === null}
-            ariaLabel="Merge branch first"
-            size="sm"
-            minWidth="170px"
-          />
-          <button class="icon-btn" title="Fetch the branches again" aria-label="Fetch the branches again" onclick={() => void loadBranches()}><RefreshCw size={12} /></button>
-        </div>
+    <!-- How: the choices on one row, their options on one line under them -->
+    <section class="line">
+      <div class="row wrap how">
+        <span class="seg" role="radiogroup" aria-label="How to release">
+          <button role="radio" aria-checked={s.mode === "local"} class:active={s.mode === "local"} onclick={() => setMode("local")}
+            title="MYLE builds, then makes the GitHub release and uploads the files">Build here</button>
+          <button role="radio" aria-checked={s.mode === "actions"} class:active={s.mode === "actions"} disabled={!hasWorkflow} onclick={() => setMode("actions")}
+            title={hasWorkflow ? `Pushing ${tag} starts ${entry.releaseWorkflow}; it builds and publishes` : "No workflow of this repository runs on a pushed tag"}>GitHub Actions</button>
+        </span>
         {#if s.mode === "actions"}
-          <span class="field">
-            <span>Build</span>
-            <span class="seg" role="radiogroup" aria-label="What the workflows build">
-              <button role="radio" aria-checked={s.target === "windows"} class:active={s.target === "windows"} onclick={() => (s.target = "windows")} title="The tag says Build: windows; mobile.yml skips the phone apps">Windows .exe only</button>
-              <button role="radio" aria-checked={s.target === "full"} class:active={s.target === "full"} onclick={() => (s.target = "full")} title="Every workflow of the tag builds: Windows, phones and the rest">Full build</button>
-            </span>
+          <span class="seg" role="radiogroup" aria-label="What the workflows build">
+            <button role="radio" aria-checked={s.target === "windows"} class:active={s.target === "windows"} onclick={() => (s.target = "windows")} title="The tag says Build: windows; mobile.yml skips the phone apps">Windows .exe</button>
+            <button role="radio" aria-checked={s.target === "full"} class:active={s.target === "full"} onclick={() => (s.target = "full")} title="Every workflow of the tag builds: Windows, phones and the rest">Full release</button>
           </span>
         {/if}
+        <span class="field branch-field">
+          <span>Merge</span>
+          <Select bind:value={s.mergeBranch} options={branchOptions} disabled={branches === null} ariaLabel="Merge a branch into {info.branch ?? 'the branch'} first" size="sm" minWidth="100px" />
+          <button class="icon-btn" title="Fetch the branches again" aria-label="Fetch the branches again" onclick={() => void loadBranches()}><RefreshCw size={12} /></button>
+        </span>
       </div>
-      {#if s.mergeBranch}
-        <div class="merge-summary">
-          <p class="sub">origin/{s.mergeBranch} is merged into {info.branch ?? "the branch"} (a merge commit) before anything else. A conflict stops the release and changes nothing.</p>
+      <div class="row wrap opts">
+        {#if s.mergeBranch}
           {#if isProtectedBranch}
-            <p class="sub protected-branch-note">
-              <code>{s.mergeBranch}</code> is a protected branch and will be kept (not deleted).
-            </p>
+            <span class="sub"><code>{s.mergeBranch}</code> is kept (a protected branch).</span>
           {:else}
-            <label class="opt delete-branch-opt">
+            <label class="opt" title="origin/{s.mergeBranch} is merged into {info.branch ?? 'the branch'} first; a conflict stops the release and changes nothing">
               <input type="checkbox" class="switch" bind:checked={s.deleteMergedBranch} />
-              <span>Delete <code>{s.mergeBranch}</code> (GitHub &amp; local) after release</span>
+              <span>Delete <code>{s.mergeBranch}</code> once released</span>
             </label>
           {/if}
-        </div>
+        {/if}
+        {#if s.mode === "local"}
+          <label class="opt" title={info.buildCommand ? info.buildSteps.join(" → ") : "No build command: set one in Build"}>
+            <input type="checkbox" class="switch" bind:checked={s.build} onchange={() => (s.touched = true)} disabled={!info.buildCommand} />
+            <span>Build first {#if info.buildCommand}<code>{info.buildCommand}</code>{:else}<em>(none set)</em>{/if}</span>
+          </label>
+          {#if !s.build}
+            <Popover align="start">
+              {#snippet trigger({ toggle, open })}
+                <button class="summary" aria-expanded={open} onclick={toggle}>{s.assets?.length ?? 0} {s.assets?.length === 1 ? "file" : "files"} to attach <ChevronDown size={12} /></button>
+              {/snippet}
+              {#snippet children()}
+                <div class="pop assets">
+                  <div class="assets-head">
+                    <span>Files to attach</span>
+                    <button class="btn small ghost" disabled={finding} onclick={() => void findFiles()}>
+                      {#if finding}<LoaderCircle size={12} class="spin" />{:else}<RefreshCw size={12} />{/if} Find built files
+                    </button>
+                  </div>
+                  {#if found?.length}
+                    {#each found as a (a.path)}
+                      <label class="file">
+                        <input type="checkbox" class="check" checked={s.assets?.includes(a.path) ?? false} onchange={() => toggleAsset(a.path)} />
+                        <span class="name">{a.name}</span>
+                        <small>{formatBytes(a.size)} · {formatRelative(a.modified)}</small>
+                      </label>
+                    {/each}
+                  {:else if found}
+                    <p class="sub">No built files were found. Build the project, or release without files.</p>
+                  {:else}
+                    <p class="sub">None yet: the release has no files unless you pick some.</p>
+                  {/if}
+                </div>
+              {/snippet}
+            </Popover>
+          {/if}
+        {:else if info.notesDir}
+          <label class="opt" title="Saved to {info.notesDir}/{s.version.trim()}.md in the release commit; the workflow publishes them">
+            <input type="checkbox" class="switch" checked={!!s.notesFile} onchange={(e) => (s.notesFile = (e.currentTarget as HTMLInputElement).checked ? `${info!.notesDir}/${s.version.trim()}.md` : null)} />
+            <span>Notes file</span>
+          </label>
+        {/if}
+        {#if ownChanges > 0}
+          <label class="opt" title="Commit the {ownChanges} uncommitted {ownChanges === 1 ? 'change' : 'changes'} with the release">
+            <input type="checkbox" class="switch" bind:checked={s.includeChanges} />
+            <span>+{ownChanges} uncommitted</span>
+          </label>
+        {/if}
+      </div>
+      {#if s.mode === "local" && s.build && info.fullBuild}
+        <p class="sub warn"><TriangleAlert size={12} /> Only part of the project's build; the full one is <code>{info.fullBuild}</code>. <button class="link" onclick={() => gr.setTab("build")}>Change it in Build</button></p>
       {/if}
-      {#if s.mode === "local"}
-        <label class="opt">
-          <input type="checkbox" class="switch" bind:checked={s.build} onchange={() => (s.touched = true)} disabled={!info.buildCommand} />
-          <span>Build first {#if info.buildCommand}<code>{info.buildCommand}</code>{:else}<em>(no build command: set one in Build)</em>{/if}</span>
-        </label>
-        {#if s.build && info.buildSteps.length > 1}
-          <p class="sub steps-line">{info.buildSteps.join(" → ")}</p>
+    </section>
+    <!-- Notes: title and commit message on one row; the notes take the height left -->
+    <section class="notes-section">
+      <div class="row">
+        <input class="input title" bind:value={s.title} placeholder={defaultTitle} aria-label="Release title" oninput={() => (s.touched = true)} />
+        <input class="input commit" bind:value={s.commitMessage} placeholder={entry.monorepo ? `${entry.name} ${s.version.trim()}` : `Release ${s.version.trim()}`} aria-label="Commit message" />
+        <button class="btn small ghost" disabled={writing} onclick={() => (gr.aiReady ? writeNotes(false) : (gr.settingsOpen = "ai"))} title="Write the notes from the commits since the last release">
+          {#if writing}<LoaderCircle size={13} class="spin" />{:else}<Sparkles size={13} />{/if} AI notes
+        </button>
+        {#if s.notes.trim()}
+          <button class="icon-btn" disabled={writing} onclick={() => (gr.aiReady ? writeNotes(true) : (gr.settingsOpen = "ai"))} title="Polish what you wrote" aria-label="Polish the notes">
+            <WandSparkles size={13} />
+          </button>
         {/if}
-        {#if s.build && info.fullBuild}
-          <p class="sub warn"><TriangleAlert size={12} /> This is only part of the project's build; the full one is <code>{info.fullBuild}</code>. <button class="link" onclick={() => gr.setTab("build")}>Change it in Build</button></p>
-        {/if}
-        {#if !s.build}
-          <div class="assets">
+      </div>
+      <textarea class="input notes" bind:value={s.notes}
+        placeholder={s.mode === "actions" ? "Release notes (Markdown). Left empty, GitHub lists the changes since the last release." : "Release notes: what changed (Markdown)"}
+        aria-label="Release notes" oninput={() => (s.touched = true)}></textarea>
+    </section>
+    <!-- A failing check shows here, one line each; all of them behind the chip below -->
+    {#if checks?.some((c) => c.state !== "ok")}
+      <ul class="checks inline-checks" aria-label="Checks to look at">
+        {#each checks.filter((c) => c.state !== "ok") as c (c.id)}
+          <li class="c-{c.state}">
+            {#if c.state === "warn"}<CircleAlert size={14} />{:else}<CircleX size={14} />{/if}
+            <span>{c.message}</span>
+            {#if c.fix}<button class="btn small" onclick={() => fix(c)}>{fixLabels[c.fix] ?? "Fix"}</button>{/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <div class="go">
+      <Popover placement="top" align="start">
+        {#snippet trigger({ toggle, open })}
+          <button class="summary checks-chip" class:bad={failed.length > 0} class:ok={!!checks && !failed.length} aria-expanded={open} aria-haspopup="dialog" onclick={toggle}>
+            {#if checking || !checks}<LoaderCircle size={12} class="spin" /> Checking…
+            {:else if failed.length}<CircleX size={12} /> {failed.length} {failed.length === 1 ? "check fails" : "checks fail"}
+            {:else}<CircleCheck size={12} /> {checks.length} checks OK{/if}
+          </button>
+        {/snippet}
+        {#snippet children()}
+          <div class="pop" role="dialog" aria-label="Checks">
             <div class="assets-head">
-              <span>Files to attach</span>
-              <button class="btn small ghost" disabled={finding} onclick={() => void findFiles()}>
-                {#if finding}<LoaderCircle size={12} class="spin" />{:else}<RefreshCw size={12} />{/if} Find built files
-              </button>
+              <span>Checks</span>
+              <button class="icon-btn" aria-label="Check again" title="Check again" onclick={() => void check()}><RefreshCw size={13} /></button>
             </div>
-            {#if found?.length}
-              {#each found as a (a.path)}
-                <label class="file">
-                  <input type="checkbox" class="check" checked={s.assets?.includes(a.path) ?? false} onchange={() => toggleAsset(a.path)} />
-                  <span class="name">{a.name}</span>
-                  <small>{formatBytes(a.size)} · {formatRelative(a.modified)}</small>
-                </label>
-              {/each}
-            {:else if found}
-              <p class="sub">No built files were found. Build the project, or release without files.</p>
-            {:else}
-              <p class="sub">None yet: the release has no files unless you pick some.</p>
+            {#if checks}
+              <ul class="checks">
+                {#each checks as c (c.id)}
+                  <li class="c-{c.state}">
+                    {#if c.state === "ok"}<CircleCheck size={14} />{:else if c.state === "warn"}<CircleAlert size={14} />{:else}<CircleX size={14} />{/if}
+                    <span>{c.message}</span>
+                    {#if c.fix && c.state !== "ok"}<button class="btn small" onclick={() => fix(c)}>{fixLabels[c.fix] ?? "Fix"}</button>{/if}
+                  </li>
+                {/each}
+              </ul>
             {/if}
           </div>
-        {:else}
-          <p class="sub">The installers and update files the build makes are attached.</p>
-        {/if}
-      {:else if info.notesDir}
-        <label class="opt">
-          <input type="checkbox" class="switch" checked={!!s.notesFile} onchange={(e) => (s.notesFile = (e.currentTarget as HTMLInputElement).checked ? `${info!.notesDir}/${s.version.trim()}.md` : null)} />
-          <span>Save the notes to <code>{info.notesDir}/{s.version.trim()}.md</code> in the release commit (the workflow publishes them)</span>
-        </label>
-        {#if s.notesFile && !s.notes.trim()}
-          <p class="sub">No notes written yet: without them, GitHub lists the changes since the last release.</p>
-        {/if}
+        {/snippet}
+      </Popover>
+      {#if s.mode === "local"}
+        <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.draft} /> Draft</label>
       {/if}
-      {#if ownChanges > 0}
-        <label class="opt">
-          <input type="checkbox" class="switch" bind:checked={s.includeChanges} />
-          <span>Include the {ownChanges} uncommitted {ownChanges === 1 ? "change" : "changes"} in the release commit</span>
-        </label>
-      {/if}
-    </section>
-    <!-- Notes -->
-    <section>
-      <div class="notes-head">
-        <h3>Release notes</h3>
-        <div class="row">
-          <button class="btn small ghost" disabled={writing} onclick={() => (gr.aiReady ? writeNotes(false) : (gr.settingsOpen = "ai"))} title="Write them from the commits since the last release">
-            {#if writing}<LoaderCircle size={13} class="spin" />{:else}<Sparkles size={13} />{/if} Write with AI
-          </button>
-          {#if s.notes.trim()}
-            <button class="btn small ghost" disabled={writing} onclick={() => (gr.aiReady ? writeNotes(true) : (gr.settingsOpen = "ai"))} title="Tidy what you wrote">
-              <WandSparkles size={13} /> Polish
-            </button>
-          {/if}
-        </div>
-      </div>
-      <input class="input" bind:value={s.title} placeholder={defaultTitle} aria-label="Release title" oninput={() => (s.touched = true)} />
-      <textarea class="input notes" bind:value={s.notes} rows="6" placeholder="What changed (Markdown)" oninput={() => (s.touched = true)}></textarea>
-      <div class="row wrap">
-        <input class="input commit" bind:value={s.commitMessage} placeholder={entry.monorepo ? `${entry.name} ${s.version.trim()}` : `Release ${s.version.trim()}`} aria-label="Commit message" />
-        {#if s.mode === "local"}
-          <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.draft} /> Draft</label>
-        {/if}
-        <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.prerelease} /> Pre-release</label>
-        <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.makeLatest} disabled={s.prerelease} /> Latest</label>
-      </div>
-    </section>
-    <!-- Checks -->
-    <section>
-      <div class="notes-head">
-        <h3>Checks {#if checking}<LoaderCircle size={12} class="spin" />{/if}</h3>
-        <button class="icon-btn" aria-label="Check again" title="Check again" onclick={() => void check()}><RefreshCw size={13} /></button>
-      </div>
-      {#if checks}
-        <ul class="checks">
-          {#each checks as c (c.id)}
-            <li class="c-{c.state}">
-              {#if c.state === "ok"}<CircleCheck size={14} />{:else if c.state === "warn"}<CircleAlert size={14} />{:else}<CircleX size={14} />{/if}
-              <span>{c.message}</span>
-              {#if c.fix && c.state !== "ok"}<button class="btn small" onclick={() => fix(c)}>{fixLabels[c.fix] ?? "Fix"}</button>{/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-    <div class="go">
+      <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.prerelease} /> Pre-release</label>
+      <label class="opt inline"><input type="checkbox" class="check" bind:checked={s.makeLatest} disabled={s.prerelease} /> Latest</label>
+      <span class="spacer"></span>
       <button class="btn primary big" disabled={!!busy || checking || !checks || failed.length > 0 || !s.version.trim()} onclick={() => void release()}>
         <Rocket size={16} /> Release {tag}
       </button>
-      {#if failed.length}<span class="sub">Fix the checks above first.</span>{/if}
     </div>
   {:else}
     <!-- The run -->
@@ -563,7 +629,17 @@
             <span class="run-badge danger">Failed</span>
           {/if}
         </div>
-        {#if s.running}
+        {#if s.running && following}
+          <!-- The tag is pushed: the release goes on on GitHub whatever MYLE does. -->
+          <div class="row">
+            <button class="btn small" disabled={stopping} onclick={() => void stopFollowing()} title="MYLE stops following the run; it goes on on GitHub">
+              <Square size={12} /> Stop following
+            </button>
+            <button class="btn small danger" disabled={stopping || !s.run?.id} onclick={() => void cancelOnGithub()} title="Cancel the workflow run on GitHub">
+              {#if stopping}<LoaderCircle size={12} class="spin" />{:else}<CircleSlash size={12} />{/if} Cancel run on GitHub
+            </button>
+          </div>
+        {:else if s.running}
           <button class="btn small danger" disabled={stopping} onclick={() => void cancel()}>
             {#if stopping}
               <LoaderCircle size={12} class="spin" /> Stopping…
@@ -573,6 +649,21 @@
           </button>
         {/if}
       </div>
+      {#if s.failures.length}
+        <div class="failures" role="alert" bind:this={failuresBox}>
+          {#each s.failures as f (failureKey(f))}
+            <div class="failure">
+              <p class="f-head">
+                <CircleX size={14} />
+                <strong>{f.job}</strong>{#if f.step}<span>failed at <b>{f.step}</b></span>{/if}
+                {#if f.url}<button class="link" onclick={() => void openUrl(f.url!)}>Open the job <ExternalLink size={11} /></button>{/if}
+              </p>
+              {#each f.errors.slice(0, 5) as e (e)}<p class="f-error selectable">{e}</p>{/each}
+              {#if f.logTail}<pre class="f-log selectable">{f.logTail}</pre>{/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
       <ol class="steps">
         {#each steps as id (id)}
           {@const state = stepIcon(id)}
@@ -619,21 +710,7 @@
           {/if}
         {/each}
       </ol>
-      {#if s.failures.length}
-        <div class="failures" role="alert">
-          {#each s.failures as f (f.job)}
-            <div class="failure">
-              <p class="f-head">
-                <CircleX size={14} />
-                <strong>{f.job}</strong>{#if f.step}<span>failed at <b>{f.step}</b></span>{/if}
-                {#if f.url}<button class="link" onclick={() => void openUrl(f.url!)}>Open the job <ExternalLink size={11} /></button>{/if}
-              </p>
-              {#each f.errors.slice(0, 5) as e (e)}<p class="f-error selectable">{e}</p>{/each}
-              {#if f.logTail}<pre class="f-log selectable">{f.logTail}</pre>{/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
+
       {#if s.steps.build && s.mode === "local" && (s.steps.build.state === "running" || s.steps.build.state === "failed")}
         <div class="build-log"><BuildLog session={s.buildLog} entryId={entry.id} compact /></div>
       {/if}
@@ -699,13 +776,13 @@
   {/if}
 </div>
 <style>
-  .release { display: flex; flex: 1; flex-direction: column; gap: 8px; min-height: 0; padding: 10px 12px 12px; overflow: auto; }
+  .release { display: flex; flex: 1; flex-direction: column; gap: 6px; min-height: 0; padding: 8px 10px 10px; overflow: auto; }
   section { display: grid; gap: 6px; padding: 8px 11px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 12px; background: rgb(255 255 255 / 0.025); }
   h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--text-1); font-size: 13px; font-weight: 650; }
   .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .wrap { flex-wrap: wrap; }
-  .version { width: 130px; height: 32px; font-family: var(--font-mono); font-size: 12.5px; }
-  .tag-preview { color: var(--text-3); font-size: 11.5px; }
+  .version { width: 78px; height: 28px; font-family: var(--font-mono); font-size: 12.5px; }
+  .tag-preview { flex: none; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
   code { font-family: var(--font-mono); font-size: 11.3px; }
   .tag-preview code { color: #c3c9f7; }
   .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; color: var(--text-3); font-size: 11.8px; }
@@ -738,18 +815,44 @@
   .assets { display: grid; gap: 3px; padding: 8px; border-radius: 9px; background: rgb(0 0 0 / 0.16); }
   .assets-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 4px; color: var(--text-2); font-size: 12px; }
   .notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .notes { min-height: 110px; resize: vertical; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
-  .commit { flex: 1; min-width: 200px; }
+  .notes { flex: 1; min-height: 30px; resize: none; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  .commit { flex: 1; min-width: 140px; }
+  .title { flex: 1.3; min-width: 150px; }
+  /* One-row sections, and the notes taking what height is left. */
+  .line { gap: 5px; padding: 6px 10px; }
+  .label { flex: none; color: var(--text-2); font-size: 12px; font-weight: 600; }
+  .bump { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--btn-border); border-radius: 7px; background: var(--btn-fill); color: var(--text-2); font-family: var(--font-mono); font-size: 11.8px; }
+  .bump:hover { background: var(--hover); color: var(--text-1); }
+  .bump.active { border-color: rgb(var(--accent-rgb) / 0.55); background: rgb(var(--accent-rgb) / 0.18); color: var(--text-1); }
+  .line .input, .notes-section .row .input { height: 28px; }
+  .how { gap: 6px 10px; }
+  .spacer { flex: 1; }
+  .opts { gap: 6px 14px; }
+  .opts:empty { display: none; }
+  .notes-section { display: flex; flex: 1 1 0; flex-direction: column; gap: 6px; min-height: 78px; padding: 7px 10px; }
+  .summary { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 26px; padding: 0 9px; overflow: hidden; border: 1px solid var(--btn-border); border-radius: 8px; background: var(--btn-fill); color: var(--text-2); font-size: 11.8px; white-space: nowrap; }
+  .summary:hover { background: var(--hover); color: var(--text-1); }
+  .summary.warn { border-color: rgb(255 184 77 / 0.4); color: #ffd08a; }
+  .summary .dim { color: var(--text-3); }
+  .checks-chip.ok { border-color: rgb(62 207 142 / 0.35); color: #8fe6bf; }
+  .checks-chip.bad { border-color: rgb(255 123 123 / 0.45); color: #ffb3b3; }
+  .pop { display: grid; gap: 6px; width: min(460px, 80vw); max-height: 320px; padding: 10px; overflow: auto; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--float-bg); box-shadow: var(--elev-3); }
+  .pop-label { margin-top: 4px; color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .pop .commits { max-height: 150px; }
+  .checks.inline-checks { flex: none; gap: 0; max-height: 66px; padding: 0 4px; overflow: auto; }
+  .checks.inline-checks li { min-height: 22px; padding: 0 2px; font-size: 12px; }
+  .checks.inline-checks .btn { height: 20px; }
+  .line .row { gap: 6px; }
   .checks { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
   .checks li { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 12.3px; }
   .checks li span { flex: 1; color: var(--text-2); }
   .c-ok { color: #3ecf8e; }
   .c-warn { color: #ffb84d; }
   .c-fail { color: #ff7b7b; }
-  .go { display: flex; align-items: center; gap: 12px; }
-  .big { height: 42px; padding: 0 20px; font-size: 13.5px; }
-  .run { display: flex; flex-direction: column; gap: 16px; padding: 18px 20px; background: rgb(0 0 0 / 0.14); border: 1px solid rgb(255 255 255 / 0.06); border-radius: 12px; }
-  .run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid rgb(255 255 255 / 0.07); }
+  .go { display: flex; flex: none; align-items: center; gap: 12px; }
+  .big { height: 36px; padding: 0 18px; font-size: 13.5px; }
+  .run { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: rgb(0 0 0 / 0.14); border: 1px solid rgb(255 255 255 / 0.06); border-radius: 12px; }
+  .run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid rgb(255 255 255 / 0.07); }
   .run-title { display: flex; align-items: center; gap: 10px; }
   .run-title h3 { margin: 0; font-size: 16px; font-weight: 600; }
   .run-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
@@ -763,8 +866,8 @@
   .ok-icon { color: #3ecf8e; }
   .cancel-icon { color: #ffb84d; }
   .fail-icon { color: #ff7b7b; }
-  .steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-  .step { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: rgb(255 255 255 / 0.02); border: 1px solid transparent; color: var(--text-3); font-size: 12.8px; transition: all 0.2s ease; }
+  .steps { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+  .step { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-radius: 8px; background: rgb(255 255 255 / 0.02); border: 1px solid transparent; color: var(--text-3); font-size: 12.8px; transition: all 0.2s ease; }
   .step.active { background: rgb(var(--accent-rgb) / 0.09); border-color: rgb(var(--accent-rgb) / 0.3); color: var(--text-1); box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); }
   .step-icon { display: grid; place-items: center; flex: none; width: 20px; }
   .step-content { display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
@@ -815,14 +918,13 @@
   .field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 11.5px; }
   .branch-field { position: relative; }
   .merge-summary { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
-  .delete-branch-opt { display: inline-flex; align-items: center; gap: 8px; margin-top: 2px; color: var(--text-2); font-size: 12px; cursor: pointer; }
-  .delete-branch-opt code { color: var(--accent); }
   .protected-branch-note { color: var(--text-3); font-size: 11.5px; }
   .select { height: 28px; min-width: 170px; padding: 0 8px; font-size: 12px; }
   .seg { display: inline-flex; padding: 2px; border: 1px solid var(--btn-border); border-radius: 8px; }
-  .seg button { padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11.5px; cursor: pointer; }
+  .seg button { padding: 3px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+  .seg button:disabled { opacity: 0.45; cursor: default; }
   .seg button.active { background: rgb(var(--accent-rgb) / 0.18); color: var(--text-1); }
-  .failures { display: grid; gap: 8px; }
+  .failures { display: grid; flex: none; gap: 8px; max-height: 240px; overflow: auto; }
   .failure { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid rgb(229 72 77 / 0.35); border-radius: 10px; background: rgb(229 72 77 / 0.07); }
   .f-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: #f1a7a9; font-size: 12px; }
   .f-head span { color: var(--text-2); }

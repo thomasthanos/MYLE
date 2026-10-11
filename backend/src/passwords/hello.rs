@@ -11,6 +11,7 @@
 //! The master password still opens the vault, and is the only way on a new
 //! PC or after Windows Hello was reset.
 
+use std::future::IntoFuture;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -89,7 +90,7 @@ fn status_error(status: KeyCredentialStatus) -> String {
 }
 
 /// What came of asking the user to confirm it is them.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Consent {
     Verified,
     /// Cancelled, or not them.
@@ -98,38 +99,102 @@ pub enum Consent {
     Unavailable,
 }
 
-/// Asks Windows Hello (PIN, fingerprint or face) to confirm it is the user,
-/// over the window in front (the browser, for a passkey).
-pub fn verify(message: &str) -> Consent {
-    use windows::Security::Credentials::UI::{
-        UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
-    };
+/// A Windows Hello prompt on screen that can be told to stop.
+pub(crate) trait Prompt {
+    /// Closes the prompt, if it has not answered yet.
+    fn cancel(&self);
+}
+
+/// Closes the prompt when dropped before it answered: a sign-in cancelled in
+/// the browser (or a tab closed) takes its Windows Hello dialog with it,
+/// instead of leaving it on screen asking for a PIN nobody needs.
+pub(crate) struct CancelOnDrop<P: Prompt> {
+    prompt: Option<P>,
+}
+
+impl<P: Prompt> CancelOnDrop<P> {
+    pub(crate) fn new(prompt: P) -> Self {
+        Self { prompt: Some(prompt) }
+    }
+
+    /// The prompt answered: nothing to close any more.
+    pub(crate) fn answered(&mut self) {
+        self.prompt = None;
+    }
+}
+
+impl<P: Prompt> Drop for CancelOnDrop<P> {
+    fn drop(&mut self) {
+        if let Some(prompt) = &self.prompt {
+            prompt.cancel();
+        }
+    }
+}
+
+type Verification = windows_future::IAsyncOperation<windows::Security::Credentials::UI::UserConsentVerificationResult>;
+
+impl Prompt for Verification {
+    fn cancel(&self) {
+        if self.Status() == Ok(windows_future::AsyncStatus::Started) {
+            let _ = self.Cancel();
+        }
+    }
+}
+
+/// Opens the prompt (the availability check blocks a moment): the running
+/// operation, or what already came of it.
+fn start_verification(message: &str) -> Result<Verification, Consent> {
+    use windows::Security::Credentials::UI::{UserConsentVerifier, UserConsentVerifierAvailability};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
-    use windows_future::IAsyncOperation;
 
     let available = UserConsentVerifier::CheckAvailabilityAsync().and_then(|op| op.get());
     if available != Ok(UserConsentVerifierAvailability::Available) {
-        return Consent::Unavailable;
+        return Err(Consent::Unavailable);
     }
     let message = HSTRING::from(message);
     let front = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     // Owned by the window in front, the prompt shows over it; else on its own.
     let operation = windows::core::factory::<UserConsentVerifier, IUserConsentVerifierInterop>()
-        .and_then(|interop| unsafe {
-            interop.RequestVerificationForWindowAsync::<IAsyncOperation<UserConsentVerificationResult>>(HWND(front), &message)
-        })
+        .and_then(|interop| unsafe { interop.RequestVerificationForWindowAsync::<Verification>(HWND(front), &message) })
         .or_else(|_| UserConsentVerifier::RequestVerificationAsync(&message));
-    let Ok(operation) = operation else { return Consent::Unavailable };
+    // Windows Hello is there but its prompt could not open: that is no
+    // consent (taking it for "no Windows Hello" would skip the check).
+    let operation = operation.map_err(|_| Consent::Refused)?;
     focus_prompt();
-    match operation.get() {
-        Ok(UserConsentVerificationResult::Verified) => Consent::Verified,
-        Ok(UserConsentVerificationResult::DeviceNotPresent | UserConsentVerificationResult::NotConfiguredForUser | UserConsentVerificationResult::DisabledByPolicy) => {
-            Consent::Unavailable
-        }
-        Ok(_) => Consent::Refused,
-        Err(_) => Consent::Unavailable,
+    Ok(operation)
+}
+
+/// What the prompt's answer means.
+pub(crate) fn consent_of(result: windows::core::Result<windows::Security::Credentials::UI::UserConsentVerificationResult>) -> Consent {
+    use windows::Security::Credentials::UI::UserConsentVerificationResult as Answer;
+    match result {
+        Ok(Answer::Verified) => Consent::Verified,
+        Ok(Answer::DeviceNotPresent | Answer::NotConfiguredForUser | Answer::DisabledByPolicy) => Consent::Unavailable,
+        // Cancelled, retries used up, busy, or an error once Windows Hello
+        // was known to be there: never "unavailable", which skips the check.
+        _ => Consent::Refused,
     }
+}
+
+/// One Windows Hello prompt at a time (two sign-ins never stack dialogs).
+static PROMPTS: std::sync::LazyLock<tokio::sync::Mutex<()>> = std::sync::LazyLock::new(Default::default);
+
+/// Asks Windows Hello (PIN, fingerprint or face) to confirm it is the user,
+/// over the window in front (the browser, for a passkey). Dropping the future
+/// before it answers (the sign-in was cancelled) closes the prompt.
+pub async fn verify(message: String) -> Consent {
+    let _turn = PROMPTS.lock().await;
+    let started = tauri::async_runtime::spawn_blocking(move || start_verification(&message)).await;
+    let operation = match started {
+        Ok(Ok(operation)) => operation,
+        Ok(Err(consent)) => return consent,
+        Err(_) => return Consent::Refused,
+    };
+    let mut prompt = CancelOnDrop::new(operation.clone());
+    let result = operation.into_future().await;
+    prompt.answered();
+    consent_of(result)
 }
 
 /// Has the Windows Hello key sign `data` (the user confirms first).
@@ -211,4 +276,44 @@ pub fn disable() {
         crate::account::vault::remove(&path);
     }
     let _ = KeyCredentialManager::DeleteAsync(&HSTRING::from(CREDENTIAL)).and_then(|op| op.get());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use windows::Security::Credentials::UI::UserConsentVerificationResult as Answer;
+
+    struct Fake(Arc<AtomicBool>);
+
+    impl Prompt for Fake {
+        fn cancel(&self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn a_prompt_left_unanswered_is_closed_and_an_answered_one_is_not() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        drop(CancelOnDrop::new(Fake(cancelled.clone())));
+        assert!(cancelled.load(Ordering::SeqCst), "the sign-in went: its dialog closes");
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut prompt = CancelOnDrop::new(Fake(cancelled.clone()));
+        prompt.answered();
+        drop(prompt);
+        assert!(!cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn only_windows_hello_saying_it_is_not_set_up_counts_as_unavailable() {
+        assert_eq!(consent_of(Ok(Answer::Verified)), Consent::Verified);
+        assert_eq!(consent_of(Ok(Answer::NotConfiguredForUser)), Consent::Unavailable);
+        assert_eq!(consent_of(Ok(Answer::Canceled)), Consent::Refused);
+        assert_eq!(consent_of(Ok(Answer::RetriesExhausted)), Consent::Refused);
+        // An error once Windows Hello was there (aborted, say) is no consent.
+        let aborted = windows::core::Error::from(windows::core::HRESULT(0x8000_4004_u32 as i32));
+        assert_eq!(consent_of(Err(aborted)), Consent::Refused);
+    }
 }

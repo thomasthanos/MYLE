@@ -64,6 +64,31 @@ function buildZip(entries) {
   return Buffer.concat([...localParts, ...centralParts, end]);
 }
 
+// The two manifests are edited by hand: they must say the same about what the
+// extension may do and runs, or one store gets a build the code does not fit.
+// webNavigation stays out: it would bring back an install warning and a longer
+// store review, and nothing needs it (background.js learns frames by census).
+const chromeSource = JSON.parse(await readFile(new URL("manifest.json", source), "utf8"));
+const firefoxSource = JSON.parse(await readFile(new URL("manifest.json", firefox), "utf8"));
+for (const key of ["version", "permissions", "content_scripts", "action", "commands", "host_permissions", "optional_permissions"]) {
+  if (JSON.stringify(chromeSource[key]) !== JSON.stringify(firefoxSource[key])) {
+    throw new Error(`extension/manifest.json and extension/firefox/manifest.json differ in "${key}"`);
+  }
+}
+const ALLOWED_PERMISSIONS = ["nativeMessaging", "activeTab", "storage"];
+for (const permission of chromeSource.permissions ?? []) {
+  if (!ALLOWED_PERMISSIONS.includes(permission)) {
+    throw new Error(`the extension asks for "${permission}": only ${ALLOWED_PERMISSIONS.join(", ")} are needed`);
+  }
+}
+// Every shared file ships with the app too (the folder copy MYLE offers).
+const bundled = Object.keys(JSON.parse(await readFile(new URL("../backend/tauri.conf.json", import.meta.url), "utf8")).bundle.resources);
+for (const file of sharedFiles) {
+  for (const folder of ["../extension/", "../extension/firefox/"]) {
+    if (!bundled.includes(`${folder}${file}`)) throw new Error(`backend/tauri.conf.json does not bundle ${folder}${file}`);
+  }
+}
+
 const loadedShared = await Promise.all(sharedFiles.map(async (name) => ({ name, data: await readFile(new URL(name, source)) })));
 // Chrome Web Store & Edge Add-ons reject the unpacked `key` field on upload.
 const chromeManifest = JSON.parse(await readFile(new URL("manifest.json", source), "utf8"));

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 pub(crate) enum Job {
     Backup,
     Compare,
+    Restore,
 }
 
 type Active = Option<(Arc<AtomicBool>, Job)>;
@@ -36,6 +37,7 @@ impl ProjectBackupsState {
             return Err(match running {
                 Job::Backup => "A backup is running. Wait for it to finish, or cancel it.",
                 Job::Compare => "A comparison is running. Wait for it to finish, or close it.",
+                Job::Restore => "A restore is running. Wait for it to finish.",
             }
             .into());
         }

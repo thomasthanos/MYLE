@@ -15,7 +15,10 @@
   // Kept before the page can replace them.
   const post = window.postMessage.bind(window);
   const listen = EventTarget.prototype.addEventListener;
+  const unlisten = EventTarget.prototype.removeEventListener;
   const nativeToString = Function.prototype.toString;
+  const later = typeof setTimeout === "function" ? setTimeout : null;
+  const cancelLater = typeof clearTimeout === "function" ? clearTimeout : () => {};
   /** Our wrappers, each with the browser's own function it stands for: they
    *  read as that one ("function get() { [native code] }"), as other
    *  password managers' do, so a page that checks for tampering still
@@ -73,6 +76,18 @@
   // Questions asked before MYLE's part of the page said hello.
   let bridged = false;
   const early = new Map();
+  // MYLE's part of the page says it heard each question (newer copies do):
+  // a question it never hears (its extension was updated or turned off) goes
+  // to the browser's own passkeys instead of waiting forever.
+  let acks = false;
+  /** How long MYLE's part of the page has to say it heard a question. */
+  const HEARD_WITHIN = 2000;
+  /** How long a question asked before MYLE's part of the page started waits
+   *  for it to start. */
+  const START_WITHIN = 10_000;
+  /** A modal request's deadline: the page's own timeout, within sane bounds,
+   *  as the browser does. */
+  const deadlineOf = (publicKey) => Math.min(Math.max(Number(publicKey.timeout) || 300_000, 30_000), 600_000);
 
   // Buffers can come from another frame's realm, where instanceof fails.
   const isArrayBuffer = (value) => Object.prototype.toString.call(value) === "[object ArrayBuffer]";
@@ -103,10 +118,13 @@
       // sign-in that asked before that (as Google's passkey step does) is
       // asked again now, instead of the question going unheard.
       bridged = true;
+      acks = event.data.acks === true;
       for (const message of earlyTraces.splice(0)) post({ ...message, event: `${message.event} (early)` }, origin);
       keepTraces = false;
       for (const [id, message] of early) {
-        if (waiting.has(id)) post(message, origin);
+        if (!waiting.has(id)) continue;
+        post(message, origin);
+        waiting.get(id).heard();
       }
       trace("bridged", { early: early.size });
       early.clear();
@@ -121,27 +139,90 @@
         url: location.href.split(/[?#]/)[0],
       });
     }
-    const resolve = waiting.get(event.data.id);
-    if (resolve) {
+    if (event.data.kind === "ack") {
+      waiting.get(event.data.id)?.acked();
+      return;
+    }
+    const question = waiting.get(event.data.id);
+    if (question) {
       waiting.delete(event.data.id);
-      resolve(event.data);
+      question.answer(event.data);
     }
   });
 
-  /** Asks MYLE's part of the page; `signal` withdraws the question. */
-  function ask(kind, options, signal) {
+  // Put in the back/forward cache, the page cannot see MYLE's prompt any more,
+  // and MYLE has cancelled it: a modal request is refused, as the browser's own
+  // would be, rather than found still waiting when the user comes back.
+  listen.call(window, "pagehide", (event) => {
+    if (!event.persisted) return;
+    for (const question of [...waiting.values()]) {
+      if (question.kind !== "conditional") question.fail(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"));
+    }
+  });
+
+  /** Asks MYLE's part of the page; `signal` withdraws the question, and a
+   *  modal request ends at `deadline` ms like the browser's own. A question
+   *  that is never heard answers "native": the browser's own passkeys. */
+  function ask(kind, options, signal, deadline = 0) {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(aborted(signal));
       const id = `${++next}-${Math.random().toString(36).slice(2)}`;
-      waiting.set(id, resolve);
-      const message = { source: PAGE, id, kind, options };
-      if (!bridged) early.set(id, message);
-      post(message, origin);
-      listen.call(signal ?? new EventTarget(), "abort", () => {
+      let heardTimer = null;
+      let deadlineTimer = null;
+      const stop = (timer) => timer !== null && cancelLater(timer);
+      const done = () => {
+        stop(heardTimer);
+        stop(deadlineTimer);
+        heardTimer = deadlineTimer = null;
+        early.delete(id);
+        if (signal) unlisten.call(signal, "abort", withdrawn);
+      };
+      /** Withdrawn by the page, or out of time: MYLE's prompt closes too. */
+      const end = (error) => {
         if (!waiting.delete(id)) return;
+        done();
         post({ source: PAGE, id, kind: "abort" }, origin);
-        reject(aborted(signal));
-      }, { once: true });
+        reject(error);
+      };
+      const withdrawn = () => end(aborted(signal));
+      const unheard = () => {
+        if (!waiting.delete(id)) return;
+        done();
+        trace("unheard", { kind });
+        resolve({ result: "native" });
+      };
+      waiting.set(id, {
+        kind,
+        answer(data) {
+          done();
+          resolve(data);
+        },
+        fail: end,
+        // Sent to a copy that says when it heard a question: it has a moment.
+        heard() {
+          stop(heardTimer);
+          heardTimer = acks && later ? later(unheard, HEARD_WITHIN) : null;
+        },
+        acked() {
+          stop(heardTimer);
+          heardTimer = null;
+        },
+      });
+      const message = { source: PAGE, id, kind, options };
+      if (bridged) {
+        post(message, origin);
+        waiting.get(id).heard();
+      } else {
+        early.set(id, message);
+        post(message, origin);
+        // MYLE's part of the page never starts (turned off, or this is a
+        // page it does not run in): the browser's own passkeys answer.
+        if (later) heardTimer = later(() => !bridged && unheard(), START_WITHIN);
+      }
+      if (deadline && later) {
+        deadlineTimer = later(() => end(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError")), deadline);
+      }
+      if (signal) listen.call(signal, "abort", withdrawn, { once: true });
     });
   }
 
@@ -292,7 +373,10 @@
           mediation: options.mediation ?? "",
         });
         if (kind === "get" && options.mediation === "conditional") return conditional(options, callNative);
-        return ask(kind, details, options.signal).then((answer) => {
+        // Making a passkey without asking (conditional create) is the
+        // browser's own business.
+        if (kind === "create" && options.mediation === "conditional") return callNative();
+        return ask(kind, details, options.signal, deadlineOf(publicKey)).then((answer) => {
           trace("answer", { kind, result: answer?.result ?? "none", name: answer?.name ?? "" });
           return settle(answer, kind, details, callNative);
         });

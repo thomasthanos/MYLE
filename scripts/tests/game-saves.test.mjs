@@ -154,6 +154,39 @@ test("restore location picker holds the lock until the mapping is saved", async 
   assert.equal(state.locked, false);
 });
 
+test("a game with saves in two folders needs a place for each, and keeps its place after a scan", () => {
+  const documents = "C:\\Users\\Old\\Documents\\A"; const roaming = "C:\\Users\\Old\\AppData\\Roaming\\A";
+  const game = entry("a", { status: "needsLocation", paths: [documents, roaming], unmappedPaths: [documents, roaming] });
+  state.page.settings.pathMappings = [{ gameId: "a", source: documents, target: "E:\\Restored\\A" }];
+  assert.deepEqual([...state.unmappedLeft(game)], [roaming]);
+  assert.equal(state.lacksLocation(game), true, "one place is not enough");
+  assert.equal(state.unmappedPathOf(game), roaming, "the next pick is for the folder still without one");
+  state.page.settings.pathMappings.push({ gameId: "a", source: "c:/users/old/appdata/roaming/a/", target: "E:\\Restored\\B" });
+  assert.equal(state.lacksLocation(game), false, "covered, whatever the case or separators");
+  // After the restore the scan shows the files where they went now.
+  const restored = { ...game, status: "backedUp", paths: ["E:\\Restored\\A"], unmappedPaths: [] };
+  assert.equal(state.mappingFor(restored)?.target, "E:\\Restored\\A", "still shown, found by the game");
+  assert.equal(state.lacksLocation(restored), false);
+});
+
+test("a scan from before every folder was reported still asks for one place", () => {
+  const game = entry("a", { status: "needsLocation" });
+  assert.equal(state.lacksLocation(game), true);
+  state.page.settings.pathMappings = [{ gameId: "a", source: "C:\\Saves\\a", target: "E:\\Saves" }];
+  assert.equal(state.lacksLocation(game), false);
+  assert.equal(state.lacksLocation(entry("b")), false, "a game with a place on this PC needs none");
+});
+
+test("the Documents OneDrive moved is offered, and used for the folder that lacks a place", async () => {
+  const writes = []; const old = "C:\\Users\\Me\\Documents\\My Games\\A"; const moved = "C:\\Users\\Me\\OneDrive\\Documents\\My Games\\A";
+  api.setPathMapping = async (mapping) => { writes.push(mapping); return { ...state.page.settings, pathMappings: [mapping] }; };
+  const game = entry("a", { status: "needsLocation", paths: [old], unmappedPaths: [old], suggestedTarget: moved });
+  await state.useSuggestedLocation(game);
+  assert.deepEqual(writes, [{ gameId: "a", source: old, target: moved }]);
+  assert.equal(state.lacksLocation(game), false);
+  assert.equal(state.locked, false);
+});
+
 test("backup uses selected IDs even when their rows are filtered out", async () => {
   state.selected.add("b"); state.setQuery("a"); const calls = [];
   api.backup = async (ids) => { calls.push(ids); return { kind: "backup", processedGames: 1, failedGames: [], failures: [] }; };
@@ -177,6 +210,47 @@ test("a late scan settings response cannot overwrite a newer preference", async 
   await state.setSchedule("daily", "03:00", "sunday");
   wait.resolve(old); await settle();
   assert.equal(state.page.settings.schedule, "daily");
+});
+
+test("a refresh refused while the scheduled backup runs waits for it, then shows what it backed up", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let running = true; const scans = [];
+  api.scan = async (mode) => {
+    scans.push(mode);
+    if (running) throw new Error("Another Game Saves operation is already running.");
+    return scan({ onThisPc: [entry("a", { status: "backedUp", hasBackup: true }), entry("b", { status: "backedUp", hasBackup: true })] });
+  };
+  api.getState = async () => clone({ ...state.page, activeOperation: running ? "scheduledBackup" : null, cachedScan: null });
+  await state.refresh(); await settle(); await settle();
+  assert.equal(state.operation?.kind, "scheduledBackup", "the page shows it running");
+  assert.match(state.operation.note, /scheduled backup is running/);
+  assert.equal(state.locked, true, "nothing else starts meanwhile");
+  running = false;
+  t.mock.timers.tick(2000); for (let i = 0; i < 5; i++) await settle();
+  assert.equal(state.operation, null);
+  assert.deepEqual(scans, ["quick", "quick"], "the list is checked again once it is done");
+  assert.deepEqual(state.games.map((game) => game.status), ["backedUp", "backedUp"]);
+  assert.equal(state.error, null);
+});
+
+test("a background check that finds the scheduled backup running shows it, quietly", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  api.scan = async () => { throw new Error("Another Game Saves operation is already running."); };
+  api.getState = async () => clone({ ...state.page, activeOperation: "scheduledBackup", cachedScan: null });
+  await state.refresh(true); await settle(); await settle();
+  assert.equal(state.operation?.kind, "scheduledBackup");
+  assert.equal(toast.visible.length, 0, "no error for what is not one");
+  api.getState = async () => clone({ ...state.page, activeOperation: null, cachedScan: null });
+  api.scan = async () => scan();
+  t.mock.timers.tick(2000); for (let i = 0; i < 5; i++) await settle();
+  assert.equal(state.operation, null);
+});
+
+test("a refresh that fails for another reason stays an error", async () => {
+  api.scan = async () => { throw new Error("The engine stopped"); };
+  await state.refresh(); await settle(); await settle();
+  assert.equal(state.operation, null);
+  assert.match(state.error, /Refresh failed: The engine stopped/);
 });
 
 test("a pending folder picker prevents starting scans or backup", async () => {
@@ -276,4 +350,28 @@ test("the preload shows the saved list and its covers without running the engine
   assert.equal(state.covers[900010], "data:image/jpeg;base64,AQ==");
   await state.preload();
   assert.equal(calls.length, 1, "once is enough");
+});
+
+test("undoing a restore names the games and says the current saves are kept first", async () => {
+  state.page = { ...state.page, undoRestore: { id: "restore-1", createdAt: 1_790_000_000, expiresAt: 1_790_604_800, games: ["Elden Ring", "Hades"] } };
+  let undone = false;
+  api.undoLastRestore = async () => { undone = true; return { kind: "restore", processedGames: 2, processedBytes: 0, failedGames: [], failures: [], safetyBackupPath: null, rolledBack: [] }; };
+  const undoing = state.undoLastRestore();
+  await settle();
+  assert.match(confirmState.current.message, /Elden Ring, Hades/);
+  assert.match(confirmState.current.message, /copied first/);
+  confirmState.answer(false);
+  await undoing;
+  assert.equal(undone, false, "nothing happens without the user's yes");
+});
+
+test("a game put back after a restore that did not finish is said plainly", async () => {
+  state.selected.add("a");
+  state.tab = "backup";
+  api.restore = async () => ({ kind: "restore", processedGames: 0, processedBytes: 0, failedGames: ["a"], failures: [{ game: "a", reason: "os error 32", file: null }], safetyBackupPath: "x", rolledBack: ["a"] });
+  const restoring = state.restore([{ gameId: "a", snapshotId: "latest" }]);
+  await settle();
+  confirmState.answer(true);
+  await restoring;
+  assert.ok(toast.visible.some((item) => /a was put back as before/.test(item.message)));
 });

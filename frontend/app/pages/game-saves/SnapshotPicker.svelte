@@ -19,7 +19,7 @@
       .filter((item) => item.snapshotId),
   );
   const missingLocation = $derived(
-    gs.selectedGames.some((game) => game.status === "needsLocation" && !gs.mappingFor(game)),
+    gs.selectedGames.some((game) => gs.lacksLocation(game)),
   );
   const canRestore = $derived(choices.length > 0 && choices.length === gs.selectedGames.length && !missingLocation);
   const selectedBytes = $derived(gs.selectedGames.reduce((sum, game) => sum + (game.snapshots.find((snapshot) => snapshot.id === gs.snapshotFor(game))?.bytes ?? 0), 0));
@@ -81,13 +81,21 @@
           {/if}
 
           {#if game.status === "needsLocation" || mapping}
-            <div class="destination" class:missing={!mapping}>
+            {@const lacks = gs.lacksLocation(game)}
+            {@const left = lacks ? gs.unmappedLeft(game)[0] : undefined}
+            {@const shown = left ? `${mapping ? "Another save folder needs a place" : "Choose a folder on this PC"}: ${left}` : (mapping?.target ?? "Choose a folder on this PC")}
+            <div class="destination" class:missing={lacks}>
               <span>
                 <small>Restore location</small>
-                <strong class="selectable" title={mapping?.target ?? ""}>{mapping?.target ?? "Choose a folder on this PC"}</strong>
+                <strong class="selectable" title={shown}>{shown}</strong>
               </span>
+              {#if lacks && game.suggestedTarget}
+                <button class="btn small primary" disabled={gs.locked} title={`Restore into ${game.suggestedTarget}`} onclick={() => gs.useSuggestedLocation(game)}>
+                  Use this PC's Documents
+                </button>
+              {/if}
               <button class="btn small" disabled={gs.locked} onclick={() => gs.chooseRestoreLocation(game)}>
-                <FolderSearch size={14} /> {mapping ? "Change" : "Choose"}
+                <FolderSearch size={14} /> {mapping && !lacks ? "Change" : "Choose"}
               </button>
               {#if mapping}
                 <button class="icon-btn" disabled={gs.locked} title="Clear restore location" aria-label={`Clear restore location for ${game.title}`} onclick={() => gs.removeRestoreLocation(game)}>

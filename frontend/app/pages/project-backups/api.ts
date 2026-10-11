@@ -8,6 +8,9 @@ export interface LastBackup {
   createdAt: number;
   fileCount: number;
   zipSize: number;
+  /** "incremental": only the changed files, on the full backup `base`. */
+  kind?: "incremental" | null;
+  base?: string | null;
 }
 /** How the last backup attempt of a project ended. */
 export interface LastResult {
@@ -95,6 +98,18 @@ export interface BackupOutcome {
   linkedFiles: string[];
   finalCheckOk: boolean;
   createdAt: number;
+  /** "incremental": only what changed since `base` (a full backup). */
+  kind: "full" | "incremental";
+  base: string | null;
+  deletedCount: number;
+}
+/** What a restore put together into the chosen folder. */
+export interface Restored {
+  folder: string;
+  files: number;
+  bytes: number;
+  /** The full backup and the increments on it, oldest first. */
+  from: string[];
 }
 export type ResultCode =
   | "CANCELLED"
@@ -252,18 +267,27 @@ export interface ChangedFile {
   status: "added" | "modified" | "deleted";
   size: number | null;
 }
+/** `unreachable`: the backups folder can't be reached now (the cloud app is
+ *  not running), so nothing is known; `error`: the check failed (`message`). */
+export type ChangeState = "upToDate" | "changed" | "noBackup" | "missing" | "unreachable" | "error";
 export interface ProjectChanges {
   projectId: string;
-  state: "upToDate" | "changed" | "noBackup" | "missing";
+  state: ChangeState;
   backupId: string | null;
   added: number;
   modified: number;
   deleted: number;
+  /** Files open in another program that could not be compared. */
+  unreadable: number;
   /** At most 300; the counts are whole. */
   files: ChangedFile[];
+  /** When the check started: of two answers, the later one is the true one. */
   checkedAt: number;
+  message: string | null;
 }
-export type Job = "backup" | "compare";
+export type Job = "backup" | "compare" | "restore";
+/** The background detection's answers (`ProjectChanges[]`). */
+export const CHANGES_EVENT = "project-backups-changes";
 /** Stands for the project folder itself in a comparison. */
 export const SOURCE_ID = "source";
 export type OpenTarget = "root" | "backups" | "source";
@@ -291,9 +315,16 @@ export const projectBackupsApi = {
   preview: (request: PreviewRequest) => invoke<Preview>("project_backups_preview", { request }),
   cancelPreview: () => invoke<void>("project_backups_cancel_preview"),
   changes: (projectIds: string[], fresh: boolean) => invoke<ProjectChanges[]>("project_backups_changes", { projectIds, fresh }),
+  /** Starts the app's background detection, or watches the folders again
+   *  after the project list changed. Its answers come as `CHANGES_EVENT`. */
   watch: () => invoke<void>("project_backups_watch"),
-  backup: (projectIds: string[], onEvent: (event: ProjectBackupsEvent) => void) =>
-    invoke<BackupRun>("project_backups_backup", { projectIds, onEvent: channel(onEvent) }),
+  /** The latest answer of the background detection for every project. */
+  latestChanges: () => invoke<ProjectChanges[]>("project_backups_latest_changes"),
+  /** `incremental`: only the changed files where an increment fits (else a full backup). */
+  backup: (projectIds: string[], onEvent: (event: ProjectBackupsEvent) => void, incremental = false) =>
+    invoke<BackupRun>("project_backups_backup", { projectIds, onEvent: channel(onEvent), incremental }),
+  /** Puts the project as last backed up into `folder` (empty), checking every file. */
+  restore: (projectId: string, folder: string) => invoke<Restored>("project_backups_restore", { projectId, folder }),
   /** Cancels the running `job` (any job when null). */
   cancel: (job: Job | null = null) => invoke<boolean>("project_backups_cancel", { job }),
   /** Starts Google Drive or Dropbox; resolves to a line for the user. */

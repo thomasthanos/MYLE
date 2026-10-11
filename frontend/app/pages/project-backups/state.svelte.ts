@@ -1,15 +1,15 @@
 // Page state of Project Backups: the settings, a running backup and its
 // progress, and the open dialogs.
+import { badges } from "../../../lib/badges.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { confirm } from "../../../lib/confirm.svelte";
-import { projectBackupsApi as api, SOURCE_ID, type BackupEntry, type BackupProvider, type CloudChoice, type PageState, type Project, type ProjectBackupsEvent, type ProjectResult, type Stage } from "./api";
+import { nav } from "../../../lib/nav.svelte";
+import { projectBackupsApi as api, CHANGES_EVENT, SOURCE_ID, type BackupEntry, type BackupProvider, type CloudChoice, type PageState, type Project, type ProjectBackupsEvent, type ProjectResult, type Stage } from "./api";
 import { formatRelative } from "../game-saves/state.svelte";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import type { ProjectChanges } from "./api";
-/** How often the folders are checked while the page is open; 30 days old is
- *  called old, a backup within 7 days counts as up to date. */
-const CHECK_EVERY_MS = 5 * 60 * 1000;
+/** 30 days old is called old, a backup within 7 days counts as up to date. */
 const STALE_DAYS = 30;
 const FRESH_DAYS = 7;
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
@@ -85,38 +85,95 @@ class ProjectBackupsState {
   filter = $state<"all" | Group["key"]>("all");
   /** Ticks every 30 s so "5 minutes ago" stays true. */
   clock = $state(Date.now());
-  /** Each project's folder against its newest backup; `checking`: being checked now. */
+  /** Each project's folder against its newest backup; `checking`: the
+   *  projects being checked now (once per check asked for). */
   changes = $state<Record<string, ProjectChanges>>({});
   checking = $state<string[]>([]);
-  #watching = false;
-  private loaded = false;
-  /** Projects with changes not in a backup yet (or none at all). */
-  get changedIds(): string[] {
-    return this.projects.filter((p) => ["changed", "noBackup"].includes(this.changes[p.id]?.state ?? "")).map((p) => p.id);
+  #detecting = false;
+  /** The count the last toast was about (null: none shown yet). */
+  #announced: number | null = null;
+  private loaded = $state(false);
+  /** The projects the answers are about: before the page state is read (at
+   *  the app's start), every project an answer came for. */
+  private get knownIds(): string[] {
+    return this.loaded ? this.projects.map((p) => p.id) : Object.keys(this.changes);
   }
-  /** Checks `ids` (all projects by default). `fresh`: no cached answer. */
+  /** Projects with changes not in a backup yet (or no backup at all). Out of
+   *  reach or not checked is not a change. */
+  get changedIds(): string[] {
+    return this.knownIds.filter((id) => ["changed", "noBackup"].includes(this.changes[id]?.state ?? ""));
+  }
+  /** Projects whose folder changed since their newest backup. */
+  get changedCount(): number {
+    return this.knownIds.filter((id) => this.changes[id]?.state === "changed").length;
+  }
+  /** Takes answers in: one started earlier than the answer already shown
+   *  (a check that was still running during a backup) never replaces it. */
+  applyChanges(results: ProjectChanges[]) {
+    for (const result of results) {
+      const known = this.changes[result.projectId];
+      if (!known || known.checkedAt <= result.checkedAt) this.changes[result.projectId] = result;
+    }
+    this.#updateBadge();
+  }
+  /** Sidebar count of changed projects, and a toast when it goes up while
+   *  another page is open. */
+  #updateBadge() {
+    const changed = this.changedCount;
+    badges.set("project-backups", changed);
+    if (this.#announced !== null && changed > this.#announced && nav.current !== "project-backups") {
+      toast.info(`${changed} ${changed === 1 ? "project has" : "projects have"} changes not backed up yet.`, {
+        label: "Review",
+        run: () => nav.go("project-backups"),
+      });
+    }
+    this.#announced = changed;
+  }
+  /** Checks `ids` (all projects by default) now. `fresh`: compare again even
+   *  where the folder looks as it did. */
   async checkChanges(ids: string[] = this.projects.map((p) => p.id), fresh = false) {
     if (!isTauri() || !ids.length) return;
-    const todo = ids.filter((id) => !this.checking.includes(id));
-    if (!todo.length) return;
-    this.checking = [...this.checking, ...todo];
+    this.checking = [...this.checking, ...ids];
     try {
-      for (const result of await api.changes(todo, fresh)) this.changes[result.projectId] = result;
+      this.applyChanges(await api.changes(ids, fresh));
     } catch {
-      // Quietly: the next check tries again.
+      // Quietly: detection checks again by itself.
     } finally {
-      this.checking = this.checking.filter((id) => !todo.includes(id));
+      const done = [...ids];
+      this.checking = this.checking.filter((id) => {
+        const index = done.indexOf(id);
+        if (index < 0) return true;
+        done.splice(index, 1);
+        return false;
+      });
     }
   }
-  /** Watches the folders and checks them now and every few minutes. */
+  /** The app's background detection (started once, for the owner, whichever
+   *  page is open): it checks a project after its folder changes and every
+   *  project every few minutes; its answers arrive here. */
+  async startDetection() {
+    if (!isTauri() || this.#detecting) return;
+    this.#detecting = true;
+    void listen<ProjectChanges[]>(CHANGES_EVENT, (event) => this.applyChanges(event.payload));
+    try {
+      await api.watch();
+      this.applyChanges(await api.latestChanges());
+    } catch {
+      // The page checks by itself when opened.
+    }
+  }
+  /** Opening the page: detection runs, and projects it has no answer for
+   *  yet (it just started) are checked now. */
+  async showChanges() {
+    await this.startDetection();
+    const unknown = this.projects.filter((p) => !this.changes[p.id]).map((p) => p.id);
+    if (unknown.length) await this.checkChanges(unknown);
+  }
+  /** After the project list changed: the folders are watched again. */
   async startWatching() {
-    void this.checkChanges();
     if (!isTauri()) return;
+    if (!this.#detecting) return this.startDetection();
     void api.watch().catch(() => {});
-    if (this.#watching) return;
-    this.#watching = true;
-    void listen<string[]>("project-backups-changed", (event) => { if (!this.locked) void this.checkChanges(event.payload); });
-    setInterval(() => { if (!this.locked) void this.checkChanges(); }, CHECK_EVERY_MS);
   }
   get locked() { return this.operation !== null || this.busy !== null }
   get projects() { return this.page.settings.projects }
@@ -253,6 +310,7 @@ class ProjectBackupsState {
     else if (report.from) toast.info("Every project of Backup Projects is already here.");
     else toast.info("Backup Projects' project list was not found on this PC or in the backups folder.");
     await this.refresh();
+    if (report.added.length) void this.startWatching();
   }
   openEditor(project: Project | null, fixMissing = false) {
     if (this.operation) return;
@@ -301,7 +359,9 @@ class ProjectBackupsState {
       return null;
     }
   }
-  async backup(projectIds: string[]) {
+  /** Backs up `projectIds`; `incremental`: only what changed where an
+   *  increment fits (the app makes a full backup otherwise). */
+  async backup(projectIds: string[], incremental = false) {
     if (this.locked || !projectIds.length) return;
     if (!this.provider) {
       toast.info("Choose Google Drive or Dropbox first.");
@@ -311,7 +371,7 @@ class ProjectBackupsState {
     this.failures = [];
     this.operation = { startedAt: Date.now(), index: 0, total: projectIds.length, projectName: "", stage: "preparing", doneBytes: 0, totalBytes: 0, doneFiles: 0, totalFiles: 0, note: null };
     try {
-      const run = await api.backup(projectIds, (event) => this.onEvent(event));
+      const run = await api.backup(projectIds, (event) => this.onEvent(event), incremental);
       this.page = { ...this.page, settings: run.settings };
       const done = run.results.filter((result) => result.ok);
       const failed = run.results.filter((result) => !result.ok && result.code !== "CANCELLED");
@@ -327,6 +387,13 @@ class ProjectBackupsState {
         for (const result of done) {
           const outcome = result.outcome!;
           const late = outcome.finalCheckOk ? "" : " The cloud app is still catching up with it.";
+          if (outcome.kind === "incremental") {
+            const gone = outcome.deletedCount ? `, ${outcome.deletedCount.toLocaleString()} deleted` : "";
+            toast.success(`${result.name}: only the changes were saved (${outcome.fileCount.toLocaleString()} files${gone}, on ${outcome.base ?? "the last full backup"}).${late}`, {
+              label: "Show", run: () => void api.open("backups", result.projectId),
+            });
+            continue;
+          }
           toast.success(`${result.name}: ${outcome.name}.zip saved (${outcome.fileCount.toLocaleString()} files).${late}`, {
             label: "Show", run: () => void api.open("backups", result.projectId, `${outcome.monthFolder}/${outcome.name}.zip`),
           });
@@ -344,7 +411,9 @@ class ProjectBackupsState {
       this.operation = null;
       this.cancelling = false;
       void this.refresh();
-      void this.checkChanges(projectIds, true); // what was just backed up is up to date: shown right away
+      // What was just backed up is shown up to date right away (writes made
+      // meanwhile, elsewhere too, are checked by the app after the backup).
+      void this.checkChanges(projectIds, true);
     }
   }
   private onEvent(event: ProjectBackupsEvent) {
@@ -396,6 +465,16 @@ class ProjectBackupsState {
     const text = await this.run("cloud", () => api.startCloud(provider));
     if (text) toast.info(`${text} Try the backup again once it is signed in.`);
     await this.refresh();
+  }
+  /** Puts the project as last backed up (its full backup and the increments
+   *  on it) into an empty folder the user picks; every file is checked. */
+  async restore(project: Project) {
+    const folder = await this.pickFolder(`Restore ${project.name} into an empty folder`);
+    if (!folder) return;
+    const restored = await this.run("restore", () => api.restore(project.id, folder));
+    if (!restored) return;
+    const parts = restored.from.length > 1 ? ` from ${restored.from[0]} and ${restored.from.length - 1} ${restored.from.length === 2 ? "increment" : "increments"}` : ` from ${restored.from[0]}`;
+    toast.success(`${project.name}: ${restored.files.toLocaleString()} files restored and checked${parts}.`);
   }
   async toggleBackups(projectId: string) {
     if (this.expanded === projectId) {

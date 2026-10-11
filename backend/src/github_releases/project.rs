@@ -443,11 +443,32 @@ pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     go(&p, &t)
 }
 
-/// The workflow a push of `tag` starts, if any.
+/// The workflow that makes the release when `tag` is pushed, if any: the
+/// first of `workflows_for_tag`.
 pub(crate) fn workflow_for_tag<'a>(workflows: &'a [Workflow], tag: &str) -> Option<&'a Workflow> {
-    workflows
+    workflows_for_tag(workflows, tag).into_iter().next()
+}
+
+/// Every workflow a push of `tag` starts, the release workflow first. A tag
+/// can start several (MYLE's starts Release and MYLE Passwords): the one that
+/// runs only for this kind of tag comes first (MYLE Passwords also runs for
+/// `mobile-v*` tags), then one named for releases, then by file name.
+pub(crate) fn workflows_for_tag<'a>(workflows: &'a [Workflow], tag: &str) -> Vec<&'a Workflow> {
+    let mut found: Vec<&Workflow> = workflows
         .iter()
-        .find(|workflow| workflow.tags.iter().any(|pattern| glob_match(pattern, tag)))
+        .filter(|workflow| workflow.tags.iter().any(|pattern| glob_match(pattern, tag)))
+        .collect();
+    let named = |workflow: &Workflow| {
+        workflow.file.to_lowercase().starts_with("release") || workflow.name.as_deref().is_some_and(|name| name.to_lowercase().contains("release"))
+    };
+    found.sort_by_key(|workflow| {
+        (
+            !workflow.tags.iter().all(|pattern| glob_match(pattern, tag)),
+            !named(workflow),
+            workflow.file.clone(),
+        )
+    });
+    found
 }
 
 #[cfg(test)]

@@ -93,29 +93,37 @@ fn focused_control(thread: u32) -> Option<usize> {
     Some(info.hwndFocus as usize)
 }
 
+/// Whether `process` runs with administrator rights (None: cannot tell).
+fn elevated(process: HANDLE) -> Option<bool> {
+    unsafe {
+        let mut token: HANDLE = null_mut();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut size = 0;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        );
+        CloseHandle(token);
+        (ok != 0).then_some(elevation.TokenIsElevated != 0)
+    }
+}
+
+/// Whether this app runs as administrator: the browsers' hosts (started
+/// without it) then cannot reach it.
+pub(crate) fn this_app_elevated() -> bool {
+    elevated(unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() }).unwrap_or(false)
+}
+
 /// Whether `pid` runs with administrator rights (and this app does not):
 /// Windows then drops the keys MYLE would type into it.
 fn runs_above_us(pid: u32) -> bool {
-    fn elevated(process: HANDLE) -> Option<bool> {
-        unsafe {
-            let mut token: HANDLE = null_mut();
-            if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-                return None;
-            }
-            let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
-            let mut size = 0;
-            let ok = GetTokenInformation(
-                token,
-                TokenElevation,
-                (&raw mut elevation).cast(),
-                size_of::<TOKEN_ELEVATION>() as u32,
-                &mut size,
-            );
-            CloseHandle(token);
-            (ok != 0).then_some(elevation.TokenIsElevated != 0)
-        }
-    }
-    let me = elevated(unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() }).unwrap_or(false);
+    let me = this_app_elevated();
     if me {
         return false;
     }

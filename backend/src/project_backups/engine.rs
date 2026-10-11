@@ -46,6 +46,12 @@ pub struct BackupOutcome {
     /// is still catching up and the backup itself is fine.
     pub final_check_ok: bool,
     pub created_at: i64,
+    /// `full`, or `incremental`: only what changed (`incremental.rs`).
+    pub kind: &'static str,
+    /// The full backup an increment builds on.
+    pub base: Option<String>,
+    /// Files an increment records as deleted.
+    pub deleted_count: usize,
 }
 
 pub(crate) struct BackupRequest<'a> {
@@ -196,6 +202,9 @@ pub(crate) fn backup_project(
         linked_files: found.links,
         final_check_ok: verified.final_check_ok,
         created_at: naming::unix_millis(now),
+        kind: "full",
+        base: None,
+        deleted_count: 0,
     })
 }
 

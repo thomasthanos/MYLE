@@ -74,21 +74,13 @@ pub(crate) use crate::cloud::detection::google_my_drive;
 pub(crate) fn detect_roots() -> Vec<GameRoot> {
     let mut out = Vec::new();
 
-    if let Some(steam) = registry_string(
-        HKEY_CURRENT_USER,
-        KEY_READ,
-        r"Software\Valve\Steam",
-        "SteamPath",
-    )
-    .or_else(|| {
-        registry_string(
-            HKEY_LOCAL_MACHINE,
-            KEY_READ | KEY_WOW64_32KEY,
-            r"Software\Valve\Steam",
-            "InstallPath",
-        )
-    }) {
-        let steam = PathBuf::from(steam.replace('/', "\\"));
+    // The user's SteamPath first; one left behind by a Steam that moved
+    // (the folder is gone) gives way to the machine's InstallPath.
+    let steam_candidates = [
+        registry_string(HKEY_CURRENT_USER, KEY_READ, r"Software\Valve\Steam", "SteamPath"),
+        registry_string(HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY, r"Software\Valve\Steam", "InstallPath"),
+    ];
+    if let Some(steam) = first_existing(steam_candidates.into_iter().flatten().map(|path| PathBuf::from(path.replace('/', "\\")))) {
         push_root(&mut out, &steam, RootStore::Steam, RootSource::Automatic);
         detect_steam_libraries(&steam, &mut out);
     }
@@ -114,6 +106,7 @@ pub(crate) fn detect_roots() -> Vec<GameRoot> {
             ),
         ],
     );
+    detect_ea_libraries(&mut out);
     detect_launcher_install(
         &mut out,
         RootStore::Origin,
@@ -207,9 +200,56 @@ fn detect_launcher_install(
         if path.is_file() {
             path.pop();
         }
-        push_root(out, &path, store, RootSource::Automatic);
-        break;
+        // A value left behind by an uninstalled launcher (Origin, before the
+        // EA app) gives way to the next one.
+        if push_root(out, &path, store, RootSource::Automatic) {
+            break;
+        }
     }
+}
+
+/// The first of `candidates` that is an existing folder.
+fn first_existing(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|path| path.is_dir())
+}
+
+/// Where EA's games are installed (not the EA app's own folder): its
+/// default libraries, and the one the EA app's settings name.
+fn detect_ea_libraries(out: &mut Vec<GameRoot>) {
+    let mut candidates = Vec::new();
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(folder) = std::env::var_os(variable) {
+            candidates.push(Path::new(&folder).join("EA Games"));
+            candidates.push(Path::new(&folder).join("Origin Games"));
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let settings = Path::new(&local).join("Electronic Arts").join("EA Desktop");
+        if let Ok(entries) = fs::read_dir(settings) {
+            for entry in entries.flatten().take(64) {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if !(name.starts_with("user_") && name.ends_with(".ini")) {
+                    continue;
+                }
+                if let Ok(text) = fs::read_to_string(entry.path()) {
+                    candidates.extend(ea_install_dirs(&text).into_iter().map(PathBuf::from));
+                }
+            }
+        }
+    }
+    for path in candidates {
+        push_root(out, &path, RootStore::Origin, RootSource::Automatic);
+    }
+}
+
+/// The game install folders an EA app settings file names
+/// (`user.downloadinplacedir=…`).
+fn ea_install_dirs(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("user.downloadinplacedir="))
+        .map(|path| path.trim().trim_end_matches(['\\', '/']).to_string())
+        .filter(|path| !path.is_empty())
+        .collect()
 }
 
 fn detect_gog(out: &mut Vec<GameRoot>) {
@@ -243,13 +283,9 @@ fn detect_gog(out: &mut Vec<GameRoot>) {
             "client",
         ) {
             let path = PathBuf::from(client);
-            push_root(
-                out,
-                path.parent().unwrap_or(&path),
-                RootStore::GogGalaxy,
-                RootSource::Automatic,
-            );
-            break;
+            if push_root(out, path.parent().unwrap_or(&path), RootStore::GogGalaxy, RootSource::Automatic) {
+                break;
+            }
         }
     }
 }
@@ -259,22 +295,25 @@ fn detect_steam_libraries(steam: &Path, out: &mut Vec<GameRoot>) {
     let Ok(text) = fs::read_to_string(file) else {
         return;
     };
-    for line in text.lines() {
-        let line = line.trim();
-        if !line.starts_with("\"path\"") {
-            continue;
-        }
-        let quoted: Vec<&str> = line.split('"').collect();
-        if quoted.len() >= 4 {
-            let path = quoted[3].replace(r"\\", r"\");
-            push_root(
-                out,
-                Path::new(&path),
-                RootStore::Steam,
-                RootSource::Automatic,
-            );
-        }
+    for path in parse_library_paths(&text) {
+        push_root(out, Path::new(&path), RootStore::Steam, RootSource::Automatic);
     }
+}
+
+/// The library folders a Steam `libraryfolders.vdf` lists (`"path"` keys,
+/// with Valve's escaped backslashes undone).
+fn parse_library_paths(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if !line.starts_with("\"path\"") {
+                return None;
+            }
+            let quoted: Vec<&str> = line.split('"').collect();
+            (quoted.len() >= 4).then(|| quoted[3].replace(r"\\", r"\"))
+        })
+        .filter(|path| !path.trim().is_empty())
+        .collect()
 }
 
 fn registry_string(hive: winreg::HKEY, flags: u32, key: &str, value: &str) -> Option<String> {
@@ -286,9 +325,10 @@ fn registry_string(hive: winreg::HKEY, flags: u32, key: &str, value: &str) -> Op
         .filter(|value| !value.trim().is_empty())
 }
 
-fn push_root(out: &mut Vec<GameRoot>, path: &Path, store: RootStore, source: RootSource) {
+/// Adds `path` as a root when it is an existing folder; answers whether it was.
+fn push_root(out: &mut Vec<GameRoot>, path: &Path, store: RootStore, source: RootSource) -> bool {
     if !path.is_dir() {
-        return;
+        return false;
     }
     let path = trim_separators(&path.to_string_lossy());
     let id = stable_id(store.ludusavi_name(), &path);
@@ -298,6 +338,7 @@ fn push_root(out: &mut Vec<GameRoot>, path: &Path, store: RootStore, source: Roo
         store,
         source,
     });
+    true
 }
 
 /// Drops trailing separators, except the one that makes `D:\` a drive root:
@@ -314,6 +355,47 @@ fn trim_separators(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steam_libraries_are_read_with_their_backslashes_undone() {
+        let vdf = r#"
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"C:\\Program Files (x86)\\Steam"
+		"label"		""
+		"apps"
+		{
+			"228980"		"1234"
+		}
+	}
+	"1"
+	{
+		"path"		"D:\\Games [SSD]\\SteamLibrary"
+	}
+}
+"#;
+        assert_eq!(parse_library_paths(vdf), [r"C:\Program Files (x86)\Steam", r"D:\Games [SSD]\SteamLibrary"]);
+        assert!(parse_library_paths("\"path\"\t\t\"\"").is_empty());
+    }
+
+    #[test]
+    fn a_launcher_folder_that_is_gone_gives_way_to_the_next() {
+        let root = std::env::temp_dir().join(format!("myle-roots-{}", std::process::id()));
+        let present = root.join("present");
+        fs::create_dir_all(&present).unwrap();
+        assert_eq!(first_existing([root.join("gone"), present.clone()]), Some(present));
+        assert_eq!(first_existing([root.join("gone")]), None);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ea_games_are_found_where_the_ea_app_installs_them() {
+        let ini = "user.locale=en_US\nuser.downloadinplacedir=E:\\EA Games\\\nother=1";
+        assert_eq!(ea_install_dirs(ini), [r"E:\EA Games"]);
+        assert!(ea_install_dirs("user.downloadinplacedir=").is_empty());
+    }
 
     #[test]
     fn a_drive_root_keeps_its_backslash() {

@@ -469,6 +469,9 @@ pub(crate) struct Edit {
     pub rel: String,
     pub before: Vec<u8>,
     pub after: Vec<u8>,
+    /// The file did not exist before (a new notes file): undoing removes it
+    /// rather than leaving an empty file behind.
+    pub created: bool,
 }
 
 /// The edits that set every (not skipped) version file of the project in
@@ -516,6 +519,7 @@ pub(crate) fn plan(dir: &Path, versions: &Versions, new: &str) -> Result<Vec<Edi
                             path: lock.clone(),
                             before: lock_before.clone(),
                             after: updated.into_bytes(),
+                            created: false,
                         }),
                     }
                     break;
@@ -528,6 +532,7 @@ pub(crate) fn plan(dir: &Path, versions: &Versions, new: &str) -> Result<Vec<Edi
                 path,
                 before,
                 after,
+                created: false,
             });
         }
     }
@@ -548,7 +553,11 @@ pub(crate) fn apply(edits: &[Edit]) -> Result<(), String> {
 /// Puts the files of `edits` back as they were.
 pub(crate) fn undo(edits: &[Edit]) {
     for edit in edits {
-        let _ = std::fs::write(&edit.path, &edit.before);
+        if edit.created {
+            let _ = std::fs::remove_file(&edit.path);
+        } else {
+            let _ = std::fs::write(&edit.path, &edit.before);
+        }
     }
 }
 
@@ -730,5 +739,18 @@ mod tests {
         assert!(bump("abc", Bump::Patch).is_err());
         assert_eq!(check_new_version("v2.0.0-rc.1").unwrap(), "2.0.0-rc.1");
         assert!(check_new_version("2.0").is_err());
+    }
+
+    #[test]
+    fn undoing_a_file_the_release_made_removes_it() {
+        let dir = temp("created");
+        let notes = dir.join("docs").join("9.0.0.md");
+        std::fs::create_dir_all(notes.parent().unwrap()).unwrap();
+        let edits = vec![Edit { path: notes.clone(), rel: "docs/9.0.0.md".into(), before: Vec::new(), after: b"notes\n".to_vec(), created: true }];
+        apply(&edits).unwrap();
+        assert!(notes.exists());
+        undo(&edits);
+        assert!(!notes.exists(), "no empty notes file is left to be committed by the next release");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

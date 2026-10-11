@@ -15,6 +15,7 @@ pub(crate) mod compare;
 mod detect;
 mod engine;
 mod gitindex;
+pub(crate) mod incremental;
 mod naming;
 mod rules;
 mod state;

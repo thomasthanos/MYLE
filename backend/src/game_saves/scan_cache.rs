@@ -113,6 +113,8 @@ mod tests {
             error: None,
             snapshots: Vec::new(),
             steam_id: None,
+            unmapped_paths: Vec::new(),
+            suggested_target: None,
         }
     }
 

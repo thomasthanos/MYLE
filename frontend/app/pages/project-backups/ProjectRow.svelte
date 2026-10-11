@@ -1,11 +1,13 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
   import Archive from "@lucide/svelte/icons/archive";
+  import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import Clock from "@lucide/svelte/icons/clock";
+  import CloudOff from "@lucide/svelte/icons/cloud-off";
   import CloudUpload from "@lucide/svelte/icons/cloud-upload";
   import FolderCode from "@lucide/svelte/icons/folder-code";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -30,6 +32,9 @@
   const change = $derived(pb.changes[project.id]);
   const checkingNow = $derived(pb.checking.includes(project.id));
   const changeCount = $derived(change ? change.added + change.modified + change.deleted : 0);
+  /** "Changes detected" says more than an age-based "Up to date": it wins. */
+  const changed = $derived(change?.state === "changed");
+  const showHealth = $derived(!(changed && (health === "ok" || health === "due")));
 
   /** The badge next to the name: what happened, not just a colour. */
   const badge = $derived.by(() => {
@@ -56,7 +61,7 @@
     <div class="project-text">
       <div class="title-row">
         <strong>{project.name}</strong>
-        <span class="tag {badge.tone}" title={badge.title}><badge.icon size={11} /> {badge.label}</span>
+        {#if showHealth}<span class="tag {badge.tone}" title={badge.title}><badge.icon size={11} /> {badge.label}</span>{/if}
         {#if checkingNow && !change}
           <span class="tag quiet"><LoaderCircle size={11} class="spin" /> Checking…</span>
         {:else if change?.state === "changed"}
@@ -64,14 +69,24 @@
             <CircleAlert size={11} /> Changes detected · {changeCount}<ChevronDown size={11} class={filesOpen ? "flip" : ""} />
           </button>
         {:else if change?.state === "upToDate"}
-          <span class="tag ok" title={`Same as ${change.backupId ?? "the last backup"}, checked ${pb.ago(change.checkedAt)}`}><CircleCheck size={11} /> No changes</span>
+          <span class="tag ok" title={`Same as ${change.backupId ?? "the last backup"}, checked ${pb.ago(change.checkedAt)}${change.unreadable ? `. ${change.unreadable} open ${change.unreadable === 1 ? "file" : "files"} could not be read to compare.` : ""}`}>
+            <CircleCheck size={11} /> No changes{change.unreadable ? ` · ${change.unreadable} in use` : ""}
+          </span>
+        {:else if change?.state === "unreachable"}
+          <span class="tag quiet" title={change.message ?? "The backups folder can't be reached now."}><CloudOff size={11} /> Backups folder not reachable</span>
+        {:else if change?.state === "error"}
+          <span class="tag quiet" title={change.message ?? "The folder could not be checked."}><CircleAlert size={11} /> Couldn't check</span>
         {/if}
         <span class="tag" title={`Backups are named ${project.appName}_D<day>_V<number>.zip`}>{project.appName}</span>
         {#if project.closeApp}<span class="tag" title="Closed before each backup">Closes {project.closeApp}</span>{/if}
       </div>
       <span class="source selectable" title={project.sourcePath}>{project.sourcePath || "No folder chosen"}</span>
       <small>
-        {#if project.lastBackup}
+        {#if project.lastBackup?.kind === "incremental"}
+          Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · Incremental
+          +{project.lastBackup.fileCount.toLocaleString()} {project.lastBackup.fileCount === 1 ? "file" : "files"} (on {project.lastBackup.base ?? "the last full backup"}) ·
+          {formatBytes(project.lastBackup.zipSize)}
+        {:else if project.lastBackup}
           Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · {project.lastBackup.name} ·
           {formatBytes(project.lastBackup.zipSize)} · {project.lastBackup.fileCount.toLocaleString()} files
         {:else}
@@ -103,6 +118,9 @@
         {/each}
       </ul>
       {#if changeCount > change.files.length}<p class="muted">…and {changeCount - change.files.length} more</p>{/if}
+      <div class="changes-actions">
+        <button class="btn small primary" disabled={pb.locked} title="Saves only the changed files when the last full backup allows it, else a full backup" onclick={() => pb.backup([project.id], true)}><CloudUpload size={13} /> Back up changes</button>
+      </div>
     </div>
   {/if}
 
@@ -121,6 +139,9 @@
           </button>
           <button class="icon-btn" title="Read the list again" aria-label="Read the list again" onclick={() => pb.loadBackups(project.id)}>
             <RefreshCw size={13} class={pb.backupsLoading === project.id ? "spin" : ""} />
+          </button>
+          <button class="btn small" disabled={pb.locked} title="Puts the project as last backed up (with its increments) into an empty folder, checking every file" onclick={() => pb.restore(project)}>
+            {#if pb.busy === "restore"}<LoaderCircle size={13} class="spin" /> Restoring…{:else}<ArchiveRestore size={13} /> Restore to folder…{/if}
           </button>
           <button class="icon-btn" title="Open in Explorer" aria-label="Open the project's backups folder" onclick={() => pb.open("backups", project.id)}><FolderOpen size={14} /></button>
         </div>
@@ -181,6 +202,7 @@
   .backup-meta.right { margin-left: auto; font-variant-numeric: tabular-nums; }
   .changes { display: grid; gap: 4px; margin-top: 8px; padding: 8px 10px; border-top: 1px solid var(--btn-border); }
   .changes ul { display: grid; max-height: 220px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: 11.5px; }
+  .changes-actions { display: flex; justify-content: flex-end; padding-top: 4px; }
   .changes li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; padding: 1px 0; }
   .changes li span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .changes small { color: var(--text-3); }

@@ -157,6 +157,20 @@ pub struct Resume {
     /// The tag still has to be made and pushed (on `commit`).
     pub tag: Option<String>,
     pub commit: Option<String>,
+    /// The release as it was asked for, so resuming it is the same release:
+    /// built by GitHub Actions or here, its title and notes, and what it builds.
+    #[serde(default)]
+    pub mode: Option<Mode>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub notes_in_file: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -641,13 +655,56 @@ pub(crate) async fn run(
         ..ReleaseOutcome::default()
     };
 
-    // 0. The chosen branch, merged in first.
-    if let Some(branch) = request.merge_branch.as_deref().filter(|b| !b.is_empty())
-        && let Err(problem) = merge_branch(&run, &entry, branch).await
-    {
-        outcome.problem = Some(problem);
-        return outcome;
+    // 0. The chosen branch, merged into the default branch first. Until the
+    // release commit is on GitHub, any failure puts the branch back where it
+    // was (`reset --keep`, which never touches uncommitted work).
+    let merging = request.merge_branch.clone().filter(|b| !b.is_empty());
+    let mut before_merge = None;
+    if let Some(branch) = merging.as_deref() {
+        match merge_branch(&run, &entry, branch).await {
+            Ok(head) => before_merge = Some(head),
+            Err(problem) => {
+                outcome.problem = Some(problem);
+                return outcome;
+            }
+        }
     }
+    let pushed = AtomicBool::new(false);
+    let mut outcome = release_merged(&run, &request, &entry, build_command, &version, &tag, outcome, &pushed).await;
+    if let (Some(head), false) = (before_merge.as_deref(), pushed.load(Ordering::Relaxed)) {
+        outcome.rolled_back |= undo_merge(&run, &entry, head).await;
+    }
+    // The merged branch goes only once the release is out: never while its
+    // workflow may still fail, and never with commits that are not merged.
+    if outcome.ok
+        && request.delete_merged_branch
+        && let Some(branch) = merging.as_deref()
+    {
+        delete_merged_branch(&run, &entry, branch).await;
+    }
+    outcome
+}
+
+/// The release after the merge: checks, version files, build, commit, push,
+/// tag, release. `pushed` says when the release commit reached GitHub.
+#[allow(clippy::too_many_arguments)]
+async fn release_merged(
+    run: &Session<'_>,
+    request: &ReleaseRequest,
+    entry: &Entry,
+    build_command: Option<String>,
+    version: &str,
+    tag: &str,
+    mut outcome: ReleaseOutcome,
+    release_pushed: &AtomicBool,
+) -> ReleaseOutcome {
+    let on_event = run.on_event;
+    let run = Session {
+        on_event,
+        cancel: run.cancel.clone(),
+    };
+    let cancel = run.cancel.clone();
+    let (request, entry, version, tag) = (request.clone(), entry.clone(), version.to_string(), tag.to_string());
 
     // 1. Checks.
     run.step("check", StepState::Running, None);
@@ -718,6 +775,7 @@ pub(crate) async fn run(
             return outcome;
         }
         let path = entry.root.join(&rel);
+        let created = !path.exists();
         let before = std::fs::read(&path).unwrap_or_default();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -727,6 +785,7 @@ pub(crate) async fn run(
             rel: rel.clone(),
             before,
             after: format!("{}\n", request.notes.trim()).into_bytes(),
+            created,
         });
     }
     let notes_rel: Option<String> = request
@@ -998,50 +1057,7 @@ pub(crate) async fn run(
         return outcome;
     }
     run.step("push", StepState::Done, None);
-
-    // 5.1 If a branch was merged in and delete was requested, clean it up.
-    if request.delete_merged_branch
-        && let Some(branch) = request.merge_branch.as_deref().filter(|b| !b.is_empty())
-    {
-        if is_protected_branch(branch) {
-            run.log(format!("Branch '{branch}' is protected and will not be deleted."));
-        } else {
-            run.log(format!("Cleaning up merged branch '{branch}'…"));
-            if let Ok(remote) = ops::require_remote(&entry.root).await {
-                // Delete from remote (origin)
-                match ops::network(
-                    &entry.root,
-                    &["push", &remote.name, "--delete", branch],
-                    &remote,
-                    false,
-                    "push",
-                    cancel.clone(),
-                    &on_line,
-                )
-                .await
-                {
-                    Ok((_, outcome)) if outcome.ok => {
-                        run.log(format!("Deleted remote branch '{branch}' from {}.", remote.name));
-                    }
-                    Ok((_, outcome)) => {
-                        if let Some(p) = outcome.problem {
-                            run.log(format!("Notice: Could not delete remote branch '{branch}': {}", p.message));
-                        }
-                    }
-                    Err(err) => {
-                        run.log(format!("Notice: Could not delete remote branch '{branch}': {err}"));
-                    }
-                }
-                // Delete local branch if it exists
-                let del_local = git::run(&entry.root, &["branch", "-D", branch]).await;
-                if del_local.is_ok_and(|o| o.ok()) {
-                    run.log(format!("Deleted local branch '{branch}'."));
-                }
-                // Prune tracking branches
-                let _ = ops::fetch(&entry.root, true, cancel.clone()).await;
-            }
-        }
-    }
+    release_pushed.store(true, Ordering::Relaxed);
 
     // 6. Tag.
     finish_from_tag(
@@ -1088,6 +1104,12 @@ async fn finish_from_tag(
         publish: !request.draft,
         make_latest: request.make_latest,
         release_id: None,
+        mode: Some(request.mode),
+        title: request.title.clone(),
+        notes: request.notes.clone(),
+        prerelease: request.prerelease,
+        target: request.target.clone(),
+        notes_in_file,
     };
     run.step("tag", StepState::Running, Some(tag.to_string()));
     let exists = git::run(
@@ -1155,6 +1177,18 @@ async fn finish_from_tag(
             });
         }
     };
+    // Runs this commit already has (an earlier attempt of this version on the
+    // same commit): never taken for the ones this tag push starts.
+    let earlier: Vec<u64> = if request.mode == Mode::Actions {
+        github::runs_for_commit(token, owner, repo, commit)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.id)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let pushed = ops::push_tag(&entry.root, tag, run.cancel.clone(), &on_line).await;
     let problem = match pushed {
         Ok(result) if result.ok => None,
@@ -1204,9 +1238,7 @@ async fn finish_from_tag(
                     let problem = problem_of(error);
                     run.step("release", StepState::Failed, Some(problem.message.clone()));
                     outcome.problem = Some(problem);
-                    let mut resume = resume_tag(&assets);
-                    resume.tag = None;
-                    outcome.resume = Some(resume);
+                    outcome.resume = Some(resume_tag(&assets));
                     return outcome;
                 }
             };
@@ -1218,23 +1250,15 @@ async fn finish_from_tag(
                 make_latest: request.make_latest,
                 tag: None,
                 commit: None,
+                ..resume_tag(&assets)
             };
             outcome.release = Some(release);
             finish_release(run, token, owner, repo, resume, outcome).await
         }
         Mode::Actions => {
             run.step("workflow", StepState::Running, None);
-            let workflow = tag_workflow(entry, tag).await;
-            let result = watch(
-                run,
-                token,
-                owner,
-                repo,
-                commit,
-                Some(tag),
-                workflow.as_ref(),
-            )
-            .await;
+            let workflows = tag_workflows(entry, tag).await;
+            let result = watch(run, token, owner, repo, commit, Some(tag), &workflows, &earlier).await;
             match result {
                 Ok(done) => {
                     let success = done.conclusion.as_deref() == Some("success");
@@ -1285,11 +1309,12 @@ async fn finish_from_tag(
                         },
                         Some(problem.message.clone()),
                     );
-                    // The tag is pushed: the release goes on on GitHub.
-                    outcome.ok = stopped;
-                    if !stopped {
-                        outcome.problem = Some(problem);
-                    }
+                    // Stopped or lost from sight: the release is not known to
+                    // be out, so it is never reported as published. The tag
+                    // is pushed, so "Follow the run" can pick it up again.
+                    outcome.ok = false;
+                    outcome.cancelled = stopped;
+                    outcome.problem = Some(problem);
                     outcome
                 }
             }
@@ -1457,10 +1482,13 @@ pub(crate) fn pick_run(
     runs: Vec<Run>,
     tag: Option<&str>,
     workflow: Option<&Workflow>,
+    earlier: &[u64],
 ) -> Option<Run> {
+    // `earlier`: runs this commit had before the tag was pushed (an earlier
+    // attempt of the same version), never the ones this push started.
     let mut candidates = runs
         .into_iter()
-        .filter(|r| r.event == "push")
+        .filter(|r| r.event == "push" && !earlier.contains(&r.id))
         .filter(|r| tag.is_none_or(|tag| r.head_branch.as_deref() == Some(tag)));
     match workflow {
         None => candidates.next(),
@@ -1474,18 +1502,20 @@ pub(crate) fn pick_run(
     }
 }
 
-/// The repository's workflow a push of `tag` starts.
-async fn tag_workflow(entry: &Entry, tag: &str) -> Option<Workflow> {
+/// The repository's workflows a push of `tag` starts, the release one first.
+async fn tag_workflows(entry: &Entry, tag: &str) -> Vec<Workflow> {
     let root = entry.root.clone();
-    let workflows = super::blocking(move || project::release_workflows(&root))
-        .await
-        .ok()?;
-    project::workflow_for_tag(&workflows, tag).cloned()
+    let Ok(workflows) = super::blocking(move || project::release_workflows(&root)).await else {
+        return Vec::new();
+    };
+    project::workflows_for_tag(&workflows, tag).into_iter().cloned().collect()
 }
 
-/// Merges `origin/<branch>` into the checked-out branch. A conflict is
-/// undone (`merge --abort`) and reported with the files in conflict.
-async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<(), Problem> {
+/// Merges `origin/<branch>` into the checked-out branch, which must be the
+/// repository's default branch (main). A conflict is undone (`merge --abort`)
+/// and reported with the files in conflict. Answers the commit the branch was
+/// on before, for `undo_merge`.
+async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<String, Problem> {
     run.step("merge", StepState::Running, Some(branch.to_string()));
     let fail = |message: String| {
         run.step("merge", StepState::Failed, Some(message.clone()));
@@ -1495,6 +1525,25 @@ async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<
         return Err(fail(format!("{branch:?} is not a branch name.")));
     }
     let remote = ops::require_remote(&entry.root).await.map_err(fail)?;
+    // Into the default branch only: merging a feature into whatever happens
+    // to be checked out is never what "merge before release" means.
+    let current = git::read(&entry.root, &["rev-parse", "--abbrev-ref", "HEAD"]).await.unwrap_or_default();
+    let current = current.trim();
+    let default = default_branch(&entry.root, &remote.name).await;
+    if current == branch {
+        return Err(fail(format!("{branch} is the branch being released; choose the feature branch to merge into it.")));
+    }
+    if let Some(default) = default.as_deref()
+        && current != default
+    {
+        return Err(fail(format!(
+            "The release merges {branch} into {default}, but {current} is checked out. Switch to {default}, then release again."
+        )));
+    }
+    let before = git::read(&entry.root, &["rev-parse", "HEAD"])
+        .await
+        .map(|head| head.trim().to_string())
+        .map_err(|error| fail(format!("The current commit could not be read: {error}")))?;
     match ops::fetch(&entry.root, false, run.cancel.clone()).await {
         Ok(result) if result.ok => {}
         Ok(result) => {
@@ -1518,7 +1567,7 @@ async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<
     if merged.ok() {
         run.log(merged.all());
         run.step("merge", StepState::Done, Some(format!("{branch} merged")));
-        return Ok(());
+        return Ok(before);
     }
     let conflicts = git::read(&entry.root, &["diff", "--name-only", "--diff-filter=U"])
         .await
@@ -1537,8 +1586,91 @@ async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<
     }))
 }
 
+/// The remote's default branch (`main` mostly): what `<remote>/HEAD` names,
+/// else `main` or `master` when the repository has it.
+async fn default_branch(root: &Path, remote: &str) -> Option<String> {
+    if let Ok(head) = git::read(root, &["symbolic-ref", "--short", &format!("refs/remotes/{remote}/HEAD")]).await
+        && let Some(name) = head.trim().strip_prefix(&format!("{remote}/"))
+        && !name.is_empty()
+    {
+        return Some(name.to_string());
+    }
+    for name in ["main", "master"] {
+        if git::run(root, &["rev-parse", "-q", "--verify", &format!("refs/heads/{name}")]).await.is_ok_and(|o| o.ok()) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Takes back a merge the release made, when the release did not reach
+/// GitHub: the branch goes back to `before`. `--keep` keeps uncommitted work
+/// and refuses rather than overwrite it. Answers whether the branch is back.
+async fn undo_merge(run: &Session<'_>, entry: &Entry, before: &str) -> bool {
+    let head = git::read(&entry.root, &["rev-parse", "HEAD"]).await.unwrap_or_default();
+    if head.trim() == before {
+        return true;
+    }
+    // Only when the merge is still part of the branch (nothing else was done).
+    let contains = git::run(&entry.root, &["merge-base", "--is-ancestor", before, "HEAD"]).await.is_ok_and(|o| o.ok());
+    if !contains {
+        run.log("The merge was not taken back: the branch changed meanwhile.");
+        return false;
+    }
+    match git::run(&entry.root, &["reset", "--keep", before]).await {
+        Ok(output) if output.ok() => {
+            run.log("The merge was taken back: the branch is as it was before the release.");
+            true
+        }
+        Ok(output) => {
+            run.log(format!("The merge could not be taken back ({}). Undo it with: git reset --keep {before}", git::first_error(&output.all())));
+            false
+        }
+        Err(error) => {
+            run.log(format!("The merge could not be taken back ({error}). Undo it with: git reset --keep {before}"));
+            false
+        }
+    }
+}
+
+/// Deletes a merged feature branch after a release that is out: on GitHub,
+/// then here with `branch -d`, which refuses a branch with commits that were
+/// never merged (they would be lost).
+async fn delete_merged_branch(run: &Session<'_>, entry: &Entry, branch: &str) {
+    if is_protected_branch(branch) || !valid_branch(branch) {
+        run.log(format!("Branch '{branch}' is protected and will not be deleted."));
+        return;
+    }
+    let Ok(remote) = ops::require_remote(&entry.root).await else {
+        return;
+    };
+    run.log(format!("Cleaning up merged branch '{branch}'…"));
+    let on_line = |text: &str, replace: bool| {
+        if !replace {
+            (run.on_event)(ReleaseEvent::Log { text: text.to_string() });
+        }
+    };
+    match ops::network(&entry.root, &["push", &remote.name, "--delete", branch], &remote, false, "push", run.cancel.clone(), &on_line).await {
+        Ok((_, outcome)) if outcome.ok => run.log(format!("Deleted remote branch '{branch}' from {}.", remote.name)),
+        Ok((_, outcome)) => {
+            if let Some(problem) = outcome.problem {
+                run.log(format!("Notice: Could not delete remote branch '{branch}': {}", problem.message));
+            }
+        }
+        Err(error) => run.log(format!("Notice: Could not delete remote branch '{branch}': {error}")),
+    }
+    let exists = git::run(&entry.root, &["rev-parse", "-q", "--verify", &format!("refs/heads/{branch}")]).await.is_ok_and(|o| o.ok());
+    if exists {
+        match git::run(&entry.root, &["branch", "-d", branch]).await {
+            Ok(output) if output.ok() => run.log(format!("Deleted local branch '{branch}'.")),
+            _ => run.log(format!("Kept local branch '{branch}': it has commits that are not merged.")),
+        }
+    }
+    let _ = ops::fetch(&entry.root, true, run.cancel.clone()).await;
+}
+
 /// What went wrong in a failed run: per failed job, the failed step, the
-/// error annotations and the end of the job's log.
+/// error annotations and the part of the job's log that shows the error.
 async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Job]) -> Vec<FailedJob> {
     let mut out = Vec::new();
     for job in jobs.iter().filter(|j| matches!(j.conclusion.as_deref(), Some("failure" | "timed_out" | "startup_failure"))) {
@@ -1548,15 +1680,24 @@ async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Jo
             .find(|s| s.conclusion.as_deref() == Some("failure"))
             .map(|s| s.name.clone());
         let errors = github::job_annotations(token, owner, repo, job.id).await.unwrap_or_default();
-        let log_tail = github::job_log(token, owner, repo, job.id)
-            .await
-            .map(|log| log_tail(&log, 40))
-            .unwrap_or_default();
+        // A log asked for right as the job ends may not be there yet.
+        let mut log = String::new();
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            if let Ok(text) = github::job_log(token, owner, repo, job.id).await
+                && !text.trim().is_empty()
+            {
+                log = text;
+                break;
+            }
+        }
         out.push(FailedJob {
             job: job.name.clone(),
             step,
             errors,
-            log_tail,
+            log_tail: log_excerpt(&log),
             url: job.html_url.clone(),
         });
         if out.len() >= 4 {
@@ -1566,17 +1707,35 @@ async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Jo
     out
 }
 
-/// The last `lines` lines of a job log, with GitHub's timestamps cut off.
-pub(crate) fn log_tail(log: &str, lines: usize) -> String {
-    let all: Vec<&str> = log.lines().collect();
-    all[all.len().saturating_sub(lines)..]
+/// The part of a job log that shows why it failed: from the start of the
+/// step that failed (or 60 lines before) to the last error, without GitHub's
+/// timestamps and group markers, and without the clean-up that follows.
+pub(crate) fn log_excerpt(log: &str) -> String {
+    let lines: Vec<&str> = log.lines().map(without_stamp).collect();
+    let Some(error) = lines.iter().rposition(|line| line.starts_with("##[error]")) else {
+        // No error marker: the end of the log, before GitHub's clean-up.
+        let end = lines.iter().position(|line| line.trim() == "Post job cleanup.").unwrap_or(lines.len());
+        return lines[end.saturating_sub(40)..end].join("\n");
+    };
+    let floor = error.saturating_sub(60);
+    let start = lines[floor..=error]
         .iter()
-        .map(|line| match line.split_once(' ') {
-            Some((stamp, rest)) if stamp.len() >= 20 && stamp.as_bytes()[4] == b'-' && stamp.ends_with('Z') => rest,
-            _ => line,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .rposition(|line| line.starts_with("##[group]Run "))
+        .map_or(floor, |at| floor + at);
+    let kept: Vec<&str> = lines[start..=error]
+        .iter()
+        .filter(|line| !line.starts_with("##[endgroup]"))
+        .map(|line| line.strip_prefix("##[group]").unwrap_or(line))
+        .collect();
+    kept[kept.len().saturating_sub(120)..].join("\n")
+}
+
+/// A log line without GitHub's leading timestamp.
+fn without_stamp(line: &str) -> &str {
+    match line.split_once(' ') {
+        Some((stamp, rest)) if stamp.len() >= 20 && stamp.as_bytes()[4] == b'-' && stamp.ends_with('Z') => rest,
+        _ => line,
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1589,8 +1748,65 @@ pub struct FailedJob {
     url: Option<String>,
 }
 
-/// Follows the workflow run a push of `commit` (and `tag`) started, to its
-/// end. Cancel stops watching, not the run.
+/// How many GitHub requests in a row may fail before watching gives up and
+/// says why (a revoked token, the rate limit, no network).
+const WATCH_FAILURES: u32 = 8;
+/// How long a release's workflows are followed at most.
+const WATCH_LIMIT: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Keeps count of GitHub requests that failed in a row, waiting longer after
+/// each (and as long as GitHub asks for a rate limit).
+struct Backoff {
+    failures: u32,
+    started: Instant,
+}
+
+impl Backoff {
+    fn new() -> Self {
+        Self { failures: 0, started: Instant::now() }
+    }
+
+    /// The value, or (after a pause) `None` to try again; the error itself
+    /// once too many requests failed in a row.
+    async fn check<T>(&mut self, run: &Session<'_>, result: Result<T, String>) -> Result<Option<T>, String> {
+        match result {
+            Ok(value) => {
+                self.failures = 0;
+                Ok(Some(value))
+            }
+            Err(error) => {
+                self.failures += 1;
+                if error_is_final(&error) || self.failures >= WATCH_FAILURES {
+                    return Err(error);
+                }
+                let wait = if error.contains("RATE_LIMITED") { 60 } else { 5u64 << self.failures.min(4) };
+                run.log(format!("GitHub did not answer ({}); trying again in {wait} s.", problem_of(error.clone()).message));
+                sleep_unless_cancelled(&run.cancel, Duration::from_secs(wait)).await;
+                Ok(None)
+            }
+        }
+    }
+
+    fn out_of_time(&self) -> bool {
+        self.started.elapsed() > WATCH_LIMIT
+    }
+}
+
+fn stopped() -> String {
+    Problem::new(
+        "CANCELLED",
+        "Stopped following the workflow. It goes on on GitHub unless it was cancelled there; Follow the run picks it up again.",
+    )
+    .into()
+}
+
+/// Follows the workflow runs a push of `commit` (and `tag`) started, to their
+/// end: the release workflow first (`workflows[0]`), then every other the tag
+/// started, so a release is never called done while one of them still runs.
+/// Answers the first run that did not succeed, or the release run. Cancel stops
+/// watching; it never cancels a run on GitHub (closing MYLE must not stop a
+/// release): that is a separate, explicit action.
+#[allow(clippy::too_many_arguments)]
 async fn watch(
     run: &Session<'_>,
     token: &str,
@@ -1598,38 +1814,85 @@ async fn watch(
     repo: &str,
     commit: &str,
     tag: Option<&str>,
-    workflow: Option<&Workflow>,
+    workflows: &[Workflow],
+    earlier: &[u64],
 ) -> Result<Run, String> {
-    let started = Instant::now();
-    let found = loop {
-        if run.cancelled() {
-            return Err(Problem::new(
-                "CANCELLED",
-                "Cancelled before the workflow started on GitHub.",
-            )
-            .into());
-        }
-        let runs = github::runs_for_commit(token, owner, repo, commit)
-            .await
-            .unwrap_or_default();
-        if let Some(found) = pick_run(runs, tag, workflow) {
-            break found;
-        }
-        if started.elapsed() > Duration::from_secs(180) {
-            return Err(Problem::new("NO_RUN", "GitHub didn't start a workflow for the tag within 3 minutes. Check the repository's Actions tab.").into());
-        }
-        (run.on_event)(ReleaseEvent::Workflow {
-            run: None,
-            jobs: Vec::new(),
-        });
-        sleep_unless_cancelled(&run.cancel, Duration::from_secs(5)).await;
+    let mut backoff = Backoff::new();
+    let first = discover(run, token, owner, repo, commit, tag, workflows.first(), earlier, &mut backoff, true).await?;
+    let Some(first) = first else {
+        return Err(Problem::new("NO_RUN", "GitHub didn't start a workflow for the tag within 3 minutes. Check the repository's Actions tab.").into());
     };
-    let mut current = found;
-    let mut reported: Vec<u64> = Vec::new();
+    let main = follow(run, token, owner, repo, first, &mut backoff).await?;
+    if !succeeded(&main) {
+        return Ok(main);
+    }
+    for other in workflows.iter().skip(1) {
+        let Some(found) = discover(run, token, owner, repo, commit, tag, Some(other), earlier, &mut backoff, false).await? else {
+            run.log(format!("{} did not start for this tag.", other.name.as_deref().unwrap_or(&other.file)));
+            continue;
+        };
+        let done = follow(run, token, owner, repo, found, &mut backoff).await?;
+        if !succeeded(&done) {
+            return Ok(done);
+        }
+    }
+    Ok(main)
+}
+
+fn succeeded(run: &Run) -> bool {
+    matches!(run.conclusion.as_deref(), Some("success" | "skipped" | "neutral"))
+}
+
+/// Waits for the run of `workflow` that the push started (3 minutes for the
+/// release workflow, `main`; less for the others, which start with it).
+#[allow(clippy::too_many_arguments)]
+async fn discover(
+    run: &Session<'_>,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    commit: &str,
+    tag: Option<&str>,
+    workflow: Option<&Workflow>,
+    earlier: &[u64],
+    backoff: &mut Backoff,
+    main: bool,
+) -> Result<Option<Run>, String> {
+    let started = Instant::now();
+    let limit = Duration::from_secs(if main { 180 } else { 60 });
     loop {
-        let jobs = github::run_jobs(token, owner, repo, current.id)
-            .await
-            .unwrap_or_default();
+        if run.cancelled() {
+            return Err(stopped());
+        }
+        if let Some(runs) = backoff.check(run, github::runs_for_commit(token, owner, repo, commit).await).await?
+            && let Some(found) = pick_run(runs, tag, workflow, earlier)
+        {
+            return Ok(Some(found));
+        }
+        if started.elapsed() > limit {
+            return Ok(None);
+        }
+        if main {
+            (run.on_event)(ReleaseEvent::Workflow { run: None, jobs: Vec::new() });
+        }
+        sleep_unless_cancelled(&run.cancel, Duration::from_secs(5)).await;
+    }
+}
+
+/// Follows one run to its end, telling the page each job and step, and what
+/// failed as soon as a job fails.
+async fn follow(
+    run: &Session<'_>,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    mut current: Run,
+    backoff: &mut Backoff,
+) -> Result<Run, String> {
+    let mut reported: Vec<u64> = Vec::new();
+    let mut waiting_said = false;
+    loop {
+        let jobs = backoff.check(run, github::run_jobs(token, owner, repo, current.id).await).await?.unwrap_or_default();
         // A job that failed while others still run: told right away.
         let failed_now: Vec<u64> = jobs
             .iter()
@@ -1639,30 +1902,38 @@ async fn watch(
         if failed_now.iter().any(|id| !reported.contains(id)) && current.status.as_deref() != Some("completed") {
             reported.extend(failed_now.iter().copied());
             let failed = failure_report(token, owner, repo, &jobs).await;
-            (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+            if !failed.is_empty() {
+                (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+            }
+        }
+        if !waiting_said && matches!(current.status.as_deref(), Some("waiting")) {
+            waiting_said = true;
+            run.log("The workflow waits for an approval on GitHub (a protected environment).");
         }
         (run.on_event)(ReleaseEvent::Workflow {
             run: Some(current.clone()),
             jobs,
         });
         if current.status.as_deref() == Some("completed") {
-            if !matches!(current.conclusion.as_deref(), Some("success" | "skipped" | "neutral")) {
+            if !succeeded(&current) {
+                // The jobs once more, so the report is complete; an empty
+                // report is never sent over one already shown.
                 let fresh = github::run_jobs(token, owner, repo, current.id).await.unwrap_or_default();
                 let failed = failure_report(token, owner, repo, &fresh).await;
-                (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+                if !failed.is_empty() {
+                    (run.on_event)(ReleaseEvent::Failure { jobs: failed });
+                }
             }
             return Ok(current);
         }
         if run.cancelled() {
-            let _ = github::cancel_run(token, owner, repo, current.id).await;
-            return Err(Problem::new(
-                "CANCELLED",
-                "Cancelled. The workflow run was stopped on GitHub.",
-            )
-            .into());
+            return Err(stopped());
+        }
+        if backoff.out_of_time() {
+            return Err(Problem::new("WATCH_TIMEOUT", "The workflow has been running for 6 hours; MYLE stopped following it. Open it on GitHub.").into());
         }
         sleep_unless_cancelled(&run.cancel, Duration::from_secs(6)).await;
-        if let Ok(fresh) = github::run(token, owner, repo, current.id).await {
+        if let Some(fresh) = backoff.check(run, github::run(token, owner, repo, current.id).await).await? {
             current = fresh;
         }
     }
@@ -1702,33 +1973,39 @@ pub(crate) async fn resume(
         remote.repo.unwrap_or_default(),
     );
     if let (Some(tag), Some(commit)) = (resume.tag.clone(), resume.commit.clone()) {
-        let request = ReleaseRequest {
-            entry_id: entry.id.clone(),
-            version: tag.trim_start_matches(&entry.tag_prefix).to_string(),
-            mode: Mode::Local,
-            build: false,
-            command: None,
-            include_changes: false,
-            commit_message: None,
-            title: tag.clone(),
-            notes: String::new(),
-            assets: None,
-            draft: !resume.publish,
-            prerelease: false,
-            make_latest: resume.make_latest,
-            notes_file: None,
-            merge_branch: None,
-            delete_merged_branch: false,
-            target: None,
-        };
+        let request = resume_request(&entry, &resume, &tag);
         outcome.tag = tag.clone();
         let assets = resume.pending_assets.iter().map(PathBuf::from).collect();
         return finish_from_tag(
-            &run, &entry, &token, &owner, &repo, &request, &tag, &commit, assets, false, outcome,
+            &run, &entry, &token, &owner, &repo, &request, &tag, &commit, assets, resume.notes_in_file, outcome,
         )
         .await;
     }
     finish_release(&run, &token, &owner, &repo, resume, outcome).await
+}
+
+/// The release a resume finishes: the one that was asked for (an older page
+/// sends no mode: a local release then, as before).
+pub(crate) fn resume_request(entry: &Entry, resume: &Resume, tag: &str) -> ReleaseRequest {
+    ReleaseRequest {
+        entry_id: entry.id.clone(),
+        version: tag.trim_start_matches(&entry.tag_prefix).to_string(),
+        mode: resume.mode.unwrap_or(Mode::Local),
+        build: false,
+        command: None,
+        include_changes: false,
+        commit_message: None,
+        title: if resume.title.trim().is_empty() { tag.to_string() } else { resume.title.clone() },
+        notes: resume.notes.clone(),
+        assets: None,
+        draft: !resume.publish,
+        prerelease: resume.prerelease,
+        make_latest: resume.make_latest,
+        notes_file: None,
+        merge_branch: None,
+        delete_merged_branch: false,
+        target: resume.target.clone(),
+    }
 }
 
 /// Watches the newest workflow run of `commit` on its own (the page asks
@@ -1744,9 +2021,9 @@ pub(crate) async fn watch_commit(
     let token = secrets::token()
         .ok_or_else(|| String::from(Problem::new("AUTH", "Connect your GitHub account first.")))?;
     let remote = ops::require_remote(&entry.root).await?;
-    let workflow = match tag.as_deref() {
-        Some(tag) => tag_workflow(&entry, tag).await,
-        None => None,
+    let workflows = match tag.as_deref() {
+        Some(tag) => tag_workflows(&entry, tag).await,
+        None => Vec::new(),
     };
     watch(
         &run,
@@ -1755,7 +2032,8 @@ pub(crate) async fn watch_commit(
         &remote.repo.unwrap_or_default(),
         &commit,
         tag.as_deref(),
-        workflow.as_ref(),
+        &workflows,
+        &[],
     )
     .await
 }
@@ -1867,7 +2145,7 @@ mod tests {
         assert_eq!(target_line(Some("windows")), Some("Build: windows"));
         assert_eq!(target_line(Some("nope")), None);
         let log = "2026-10-10T09:00:00.1234567Z one\n2026-10-10T09:00:01.1234567Z two\nthree";
-        assert_eq!(log_tail(log, 2), "two\nthree");
+        assert_eq!(log_excerpt(log), "one\ntwo\nthree");
     }
 
     #[test]
@@ -1897,23 +2175,23 @@ mod tests {
             tags: vec!["v*".into()],
         };
         assert_eq!(
-            pick_run(runs(), Some("v9.7.2"), Some(&release)).map(|r| r.id),
+            pick_run(runs(), Some("v9.7.2"), Some(&release), &[]).map(|r| r.id),
             Some(1)
         );
         // Without the workflow, the first run of the tag, as before.
         assert_eq!(
-            pick_run(runs(), Some("v9.7.2"), None).map(|r| r.id),
+            pick_run(runs(), Some("v9.7.2"), None, &[]).map(|r| r.id),
             Some(2)
         );
         // Not started yet: keep waiting.
-        assert!(pick_run(runs()[..2].to_vec(), Some("v9.7.2"), Some(&release)).is_none());
+        assert!(pick_run(runs()[..2].to_vec(), Some("v9.7.2"), Some(&release), &[]).is_none());
         // Runs without a path are matched by name.
         let unnamed = vec![
             run_of(5, "MYLE Passwords", None, "v1.0.0"),
             run_of(4, "Release", None, "v1.0.0"),
         ];
         assert_eq!(
-            pick_run(unnamed, Some("v1.0.0"), Some(&release)).map(|r| r.id),
+            pick_run(unnamed, Some("v1.0.0"), Some(&release), &[]).map(|r| r.id),
             Some(4)
         );
         // A path with a ref.
@@ -1924,7 +2202,7 @@ mod tests {
             "v2.0.0",
         )];
         assert_eq!(
-            pick_run(with_ref, Some("v2.0.0"), Some(&release)).map(|r| r.id),
+            pick_run(with_ref, Some("v2.0.0"), Some(&release), &[]).map(|r| r.id),
             Some(6)
         );
     }
@@ -1941,5 +2219,75 @@ mod tests {
             &root,
             now + CHECK_FETCH_EVERY + Duration::from_secs(1)
         ));
+    }
+
+    #[test]
+    fn the_failure_excerpt_shows_the_failing_step_up_to_its_error() {
+        let log = [
+            "2026-10-10T09:00:00.0000000Z ##[group]Run npm ci",
+            "2026-10-10T09:00:01.0000000Z added 300 packages",
+            "2026-10-10T09:00:02.0000000Z ##[endgroup]",
+            "2026-10-10T09:00:03.0000000Z ##[group]Run npm run check",
+            "2026-10-10T09:00:04.0000000Z src/a.ts(3,1): error TS2304: Cannot find name 'x'.",
+            "2026-10-10T09:00:05.0000000Z ##[error]Process completed with exit code 1.",
+            "2026-10-10T09:00:06.0000000Z Post job cleanup.",
+            "2026-10-10T09:00:07.0000000Z [command]git config --unset-all http.extraheader",
+        ]
+        .join("\n");
+        let excerpt = log_excerpt(&log);
+        assert_eq!(
+            excerpt,
+            "Run npm run check\nsrc/a.ts(3,1): error TS2304: Cannot find name 'x'.\n##[error]Process completed with exit code 1."
+        );
+        assert!(!excerpt.contains("Post job cleanup"));
+        assert!(!excerpt.contains("added 300 packages"));
+    }
+
+    #[test]
+    fn a_log_without_an_error_marker_ends_before_the_clean_up() {
+        let log = "step output\nlast line\nPost job cleanup.\nCleaning up orphan processes";
+        assert_eq!(log_excerpt(log), "step output\nlast line");
+    }
+
+    #[test]
+    fn a_run_from_an_earlier_attempt_on_the_same_commit_is_never_followed() {
+        let run = |id: u64| run_of(id, "Release", Some(".github/workflows/release.yml"), "v9.17.1");
+        assert_eq!(pick_run(vec![run(1)], Some("v9.17.1"), None, &[1]).map(|r| r.id), None);
+        assert_eq!(pick_run(vec![run(2), run(1)], Some("v9.17.1"), None, &[1]).map(|r| r.id), Some(2));
+    }
+
+    #[test]
+    fn this_repositorys_tag_is_followed_through_release_yml_first() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let workflows = project::release_workflows(&root);
+        let started: Vec<&str> = project::workflows_for_tag(&workflows, "v9.17.1").iter().map(|w| w.file.as_str()).collect();
+        assert_eq!(started.first(), Some(&"release.yml"), "the Windows release, not MYLE Passwords");
+        assert!(started.contains(&"mobile.yml"), "the phone builds are followed too");
+        assert_eq!(project::workflow_for_tag(&workflows, "v9.17.1").map(|w| w.file.as_str()), Some("release.yml"));
+    }
+
+    #[test]
+    fn a_resume_is_the_release_that_was_asked_for() {
+        let entry = entry(None, false);
+        let resume = Resume {
+            tag: Some("v2.0.0".into()),
+            commit: Some("abc".into()),
+            publish: true,
+            mode: Some(Mode::Actions),
+            title: "Big release".into(),
+            notes: "Notes".into(),
+            prerelease: true,
+            target: Some("windows".into()),
+            ..Resume::default()
+        };
+        let request = resume_request(&entry, &resume, "v2.0.0");
+        assert_eq!(request.mode, Mode::Actions);
+        assert_eq!(request.title, "Big release");
+        assert_eq!(request.notes, "Notes");
+        assert!(request.prerelease);
+        assert_eq!(request.target.as_deref(), Some("windows"));
+        // What an older page sends back still works (a local release, as before).
+        let old: Resume = serde_json::from_str(r#"{"releaseId":null,"pendingAssets":[],"publish":true,"makeLatest":true,"tag":"v2.0.0","commit":"abc"}"#).unwrap();
+        assert_eq!(resume_request(&entry, &old, "v2.0.0").mode, Mode::Local);
     }
 }

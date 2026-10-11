@@ -212,7 +212,8 @@
     <button class="btn small" onclick={() => void gr.refresh(repoId)}>Check again</button>
   </div>
 {:else}
-  <div class="facts">
+  <!-- The Release tab says all of this in its checks: its room goes to the form. -->
+  <div class="facts" hidden={gr.tab === "release"}>
     {#if !github}
       <span class="fact warn"><CircleAlert size={13} /> No GitHub remote</span>
     {/if}

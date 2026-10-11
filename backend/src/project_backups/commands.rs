@@ -650,7 +650,9 @@ pub async fn project_backups_backup(
     state: State<'_, ProjectBackupsState>,
     project_ids: Vec<String>,
     on_event: Channel<ProjectBackupsEvent>,
+    incremental: Option<bool>,
 ) -> Result<BackupRun, String> {
+    let incremental = incremental.unwrap_or(false);
     let running = state.begin(Job::Backup)?;
     let version = app.package_info().version.to_string();
     let settings = blocking(store::load).await??;
@@ -674,7 +676,7 @@ pub async fn project_backups_backup(
             project_id: project.id.clone(),
             name: project.name.clone(),
         });
-        let result = backup_one(&project, &version, &on_event, &running).await;
+        let result = backup_one(&project, &version, &on_event, &running, incremental).await;
         let (ok, code, error, outcome) = match result {
             Ok(outcome) => (true, None, None, Some(outcome)),
             Err(failure) => (
@@ -709,6 +711,9 @@ pub async fn project_backups_backup(
     }
     let cancelled = running.cancelled();
     drop(running);
+    // What was just backed up is checked again at once (and anything that
+    // changed meanwhile, which waited for the backup to end).
+    super::changes::recheck(results.iter().map(|result| result.project_id.clone()).collect());
     let now = super::naming::unix_millis(std::time::SystemTime::now());
     let finished: Vec<(String, Option<LastBackup>, LastResult)> = results
         .iter()
@@ -718,6 +723,8 @@ pub async fn project_backups_backup(
                 created_at: outcome.created_at,
                 file_count: outcome.file_count,
                 zip_size: outcome.zip_size,
+                kind: (outcome.kind != "full").then(|| outcome.kind.to_string()),
+                base: outcome.base.clone(),
             });
             let attempt = LastResult {
                 at: now,
@@ -759,6 +766,7 @@ async fn backup_one(
     version: &str,
     channel: &Channel<ProjectBackupsEvent>,
     running: &std::sync::Arc<Running>,
+    incremental: bool,
 ) -> Result<BackupOutcome, Failure> {
     if project.source_path.trim().is_empty() || !Path::new(&project.source_path).is_dir() {
         return Err(Failure::SourceMissing);
@@ -783,7 +791,7 @@ async fn backup_one(
         channel.clone(),
         running.clone(),
     );
-    blocking(move || run_one(&job, &backup_root, &version, &channel, &running))
+    blocking(move || run_one(&job, &backup_root, &version, &channel, &running, incremental))
         .await
         .map_err(Failure::Message)?
 }
@@ -794,6 +802,7 @@ fn run_one(
     version: &str,
     channel: &Channel<ProjectBackupsEvent>,
     running: &Running,
+    incremental: bool,
 ) -> Result<BackupOutcome, Failure> {
     let sink = ChannelSink::new(channel, running);
     let settings = store::load().map_err(Failure::Message)?;
@@ -806,15 +815,49 @@ fn run_one(
         app_version: version,
         delays: RETRY_DELAYS,
     };
-    match engine::backup_project(&request, &sink) {
+    // Only what changed when an increment fits, else a full backup.
+    let attempt = |sink: &ChannelSink| -> Result<BackupOutcome, Failure> {
+        if incremental {
+            match super::incremental::backup(&request, sink)? {
+                Ok(outcome) => return Ok(outcome),
+                Err(why) => sink.message(format!("A full backup is made: {why}.")),
+            }
+        }
+        engine::backup_project(&request, sink)
+    };
+    match attempt(&sink) {
         Err(Failure::CloudOffline(path)) => {
             if !bring_online(&path, &sink)? {
                 return Err(Failure::CloudOffline(path));
             }
-            engine::backup_project(&request, &sink)
+            attempt(&sink)
         }
         other => other,
     }
+}
+
+/// Puts the project as last backed up (its newest full backup and the
+/// increments on it) into an empty folder, checking every file it writes.
+#[tauri::command]
+pub async fn project_backups_restore(
+    state: State<'_, ProjectBackupsState>,
+    project_id: String,
+    folder: String,
+) -> Result<super::incremental::Restored, String> {
+    let running = state.begin(Job::Restore)?;
+    blocking(move || {
+        let (_, project, dir) = project_and_dir(&project_id)?;
+        let target = PathBuf::from(folder.trim());
+        if !target.is_absolute() {
+            return Err("Choose the folder to restore into.".to_string());
+        }
+        let source = Path::new(&project.source_path);
+        if !project.source_path.trim().is_empty() && (store::inside(&target, source) || super::walk::same_path(&target, source)) {
+            return Err("Choose a folder outside the project folder: the next backup would take the restored copy too.".into());
+        }
+        super::incremental::restore(&dir, &project.app_name, &target, &|| running.cancelled())
+    })
+    .await?
 }
 
 /// Cancels the running backup (`job` = `backup`) or comparison (`compare`).
@@ -823,6 +866,7 @@ pub fn project_backups_cancel(state: State<'_, ProjectBackupsState>, job: Option
     let job = match job.as_deref() {
         Some("backup") => Some(Job::Backup),
         Some("compare") => Some(Job::Compare),
+        Some("restore") => Some(Job::Restore),
         _ => None,
     };
     state.cancel(job)
@@ -860,22 +904,32 @@ fn project_and_dir(project_id: &str) -> Result<(Settings, Project, PathBuf), Str
     Ok((settings, project, dir))
 }
 
-/// Whether each project's folder differs from its newest backup.
+/// Whether each project's folder differs from its newest backup. A check
+/// that fails answers `error` with the reason, never nothing.
 #[tauri::command]
 pub async fn project_backups_changes(project_ids: Vec<String>, fresh: bool) -> Result<Vec<super::changes::ProjectChanges>, String> {
     blocking(move || {
+        let settings = store::load()?;
         Ok(project_ids
             .iter()
-            .filter_map(|id| super::changes::check(id, fresh).ok())
+            .filter_map(|id| settings.project(id).ok())
+            .map(|project| super::changes::check(&settings, project, fresh))
             .collect())
     })
     .await?
 }
 
-/// (Re)starts watching the project folders for changes.
+/// The latest answer of the background detection for every project.
+#[tauri::command]
+pub async fn project_backups_latest_changes() -> Result<Vec<super::changes::ProjectChanges>, String> {
+    blocking(move || store::load().map(|settings| super::changes::latest(&settings))).await?
+}
+
+/// Starts the background detection of changes, or after the project list
+/// changed, watches the folders again and checks every project.
 #[tauri::command]
 pub async fn project_backups_watch(app: AppHandle) -> Result<(), String> {
-    blocking(move || super::changes::watch(app)).await?
+    super::changes::start(app)
 }
 
 #[tauri::command]

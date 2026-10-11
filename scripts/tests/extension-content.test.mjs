@@ -20,9 +20,12 @@ function unlockWait(context) {
   const start = source.indexOf("  async function carryOnWhenUnlocked(");
   assert.ok(start >= 0);
   const end = source.indexOf("\n  }\n", start);
-  return vm.runInNewContext(`(${source.slice(start, end + 4).trim()})`, {
-    prompted: "request", UNLOCK_WAIT: 180, problems: {}, debug() {}, ...context,
+  const scope = vm.createContext({
+    prompted: "request", promptToken: {}, UNLOCK_WAIT: 180, problems: {}, debug() {}, ...context,
   });
+  const wait = vm.runInContext(`(${source.slice(start, end + 4).trim()})`, scope);
+  wait.scope = scope;
+  return wait;
 }
 
 for (const [label, reply] of [
@@ -72,4 +75,49 @@ test("a 2FA key written on a setup page is told from other text", () => {
   assert.equal(keyIn("HxDmVjEcJjWsRb3HwIzR4IfU"), null);
   assert.equal(keyIn("ORDER-1234-5678-9012-3456"), null);
   assert.equal(keyIn("JBSW Y3DP"), null);
+});
+
+test("a prompt drawn again ends the earlier wait, so the sign-in is carried on once", async () => {
+  let release;
+  const wait = unlockWait({
+    send: () => new Promise((resolve) => { release = resolve; }),
+  });
+  const shown = { textContent: "" };
+  let retries = 0;
+  const waiting = wait("request", shown, () => retries++);
+  // "Try again" draws the prompt again while the first wait is with MYLE.
+  wait.scope.promptToken = {};
+  release({ ok: true, state: "unlocked", unlocked: true });
+  await waiting;
+  assert.equal(retries, 0, "only the wait of the prompt on screen carries the sign-in on");
+});
+
+test("a copy left behind by an extension update answers instead of throwing", async () => {
+  const removed = [];
+  const send = vm.runInNewContext(`(${source.slice(source.indexOf("  function send("), source.indexOf("\n  }\n", source.indexOf("  function send(")) + 4).trim()})`, {
+    ext: { runtime: { sendMessage() { throw new Error("Extension context invalidated."); } } },
+    lost: () => ({ ok: false, error: "noHost" }),
+    orphaned: () => removed.push(true),
+    Promise,
+  });
+  assert.equal((await send({ type: "logins" })).error, "reloaded");
+  assert.equal(removed.length, 1, "a fresh copy may take the page over");
+});
+
+test("a rejected message is a missing host while the extension lives, and reloaded once it is gone", async () => {
+  const start = source.indexOf("  const lost = ");
+  const line = source.slice(start, source.indexOf("\n", start));
+  const alive = vm.runInNewContext(`${line}; lost`, { ext: { runtime: { id: "x" } } });
+  const gone = vm.runInNewContext(`${line}; lost`, { ext: { runtime: {} } });
+  assert.equal(alive().error, "noHost");
+  assert.equal(gone().error, "reloaded");
+});
+
+test("the 2FA key prompt closes only itself", () => {
+  const settleKey = vm.runInNewContext(`(${source.slice(source.indexOf("  function settleKey("), source.indexOf("\n  }\n", source.indexOf("  function settleKey(")) + 4).trim()})`, {
+    get prompted() { return "passkey-request"; },
+    closePrompt: () => assert.fail("a passkey prompt that replaced the key prompt must stay"),
+    setTimeout: (run) => run(),
+  });
+  settleKey({ textContent: "" }, "Saved.", "totp-1");
 });

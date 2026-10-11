@@ -158,6 +158,13 @@ export interface BrowserSetup {
   localVersion: string | null;
   /** The side-loaded copy is older than the one this app carries. */
   localUpdate: boolean;
+  /** MYLE's end of the bridge waits for the browsers; what went wrong last;
+   *  when a browser was last answered (Unix ms). */
+  serverListening?: boolean;
+  serverError?: string | null;
+  lastServedAt?: number | null;
+  /** MYLE runs as administrator: the browsers cannot reach it. */
+  elevated?: boolean;
 }
 /** A newer MYLE Passwords for Android. */
 export interface MobileUpdate {
@@ -236,6 +243,8 @@ export interface PasswordsApi {
   helloUnlock(): Promise<void>;
   browserGet(): Promise<BrowserSetup>;
   browserSet(enabled: boolean): Promise<void>;
+  /** Points the browsers at MYLE again, changing no setting. */
+  browserRepair(): Promise<void>;
   openExtensionDir(): Promise<void>;
   /** Copies the bundled extension into the folder copy; its path. */
   syncExtension(): Promise<string>;
@@ -307,6 +316,7 @@ const tauriApi: PasswordsApi = {
   helloUnlock: () => invoke("passwords_hello_unlock"),
   browserGet: () => invoke("passwords_browser_get"),
   browserSet: (enabled) => invoke("passwords_browser_set", { enabled }),
+  browserRepair: () => invoke("passwords_browser_repair"),
   openExtensionDir: () => invoke("passwords_open_extension_dir"),
   syncExtension: () => invoke("passwords_extension_sync"),
   onBrowserContact: (handler) =>
@@ -545,10 +555,17 @@ function previewApi(): PasswordsApi {
         localDir: null,
         localVersion: null,
         localUpdate: new URLSearchParams(location.search).has("old-folder"),
+        serverListening: !new URLSearchParams(location.search).has("not-listening"),
+        serverError: new URLSearchParams(location.search).has("not-listening") ? "Access is denied. (os error 5)" : null,
+        lastServedAt: connected ? Date.now() - 95_000 : null,
+        elevated: new URLSearchParams(location.search).has("elevated"),
       };
     },
     async browserSet(enabled) {
       browserFilling = enabled;
+    },
+    async browserRepair() {
+      await wait(400);
     },
     async openExtensionDir() {},
     async syncExtension() {

@@ -277,6 +277,13 @@ pub struct GameSaveEntry {
     /// Its Steam app id in the save database, for its cover.
     #[serde(default)]
     pub steam_id: Option<u32>,
+    /// A backup-only game's save folders that have no place on this PC yet
+    /// (another user's profile, a missing drive, Documents moved by OneDrive),
+    /// and for one under Documents, where this PC's Documents puts it.
+    #[serde(default)]
+    pub unmapped_paths: Vec<String>,
+    #[serde(default)]
+    pub suggested_target: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -366,6 +373,10 @@ pub struct GameSavesOperationResult {
     #[serde(default)]
     pub failures: Vec<GameFailure>,
     pub safety_backup_path: Option<String>,
+    /// Games whose restore did not finish cleanly and were put back as they
+    /// were before it, from the safety copy.
+    #[serde(default)]
+    pub rolled_back: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -431,6 +442,8 @@ mod tests {
             error: None,
             snapshots: Vec::new(),
             steam_id: None,
+            unmapped_paths: Vec::new(),
+            suggested_target: None,
         }
     }
 
