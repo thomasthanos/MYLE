@@ -2753,7 +2753,7 @@ dependencies = [
 
 [[package]]
 name = "make-your-life-easier"
-version = "9.18.1"
+version = "9.18.2"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",

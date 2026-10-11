@@ -128,7 +128,7 @@
   .work-pct { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .work-pct.settled { color: #98dfbd; }
   .work-note { color: var(--text-3); font-size: 10.75px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: stretch; gap: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); align-items: stretch; gap: 6px; }
 
   @keyframes fade-in { from { opacity: 0; } }
   @media (max-width: 860px) { .bar { flex-basis: 100%; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.06); } }

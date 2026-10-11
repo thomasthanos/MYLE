@@ -40,55 +40,51 @@
 
 <article class="card" class:on={checked} class:done class:partly class:working={cleanerState.phase === "cleaning" && checked}>
   <div class="head">
-    <span class="icon"><Icon size={16} strokeWidth={1.7} /></span>
+    <span class="icon"><Icon size={15} strokeWidth={1.7} /></span>
     <div class="titles">
-      <h3>{category.title}</h3>
-      <p>{category.description}</p>
+      <h3 title={category.description}>{category.title}</h3>
+      <p title={category.description}>{category.description}</p>
     </div>
+    <strong class="size" class:shimmer={pending}>{measured ? formatSize(measured.bytes) : "0 B"}</strong>
     <input type="checkbox" class="switch" aria-label="Include {category.title}" {checked} disabled={cleanerState.busy || done} onchange={() => cleanerState.toggle(category.id)} />
   </div>
-
   <div class="foot">
-    <div class="amount">
-      <strong class:shimmer={pending}>{measured ? formatSize(measured.bytes) : "0 B"}</strong>
-      <span class="hint" title={category.hint}>
-        {#if partly}
-          <TriangleAlert size={11} />
-          {freedAndInUse(outcome?.freed ?? 0, inUse)}{needsAdmin ? " · needs administrator" : ""}{skippedFiles}
-        {:else if done}
-          <CheckCheck size={11} />
-          {outcome?.freed ? `Freed ${formatSize(outcome.freed)}` : "Cleaned"} · scan again to re-check
-        {:else if locked}
-          <Lock size={11} /> System files skipped (no administrator)
-        {:else if measured?.files}
-          {measured.files.toLocaleString()} files · {category.hint}
-        {:else}
-          {category.hint}
-        {/if}
-      </span>
-    </div>
+    <span class="hint" title={category.hint}>
+      {#if partly}
+        <TriangleAlert size={11} />
+        {freedAndInUse(outcome?.freed ?? 0, inUse)}{needsAdmin ? " · needs administrator" : ""}{skippedFiles}
+      {:else if done}
+        <CheckCheck size={11} />
+        {outcome?.freed ? `Freed ${formatSize(outcome.freed)}` : "Cleaned"} · scan again to re-check
+      {:else if locked}
+        <Lock size={11} /> System files skipped (no administrator)
+      {:else if measured?.files}
+        {measured.files.toLocaleString()} files · {category.hint}
+      {:else}
+        {category.hint}
+      {/if}
+    </span>
     {#if locked && !done && cleanerState.adminGranted === false}
-      <button class="btn small" disabled={cleanerState.busy} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={13} /> Allow admin</button>
+      <button class="btn small" disabled={cleanerState.busy} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={12} /> Allow admin</button>
     {/if}
   </div>
 </article>
 
 <style>
-  /* Same 3D glass treatment as the Creative Hub cards. */
-  .card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px 9px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: var(--radius-lg); background: var(--grain), linear-gradient(180deg, rgb(200 210 255 / 0.09), rgb(200 210 255 / 0.025) 60%, rgb(0 0 0 / 0.06)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-2); transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med) var(--ease-out); }
-  .card:hover { transform: translateY(-1px); border-color: rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-3); }
+  .card { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 8px 10px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 10px; background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)); transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .card:hover { border-color: rgb(255 255 255 / 0.14); background: rgb(255 255 255 / 0.04); }
   .card.on { border-color: rgb(var(--accent-rgb) / 0.32); }
-  .card.working { border-color: rgb(var(--accent-rgb) / 0.5); }
-  .card.done .head, .card.done strong { opacity: 0.55; }
+  .card.working { border-color: rgb(var(--accent-rgb) / 0.55); }
+  .card.done .head { opacity: 0.6; }
   .card.done .hint { color: var(--ok); }
   .card.partly .hint { color: rgb(245 188 95 / 0.9); }
-  .head { display: flex; align-items: flex-start; gap: 9px; }
-  .icon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 8px; background: linear-gradient(160deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.03)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); color: var(--accent); }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .icon { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 7px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
   .titles { flex: 1; min-width: 0; }
-  h3 { font-size: 12.75px; line-height: 1.25; }
-  .titles p { display: -webkit-box; overflow: hidden; margin-top: 1px; color: var(--text-2); font-size: 11px; line-height: 1.35; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
-  .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 6px; border-top: 1px solid rgb(255 255 255 / 0.055); }
-  .amount { display: grid; gap: 2px; min-width: 0; }
-  .amount strong { font-size: 17px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .hint { display: flex; align-items: center; gap: 5px; overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
+  h3, .titles p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  h3 { font-size: 12.25px; font-weight: 600; line-height: 1.25; }
+  .titles p { color: var(--text-3); font-size: 10.5px; line-height: 1.3; }
+  .size { flex: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 16px; padding-left: 34px; }
+  .hint { display: flex; align-items: center; gap: 4px; overflow: hidden; color: var(--text-3); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
 </style>
