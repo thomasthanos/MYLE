@@ -222,14 +222,26 @@ export class ReleaseSession {
         this.run = event.data.run;
         this.jobs = event.data.jobs;
         break;
-      case "failure":
-        this.failures = event.data.jobs;
+      case "failure": {
+        // A later report (the same run once it ended, or another workflow on
+        // the tag) updates and adds to what is shown, never wipes it.
+        const fresh = new Map(event.data.jobs.map((job) => [failureKey(job), job]));
+        const known = new Set(this.failures.map(failureKey));
+        this.failures = [
+          ...this.failures.map((job) => fresh.get(failureKey(job)) ?? job),
+          ...[...fresh.values()].filter((job) => !known.has(failureKey(job))),
+        ];
         break;
+      }
       case "log":
         this.log = [...this.log.slice(-300), event.data.text];
         break;
     }
   }
+}
+/** One failed job: two workflows on a tag may both have a job named "build". */
+export function failureKey(job: FailedJob): string {
+  return `${job.url ?? ""}\n${job.job}`;
 }
 /** Output of a push or pull, shown under the commit box. */
 export interface GitOutput {

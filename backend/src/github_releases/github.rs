@@ -95,6 +95,11 @@ pub(crate) fn api_problem(
                 }
             ),
         ),
+        // Stopping a run that already ended, among others.
+        409 => Problem::new(
+            "GITHUB_CONFLICT",
+            format!("GitHub answered 409: {}", if message.is_empty() { "conflict" } else { &message }),
+        ),
         404 => Problem::new(
             "NOT_FOUND",
             "GitHub didn't find it, or your account can't see this repository.",
@@ -754,8 +759,12 @@ pub(crate) async fn cancel_run(
 ) -> Result<(), String> {
     let url = format!("{API}/repos/{owner}/{repo}/actions/runs/{run_id}/cancel");
     let builder = request(&client()?, reqwest::Method::POST, &url, token);
-    send(builder).await?;
-    Ok(())
+    match send(builder).await {
+        Ok(_) => Ok(()),
+        // The run ended on its own meanwhile: there is nothing left to stop.
+        Err(error) if error.contains("\"code\":\"GITHUB_CONFLICT\"") => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -766,6 +775,12 @@ mod tests {
     fn failures_get_codes_and_the_upload_url_its_base() {
         let headers = reqwest::header::HeaderMap::new();
         assert_eq!(api_problem(401, &headers, "{}").code, "AUTH");
+        let ended = String::from(api_problem(
+            409,
+            &headers,
+            "{\"message\":\"Cannot cancel a workflow run that is completed.\"}",
+        ));
+        assert!(ended.contains("\"code\":\"GITHUB_CONFLICT\""), "{ended}");
         assert_eq!(
             api_problem(404, &headers, "{\"message\":\"Not Found\"}").code,
             "NOT_FOUND"

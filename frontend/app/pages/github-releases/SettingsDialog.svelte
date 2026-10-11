@@ -349,7 +349,7 @@
           <details class="token">
             <summary><ChevronDown size={13} class="chev" /> Or paste a personal access token</summary>
             <div class="token-body">
-              <p>Classic token with <code>repo</code> and <code>workflow</code>, or a fine-grained one with Contents, Actions (read) and Workflows access.</p>
+              <p>Classic token with <code>repo</code> and <code>workflow</code>, or a fine-grained one with Contents, Workflows and Actions access (Actions write lets Stop cancel the run on GitHub).</p>
               <div class="row">
                 <input class="input" type="password" autocomplete="off" bind:value={token} placeholder="ghp_… or github_pat_…" onkeydown={(e) => e.key === "Enter" && void connectToken()} />
                 <button class="btn small" class:primary={!!token.trim()} disabled={connecting || !token.trim()} onclick={() => void connectToken()}>Connect</button>

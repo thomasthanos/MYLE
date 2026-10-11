@@ -39,6 +39,7 @@
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
   import {
     actionsSteps,
+    failureKey,
     formatBytes,
     formatRelative,
     githubReleases as gr,
@@ -320,8 +321,14 @@
     stopping = true;
     try {
       await api.cancel(repoId);
-      if (s.run?.id) {
-        void api.cancelCi(repoId, s.run.id).catch(() => {});
+      const run = s.run;
+      if (run?.id) {
+        void api.cancelCi(repoId, run.id).catch((error) =>
+          toast.error(`The run goes on on GitHub: ${messageOf(error)}`, {
+            label: "Open",
+            run: () => void openUrl(run.htmlUrl),
+          }),
+        );
       }
     } catch (error) {
       toast.error(messageOf(error));
@@ -621,7 +628,7 @@
       </ol>
       {#if s.failures.length}
         <div class="failures" role="alert">
-          {#each s.failures as f (f.job)}
+          {#each s.failures as f (failureKey(f))}
             <div class="failure">
               <p class="f-head">
                 <CircleX size={14} />
