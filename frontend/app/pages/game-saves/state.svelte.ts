@@ -351,10 +351,30 @@ class GameSavesState {
     const selected = this.snapshotChoices[game.id];
     return game.snapshots.some((snapshot) => snapshot.id === selected) ? selected : (game.snapshots[0]?.id ?? "");
   }
+  /** The game's restore location. By the game alone: after a restore its
+   *  files show at the new place, and the mapping must stay visible there. */
   mappingFor(game: GameSaveEntry): PathMapping | undefined {
-    return this.page.settings.pathMappings.find(
-      (mapping) => mapping.gameId === game.id && (!game.paths[0] || samePath(mapping.source, game.paths[0])),
-    );
+    return this.page.settings.pathMappings.find((mapping) => mapping.gameId === game.id);
+  }
+  /** The game's save folders still without a place on this PC: none of its
+   *  restore locations covers them. */
+  unmappedLeft(game: GameSaveEntry): string[] {
+    const sources = this.page.settings.pathMappings.filter((mapping) => mapping.gameId === game.id).map((mapping) => mapping.source);
+    const inside = (path: string, folder: string) => {
+      const [a, b] = [path, folder].map((value) => value.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase());
+      return a === b || a.startsWith(`${b}\\`);
+    };
+    return (game.unmappedPaths ?? []).filter((path) => !sources.some((source) => inside(path, source)));
+  }
+  /** Whether a restore of the game still lacks a place on this PC. */
+  lacksLocation(game: GameSaveEntry): boolean {
+    if (game.status !== "needsLocation") return false;
+    return game.unmappedPaths?.length ? this.unmappedLeft(game).length > 0 : !this.mappingFor(game);
+  }
+  /** The save folder a new restore location is for: the first one with no
+   *  place on this PC yet (a game may keep saves in several). */
+  unmappedPathOf(game: GameSaveEntry): string | undefined {
+    return this.unmappedLeft(game)[0] ?? game.paths[0];
   }
   openCustomDialog(game: CustomGame | null = null) {
     if (this.locked) return;
@@ -759,13 +779,20 @@ class GameSavesState {
   }
   async chooseRestoreLocation(game: GameSaveEntry) {
     await this.setting("pathMapping", async () => {
-      const target = await gameSavesApi.pickFolder(`Choose where to restore ${game.title}`);
+      const source = this.unmappedPathOf(game) ?? game.id;
+      const target = await gameSavesApi.pickFolder(`Choose where to restore ${game.title} (${source})`);
       if (!target) return;
-      this.page.settings = await gameSavesApi.setPathMapping({
-        gameId: game.id,
-        source: game.paths[0] ?? game.id,
-        target,
-      });
+      this.page.settings = await gameSavesApi.setPathMapping({ gameId: game.id, source, target });
+    });
+  }
+  /** Restores to where this PC's Documents keeps the game's saves (they were
+   *  backed up from a Documents that OneDrive moved, or not). */
+  async useSuggestedLocation(game: GameSaveEntry) {
+    const target = game.suggestedTarget;
+    const source = this.unmappedPathOf(game);
+    if (!target || !source) return;
+    await this.setting("pathMapping", async () => {
+      this.page.settings = await gameSavesApi.setPathMapping({ gameId: game.id, source, target });
     });
   }
   async removeRestoreLocation(game: GameSaveEntry) {

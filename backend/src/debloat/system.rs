@@ -572,7 +572,7 @@ pub fn windows_dir() -> PathBuf {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Windows).unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
 }
 
-fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
+pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};

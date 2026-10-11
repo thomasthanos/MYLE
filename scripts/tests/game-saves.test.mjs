@@ -154,6 +154,39 @@ test("restore location picker holds the lock until the mapping is saved", async 
   assert.equal(state.locked, false);
 });
 
+test("a game with saves in two folders needs a place for each, and keeps its place after a scan", () => {
+  const documents = "C:\\Users\\Old\\Documents\\A"; const roaming = "C:\\Users\\Old\\AppData\\Roaming\\A";
+  const game = entry("a", { status: "needsLocation", paths: [documents, roaming], unmappedPaths: [documents, roaming] });
+  state.page.settings.pathMappings = [{ gameId: "a", source: documents, target: "E:\\Restored\\A" }];
+  assert.deepEqual([...state.unmappedLeft(game)], [roaming]);
+  assert.equal(state.lacksLocation(game), true, "one place is not enough");
+  assert.equal(state.unmappedPathOf(game), roaming, "the next pick is for the folder still without one");
+  state.page.settings.pathMappings.push({ gameId: "a", source: "c:/users/old/appdata/roaming/a/", target: "E:\\Restored\\B" });
+  assert.equal(state.lacksLocation(game), false, "covered, whatever the case or separators");
+  // After the restore the scan shows the files where they went now.
+  const restored = { ...game, status: "backedUp", paths: ["E:\\Restored\\A"], unmappedPaths: [] };
+  assert.equal(state.mappingFor(restored)?.target, "E:\\Restored\\A", "still shown, found by the game");
+  assert.equal(state.lacksLocation(restored), false);
+});
+
+test("a scan from before every folder was reported still asks for one place", () => {
+  const game = entry("a", { status: "needsLocation" });
+  assert.equal(state.lacksLocation(game), true);
+  state.page.settings.pathMappings = [{ gameId: "a", source: "C:\\Saves\\a", target: "E:\\Saves" }];
+  assert.equal(state.lacksLocation(game), false);
+  assert.equal(state.lacksLocation(entry("b")), false, "a game with a place on this PC needs none");
+});
+
+test("the Documents OneDrive moved is offered, and used for the folder that lacks a place", async () => {
+  const writes = []; const old = "C:\\Users\\Me\\Documents\\My Games\\A"; const moved = "C:\\Users\\Me\\OneDrive\\Documents\\My Games\\A";
+  api.setPathMapping = async (mapping) => { writes.push(mapping); return { ...state.page.settings, pathMappings: [mapping] }; };
+  const game = entry("a", { status: "needsLocation", paths: [old], unmappedPaths: [old], suggestedTarget: moved });
+  await state.useSuggestedLocation(game);
+  assert.deepEqual(writes, [{ gameId: "a", source: old, target: moved }]);
+  assert.equal(state.lacksLocation(game), false);
+  assert.equal(state.locked, false);
+});
+
 test("backup uses selected IDs even when their rows are filtered out", async () => {
   state.selected.add("b"); state.setQuery("a"); const calls = [];
   api.backup = async (ids) => { calls.push(ids); return { kind: "backup", processedGames: 1, failedGames: [], failures: [] }; };

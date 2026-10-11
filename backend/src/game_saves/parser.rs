@@ -316,9 +316,12 @@ fn entry_from(
     snapshots.truncate(3);
     let has_backup = !snapshots.is_empty();
     let has_local_data = local_present;
-    let needs_location = !local_view
-        && !local_present
-        && restore_destination_unknown(&id, &paths, !registries.is_empty(), settings);
+    let unknown = if !local_view && !local_present {
+        restore_destination_unknown(&id, &paths, !registries.is_empty(), settings, &Here::current())
+    } else {
+        Unknown::default()
+    };
+    let needs_location = unknown.needs_location;
 
     let status = if failed || error.is_some() {
         GameSaveStatus::Error
@@ -365,49 +368,131 @@ fn entry_from(
         error,
         snapshots,
         steam_id: metadata.steam_ids.get(title).copied(),
+        unmapped_paths: unknown.paths,
+        suggested_target: unknown.suggested_target,
     }
 }
 
-fn restore_destination_unknown(
+/// This PC's own folders, as Windows names them (injected in tests).
+pub(crate) struct Here {
+    pub profile: Option<PathBuf>,
+    /// The Documents known folder: moved into OneDrive by its folder backup
+    /// (Known Folder Move), or wherever the user put it.
+    pub documents: Option<PathBuf>,
+    /// `C:\Users\Public`: shared by every user, the same on every PC.
+    pub public: Option<PathBuf>,
+}
+
+impl Here {
+    pub(crate) fn current() -> Here {
+        use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, FOLDERID_Public};
+        Here {
+            profile: std::env::var_os("USERPROFILE").map(PathBuf::from),
+            documents: crate::debloat::system::known_folder(&FOLDERID_Documents),
+            public: crate::debloat::system::known_folder(&FOLDERID_Public),
+        }
+    }
+}
+
+/// What a backup-only game's restore lacks on this PC.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Unknown {
+    pub needs_location: bool,
+    /// The save folders no mapping of the game covers yet.
+    pub paths: Vec<String>,
+    /// For a folder under another Documents: the same place in this PC's.
+    pub suggested_target: Option<String>,
+}
+
+/// Where a backed-up path in Documents goes on this PC, when Documents moved
+/// (OneDrive's folder backup on one side and not the other, or another
+/// user): `<profile>\Documents\…` or `<profile>\OneDrive…\Documents\…`
+/// that is not this PC's Documents. `Some(the same place in this one)`.
+fn moved_documents(normalized: &str, raw: &str, here: &Here) -> Option<String> {
+    let documents = here.documents.as_deref()?;
+    let current = normalized_path(documents);
+    if within(normalized, &current) {
+        return None;
+    }
+    // `c:\users\<name>\[onedrive…\]documents\rest`
+    // Empty parts dropped on both sides, so the two line up.
+    let parts: Vec<&str> = normalized.split('\\').filter(|part| !part.is_empty()).collect();
+    let users = parts.iter().position(|part| *part == "users")?;
+    let after = &parts[users + 2..];
+    let rest_at = match after {
+        ["documents", ..] => users + 3,
+        [cloud, "documents", ..] if cloud.starts_with("onedrive") => users + 4,
+        _ => return None,
+    };
+    let original: Vec<&str> = raw.split(['\\', '/']).filter(|part| !part.is_empty()).collect();
+    let rest = original.get(rest_at..).unwrap_or_default();
+    let mut target = documents.to_path_buf();
+    target.extend(rest);
+    Some(target.to_string_lossy().into_owned())
+}
+
+pub(crate) fn restore_destination_unknown(
     game_id: &str,
     paths: &[String],
     has_registry: bool,
     settings: &GameSavesSettings,
-) -> bool {
-    if settings
+    here: &Here,
+) -> Unknown {
+    let mappings: Vec<String> = settings
         .path_mappings
         .iter()
-        .any(|mapping| mapping.game_id == game_id)
-    {
-        return false;
-    }
+        .filter(|mapping| mapping.game_id == game_id)
+        .map(|mapping| normalized_path(Path::new(&mapping.source)))
+        .collect();
     if paths.is_empty() {
-        return !has_registry;
+        return Unknown { needs_location: !has_registry && mappings.is_empty(), ..Unknown::default() };
     }
 
-    let current_profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
-    let profiles_root = current_profile
-        .as_deref()
-        .and_then(Path::parent)
-        .map(normalized_path);
-    let current_profile = current_profile.as_deref().map(normalized_path);
+    let profiles_root = here.profile.as_deref().and_then(Path::parent).map(normalized_path);
+    let current_profile = here.profile.as_deref().map(normalized_path);
+    // Folders every user shares: the same on any PC.
+    let shared: Vec<String> = here
+        .public
+        .iter()
+        .map(|public| normalized_path(public))
+        .chain(profiles_root.iter().flat_map(|root| [format!("{root}\\default"), format!("{root}\\all users")]))
+        .collect();
 
-    paths.iter().any(|raw| {
+    let mut unknown = Unknown::default();
+    for raw in paths {
         let path = Path::new(raw);
-        if !path.is_absolute() || raw.contains('<') || raw.contains('%') {
-            return true;
-        }
         let normalized = normalized_path(path);
-        if let (Some(profiles_root), Some(current_profile)) =
-            (profiles_root.as_deref(), current_profile.as_deref())
+        // A mapping of this game whose folder holds it: it has its place.
+        if mappings.iter().any(|source| within(&normalized, source)) {
+            continue;
+        }
+        let is_shared = shared.iter().any(|folder| within(&normalized, folder));
+        let without_place = if !path.is_absolute() || raw.contains('<') || raw.contains('%') {
+            true
+        } else if let Some(target) = (!is_shared).then(|| moved_documents(&normalized, raw, here)).flatten() {
+            unknown.suggested_target.get_or_insert(target);
+            true
+        } else if let (Some(profiles_root), Some(current_profile)) = (profiles_root.as_deref(), current_profile.as_deref())
             && within(&normalized, profiles_root)
             && !within(&normalized, current_profile)
+            && !is_shared
         {
-            return true;
+            true
+        } else {
+            let drive_root: PathBuf = path.components().take(2).collect();
+            !drive_root.as_os_str().is_empty() && !drive_root.exists()
+        };
+        if without_place {
+            unknown.paths.push(raw.clone());
         }
-        let drive_root: PathBuf = path.components().take(2).collect();
-        !drive_root.as_os_str().is_empty() && !drive_root.exists()
-    })
+    }
+    unknown.needs_location = !unknown.paths.is_empty();
+    unknown
+}
+
+/// Whether a restore-location mapping from `source` covers `path`.
+pub(crate) fn covered_by(path: &str, source: &str) -> bool {
+    within(&normalized_path(Path::new(path)), &normalized_path(Path::new(source)))
 }
 
 fn normalized_path(path: &Path) -> String {
@@ -501,6 +586,65 @@ pub(crate) fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_saves::models::RestorePathMapping;
+
+    fn here(documents: &str) -> Here {
+        Here {
+            profile: Some(PathBuf::from(r"C:\Users\P")),
+            documents: Some(PathBuf::from(documents)),
+            public: Some(PathBuf::from(r"C:\Users\Public")),
+        }
+    }
+
+    fn unknown_for(paths: &[&str], mappings: &[(&str, &str)], documents: &str) -> Unknown {
+        let settings = GameSavesSettings {
+            path_mappings: mappings
+                .iter()
+                .map(|(source, target)| RestorePathMapping { game_id: "g".into(), source: (*source).into(), target: (*target).into() })
+                .collect(),
+            ..GameSavesSettings::default()
+        };
+        let paths: Vec<String> = paths.iter().map(|path| path.to_string()).collect();
+        restore_destination_unknown("g", &paths, false, &settings, &here(documents))
+    }
+
+    #[test]
+    fn saves_from_before_onedrive_moved_documents_need_their_new_place() {
+        let moved = unknown_for(&["C:/Users/P/Documents/My Games/X"], &[], r"C:\Users\P\OneDrive\Documents");
+        assert!(moved.needs_location);
+        assert_eq!(moved.suggested_target.as_deref(), Some(r"C:\Users\P\OneDrive\Documents\My Games\X"));
+        // And the other way: OneDrive's Documents then, the plain one now.
+        let back = unknown_for(&[r"C:\Users\P\OneDrive - Personal\Documents\My Games\X"], &[], r"C:\Users\P\Documents");
+        assert!(back.needs_location);
+        assert_eq!(back.suggested_target.as_deref(), Some(r"C:\Users\P\Documents\My Games\X"));
+        // Where this PC keeps Documents: nothing to choose.
+        assert!(!unknown_for(&["C:/Users/P/Documents/My Games/X"], &[], r"C:\Users\P\Documents").needs_location);
+    }
+
+    #[test]
+    fn another_users_documents_are_offered_this_users() {
+        let other = unknown_for(&["C:/Users/Old/Documents/My Games/X"], &[], r"C:\Users\P\Documents");
+        assert!(other.needs_location);
+        assert_eq!(other.suggested_target.as_deref(), Some(r"C:\Users\P\Documents\My Games\X"));
+        assert!(unknown_for(&["C:/Users/Old/AppData/Local/X"], &[], r"C:\Users\P\Documents").needs_location);
+    }
+
+    #[test]
+    fn saves_in_the_shared_public_folder_need_no_place() {
+        assert!(!unknown_for(&["C:/Users/Public/Documents/Game"], &[], r"C:\Users\P\Documents").needs_location);
+    }
+
+    #[test]
+    fn every_save_folder_of_a_game_needs_its_place() {
+        let paths = ["C:/Users/Other/AppData/Local/G", "C:/Users/Other/Saved Games/G"];
+        let one = unknown_for(&paths, &[(r"C:\Users\Other\AppData\Local\G", r"C:\Users\P\AppData\Local\G")], r"C:\Users\P\Documents");
+        assert!(one.needs_location, "one folder placed, the other not yet");
+        assert_eq!(one.paths, ["C:/Users/Other/Saved Games/G"]);
+        let both = unknown_for(&paths, &[(r"C:\Users\Other", r"C:\Users\P")], r"C:\Users\P\Documents");
+        assert!(!both.needs_location, "one mapping above both covers both");
+        assert!(covered_by("C:/Users/Other/Saved Games/G", r"C:\Users\Other"));
+        assert!(!covered_by(r"C:\Users\Others\G", r"C:\Users\Other"));
+    }
 
     #[test]
     fn manifest_count_only_includes_entries_with_backup_definitions() {

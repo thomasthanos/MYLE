@@ -16,7 +16,7 @@ mod helper;
 #[cfg(test)]
 mod sandbox_tests;
 mod start_menu;
-mod system;
+pub(crate) mod system;
 mod undo;
 
 use serde::Serialize;

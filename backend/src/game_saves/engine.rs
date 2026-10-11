@@ -357,7 +357,7 @@ fn render_config(settings: &GameSavesSettings) -> String {
         for root in &settings.roots {
             out.push_str(&format!(
                 "  - path: {}\n    store: {}\n",
-                yaml_string(&root.path),
+                yaml_string(&glob_escape(&root.path)),
                 root.store.ludusavi_name()
             ));
         }
@@ -391,7 +391,7 @@ fn render_config(settings: &GameSavesSettings) -> String {
                 yaml_string(&game.name)
             ));
             for path in &game.paths {
-                out.push_str(&format!("      - {}\n", yaml_string(path)));
+                out.push_str(&format!("      - {}\n", yaml_string(&glob_escape(path))));
             }
             out.push_str("    registry: []\n");
             if let Some(path) = game.install_path.as_deref() {
@@ -408,6 +408,25 @@ fn render_config(settings: &GameSavesSettings) -> String {
     out
 }
 
+/// The engine reads root and custom-game paths as glob patterns: a folder
+/// named `Games [SSD]` would be a character class and match nothing. Each
+/// pattern character is written as a class of its own (`[[]`), matching
+/// itself. Only the engine's config changes; the settings keep the path.
+fn glob_escape(path: &str) -> String {
+    let mut escaped = String::with_capacity(path.len());
+    for character in path.chars() {
+        match character {
+            '[' | ']' | '*' | '?' | '{' | '}' => {
+                escaped.push('[');
+                escaped.push(character);
+                escaped.push(']');
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 fn yaml_string(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
@@ -420,6 +439,25 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::game_saves::models::{CustomGame, RestorePathMapping};
+
+    #[test]
+    fn folders_with_brackets_are_matched_as_they_are_named() {
+        assert_eq!(glob_escape(r"D:\Games [SSD]\SteamLibrary"), r"D:\Games [[]SSD[]]\SteamLibrary");
+        assert_eq!(glob_escape(r"C:\Saves {x}"), r"C:\Saves [{]x[}]");
+        assert_eq!(glob_escape(r"C:\Plain\Folder"), r"C:\Plain\Folder");
+        let settings = GameSavesSettings {
+            roots: vec![crate::game_saves::models::GameRoot {
+                id: "r".into(),
+                path: r"D:\Games [SSD]".into(),
+                store: crate::game_saves::models::RootStore::Steam,
+                source: crate::game_saves::models::RootSource::Manual,
+            }],
+            ..GameSavesSettings::default()
+        };
+        let config = render_config(&settings);
+        assert!(config.contains(r"'D:\Games [[]SSD[]]'"), "{config}");
+        assert_eq!(settings.roots[0].path, r"D:\Games [SSD]", "the settings keep the folder's real name");
+    }
 
     #[test]
     fn yaml_quotes_apostrophes_and_keeps_windows_slashes_literal() {

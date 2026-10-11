@@ -468,7 +468,16 @@ pub fn game_saves_set_path_mapping(
     if mapping.source.is_empty() || mapping.target.is_empty() {
         return Err("Both the original and replacement restore paths are required.".into());
     }
-    if !Path::new(&mapping.target).is_dir() {
+    let target = Path::new(&mapping.target);
+    // The place this PC's Documents keeps it may not exist yet (a new PC):
+    // made, as the game itself would, when the folder above it is there.
+    if !target.is_dir()
+        && game.suggested_target.as_deref().is_some_and(|suggested| settings::paths_equal(Path::new(suggested), target))
+        && target.parent().is_some_and(Path::is_dir)
+    {
+        std::fs::create_dir_all(target).map_err(|error| format!("{} could not be made: {error}", target.display()))?;
+    }
+    if !target.is_dir() {
         return Err("Choose an existing replacement restore folder.".into());
     }
     let mut value = settings::initialize(&app)?;
@@ -1609,12 +1618,17 @@ fn selected_restore_games(
             .ok_or("One of the selected games is stale. Scan again.")?;
         // The status comes from the last scan; a location chosen since then is
         // only in the settings, and must not be refused as missing.
-        if game.status == GameSaveStatus::NeedsLocation
-            && !settings
-                .path_mappings
+        // Every save folder without a place needs one (a game may keep its
+        // saves in several); a scan from before that was told counts any.
+        let mappings: Vec<_> = settings.path_mappings.iter().filter(|mapping| mapping.game_id == game.id).collect();
+        let placed = if game.unmapped_paths.is_empty() {
+            !mappings.is_empty()
+        } else {
+            game.unmapped_paths
                 .iter()
-                .any(|mapping| mapping.game_id == game.id)
-        {
+                .all(|path| mappings.iter().any(|mapping| parser::covered_by(path, &mapping.source)))
+        };
+        if game.status == GameSaveStatus::NeedsLocation && !placed {
             return Err(format!(
                 "Choose a restore location for {} before restoring it.",
                 game.title
@@ -1926,6 +1940,8 @@ mod tests {
                     is_safety: false,
                 }],
                 steam_id: None,
+                unmapped_paths: Vec::new(),
+                suggested_target: None,
             }],
             ..Default::default()
         });

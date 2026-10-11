@@ -136,6 +136,10 @@ export interface GameSaveEntry {
   snapshots: BackupSnapshot[];
   /** Its Steam app id in the save database, for its cover. */
   steamId?: number | null;
+  /** Save folders that have no place on this PC yet, and for one under
+   *  another Documents, where this PC's Documents puts it. */
+  unmappedPaths?: string[];
+  suggestedTarget?: string | null;
 }
 export interface GameSavesScan {
   generatedAt: number;
