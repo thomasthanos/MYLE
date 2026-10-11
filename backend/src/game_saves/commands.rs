@@ -22,6 +22,7 @@ use super::models::{
 use super::parser::{self, ApiGame, ApiOutput, ManifestMetadata};
 use super::scan_cache::{self, CachedScan};
 use super::settings;
+use super::safety;
 use super::state::{GameSavesState, OperationHandle};
 use super::undo;
 
@@ -687,6 +688,42 @@ pub(crate) async fn backup_titles(
     operation: &OperationHandle,
     on_stage: &(dyn Fn(OperationStage) + Sync),
 ) -> Result<GameSavesOperationResult, String> {
+    // A game whose backup list is damaged is not backed up: the engine would
+    // start a new list and delete every older snapshot of it.
+    let (titles, protected): (Vec<String>, Vec<GameFailure>) = titles.iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut ok, mut protected), title| {
+            match safety::history_damage(Path::new(backup), title) {
+                Some(reason) => protected.push(GameFailure { game: title.clone(), reason, file: None }),
+                None => ok.push(title.clone()),
+            }
+            (ok, protected)
+        },
+    );
+    let mut result = backup_known_good(engine, backup, &titles, operation, on_stage).await?;
+    result.failed_games.extend(protected.iter().map(|failure| failure.game.clone()));
+    result.failures.extend(protected);
+    Ok(result)
+}
+
+async fn backup_known_good(
+    engine: &Engine,
+    backup: &str,
+    titles: &[String],
+    operation: &OperationHandle,
+    on_stage: &(dyn Fn(OperationStage) + Sync),
+) -> Result<GameSavesOperationResult, String> {
+    if titles.is_empty() {
+        return Ok(GameSavesOperationResult {
+            kind: OperationKind::Backup,
+            processed_games: 0,
+            processed_bytes: 0,
+            failed_games: Vec::new(),
+            failures: Vec::new(),
+            safety_backup_path: None,
+            rolled_back: Vec::new(),
+        });
+    }
     let api = backup_pass(engine, backup, titles, operation).await?;
     let first = operation_result(OperationKind::Backup, titles, &api, None);
     let (retry, files) = cloud_offline(&first.failed_games, &api);
@@ -719,6 +756,7 @@ pub(crate) async fn backup_titles(
         failed_games,
         failures,
         safety_backup_path: None,
+        rolled_back: Vec::new(),
     })
 }
 
@@ -816,10 +854,12 @@ pub async fn game_saves_restore(
 
     // Re-preview every selected restore point immediately before touching any
     // local files. This catches a deleted/corrupt/stale snapshot while it is
-    // still safe to stop, and applies persisted path redirects in the preview.
+    // still safe to stop, applies persisted path redirects in the preview, and
+    // names every file the restore will write.
     send_stage(&on_event, OperationStage::Preparing);
     let total = games.len();
     send_progress(&on_event, 0, total, None);
+    let mut targets = Vec::new();
     for (index, (game, snapshot)) in games.iter().enumerate() {
         send_progress(&on_event, index, total, Some(game.title.clone()));
         let input = stdin_titles(std::slice::from_ref(&game.title));
@@ -838,138 +878,193 @@ pub async fn game_saves_restore(
                 game.title
             ));
         }
+        targets.extend(safety::targets(&api));
         send_progress(&on_event, index + 1, total, Some(game.title.clone()));
     }
 
-    send_stage(&on_event, OperationStage::CreatingSafetyBackup);
-    let safety_root = settings::safety_root(&app)?;
-    let local_ids: HashSet<_> = state
-        .cached_scan()
-        .into_iter()
-        .flat_map(|scan| scan.on_this_pc)
-        .filter(|game| game.has_local_data)
-        .map(|game| game.id)
-        .collect();
-    let safety_titles: Vec<String> = games
-        .iter()
-        .filter(|(game, _)| local_ids.contains(&game.id))
-        .map(|(game, _)| game.title.clone())
-        .collect();
-    let mut safety_path = None;
-    let mut safety_slot = None;
-    if !safety_titles.is_empty() {
-        let (undo_record, slot) = undo::create_slot(&safety_root)?;
-        let safety_input = stdin_titles(&safety_titles);
-        let safety_output = run_engine(
-            &engine,
-            &Engine::backup_args(&slot.to_string_lossy()),
-            Some(&safety_input),
-            &operation,
-        )
-        .await;
-        let safety_output = match safety_output {
-            Ok(output) => output,
-            Err(error) => {
-                undo::discard_slot(&safety_root, &undo_record.id);
-                return Err(format!(
-                    "The restore was not started because its safety copy failed: {error}"
-                ));
-            }
-        };
-        let safety_api = match parser::parse_api(&safety_output.stdout) {
-            Ok(api) => api,
-            Err(error) => {
-                undo::discard_slot(&safety_root, &undo_record.id);
-                return Err(format!(
-                    "The restore was not started because the safety-copy result was invalid: {error}"
-                ));
-            }
-        };
-        let failures = failed_games(&safety_titles, &safety_api);
-        if !failures.is_empty() {
-            undo::discard_slot(&safety_root, &undo_record.id);
-            return Err(format!(
-                "The restore was not started because a safety copy failed for: {}",
-                failures.join(", ")
-            ));
-        }
-        undo::commit(&safety_root, undo_record.clone(), safety_titles)?;
-        safety_path = Some(slot.to_string_lossy().into_owned());
-        safety_slot = Some(undo_record.id);
+    // Each snapshot is read through (every file's CRC) before anything is
+    // touched: a damaged backup must not be half written over a good save.
+    let titles: Vec<String> = games.iter().map(|(game, _)| game.title.clone()).collect();
+    let folders = backup_folders(&engine, &backup, &titles, &operation).await?;
+    for (game, snapshot) in &games {
+        let folder = folders.get(&game.title).ok_or_else(|| {
+            format!("The backup of {} was not found. Scan again, then try the restore again.", game.title)
+        })?;
+        safety::verify_snapshot(&folder.join(snapshot)).map_err(|error| {
+            format!("{} was not restored, and nothing was changed: its backup is damaged. {error}", game.title)
+        })?;
     }
+    ensure_not_cancelled(&operation)?;
+
+    // A save the game (or its launcher) holds open cannot be written whole,
+    // and would be overwritten again when the game saves on exit.
+    let locked = safety::locked(&targets);
+    if !locked.is_empty() {
+        return Err(format!(
+            "Close the game first: these saves are in use, so nothing was restored: {}",
+            locked.join(", ")
+        ));
+    }
+    let safety_root = settings::safety_root(&app)?;
+    let existing_bytes: u64 = targets.iter().filter_map(|target| fs::metadata(&target.path).ok()).map(|meta| meta.len()).sum();
+    safety::ensure_room(&safety_root, existing_bytes, "the restore's safety copy")?;
+    for target in &targets {
+        if let Some(folder) = target.path.parent() {
+            let needed: u64 = targets.iter().filter(|other| other.path.parent() == Some(folder)).map(|other| other.bytes).sum();
+            safety::ensure_room(folder, needed, "the restored saves")?;
+        }
+    }
+
+    // Every file the restore writes is copied first (and each copy checked),
+    // so any game whose restore does not finish cleanly is put back at once,
+    // and "Undo last restore" can put the whole restore back. From here on,
+    // Cancel stops only between games: a save is never cut off half-written.
+    send_stage(&on_event, OperationStage::CreatingSafetyBackup);
+    operation.set_killable(false);
+    let slot = if targets.is_empty() {
+        // Nothing on this PC changes: there is nothing to undo, and an older
+        // restore's undo must not stay offered as if it were this one's.
+        undo::clear(&safety_root);
+        None
+    } else {
+        let (undo_record, slot) = undo::create_slot(&safety_root)?;
+        match safety::take(&slot, &targets, parser::now()) {
+            Ok(manifest) => {
+                if let Err(error) = undo::commit(&safety_root, undo_record.clone(), manifest.games()) {
+                    undo::discard_slot(&safety_root, &undo_record.id);
+                    return Err(format!("The restore was not started because its safety copy could not be kept: {error}"));
+                }
+                Some((slot, manifest))
+            }
+            Err(error) => {
+                undo::discard_slot(&safety_root, &undo_record.id);
+                return Err(format!("The restore was not started because its safety copy failed: {error}"));
+            }
+        }
+    };
 
     send_stage(&on_event, OperationStage::Restoring);
     let mut processed_games = 0;
     let mut processed_bytes = 0;
     let mut failures = Vec::new();
     let mut reasons: Vec<GameFailure> = Vec::new();
+    let mut rolled_back = Vec::new();
+    let mut restored = HashSet::new();
+    let mut stopped = false;
     send_progress(&on_event, 0, total, None);
     for (index, (game, snapshot)) in games.iter().enumerate() {
         if operation.is_cancelled() {
-            return Err("The restore was cancelled.".into());
+            stopped = true;
+            break;
         }
         send_progress(&on_event, index, total, Some(game.title.clone()));
+        // The game may have been started meanwhile.
+        let game_targets: Vec<_> = targets.iter().filter(|target| target.game == game.title).cloned().collect();
+        let in_use = safety::locked(&game_targets);
+        if !in_use.is_empty() {
+            failures.push(game.title.clone());
+            reasons.push(GameFailure {
+                game: game.title.clone(),
+                reason: format!("Not restored: the game is using its saves ({}). Close it and restore again.", in_use.join(", ")),
+                file: None,
+            });
+            continue;
+        }
         let input = stdin_titles(std::slice::from_ref(&game.title));
-        match run_engine(
+        let outcome = run_engine_to_end(
             &engine,
             &Engine::restore_args(&backup.to_string_lossy(), Some(snapshot)),
             Some(&input),
             &operation,
         )
         .await
-        {
-            Ok(output) => match parser::parse_api(&output.stdout) {
-                Ok(api) => {
-                    let result = operation_result(
-                        OperationKind::Restore,
-                        std::slice::from_ref(&game.title),
-                        &api,
-                        None,
-                    );
+        .and_then(|output| parser::parse_api(&output.stdout).map_err(|error| format!("The engine returned an invalid result: {error}")));
+        let clean = match outcome {
+            Ok(api) => {
+                let result = operation_result(OperationKind::Restore, std::slice::from_ref(&game.title), &api, None);
+                processed_bytes += result.processed_bytes;
+                let clean = result.failed_games.is_empty();
+                if clean {
                     processed_games += result.processed_games;
-                    processed_bytes += result.processed_bytes;
-                    failures.extend(result.failed_games);
-                    reasons.extend(result.failures);
                 }
-                Err(error) => {
-                    failures.push(game.title.clone());
-                    reasons.push(GameFailure {
-                        game: game.title.clone(),
-                        reason: format!("The engine returned an invalid result: {error}"),
-                        file: None,
-                    });
-                }
-            },
+                failures.extend(result.failed_games);
+                reasons.extend(result.failures);
+                clean
+            }
             Err(error) => {
-                if operation.is_cancelled() {
-                    return Err("The restore was cancelled.".into());
-                }
                 failures.push(game.title.clone());
+                reasons.push(GameFailure { game: game.title.clone(), reason: error.clone(), file: None });
+                let _ = on_event.send(GameSavesEvent::Message { text: error });
+                false
+            }
+        };
+        if clean {
+            restored.insert(game.title.clone());
+        } else if let Some((slot, manifest)) = &slot {
+            // Not a mix of old and new saves: the game goes back to how it was.
+            let only: HashSet<String> = [game.title.clone()].into();
+            let left = safety::put_back(slot, manifest, Some(&only));
+            if left.is_empty() {
+                rolled_back.push(game.title.clone());
+            } else {
                 reasons.push(GameFailure {
                     game: game.title.clone(),
-                    reason: error.clone(),
+                    reason: format!(
+                        "Some saves could not be put back as they were; use Undo last restore. {}",
+                        left.join("; ")
+                    ),
                     file: None,
                 });
-                let _ = on_event.send(GameSavesEvent::Message { text: error });
             }
         }
         send_progress(&on_event, index + 1, total, Some(game.title.clone()));
     }
+    if let Some((_, manifest)) = &slot {
+        safety::keep_readonly(manifest, &restored);
+    }
     send_progress(&on_event, total, total, None);
     send_stage(&on_event, OperationStage::Finishing);
+    if stopped {
+        let left: Vec<String> = games
+            .iter()
+            .map(|(game, _)| game.title.clone())
+            .filter(|title| !restored.contains(title) && !failures.contains(title))
+            .collect();
+        failures.extend(left.iter().cloned());
+        for title in left {
+            reasons.push(GameFailure { game: title, reason: "Not restored: the restore was stopped before this game.".into(), file: None });
+        }
+    }
     failures.sort();
     failures.dedup();
-    // Keep the committed safety copy even if one restore failed: any games
-    // that were already modified can still be put back.
-    let _ = safety_slot;
     Ok(GameSavesOperationResult {
         kind: OperationKind::Restore,
         processed_games,
         processed_bytes,
         failed_games: failures,
         failures: reasons,
-        safety_backup_path: safety_path,
+        safety_backup_path: slot.map(|(slot, _)| slot.to_string_lossy().into_owned()),
+        rolled_back,
     })
+}
+
+/// Each game's folder in the backup, as the engine lists them.
+async fn backup_folders(
+    engine: &Engine,
+    backup: &Path,
+    titles: &[String],
+    operation: &OperationHandle,
+) -> Result<HashMap<String, PathBuf>, String> {
+    let input = stdin_titles(titles);
+    let output = run_engine(engine, &Engine::backups_args(&backup.to_string_lossy()), Some(&input), operation)
+        .await
+        .map_err(|error| format!("Could not read the backup list: {error}"))?;
+    let api = parser::parse_api(&output.stdout)?;
+    Ok(api
+        .games
+        .into_iter()
+        .filter_map(|(title, game)| game.backup_path.map(|path| (title, PathBuf::from(path.replace('/', "\\")))))
+        .collect())
 }
 
 #[tauri::command]
@@ -987,23 +1082,82 @@ pub async fn game_saves_undo_last_restore(
     let value = settings::initialize(&app)?;
     let engine = Engine::for_app(&app)?;
     engine.prepare(&value)?;
-    send_stage(&on_event, OperationStage::Restoring);
-    let input = stdin_titles(&undo_record.games);
-    let output = run_engine(
-        &engine,
-        &Engine::restore_args(&slot.to_string_lossy(), None),
-        Some(&input),
-        &operation,
-    )
-    .await?;
-    let api = parser::parse_api(&output.stdout)?;
-    ensure_not_cancelled(&operation)?;
-    let result = operation_result(OperationKind::Restore, &undo_record.games, &api, None);
-    if result.failed_games.is_empty() {
-        undo::consume(&safety_root, &undo_record.id)?;
+
+    // What the undo will write: the files of the restore's own copy, or (a
+    // copy an older MYLE made with the engine) what the engine would restore.
+    send_stage(&on_event, OperationStage::Preparing);
+    let manifest = safety::load(&slot);
+    let targets = match &manifest {
+        Some(manifest) => manifest
+            .entries
+            .iter()
+            .map(|entry| safety::Target { game: entry.game.clone(), path: PathBuf::from(&entry.target), bytes: entry.bytes })
+            .collect(),
+        None => {
+            let input = stdin_titles(&undo_record.games);
+            let output = run_engine(&engine, &Engine::restore_preview_args(&slot.to_string_lossy(), None), Some(&input), &operation)
+                .await
+                .map_err(|error| format!("Could not read the safety copy: {error}"))?;
+            safety::targets(&parser::parse_api(&output.stdout)?)
+        }
+    };
+    let locked = safety::locked(&targets);
+    if !locked.is_empty() {
+        return Err(format!("Close the game first: these saves are in use, so nothing was undone: {}", locked.join(", ")));
     }
+
+    // The saves as they are now are copied first: whatever was played since
+    // the restore is not lost, and this undo can itself be undone.
+    send_stage(&on_event, OperationStage::CreatingSafetyBackup);
+    operation.set_killable(false);
+    let (now_record, now_slot) = undo::create_slot(&safety_root)?;
+    let now_manifest = match safety::take(&now_slot, &targets, parser::now()) {
+        Ok(taken) => taken,
+        Err(error) => {
+            undo::discard_slot(&safety_root, &now_record.id);
+            return Err(format!("Nothing was undone because the copy of the current saves failed: {error}"));
+        }
+    };
+
+    send_stage(&on_event, OperationStage::Restoring);
+    let failed = match &manifest {
+        Some(manifest) => safety::put_back(&slot, manifest, None),
+        None => {
+            let input = stdin_titles(&undo_record.games);
+            match run_engine_to_end(&engine, &Engine::restore_args(&slot.to_string_lossy(), None), Some(&input), &operation)
+                .await
+                .and_then(|output| parser::parse_api(&output.stdout))
+            {
+                Ok(api) => failed_games(&undo_record.games, &api),
+                Err(error) => vec![error],
+            }
+        }
+    };
     send_stage(&on_event, OperationStage::Finishing);
-    Ok(result)
+    if !failed.is_empty() {
+        // Not a mix: the saves go back to how they were before this undo.
+        let left = safety::put_back(&now_slot, &now_manifest, None);
+        if left.is_empty() {
+            undo::discard_slot(&safety_root, &now_record.id);
+        }
+        return Err(format!(
+            "The undo did not finish, so your saves were left as they were before it{}. {}",
+            if left.is_empty() { "" } else { " (except some files; a copy of them is in the safety folder)" },
+            failed.join("; ")
+        ));
+    }
+    // The copy just taken replaces the restore's: "Undo" now puts back what
+    // was there before this undo.
+    undo::commit(&safety_root, now_record, undo_record.games.clone())?;
+    Ok(GameSavesOperationResult {
+        kind: OperationKind::Restore,
+        processed_games: undo_record.games.len() as u64,
+        processed_bytes: targets.iter().map(|target| target.bytes).sum(),
+        failed_games: Vec::new(),
+        failures: Vec::new(),
+        safety_backup_path: Some(now_slot.to_string_lossy().into_owned()),
+        rolled_back: Vec::new(),
+    })
 }
 
 /// What of the Game Saves setup the account syncs.
@@ -1193,6 +1347,19 @@ pub(crate) async fn run_engine(
     }
 }
 
+/// Runs the engine and answers what it did, even when Cancel was pressed
+/// meanwhile: a restore is never stopped half-way (see `set_killable`), and a
+/// game it finished must count as finished.
+async fn run_engine_to_end(
+    engine: &Engine,
+    args: &[String],
+    stdin: Option<&str>,
+    operation: &OperationHandle,
+) -> Result<EngineOutput, String> {
+    let mut track = |pid, running| operation.track_pid(pid, running);
+    engine.run(args, stdin, &mut track).await
+}
+
 pub(crate) fn operation_result(
     kind: OperationKind,
     requested: &[String],
@@ -1223,6 +1390,7 @@ pub(crate) fn operation_result(
         failed_games,
         failures,
         safety_backup_path,
+        rolled_back: Vec::new(),
     }
 }
 

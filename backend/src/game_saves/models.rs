@@ -366,6 +366,10 @@ pub struct GameSavesOperationResult {
     #[serde(default)]
     pub failures: Vec<GameFailure>,
     pub safety_backup_path: Option<String>,
+    /// Games whose restore did not finish cleanly and were put back as they
+    /// were before it, from the safety copy.
+    #[serde(default)]
+    pub rolled_back: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

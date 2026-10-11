@@ -68,6 +68,11 @@ pub(crate) struct ApiFile {
     pub ignored: bool,
     #[serde(default)]
     pub error: Option<ApiError>,
+    /// For a restore: how the backed-up file compares with the one on this PC
+    /// ("New", "Different", "Same", "Unknown"); "Same" is not written. The
+    /// file's key is the path it is written to (a restore location applied).
+    #[serde(default)]
+    pub change: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -531,7 +536,11 @@ Registry Game:
     #[test]
     fn pinned_manifest_supported_count_is_current_when_resource_is_present() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/ludusavi/manifest.yaml");
-        if let Ok(text) = fs::read_to_string(path) {
+        // The pinned manifest is tens of megabytes; a build without the
+        // downloaded resources has only a small stand-in, which says nothing.
+        if let Ok(text) = fs::read_to_string(path)
+            && text.len() > 1_000_000
+        {
             assert_eq!(parse_manifest_metadata(&text).supported_games, 22_976);
         }
     }

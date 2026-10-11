@@ -168,6 +168,9 @@ export interface GameSavesOperationResult {
   /** Why each failed game failed, as far as the engine said. */
   failures: GameFailure[];
   safetyBackupPath: string | null;
+  /** Games whose restore did not finish cleanly and were put back as they
+   *  were, from the safety copy. */
+  rolledBack?: string[];
 }
 export interface DatabaseUpdate {
   games: number;

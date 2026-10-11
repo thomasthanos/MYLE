@@ -277,3 +277,27 @@ test("the preload shows the saved list and its covers without running the engine
   await state.preload();
   assert.equal(calls.length, 1, "once is enough");
 });
+
+test("undoing a restore names the games and says the current saves are kept first", async () => {
+  state.page = { ...state.page, undoRestore: { id: "restore-1", createdAt: 1_790_000_000, expiresAt: 1_790_604_800, games: ["Elden Ring", "Hades"] } };
+  let undone = false;
+  api.undoLastRestore = async () => { undone = true; return { kind: "restore", processedGames: 2, processedBytes: 0, failedGames: [], failures: [], safetyBackupPath: null, rolledBack: [] }; };
+  const undoing = state.undoLastRestore();
+  await settle();
+  assert.match(confirmState.current.message, /Elden Ring, Hades/);
+  assert.match(confirmState.current.message, /copied first/);
+  confirmState.answer(false);
+  await undoing;
+  assert.equal(undone, false, "nothing happens without the user's yes");
+});
+
+test("a game put back after a restore that did not finish is said plainly", async () => {
+  state.selected.add("a");
+  state.tab = "backup";
+  api.restore = async () => ({ kind: "restore", processedGames: 0, processedBytes: 0, failedGames: ["a"], failures: [{ game: "a", reason: "os error 32", file: null }], safetyBackupPath: "x", rolledBack: ["a"] });
+  const restoring = state.restore([{ gameId: "a", snapshotId: "latest" }]);
+  await settle();
+  confirmState.answer(true);
+  await restoring;
+  assert.ok(toast.visible.some((item) => /a was put back as before/.test(item.message)));
+});

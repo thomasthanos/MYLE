@@ -7,6 +7,7 @@ mod headless;
 mod models;
 pub(crate) mod notice;
 mod parser;
+mod safety;
 mod scan_cache;
 mod settings;
 mod state;

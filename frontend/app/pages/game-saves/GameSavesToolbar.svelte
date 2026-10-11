@@ -26,6 +26,11 @@
   const shownFilters = $derived(
     filterOptions.filter((option) => option.value === "all" || option.value === gameSaves.filter || gameSaves.statusCounts[option.value] > 0),
   );
+  /** A restore or undo is writing saves: Cancel stops only between games. */
+  const writingSaves = $derived(
+    gameSaves.operation?.kind === "restore" &&
+      (gameSaves.operation.stage === "creatingSafetyBackup" || gameSaves.operation.stage === "restoring"),
+  );
   const stageLabels: Record<OperationStage, string> = {
     preparing: "Preparing…",
     scanning: "Scanning save locations…",
@@ -224,8 +229,15 @@
       {#if elapsed >= 2}
         <span class="numbers">{formatElapsed(elapsed)}</span>
       {/if}
-      <button class="btn small" disabled={gameSaves.cancelling} onclick={() => gameSaves.cancel()}>
-        {gameSaves.cancelling ? "Cancelling…" : "Cancel"}
+      <!-- While saves are written, a game is never cut off half-way: Cancel
+           then stops before the next game. -->
+      <button
+        class="btn small"
+        disabled={gameSaves.cancelling}
+        title={writingSaves ? "Saves are never cut off half-written: the game being restored finishes first." : undefined}
+        onclick={() => gameSaves.cancel()}
+      >
+        {gameSaves.cancelling ? (writingSaves ? "Stopping after this game…" : "Cancelling…") : writingSaves ? "Stop after this game" : "Cancel"}
       </button>
       <span class="progress" class:indeterminate={progress === null} aria-hidden="true">
         <span style:width={progress === null ? undefined : `${progress}%`}></span>

@@ -597,7 +597,8 @@ class GameSavesState {
       title: `Restore ${selections.length} ${selections.length === 1 ? "game" : "games"}?`,
       message:
         `${chosen.length} ${chosen.length === 1 ? "saved copy" : "saved copies"} · ${formatBytes(bytes)}\n\n` +
-        "Close the selected games before continuing. Their current local saves will be replaced by the chosen snapshots. A safety backup is created first and can be undone for 7 days.",
+        "Close the selected games before continuing. Their current local saves will be replaced by the chosen snapshots.\n\n" +
+        "Every save that is replaced is copied first. A game whose restore does not finish is put back as it was at once, and the whole restore can be undone for 7 days.",
       confirmLabel: "Restore saves",
       danger: true,
     });
@@ -619,11 +620,13 @@ class GameSavesState {
   async undoLastRestore() {
     const undo = this.page.undoRestore;
     if (!undo || this.locked) return;
+    const when = new Date(undo.createdAt * 1000).toLocaleString();
+    const names = undo.games.slice(0, 5).join(", ") + (undo.games.length > 5 ? ` and ${undo.games.length - 5} more` : "");
     const ok = await confirm({
       title: "Undo the last restore?",
       message:
-        `${undo.games.length} ${undo.games.length === 1 ? "game" : "games"} will be returned to their state before the last restore.\n\n` +
-        "Close those games before continuing. This safety copy is consumed only after a successful undo.",
+        `${names} will go back to how they were before the restore of ${when}.\n\n` +
+        "Anything played since then is not lost: the saves as they are now are copied first, and this undo can be undone in turn. Close those games before continuing.",
       confirmLabel: "Undo restore",
       danger: true,
     });
@@ -900,6 +903,10 @@ class GameSavesState {
     const verb = result.kind === "backup" ? "Backed up" : "Restored";
     const failed = result.failedGames.length;
     if (result.processedGames) toast.success(`${verb} ${result.processedGames} ${result.processedGames === 1 ? "game" : "games"}.`);
+    const rolledBack = result.rolledBack ?? [];
+    if (rolledBack.length) {
+      toast.info(`${rolledBack.join(", ")} ${rolledBack.length === 1 ? "was" : "were"} put back as before: the restore did not finish, so nothing was mixed.`);
+    }
     if (!failed) {
       this.failures = null;
       return;

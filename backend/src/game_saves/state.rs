@@ -24,6 +24,10 @@ struct ActiveOperation {
     /// A scan runs its engine passes side by side; cancel stops all of them.
     pids: Vec<u32>,
     cancelled: bool,
+    /// Whether Cancel may stop the engine at once. Not while it writes saves
+    /// (a restore, an undo): a save cut off half-written is lost, so Cancel
+    /// then only stops before the next game.
+    killable: bool,
 }
 
 pub(crate) struct OperationHandle {
@@ -76,6 +80,7 @@ impl GameSavesState {
                 token,
                 pids: Vec::new(),
                 cancelled: false,
+                killable: true,
             });
             token
         };
@@ -128,17 +133,20 @@ impl GameSavesState {
     }
 
     pub(crate) fn cancel(&self) {
-        let pids = {
-            let mut inner = self.lock();
-            let Some(active) = inner.active.as_mut() else {
-                return;
-            };
-            active.cancelled = true;
-            active.pids.clone()
-        };
-        for pid in pids {
+        for pid in self.cancel_marking() {
             crate::apps::process::kill_tree(pid);
         }
+    }
+
+    /// Marks the running operation cancelled; answers the engine processes
+    /// to stop now (none while saves are being written).
+    fn cancel_marking(&self) -> Vec<u32> {
+        let mut inner = self.lock();
+        let Some(active) = inner.active.as_mut() else {
+            return Vec::new();
+        };
+        active.cancelled = true;
+        if active.killable { active.pids.clone() } else { Vec::new() }
     }
 
     pub(crate) fn ensure_idle(&self) -> Result<(), String> {
@@ -172,10 +180,24 @@ impl OperationHandle {
             } else {
                 active.pids.retain(|known| *known != pid);
             }
-            running && active.cancelled
+            running && active.cancelled && active.killable
         };
         if cancelled {
             crate::apps::process::kill_tree(pid);
+        }
+    }
+
+    /// While `false`, Cancel no longer stops the engine mid-way: it only stops
+    /// the operation before its next step (see `ActiveOperation::killable`).
+    pub(crate) fn set_killable(&self, killable: bool) {
+        if let Some(active) = self
+            .state
+            .lock()
+            .active
+            .as_mut()
+            .filter(|active| active.token == self.token)
+        {
+            active.killable = killable;
         }
     }
 
@@ -286,6 +308,27 @@ mod tests {
 
         drop(reservation);
         assert!(state.begin(&root, OperationKind::Scan).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cancel_never_stops_the_engine_while_it_writes_saves() {
+        let root = std::env::temp_dir().join(format!(
+            "myle-game-saves-cancel-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let state = GameSavesState::default();
+        let operation = state.begin(&root, OperationKind::Restore).unwrap();
+        state.lock().active.as_mut().unwrap().pids.push(4242);
+
+        operation.set_killable(false);
+        assert!(state.cancel_marking().is_empty(), "a restore writing saves is not killed");
+        assert!(operation.is_cancelled(), "it stops before the next game instead");
+
+        operation.set_killable(true);
+        assert_eq!(state.cancel_marking(), vec![4242], "a scan or preview still stops at once");
+        drop(operation);
         let _ = fs::remove_dir_all(&root);
     }
 }

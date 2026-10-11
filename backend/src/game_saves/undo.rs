@@ -73,20 +73,13 @@ pub(crate) fn load_valid(root: &Path) -> Option<UndoRestore> {
     Some(undo)
 }
 
-pub(crate) fn consume(root: &Path, id: &str) -> Result<(), String> {
-    let current = load_valid(root).ok_or("The restore safety copy is no longer available.")?;
-    if current.id != id {
-        return Err("The restore safety copy changed. Refresh and try again.".into());
+/// Forgets the last restore's safety copy: a newer restore that changes
+/// nothing must not leave "Undo last restore" putting back an older one.
+pub(crate) fn clear(root: &Path) {
+    if let Some(previous) = load_valid(root) {
+        let _ = fs::remove_file(root.join(METADATA_FILE));
+        discard_slot(root, &previous.id);
     }
-    let slot = slot_path(root, id)?;
-    let metadata = root.join(METADATA_FILE);
-    if metadata.exists() {
-        fs::remove_file(metadata).map_err(|error| error.to_string())?;
-    }
-    if slot.exists() {
-        fs::remove_dir_all(slot).map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 pub(crate) fn discard_slot(root: &Path, id: &str) {
