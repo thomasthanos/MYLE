@@ -1410,6 +1410,37 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     })
 }
 
+/// The site of an address or passkey relying party, as its registrable
+/// domain: `https://accounts.google.com/x` and `google.com` are one site.
+fn site_of(text: &str) -> Option<String> {
+    let host = super::import::host_of(text)?;
+    Some(psl::domain_str(&host).unwrap_or(&host).to_string())
+}
+
+/// The same account on the same site: a kept passkey entry and an imported
+/// login with its password.
+fn same_login(had: &Entry, imported: &Entry) -> bool {
+    let theirs: Vec<String> = imported.urls.iter().filter_map(|u| site_of(u)).collect();
+    if theirs.is_empty() {
+        return false;
+    }
+    let ours: Vec<String> = had
+        .urls
+        .iter()
+        .filter_map(|u| site_of(u))
+        .chain(had.passkeys.iter().filter_map(|k| site_of(&k.rp_id)))
+        .collect();
+    if !theirs.iter().any(|t| ours.contains(t)) {
+        return false;
+    }
+    let user = imported.username.trim();
+    if user.is_empty() {
+        return false;
+    }
+    had.username.trim().eq_ignore_ascii_case(user)
+        || had.passkeys.iter().any(|k| k.user_name.trim().eq_ignore_ascii_case(user))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1997,33 +2028,3 @@ mod tests {
     }
 }
 
-/// The site of an address or passkey relying party, as its registrable
-/// domain: `https://accounts.google.com/x` and `google.com` are one site.
-fn site_of(text: &str) -> Option<String> {
-    let host = super::import::host_of(text)?;
-    Some(psl::domain_str(&host).unwrap_or(&host).to_string())
-}
-
-/// The same account on the same site: a kept passkey entry and an imported
-/// login with its password.
-fn same_login(had: &Entry, imported: &Entry) -> bool {
-    let theirs: Vec<String> = imported.urls.iter().filter_map(|u| site_of(u)).collect();
-    if theirs.is_empty() {
-        return false;
-    }
-    let ours: Vec<String> = had
-        .urls
-        .iter()
-        .filter_map(|u| site_of(u))
-        .chain(had.passkeys.iter().filter_map(|k| site_of(&k.rp_id)))
-        .collect();
-    if !theirs.iter().any(|t| ours.contains(t)) {
-        return false;
-    }
-    let user = imported.username.trim();
-    if user.is_empty() {
-        return false;
-    }
-    had.username.trim().eq_ignore_ascii_case(user)
-        || had.passkeys.iter().any(|k| k.user_name.trim().eq_ignore_ascii_case(user))
-}
