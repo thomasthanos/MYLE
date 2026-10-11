@@ -1,0 +1,29 @@
+{
+  "name": "MYLE",
+  "identifier": "uk.thomast.myle.source",
+  "subtitle": "MYLE Passwords for iPhone",
+  "iconURL": "https://raw.githubusercontent.com/thomasthanos/MYLE/main/backend/icons/128x128@2x.png",
+  "website": "https://github.com/thomasthanos/MYLE",
+  "apps": [
+    {
+      "name": "MYLE Passwords",
+      "bundleIdentifier": "uk.thomast.myle.passwords",
+      "developerName": "thomasthanos",
+      "subtitle": "Passwords, passkeys and 2FA codes",
+      "localizedDescription": "MYLE's password manager for iPhone, synced with the MYLE desktop app.",
+      "iconURL": "https://raw.githubusercontent.com/thomasthanos/MYLE/main/backend/icons/128x128@2x.png",
+      "tintColor": "7C83FD",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "9.19.0",
+          "date": "2026-10-11",
+          "downloadURL": "https://github.com/thomasthanos/MYLE/releases/download/v9.19.0/MYLE-Passwords.ipa",
+          "size": 6129414,
+          "minOSVersion": "15.0"
+        }
+      ]
+    }
+  ],
+  "news": []
+}
