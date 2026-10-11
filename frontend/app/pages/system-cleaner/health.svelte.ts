@@ -30,8 +30,9 @@ export interface ModuleReport { module: HealthModule; findings: Finding[]; error
 export interface RestoreEntry { id: string; at: number; module: string; title: string; undo: { kind: string } }
 export interface ApplyResult { id: string; ok: boolean; message: string | null }
 export type HealthEvent =
-  | { event: "module"; data: { module: string; done: number; total: number } }
-  | { event: "found"; data: { module: string; count: number } };
+  | { event: "started"; data: { module: HealthModule } }
+  | { event: "step"; data: { module: HealthModule; fraction: number } }
+  | { event: "result"; data: { report: ModuleReport } };
 
 export const MODULES: { id: HealthModule; title: string; hint: string }[] = [
   { id: "leftovers", title: "Uninstallation leftovers", hint: "Folders and registry entries of software that is gone." },
@@ -74,31 +75,55 @@ class HealthState {
     return Object.values(this.reports).reduce((n, r) => n + r.findings.length, 0);
   }
 
+  /** Per module while a scan runs: 0..1, or 1 once its result is in. */
+  progress = $state<Record<string, number>>({});
+  /** Modules that are scanning right now. */
+  running = $state<Set<string>>(new Set());
+
+  /** Overall 0..1: finished modules plus how far the running ones are. */
+  get fraction() {
+    const ids = Object.keys(this.progress);
+    if (!ids.length) return 0;
+    return ids.reduce((n, id) => n + this.progress[id], 0) / ids.length;
+  }
+
   async scan(modules: HealthModule[] = []) {
     if (this.scanning) return;
+    const ids = modules.length ? modules : MODULES.map((m) => m.id);
     this.scanning = true;
+    this.total = ids.length;
     this.done = 0;
-    this.total = modules.length || MODULES.length;
+    this.progress = Object.fromEntries(ids.map((id) => [id, 0]));
+    this.running = new Set();
     const channel = new Channel<HealthEvent>();
     channel.onmessage = (e) => {
-      if (e.event === "module") {
-        this.current = e.data.module;
-        this.done = e.data.done;
-        this.total = e.data.total;
+      if (e.event === "started") {
+        this.running = new Set([...this.running, e.data.module]);
+      } else if (e.event === "step") {
+        // Never backwards, and never full before the result.
+        const now = this.progress[e.data.module] ?? 0;
+        this.progress = { ...this.progress, [e.data.module]: Math.max(now, Math.min(0.95, e.data.fraction)) };
+      } else if (e.event === "result") {
+        const r = e.data.report;
+        this.reports = { ...this.reports, [r.module]: r };
+        this.progress = { ...this.progress, [r.module]: 1 };
+        const running = new Set(this.running);
+        running.delete(r.module);
+        this.running = running;
+        this.done += 1;
+        this.current = [...running][0] ?? "";
       }
     };
     try {
-      const list = await invoke<ModuleReport[]>("cleaner_health_scan", { modules, onEvent: channel });
-      const next = { ...this.reports };
-      for (const r of list) next[r.module] = r;
-      this.reports = next;
-      this.selected = new Set();
-      this.failures = {};
+      await invoke<ModuleReport[]>("cleaner_health_scan", { modules, onEvent: channel });
+      const keep = new Set(Object.values(this.reports).flatMap((r) => r.findings.map((f) => f.id)));
+      this.selected = new Set([...this.selected].filter((id) => keep.has(id)));
     } catch (e) {
       toast.error(`Software Health scan failed: ${e}`);
     } finally {
       this.scanning = false;
       this.current = "";
+      this.running = new Set();
     }
     await this.loadRestore();
   }

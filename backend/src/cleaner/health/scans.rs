@@ -11,16 +11,19 @@ use uuid::Uuid;
 use super::sys;
 use super::{Finding, Target};
 
-pub fn scan(module: &str) -> Result<Vec<(Finding, Target)>, String> {
+/// Reports how far a scan is, 0..1.
+pub type Tick<'a> = &'a (dyn Fn(f32) + Sync);
+
+pub fn scan(module: &str, tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     match module {
-        "leftovers" => Ok(leftovers()),
+        "leftovers" => Ok(leftovers(tick)),
         "broken" => Ok(broken()),
         "redundant" => Ok(redundant()),
-        "hibernation" => Ok(hibernation()),
+        "hibernation" => Ok(hibernation(tick)),
         "permissions" => Ok(permissions()),
-        "notifications" => Ok(notifications()),
+        "notifications" => Ok(notifications(tick)),
         "installers" => Ok(installers()),
-        "suspicious" => Ok(suspicious()),
+        "suspicious" => Ok(suspicious(tick)),
         other => Err(format!("Unknown module {other}")),
     }
 }
@@ -144,10 +147,12 @@ fn live_tokens() -> HashSet<String> {
 
 // ─── 1. Uninstallation leftovers ─────────────────────────────────────────────
 
-fn leftovers() -> Vec<(Finding, Target)> {
+fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
     let list = installed_list();
     let mut tokens = installed_tokens(&list);
+    tick(0.1);
     tokens.extend(live_tokens());
+    tick(0.4);
     let mut out = Vec::new();
 
     let roots: Vec<PathBuf> = [
@@ -162,7 +167,9 @@ fn leftovers() -> Vec<(Finding, Target)> {
     .collect();
 
     let mut seen = HashSet::new();
-    for root in roots {
+    let roots_total = roots.len().max(1) as f32;
+    for (index, root) in roots.into_iter().enumerate() {
+        tick(0.4 + 0.5 * index as f32 / roots_total);
         let Ok(entries) = std::fs::read_dir(&root) else {
             continue;
         };
@@ -457,7 +464,7 @@ fn startup_enabled(approved_hive: &str, name: &str) -> bool {
     }
 }
 
-fn hibernation() -> Vec<(Finding, Target)> {
+fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
 
     for hive in ["HKLM", "HKCU"] {
@@ -495,6 +502,7 @@ fn hibernation() -> Vec<(Finding, Target)> {
         }
     }
 
+    tick(0.15);
     // The Startup folder (shortcuts), approved the same way.
     if let Some(roaming) = sys::env_dir("APPDATA") {
         let folder = roaming.join(r"Microsoft\Windows\Start Menu\Programs\Startup");
@@ -532,6 +540,7 @@ fn hibernation() -> Vec<(Finding, Target)> {
         }
     }
 
+    tick(0.25);
     // Busy third-party background processes (information: CPU and memory).
     if let Ok(text) = sys::powershell(
         "Get-Process | Where-Object { $_.Path -and $_.MainWindowHandle -eq 0 } | Sort-Object WorkingSet64 -Descending | Select-Object -First 40 Name,Path,CPU,WorkingSet64 | ConvertTo-Json -Compress",
@@ -563,6 +572,7 @@ fn hibernation() -> Vec<(Finding, Target)> {
         }
     }
 
+    tick(0.6);
     // Third-party automatic services that are running now.
     if let Ok(text) = sys::powershell(
         "Get-CimInstance Win32_Service | Where-Object { $_.StartMode -eq 'Auto' -and $_.State -eq 'Running' } | Select-Object Name,DisplayName,PathName | ConvertTo-Json -Compress",
@@ -683,7 +693,7 @@ fn pretty_app(app: &str) -> String {
 
 const NOTIFY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings";
 
-fn notifications() -> Vec<(Finding, Target)> {
+fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     if let Some(root) = sys::open("HKCU", NOTIFY) {
         for app in sys::subkeys(&root) {
@@ -710,8 +720,11 @@ fn notifications() -> Vec<(Finding, Target)> {
     }
 
     // Browser site push permissions.
+    tick(0.3);
     out.extend(chrome_sites("chrome.exe", r"Google\Chrome\User Data"));
+    tick(0.5);
     out.extend(chrome_sites("msedge.exe", r"Microsoft\Edge\User Data"));
+    tick(0.7);
     out.extend(chrome_sites(
         "brave.exe",
         r"BraveSoftware\Brave-Browser\User Data",
@@ -899,15 +912,19 @@ fn installers() -> Vec<(Finding, Target)> {
 
 // ─── 8. Suspicious software & extensions ─────────────────────────────────────
 
-fn suspicious() -> Vec<(Finding, Target)> {
+fn suspicious(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     out.extend(browser_extensions("Chrome", r"Google\Chrome\User Data"));
+    tick(0.1);
     out.extend(browser_extensions("Edge", r"Microsoft\Edge\User Data"));
+    tick(0.2);
     out.extend(browser_extensions(
         "Brave",
         r"BraveSoftware\Brave-Browser\User Data",
     ));
+    tick(0.35);
     out.extend(suspicious_startup());
+    tick(0.6);
     out.extend(suspicious_tasks());
     out
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
   import History from "@lucide/svelte/icons/history";
@@ -15,7 +16,6 @@
 
   onMount(() => health.loadRestore());
 
-  const pct = $derived(health.total ? Math.round((health.done / health.total) * 100) : 0);
   const moduleTitle = (id: string) => MODULES.find((m) => m.id === id)?.title ?? id;
 
   function findings(id: HealthModule): Finding[] {
@@ -61,8 +61,11 @@
 
   {#if health.scanning}
     <div class="progress" aria-live="polite">
-      <span>Scanning {moduleTitle(health.current)}… {health.done}/{health.total}</span>
-      <ProgressBar value={pct} label="Software Health scan" />
+      <span>
+        {health.done}/{health.total} done{#if health.running.size} · scanning {[...health.running].map(moduleTitle).join(", ")}{/if}
+        <em>{Math.round(health.fraction * 100)}%</em>
+      </span>
+      <ProgressBar value={health.fraction} label="Software Health scan" />
     </div>
   {/if}
 
@@ -91,8 +94,14 @@
           <ChevronRight size={14} class="chev" />
           <span class="name">{m.title}</span>
           <span class="hint">{m.hint}</span>
-          {#if report}
-            <span class="badge" class:clean={!list.length}>{list.length ? list.length : "OK"}</span>
+          {#if health.running.has(m.id)}
+            <span class="badge idle"><LoaderCircle size={11} class="spin" /></span>
+          {:else if health.scanning && health.progress[m.id] === 0}
+            <span class="badge idle">…</span>
+          {:else if report}
+            <span class="badge" class:clean={!list.length}>
+              {#if health.scanning && health.progress[m.id] === 1}<Check size={10} />{/if}{list.length ? list.length : "OK"}
+            </span>
           {:else}
             <span class="badge idle">—</span>
           {/if}
@@ -141,28 +150,31 @@
 </section>
 
 <style>
-  .health { display: grid; gap: 10px; margin-top: 12px; padding: 14px 16px; }
+  .health { display: grid; gap: 7px; margin-top: 8px; padding: 10px 12px; }
   header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
   .title { display: flex; gap: 10px; min-width: 0; flex: 1 1 360px; }
   .title :global(svg) { flex: none; margin-top: 2px; color: var(--accent); }
-  h2 { font-size: 14px; font-weight: 600; }
-  .title p { margin-top: 2px; color: var(--text-3); font-size: 11.5px; }
+  h2 { font-size: 13px; font-weight: 600; }
+  .title p { margin-top: 1px; color: var(--text-3); font-size: 10.75px; }
   .actions, .tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .progress { display: grid; gap: 5px; color: var(--text-2); font-size: 11.5px; }
-  .modules { display: grid; gap: 4px; }
+  .progress { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; }
+  .progress span { display: flex; gap: 6px; }
+  .progress em { margin-left: auto; font-style: normal; font-variant-numeric: tabular-nums; }
+  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); align-items: start; gap: 4px; }
+  .module.open { grid-column: 1 / -1; }
   .module { border: 1px solid rgb(255 255 255 / 0.06); border-radius: 8px; background: rgb(255 255 255 / 0.015); }
-  .head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 9px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .head:hover { background: rgb(255 255 255 / 0.03); }
   .head :global(.chev) { flex: none; color: var(--text-3); transition: transform 160ms var(--ease-out); }
   .module.open .head :global(.chev) { transform: rotate(90deg); }
-  .name { flex: none; font-size: 12.5px; font-weight: 600; }
+  .name { flex: none; font-size: 12px; font-weight: 600; }
   .hint { overflow: hidden; flex: 1; color: var(--text-3); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
-  .badge { flex: none; min-width: 26px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--accent-soft-rgb) / 0.18); color: rgb(var(--accent-soft-rgb)); font-size: 10.5px; font-weight: 600; text-align: center; }
+  .badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex: none; min-width: 26px; padding: 1px 7px; border-radius: 999px; background: rgb(var(--accent-soft-rgb) / 0.18); color: rgb(var(--accent-soft-rgb)); font-size: 10.5px; font-weight: 600; text-align: center; }
   .badge.clean { background: rgb(62 207 142 / 0.14); color: #98dfbd; }
   .badge.idle { background: rgb(255 255 255 / 0.05); color: var(--text-3); }
-  .body { display: grid; gap: 6px; padding: 4px 10px 10px 32px; }
+  .body { display: grid; gap: 4px; padding: 2px 9px 8px 29px; }
   ul { display: grid; gap: 2px; max-height: 340px; overflow: auto; list-style: none; }
-  li { display: flex; align-items: center; gap: 9px; padding: 5px 6px; border-radius: 6px; }
+  li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 6px; }
   li:hover { background: rgb(255 255 255 / 0.03); }
   li.off { opacity: 0.65; }
   .grow { flex: 1; min-width: 0; }

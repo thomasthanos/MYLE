@@ -169,15 +169,12 @@ pub struct ModuleReport {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum HealthEvent {
-    Module {
-        module: &'static str,
-        done: usize,
-        total: usize,
-    },
-    Found {
-        module: &'static str,
-        count: usize,
-    },
+    /// A module started scanning.
+    Started { module: &'static str },
+    /// How far a module is, 0..1.
+    Step { module: &'static str, fraction: f32 },
+    /// A module finished: its findings, straight away.
+    Result { report: ModuleReport },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -249,43 +246,46 @@ pub async fn cleaner_health_scan(
         .filter(|m| modules.is_empty() || modules.iter().any(|w| w == m))
         .collect();
     tauri::async_runtime::spawn_blocking(move || {
-        let total = wanted.len();
-        let mut reports = Vec::new();
-        let mut found = HashMap::new();
-        for (done, module) in wanted.iter().enumerate() {
-            let _ = on_event.send(HealthEvent::Module {
-                module,
-                done,
-                total,
-            });
-            let (items, error) = match scans::scan(module) {
-                Ok(items) => (items, None),
-                Err(error) => (Vec::new(), Some(error)),
-            };
-            let _ = on_event.send(HealthEvent::Found {
-                module,
-                count: items.len(),
-            });
-            let mut findings = Vec::new();
-            for (finding, target) in items {
-                findings.push(finding.clone());
-                found.insert(finding.id.clone(), (finding, target));
+        // Every module at once: they read different places, and the slow
+        // ones (PowerShell, folder sizes) no longer hold the others back.
+        let reports = Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            for module in wanted.iter().copied() {
+                let on_event = &on_event;
+                let reports = &reports;
+                scope.spawn(move || {
+                    let _ = on_event.send(HealthEvent::Started { module });
+                    let tick = |fraction: f32| {
+                        let _ = on_event.send(HealthEvent::Step { module, fraction });
+                    };
+                    let (items, error) = match scans::scan(module, &tick) {
+                        Ok(items) => (items, None),
+                        Err(error) => (Vec::new(), Some(error)),
+                    };
+                    let findings: Vec<Finding> = items.iter().map(|(f, _)| f.clone()).collect();
+                    {
+                        let mut store = FOUND.lock().unwrap_or_else(|p| p.into_inner());
+                        store.retain(|_, (f, _)| f.module != module);
+                        store.extend(items.into_iter().map(|(f, t)| (f.id.clone(), (f, t))));
+                    }
+                    let report = ModuleReport {
+                        module,
+                        findings,
+                        error,
+                    };
+                    let _ = on_event.send(HealthEvent::Result {
+                        report: report.clone(),
+                    });
+                    reports
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .push(report);
+                });
             }
-            reports.push(ModuleReport {
-                module,
-                findings,
-                error,
-            });
-        }
-        let _ = on_event.send(HealthEvent::Module {
-            module: "",
-            done: total,
-            total,
         });
-        let mut store = FOUND.lock().unwrap_or_else(|p| p.into_inner());
-        store.retain(|_, (f, _)| !wanted.contains(&f.module));
-        store.extend(found);
-        reports
+        let mut list = reports.into_inner().unwrap_or_else(|p| p.into_inner());
+        list.sort_by_key(|r| MODULES.iter().position(|m| *m == r.module));
+        list
     })
     .await
     .map_err(|e| e.to_string())

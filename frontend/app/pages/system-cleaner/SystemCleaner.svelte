@@ -105,17 +105,17 @@
 <SoftwareHealth />
 
 <style>
-  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px 24px; margin-bottom: 16px; padding: 16px 20px; }
+  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 10px; padding: 10px 14px; }
   .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 28px; }
   .stat { display: grid; gap: 3px; }
-  .label { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-  .value { font-size: 23px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .value.small { font-size: 15px; font-weight: 500; line-height: 1.35; }
+  .label { color: var(--text-3); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .value { font-size: 18px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 13px; font-weight: 500; line-height: 1.35; }
   .value.accent { color: var(--accent); }
   .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex: 1 1 380px; gap: 10px 16px; }
   .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; }
   .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: 13px; }
+  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: 13px; }
   /* The scan just ticked everything: say so, so the ticks are not a surprise. */
   .picked { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: 11.5px; animation: fade-in 260ms var(--ease-out) both; }
   .picked :global(svg) { flex: none; color: rgb(62 207 142 / 0.75); }
@@ -128,9 +128,8 @@
   .work-pct { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .work-pct.settled { color: #98dfbd; }
   .work-note { color: var(--text-3); font-size: 10.75px; }
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: stretch; gap: 8px; }
 
   @keyframes fade-in { from { opacity: 0; } }
   @media (max-width: 860px) { .bar { flex-basis: 100%; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.06); } }
-  @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
 </style>

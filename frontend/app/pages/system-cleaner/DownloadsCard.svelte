@@ -45,9 +45,9 @@
 <style>
   .downloads {
     display: grid;
-    gap: 10px;
-    margin-top: 12px;
-    padding: 14px;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 9px 12px;
   }
 
   header {
@@ -60,8 +60,8 @@
     display: grid;
     flex: none;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
     border-radius: 9px;
     background: rgb(var(--accent-rgb) / 0.14);
     color: rgb(var(--accent-rgb));
