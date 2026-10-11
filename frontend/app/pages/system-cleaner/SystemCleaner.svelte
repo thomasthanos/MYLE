@@ -5,13 +5,17 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RadarIcon from "@lucide/svelte/icons/radar";
   import Sparkles from "@lucide/svelte/icons/sparkles";
+  import HeartPulse from "@lucide/svelte/icons/heart-pulse";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
-  import DownloadsCard from "./DownloadsCard.svelte";
   import SoftwareHealth from "./SoftwareHealth.svelte";
   import { cleanerState } from "./state.svelte";
+  import { health } from "./health.svelte";
+
+  let tab = $state<"cleanup" | "health">("cleanup");
+  const locked = $derived(cleanerState.busy || health.busy || health.scanning);
 
   onMount(() => void cleanerState.load());
 
@@ -39,12 +43,19 @@
   });
 </script>
 
-<PageHeader title="System Cleaner" subtitle="Find and remove the files Windows leaves behind." />
+<PageHeader title="System Cleaner" subtitle="Clear temporary files, clean software leftovers and keep your apps in check." />
+
+<div class="tabs" role="tablist" aria-label="Cleaner tools">
+  <button id="cleanup-tab" role="tab" aria-selected={tab === "cleanup"} aria-controls="cleanup-panel" tabindex={tab === "cleanup" ? 0 : -1} class:active={tab === "cleanup"} onclick={() => tab = "cleanup"} onkeydown={(e) => { if (["ArrowRight", "ArrowLeft", "End"].includes(e.key)) { e.preventDefault(); tab = "health"; document.getElementById("health-tab")?.focus(); } }}><Sparkles size={17} /> Cleanup</button>
+  <button id="health-tab" role="tab" aria-selected={tab === "health"} aria-controls="health-panel" tabindex={tab === "health" ? 0 : -1} class:active={tab === "health"} onclick={() => tab = "health"} onkeydown={(e) => { if (["ArrowRight", "ArrowLeft", "Home"].includes(e.key)) { e.preventDefault(); tab = "cleanup"; document.getElementById("cleanup-tab")?.focus(); } }}><HeartPulse size={17} /> Software Health</button>
+</div>
+
+<div id="cleanup-panel" role="tabpanel" aria-labelledby="cleanup-tab" hidden={tab !== "cleanup"}>
 
 <section class="hero surface">
   <div class="stats">
     <div class="stat"><span class="label">Last cleaned</span><strong class="value small" title={lastCleanedTitle}>{lastCleanedLabel}</strong></div>
-    <div class="stat"><span class="label">Total size</span><strong class="value" class:shimmer={cleanerState.phase === "scanning"}>{formatSize(cleanerState.total)}</strong></div>
+    <div class="stat"><span class="label">Available to clean</span><strong class="value" class:shimmer={cleanerState.phase === "scanning"}>{formatSize(cleanerState.total)}</strong></div>
     <div class="stat"><span class="label">Selected</span><strong class="value accent">{formatSize(cleanerState.selectedBytes)}</strong></div>
   </div>
 
@@ -54,12 +65,12 @@
       {cleanerState.status}
     </p>
     <div class="actions">
-      <button class="btn" disabled={cleanerState.busy} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
-      <button class="btn" disabled={cleanerState.busy || !cleanerState.categories.length} onclick={() => cleanerState.toggleAll()}>
+      <button class="btn" disabled={locked} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
+      <button class="btn" disabled={locked || !cleanerState.categories.length} onclick={() => cleanerState.toggleAll()}>
         <CheckCheck size={15} />
         {cleanerState.allSelected ? "Deselect all" : "Select all"}
       </button>
-      <button class="btn primary" disabled={cleanerState.busy || !cleanerState.selected.size} onclick={() => cleanerState.clean()}>
+      <button class="btn primary" disabled={locked || !cleanerState.selected.size} onclick={() => cleanerState.clean()}>
         <Sparkles size={15} />
         {cleanLabel}
       </button>
@@ -100,15 +111,19 @@
   {/each}
 </div>
 
-<DownloadsCard />
-
-<SoftwareHealth />
+</div>
+<div id="health-panel" role="tabpanel" aria-labelledby="health-tab" hidden={tab !== "health"}><SoftwareHealth /></div>
 
 <style>
+  .tabs { display: flex; gap: 6px; margin: 0 0 20px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
+  .tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+  .tabs button.active { background: var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button:first-child :global(svg) { color: #7dd3fc; }
+  .tabs button:last-child :global(svg) { color: #c4b5fd; }
   .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-3) var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4); }
   .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 28px; }
   .stat { display: grid; gap: 3px; }
-  .label { color: var(--text-3); font-size: var(--fluid-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .label { color: var(--text-2); font-size: var(--fluid-xs); font-weight: 500; }
   .value { font-size: var(--fluid-lg); font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   .value.small { font-size: var(--fluid-md); font-weight: 500; line-height: 1.35; }
   .value.accent { color: var(--accent); }

@@ -11,7 +11,9 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Zap from "@lucide/svelte/icons/zap";
   import { formatSize, type CleanerCategory } from "./api";
-  import { cleanerState, freedAndInUse } from "./state.svelte";
+  import { cleanerState } from "./state.svelte";
+  import DownloadsCard from "./DownloadsCard.svelte";
+  import { health } from "./health.svelte";
 
   let { category }: { category: CleanerCategory } = $props();
 
@@ -32,7 +34,9 @@
   const partly = $derived(done && (measured?.bytes ?? 0) > 0);
   /** The bytes the run could not remove; an administrator pass already replaced
    *  its part of `skippedBytes` and zeroed `adminSkippedBytes`. */
-  const inUse = $derived(done ? Math.max(outcome?.skippedBytes ?? 0, partly ? (measured?.bytes ?? 0) : 0) : 0);
+  const remaining = $derived(done ? Math.max(outcome?.skippedBytes ?? 0, partly ? (measured?.bytes ?? 0) : 0) : 0);
+  const adminBytes = $derived(Math.min(remaining, outcome?.adminSkippedBytes ?? 0));
+  const inUse = $derived(Math.max(0, remaining - adminBytes));
   /** Only when the leftovers are the system folders the user did not approve. */
   const needsAdmin = $derived(partly && category.mayNeedAdmin && cleanerState.adminGranted !== true);
   const skippedFiles = $derived(outcome?.skipped ? ` (${outcome.skipped.toLocaleString()} ${outcome.skipped === 1 ? "file" : "files"})` : "");
@@ -46,13 +50,15 @@
       <p title={category.description}>{category.description}</p>
     </div>
     <strong class="size" class:shimmer={pending}>{measured ? formatSize(measured.bytes) : "0 B"}</strong>
-    <input type="checkbox" class="switch" aria-label="Include {category.title}" {checked} disabled={cleanerState.busy || done} onchange={() => cleanerState.toggle(category.id)} />
+    <input type="checkbox" aria-label="Include {category.title}" {checked} disabled={cleanerState.busy || health.busy || health.scanning || done} onchange={() => cleanerState.toggle(category.id)} />
   </div>
   <div class="foot">
     <span class="hint" title={category.hint}>
       {#if partly}
         <TriangleAlert size={11} />
-        {freedAndInUse(outcome?.freed ?? 0, inUse)}{needsAdmin ? " · needs administrator" : ""}{skippedFiles}
+        <span class="result freed">Freed {formatSize(outcome?.freed ?? 0)}</span>
+        {#if inUse}<span class="result">In use: {formatSize(inUse)}{skippedFiles} · close the app and scan again</span>{/if}
+        {#if needsAdmin}<span class="result">Administrator needed{adminBytes ? `: ${formatSize(adminBytes)}` : ""}</span>{/if}
       {:else if done}
         <CheckCheck size={11} />
         {outcome?.freed ? `Freed ${formatSize(outcome.freed)}` : "Cleaned"} · scan again to re-check
@@ -65,26 +71,36 @@
       {/if}
     </span>
     {#if locked && !done && cleanerState.adminGranted === false}
-      <button class="btn small" disabled={cleanerState.busy} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={12} /> Allow admin</button>
+      <button class="btn small" disabled={cleanerState.busy || health.busy || health.scanning} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={12} /> Allow admin</button>
     {/if}
   </div>
+  {#if category.id === "downloads" && cleanerState.downloads}
+    <details class="downloads-details"><summary>Review Downloads files</summary><DownloadsCard embedded /></details>
+  {/if}
 </article>
 
 <style>
-  .card { display: flex; flex-direction: column; gap: var(--fluid-gap-2); min-width: 0; padding: var(--fluid-gap-3) var(--fluid-gap-4); border: 1px solid rgb(255 255 255 / 0.07); border-radius: 12px; background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)); transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--surface-fill); box-shadow: var(--surface-depth); transition: border-color var(--dur-fast); }
   .card:hover { border-color: rgb(255 255 255 / 0.14); background: rgb(255 255 255 / 0.04); }
   .card.on { border-color: rgb(var(--accent-rgb) / 0.32); }
   .card.working { border-color: rgb(var(--accent-rgb) / 0.55); }
   .card.done .head { opacity: 0.6; }
   .card.done .hint { color: var(--ok); }
   .card.partly .hint { color: rgb(245 188 95 / 0.9); }
-  .head { display: flex; align-items: flex-start; gap: var(--fluid-gap-3); }
-  .icon { display: grid; place-items: center; width: var(--fluid-icon); height: var(--fluid-icon); flex: none; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
+  .head { display: flex; align-items: flex-start; gap: 10px; }
+  .icon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 9px; background: rgb(125 211 252 / .09); color: #7dd3fc; box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
+  .card:nth-child(2) .icon { color: #f5c26b; background: rgb(245 194 107 / .08); }
+  .card:nth-child(3) .icon { color: #98dfbd; background: rgb(152 223 189 / .08); }
+  .card:nth-child(5) .icon { color: #c4b5fd; background: rgb(196 181 253 / .08); }
   .titles { flex: 1; min-width: 0; }
-  h3 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  h3 { overflow-wrap: anywhere; }
   h3 { font-size: var(--fluid-sm); font-weight: 600; line-height: 1.25; }
   .titles p { margin-top: 2px; color: var(--text-2); line-height: 1.4; font-size: var(--fluid-xs); line-height: 1.3; }
-  .size { flex: none; font-size: var(--fluid-md); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .size { flex: none; font-size: var(--fluid-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
   .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; padding-top: var(--fluid-gap-2); border-top: 1px solid rgb(255 255 255 / 0.05); }
-  .hint { display: flex; align-items: center; gap: 4px; overflow: hidden; color: var(--text-3); font-size: var(--fluid-xs); white-space: nowrap; text-overflow: ellipsis; }
+  .hint { display: flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fluid-xs); flex-wrap: wrap; }
+  .result { display: block; flex-basis: 100%; }
+  .result.freed { color: var(--ok); }
+  .downloads-details { font-size: var(--fluid-xs); color: var(--text-2); }
+  .downloads-details summary { cursor: pointer; }
 </style>

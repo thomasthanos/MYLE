@@ -4,6 +4,8 @@
   import type { Kept } from "./downloads";
   import { cleanerState } from "./state.svelte";
 
+  let { embedded = false }: { embedded?: boolean } = $props();
+
   const preview = $derived(cleanerState.downloads);
   const when = (seconds: number) => new Date(seconds * 1000).toLocaleDateString();
   const why = (k: Kept) =>
@@ -11,11 +13,11 @@
 </script>
 
 {#if preview}
-  <section class="downloads surface">
+  <section class="downloads" class:surface={!embedded} class:embedded>
     <header>
-      <span class="icon"><FolderDown size={16} /></span>
+      {#if !embedded}<span class="icon"><FolderDown size={16} /></span>{/if}
       <span class="text">
-        <strong>Downloads folder, in detail</strong>
+        {#if !embedded}<strong>Downloads folder, in detail</strong>{/if}
         <small>{preview.folder} · {preview.items.length} to delete ({formatSize(preview.total)}), permanently · {preview.kept.length} kept</small>
       </span>
     </header>
@@ -43,6 +45,8 @@
 {/if}
 
 <style>
+  .downloads.embedded { padding: 10px 0 0; margin-top: 0; }
+  .embedded .text small { overflow-wrap: anywhere; }
   .downloads {
     display: grid;
     gap: var(--fluid-gap-2);

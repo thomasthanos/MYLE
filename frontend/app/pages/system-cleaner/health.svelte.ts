@@ -4,6 +4,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { confirm } from "../../../lib/confirm.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { formatSize } from "./api";
+import type { BatchItem } from "./health-model";
 
 export type HealthModule =
   | "leftovers" | "broken" | "redundant" | "hibernation"
@@ -24,11 +25,15 @@ export interface Finding {
   enabled: boolean | null;
   flags: string[];
   actions: HealthAction[];
+  cleanupAction: HealthAction | null;
+  recommended: boolean;
+  reviewReason: string | null;
 }
 
 export interface ModuleReport { module: HealthModule; findings: Finding[]; error: string | null }
 export interface RestoreEntry { id: string; at: number; module: string; title: string; undo: { kind: string } }
 export interface ApplyResult { id: string; ok: boolean; message: string | null }
+export interface BatchProgress { done: number; total: number; current: string }
 export type HealthEvent =
   | { event: "started"; data: { module: HealthModule } }
   | { event: "step"; data: { module: HealthModule; fraction: number } }
@@ -47,7 +52,7 @@ export const MODULES: { id: HealthModule; title: string; hint: string }[] = [
 
 export const ACTION_LABELS: Record<HealthAction, string> = {
   recycle: "Move to Recycle Bin", forceClean: "Force clean", deleteKey: "Remove entry",
-  disable: "Disable", enable: "Enable", manual: "Set to Manual", revoke: "Revoke", allow: "Allow",
+  disable: "Disable", enable: "Enable", manual: "Set to Manual", revoke: "Block access", allow: "Allow access",
   mute: "Mute", unmute: "Unmute", block: "Block", open: "Open in browser",
 };
 
@@ -60,7 +65,20 @@ const ACTION_NOTES: Partial<Record<HealthAction, string>> = {
   block: "The browser must be closed. Restore puts the permission back.",
 };
 
-class HealthState {
+export const healthApi = {
+  scan: async (modules: HealthModule[], onEvent: (event: HealthEvent) => void) => {
+    const channel = new Channel<HealthEvent>(); channel.onmessage = onEvent;
+    return invoke<ModuleReport[]>("cleaner_health_scan", { modules, onEvent: channel });
+  },
+  batch: async (items: BatchItem[], onEvent: (event: BatchProgress) => void) => {
+    const channel = new Channel<BatchProgress>(); channel.onmessage = onEvent;
+    return invoke<ApplyResult[]>("cleaner_health_apply_batch", { items, onEvent: channel });
+  },
+  restoreList: () => invoke<RestoreEntry[]>("cleaner_health_restore_list"),
+  undo: (id: string) => invoke<void>("cleaner_health_restore", { id }),
+};
+
+export class HealthState {
   reports = $state<Record<string, ModuleReport>>({});
   scanning = $state(false);
   current = $state("");
@@ -70,6 +88,15 @@ class HealthState {
   selected = $state<Set<string>>(new Set());
   restore = $state<RestoreEntry[]>([]);
   failures = $state<Record<string, string>>({});
+  overrides = $state<Record<string, HealthAction>>({});
+  operation = $state<BatchProgress | null>(null);
+  lastResults = $state<ApplyResult[]>([]);
+  #seen = new Set<string>();
+  #seenModules = new Map<string, HealthModule>();
+  #attempts = new Map<string, BatchItem>();
+
+  get findings() { return Object.values(this.reports).flatMap((r) => r.findings); }
+  get picked() { return this.findings.filter((f) => this.selected.has(f.id)); }
 
   get count() {
     return Object.values(this.reports).reduce((n, r) => n + r.findings.length, 0);
@@ -88,15 +115,19 @@ class HealthState {
   }
 
   async scan(modules: HealthModule[] = []) {
-    if (this.scanning) return;
+    if (this.scanning || this.busy) return;
+    await this.#scan(modules, true);
+  }
+
+  async #scan(modules: HealthModule[], recommend: boolean) {
     const ids = modules.length ? modules : MODULES.map((m) => m.id);
     this.scanning = true;
     this.total = ids.length;
     this.done = 0;
     this.progress = Object.fromEntries(ids.map((id) => [id, 0]));
     this.running = new Set();
-    const channel = new Channel<HealthEvent>();
-    channel.onmessage = (e) => {
+    const completed = new Set<string>();
+    const receive = (e: HealthEvent) => {
       if (e.event === "started") {
         this.running = new Set([...this.running, e.data.module]);
       } else if (e.event === "step") {
@@ -110,14 +141,24 @@ class HealthState {
         const running = new Set(this.running);
         running.delete(r.module);
         this.running = running;
-        this.done += 1;
+        completed.add(r.module);
+        this.done = completed.size;
         this.current = [...running][0] ?? "";
       }
     };
     try {
-      await invoke<ModuleReport[]>("cleaner_health_scan", { modules, onEvent: channel });
-      const keep = new Set(Object.values(this.reports).flatMap((r) => r.findings.map((f) => f.id)));
-      this.selected = new Set([...this.selected].filter((id) => keep.has(id)));
+      const reports = await healthApi.scan(modules, receive);
+      for (const report of reports) receive({ event: "result", data: { report } });
+      const successful = new Set([...completed].filter(id => !this.reports[id]?.error));
+      const oldModules = new Map(this.#seenModules);
+      const keep = new Set(this.findings.map((f) => f.id));
+      this.selected = new Set([...this.selected].filter((id) => keep.has(id) || !successful.has(oldModules.get(id) ?? "")));
+      for (const f of this.findings) {
+        if (recommend && !this.#seen.has(f.id) && f.recommended && f.cleanupAction) this.selected.add(f.id);
+        this.#seen.add(f.id);
+        this.#seenModules.set(f.id, f.module);
+      }
+      this.selected = new Set(this.selected);
     } catch (e) {
       toast.error(`Software Health scan failed: ${e}`);
     } finally {
@@ -129,58 +170,85 @@ class HealthState {
   }
 
   toggle(id: string) {
+    if (this.busy || this.scanning) return;
     const next = new Set(this.selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     this.selected = next;
   }
 
-  /** Previews `items`, asks, then applies `action` and rescans the module. */
+  /** Compatibility entry point; mixed lists use applyBatch. */
   async apply(module: HealthModule, action: HealthAction, items: Finding[]) {
-    if (!items.length || this.busy) return;
-    if (action !== "open") {
-      const bytes = items.reduce((n, f) => n + (f.size ?? 0), 0);
-      const list = items.slice(0, 12).map((f) => `• ${f.title}${f.path ? ` — ${f.path}` : ""}`).join("\n");
-      const more = items.length > 12 ? `\n…and ${items.length - 12} more` : "";
-      const ok = await confirm({
-        title: `${ACTION_LABELS[action]}: ${items.length} item(s)?`,
-        message: `${list}${more}${bytes ? `\n\nAbout ${formatSize(bytes)}.` : ""}\n\n${ACTION_NOTES[action] ?? "Every change is recorded in the restore list and can be undone."}`,
-        confirmLabel: ACTION_LABELS[action],
-      });
-      if (!ok) return;
+    await this.applyBatch(items.filter((f) => f.module === module && f.actions.includes(action)).map((f) => ({ id: f.id, action })));
+  }
+
+  async applyBatch(requests: BatchItem[]) {
+    if (!requests.length || this.busy || this.scanning) return;
+    const byId = new Map(this.findings.map((f) => [f.id, f]));
+    const items = [...new Map(requests.filter((i) => byId.get(i.id)?.actions.includes(i.action)).map((i) => [i.id, i])).values()];
+    if (!items.length) return;
+    // Lock before preview: a second click, scan or restore cannot race it.
+    this.busy = true;
+    let attempted = false;
+    const modules = [...new Set(items.filter((i) => i.action !== "open").map((i) => byId.get(i.id)!.module))];
+    try {
+      if (items.some((i) => i.action !== "open")) {
+        const groups = new Map<HealthAction, Finding[]>();
+        for (const i of items) groups.set(i.action, [...groups.get(i.action) ?? [], byId.get(i.id)!]);
+        const bytes = items.reduce((n, i) => n + (byId.get(i.id)?.size ?? 0), 0);
+        const message = [...groups].map(([action, rows]) => `${ACTION_LABELS[action]} (${rows.length})\n${ACTION_NOTES[action] ?? "Changes are recorded for restore."}\n${rows.map((f) => `• ${f.title}${f.module === "permissions" && f.flags[0] ? ` (${f.flags[0]})` : ""}${f.path ? ` — ${f.path}` : ""}`).join("\n")}`).join("\n\n");
+        if (!await confirm({ title: `Review ${items.length} selected item${items.length === 1 ? "" : "s"}`, message: `${message}${bytes ? `\n\nSelected files: ${formatSize(bytes)}` : ""}`, confirmLabel: "Apply changes", danger: items.some((i) => i.action === "forceClean") })) return;
+      }
+      attempted = true;
+      for (const item of items) this.#attempts.set(item.id, item);
+      this.operation = { done: 0, total: items.length, current: "Preparing changes…" };
+      const results = await healthApi.batch(items, (progress) => { this.operation = progress; });
+      // A missing native result must never be counted as successful.
+      const received = new Map(results.map((r) => [r.id, r]));
+      this.lastResults = items.map((i) => received.get(i.id) ?? { id: i.id, ok: false, message: "No result received. Scan again before retrying." });
+      const failed = this.lastResults.filter((r) => !r.ok);
+      const failures = { ...this.failures };
+      const selected = new Set(this.selected);
+      for (const r of this.lastResults) {
+        if (r.ok) { delete failures[r.id]; selected.delete(r.id); }
+        else { failures[r.id] = r.message ?? "Failed"; selected.add(r.id); }
+      }
+      this.failures = failures;
+      this.selected = selected;
+      const okCount = this.lastResults.length - failed.length;
+      if (okCount) toast.success(`${okCount} selected item${okCount === 1 ? "" : "s"} completed.`);
+      if (failed.length) toast.error(`${failed.length} could not be changed: ${failed[0].message ?? ""}`);
+    } catch (e) {
+      const failures = { ...this.failures };
+      for (const item of items) failures[item.id] = String(e);
+      this.failures = failures;
+      this.lastResults = items.map(item => ({ id: item.id, ok: false, message: String(e) }));
+      this.selected = new Set([...this.selected, ...items.map(item => item.id)]);
+      toast.error(String(e));
+    } finally {
+      if (attempted && modules.length) await this.#scan(modules, false);
+      this.busy = false;
+      this.operation = null;
     }
+  }
+
+  async retryFailed() { await this.applyBatch([...this.#attempts.values()].filter((i) => !!this.failures[i.id])); }
+
+  async loadRestore() {
+    this.restore = await healthApi.restoreList().catch(() => []);
+  }
+
+  async undo(entry: RestoreEntry) {
+    if (this.busy || this.scanning || entry.undo.kind === "recycled") return;
     this.busy = true;
     try {
-      const results = await invoke<ApplyResult[]>("cleaner_health_apply", { ids: items.map((f) => f.id), action });
-      const failed = results.filter((r) => !r.ok);
-      const failures = { ...this.failures };
-      for (const r of failed) failures[r.id] = r.message ?? "Failed";
-      this.failures = failures;
-      const okCount = results.length - failed.length;
-      if (okCount) toast.success(`${ACTION_LABELS[action]}: ${okCount} done.`);
-      if (failed.length) toast.error(`${failed.length} could not be changed: ${failed[0].message ?? ""}`);
+      await healthApi.undo(entry.id);
+      toast.success(`Restored: ${entry.title}`);
+      await this.#scan([entry.module as HealthModule], false);
     } catch (e) {
       toast.error(String(e));
     } finally {
       this.busy = false;
-    }
-    if (action !== "open") {
-      const keep = this.failures;
-      await this.scan([module]);
-      this.failures = keep;
-    }
-  }
-
-  async loadRestore() {
-    this.restore = await invoke<RestoreEntry[]>("cleaner_health_restore_list").catch(() => []);
-  }
-
-  async undo(entry: RestoreEntry) {
-    try {
-      await invoke("cleaner_health_restore", { id: entry.id });
-      toast.success(`Restored: ${entry.title}`);
-    } catch (e) {
-      toast.error(String(e));
     }
     await this.loadRestore();
   }
