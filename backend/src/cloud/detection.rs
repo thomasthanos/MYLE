@@ -100,6 +100,12 @@ const MY_DRIVE: &[&str] = &[
     "Мой диск",
 ];
 
+/// Whether `name` is a top folder of Google Drive for desktop's drive: its
+/// "My Drive" (in any of the languages above) or "Shared drives".
+pub(crate) fn is_google_drive_folder(name: &str) -> bool {
+    MY_DRIVE.iter().chain(&["Shared drives"]).any(|known| known.eq_ignore_ascii_case(name))
+}
+
 /// Drive for desktop shows the account as a drive of its own (usually
 /// `G:\My Drive`) or, in mirror mode, as a folder in the user's profile.
 /// The older Backup and Sync used `%USERPROFILE%\Google Drive`.

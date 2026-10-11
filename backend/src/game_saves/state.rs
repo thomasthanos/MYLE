@@ -42,6 +42,41 @@ pub(crate) struct OperationFileLock {
     file: Option<File>,
 }
 
+/// Why an operation cannot begin while another process (the scheduled
+/// backup, or the app while that backup waits) holds the lock.
+pub(crate) const BUSY: &str = "Another Game Saves operation is already running.";
+
+/// The operation locks this process holds. Taking or releasing one never runs
+/// alongside `held_elsewhere`, whose look at the file would otherwise make it
+/// fail (or be taken for another process's).
+static HELD_HERE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn held_here() -> MutexGuard<'static, Vec<PathBuf>> {
+    HELD_HERE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Whether another process holds the operation lock: with the app being
+/// single-instance, that is the scheduled backup running on its own.
+pub(crate) fn held_elsewhere(config_root: &Path) -> bool {
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
+    let path = config_root.join(LOCK_FILE);
+    let held = held_here();
+    if held.contains(&path) {
+        return false;
+    }
+    // The holder shares it with nobody: opening it at all fails meanwhile.
+    let probe = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .open(&path);
+    let busy = matches!(&probe, Err(error) if matches!(error.raw_os_error(), Some(32 | 33)));
+    drop(probe);
+    drop(held);
+    busy
+}
+
+const LOCK_FILE: &str = "operation.lock";
+
 /// Holds the same cross-process lock as a Game Saves operation without
 /// starting one. Destructive system actions keep this guard alive so neither
 /// the UI nor the scheduled headless process can begin while they are pending.
@@ -227,12 +262,14 @@ impl Drop for OperationHandle {
 impl OperationFileLock {
     pub(crate) fn acquire(config_root: &Path) -> Result<Self, String> {
         fs::create_dir_all(config_root).map_err(|error| error.to_string())?;
-        let path = config_root.join("operation.lock");
+        let path = config_root.join(LOCK_FILE);
+        let mut held = held_here();
         match create_lock(&path) {
-            Ok(lock) => Ok(lock),
-            Err(error) if matches!(error.raw_os_error(), Some(32 | 33)) => {
-                Err("Another Game Saves operation is already running.".into())
+            Ok(lock) => {
+                held.push(path);
+                Ok(lock)
             }
+            Err(error) if matches!(error.raw_os_error(), Some(32 | 33)) => Err(BUSY.into()),
             Err(error) => Err(lock_error(error)),
         }
     }
@@ -240,9 +277,13 @@ impl OperationFileLock {
 
 impl Drop for OperationFileLock {
     fn drop(&mut self) {
+        let mut held = held_here();
         // Release the exclusive Windows handle before removing the marker.
         self.file.take();
         let _ = fs::remove_file(&self.path);
+        if let Some(index) = held.iter().position(|path| *path == self.path) {
+            held.swap_remove(index);
+        }
     }
 }
 
@@ -290,6 +331,28 @@ mod tests {
         assert!(OperationFileLock::acquire(&root).is_err());
         drop(first);
         assert!(OperationFileLock::acquire(&root).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_lock_of_another_process_is_told_from_this_ones() {
+        let root = std::env::temp_dir().join(format!("myle-game-saves-elsewhere-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        assert!(!held_elsewhere(&root), "no lock file: nothing runs");
+        let state = GameSavesState::default();
+        let operation = state.begin(&root, OperationKind::Scan).unwrap();
+        assert!(!held_elsewhere(&root), "this process's own operation");
+        drop(operation);
+        assert!(!held_elsewhere(&root), "released");
+        // Another process: the file held with no sharing, outside this
+        // process's bookkeeping.
+        let other = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode(0).open(root.join(LOCK_FILE)).unwrap();
+        assert!(held_elsewhere(&root));
+        assert_eq!(state.begin(&root, OperationKind::Scan).err().as_deref(), Some(BUSY));
+        drop(other);
+        assert!(!held_elsewhere(&root), "a lock file left behind by a crash holds nothing");
+        assert!(state.begin(&root, OperationKind::Scan).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
 

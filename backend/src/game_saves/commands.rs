@@ -64,6 +64,7 @@ pub async fn game_saves_get_state(
     state: State<'_, GameSavesState>,
 ) -> Result<GameSavesPageState, String> {
     let settings = settings::initialize(&app)?;
+    check_scheduled_task_once(&app, &settings);
     let engine = Engine::for_app(&app).ok();
     let version = match &engine {
         Some(engine) => engine.version().await,
@@ -91,7 +92,13 @@ pub async fn game_saves_get_state(
         cloud_folders: detection::detect_cloud_folders(),
         engine_available: engine.is_some(),
         engine_version: version,
-        active_operation: state.active_kind(),
+        // The scheduled backup runs in a process of its own: the page waits
+        // for it like for one of its own operations, instead of failing.
+        active_operation: state.active_kind().or_else(|| {
+            settings::config_root(&app)
+                .is_ok_and(|root| super::state::held_elsewhere(&root))
+                .then_some(OperationKind::ScheduledBackup)
+        }),
         undo_restore,
         cached_scan,
     })
@@ -1689,7 +1696,21 @@ async fn pick_folder(app: AppHandle, title: String) -> Result<Option<PathBuf>, S
     .map_err(|error| error.to_string())?
 }
 
+/// Held while the Windows task is changed (and, by the check at start-up,
+/// while it is looked at): two changes at once could leave the task as the
+/// earlier one asked, under settings saved by the later.
+static TASK_EDIT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn configure_scheduled_task(
+    schedule: BackupSchedule,
+    time: &str,
+    weekday: ScheduleWeekday,
+) -> Result<(), String> {
+    let _task = TASK_EDIT.lock().await;
+    register_scheduled_task(schedule, time, weekday).await
+}
+
+async fn register_scheduled_task(
     schedule: BackupSchedule,
     time: &str,
     weekday: ScheduleWeekday,
@@ -1749,14 +1770,10 @@ fn scheduled_task_script(
     executable: &Path,
 ) -> String {
     let trigger = match schedule {
-        BackupSchedule::Daily => format!(
-            "New-ScheduledTaskTrigger -Daily -At ([datetime]::Today.Add([timespan]::ParseExact({}, 'hh\\:mm', $null)))",
-            ps_literal(time)
-        ),
+        BackupSchedule::Daily => "New-ScheduledTaskTrigger -Daily -At $at".to_string(),
         BackupSchedule::Weekly => format!(
-            "New-ScheduledTaskTrigger -Weekly -DaysOfWeek {} -At ([datetime]::Today.Add([timespan]::ParseExact({}, 'hh\\:mm', $null)))",
-            weekday_for_scheduled_tasks(weekday),
-            ps_literal(time)
+            "New-ScheduledTaskTrigger -Weekly -DaysOfWeek {} -At $at",
+            weekday_for_scheduled_tasks(weekday)
         ),
         BackupSchedule::Off => unreachable!(),
     };
@@ -1764,10 +1781,16 @@ fn scheduled_task_script(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_string_lossy();
+    // The start written without a UTC offset is local time, so the backup
+    // keeps its hour when daylight saving time begins or ends (with the
+    // offset New-ScheduledTaskTrigger writes, it moved by one). Errors are
+    // written in UTF-8, so they read right in any Windows language.
     format!(
-        "$ErrorActionPreference = 'Stop'; try {{ \
+        "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ \
          $action = New-ScheduledTaskAction -Execute {} -Argument '--game-saves-auto-backup' -WorkingDirectory {}; \
+         $at = [datetime]::Today.Add([timespan]::ParseExact({}, 'hh\\:mm', $null)); \
          $trigger = {}; \
+         $trigger.StartBoundary = $at.ToString('s'); \
          $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 12); \
          $settings.WakeToRun = $false; \
          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; \
@@ -1778,9 +1801,91 @@ fn scheduled_task_script(
          }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}",
         ps_literal(&executable.to_string_lossy()),
         ps_literal(&working_directory),
+        ps_literal(time),
         trigger,
         ps_literal(TASK_NAME),
     )
+}
+
+/// What Windows has for the task, as `scheduled_task_query` writes it.
+#[derive(Debug, PartialEq, Eq)]
+enum TaskFound {
+    Missing,
+    /// It is there, and starts this program.
+    Starts(String),
+    /// It could not be looked at (no PowerShell, no access): left as it is.
+    Unknown,
+}
+
+fn scheduled_task_query() -> String {
+    format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         try {{ $task = Get-ScheduledTask -TaskPath '\\' -TaskName {} -ErrorAction Stop }} \
+         catch {{ if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {{ 'missing' }} else {{ 'unknown' }}; exit 0 }}; \
+         'present'; @($task.Actions)[0].Execute",
+        ps_literal(TASK_NAME)
+    )
+}
+
+fn parse_task_query(output: &str) -> TaskFound {
+    let mut lines = output.lines().map(str::trim).filter(|line| !line.is_empty());
+    match (lines.next(), lines.next()) {
+        (Some("missing"), _) => TaskFound::Missing,
+        (Some("present"), Some(exe)) => TaskFound::Starts(exe.trim_matches('"').to_string()),
+        _ => TaskFound::Unknown,
+    }
+}
+
+/// Whether the task must be registered again: it is gone (an uninstall that
+/// kept the settings removed it, or a clean-up tool did) or starts a program
+/// that is not this one (MYLE moved). The settings say a backup is scheduled,
+/// and nothing would ever run it.
+fn needs_registering(found: &TaskFound, this_program: &Path) -> bool {
+    match found {
+        TaskFound::Missing => true,
+        TaskFound::Starts(program) => !settings::paths_equal(Path::new(program), this_program),
+        TaskFound::Unknown => false,
+    }
+}
+
+/// Once per run of the app, in the background: puts the scheduled backup's
+/// task back when the settings say there is one and Windows has none (or one
+/// for another copy of MYLE). Not from a development build, whose program
+/// would take the installed app's place.
+fn check_scheduled_task_once(app: &AppHandle, value: &GameSavesSettings) {
+    static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if cfg!(debug_assertions)
+        || value.schedule == BackupSchedule::Off
+        || CHECKED.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _task = TASK_EDIT.lock().await;
+        let Ok(this_program) = std::env::current_exe() else {
+            return;
+        };
+        let Ok(output) = crate::apps::process::hidden(crate::apps::process::powershell())
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+            .arg(crate::apps::process::encode_command(&scheduled_task_query()))
+            .stdin(Stdio::null())
+            .output()
+            .await
+        else {
+            return;
+        };
+        if !output.status.success() || !needs_registering(&parse_task_query(&String::from_utf8_lossy(&output.stdout)), &this_program) {
+            return;
+        }
+        // What the settings say now: the schedule may have changed meanwhile.
+        let Ok(value) = settings::load(&app) else {
+            return;
+        };
+        if value.schedule != BackupSchedule::Off && settings::valid_schedule_time(&value.schedule_time) {
+            let _ = register_scheduled_task(value.schedule, &value.schedule_time, value.schedule_weekday).await;
+        }
+    });
 }
 
 fn ps_literal(value: &str) -> String {
@@ -2027,7 +2132,46 @@ mod tests {
         assert!(script.contains("-StartWhenAvailable"));
         assert!(script.contains("WakeToRun = $false"));
         assert!(script.contains("-LogonType Interactive -RunLevel Limited"));
-        assert!(script.contains("-Weekly -DaysOfWeek Sunday"));
+        assert!(script.contains("-Weekly -DaysOfWeek Sunday -At $at"));
         assert!(script.contains("--game-saves-auto-backup"));
+    }
+
+    #[test]
+    fn the_scheduled_hour_survives_daylight_saving_and_errors_read_in_any_language() {
+        let script = scheduled_task_script(
+            BackupSchedule::Daily,
+            "03:30",
+            ScheduleWeekday::Sunday,
+            Path::new(r"C:\Users\Παναγιώτης\AppData\Local\MYLE\MakeYourLifeEasier.exe"),
+        );
+        assert!(script.contains("ParseExact('03:30', 'hh\\:mm', $null)"), "{script}");
+        assert!(script.contains("New-ScheduledTaskTrigger -Daily -At $at"));
+        // Set after the trigger is made, which would write a UTC offset.
+        let made = script.find("$trigger = New-ScheduledTaskTrigger").unwrap();
+        let local = script.find("$trigger.StartBoundary = $at.ToString('s')").unwrap();
+        assert!(made < local);
+        assert!(script.find("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8").unwrap() < script.find("try {").unwrap());
+        assert!(script.contains("'C:\\Users\\Παναγιώτης\\AppData\\Local\\MYLE\\MakeYourLifeEasier.exe'"));
+    }
+
+    #[test]
+    fn a_scheduled_backup_without_its_task_gets_it_back() {
+        assert_eq!(parse_task_query("missing\r\n"), TaskFound::Missing);
+        assert_eq!(parse_task_query("unknown\r\n"), TaskFound::Unknown);
+        assert_eq!(parse_task_query(""), TaskFound::Unknown, "PowerShell said nothing");
+        assert_eq!(parse_task_query("present\r\n"), TaskFound::Unknown, "no program named");
+        assert_eq!(
+            parse_task_query("present\r\n\"C:\\MYLE\\MakeYourLifeEasier.exe\"\r\n"),
+            TaskFound::Starts(r"C:\MYLE\MakeYourLifeEasier.exe".into())
+        );
+
+        let this_program = std::env::current_exe().unwrap();
+        assert!(needs_registering(&TaskFound::Missing, &this_program));
+        assert!(!needs_registering(&TaskFound::Unknown, &this_program), "what cannot be seen is left alone");
+        let same = this_program.to_string_lossy().to_uppercase();
+        assert!(!needs_registering(&TaskFound::Starts(same), &this_program), "the same program, in other letters");
+        let moved = this_program.with_file_name("moved-away.exe");
+        assert!(needs_registering(&TaskFound::Starts(moved.to_string_lossy().into_owned()), &this_program));
+        assert!(scheduled_task_query().contains("-TaskName 'MakeYourLifeEasier Game Saves Backup'"));
     }
 }

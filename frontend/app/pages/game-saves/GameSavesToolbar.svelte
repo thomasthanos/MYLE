@@ -230,15 +230,18 @@
         <span class="numbers">{formatElapsed(elapsed)}</span>
       {/if}
       <!-- While saves are written, a game is never cut off half-way: Cancel
-           then stops before the next game. -->
-      <button
-        class="btn small"
-        disabled={gameSaves.cancelling}
-        title={writingSaves ? "Saves are never cut off half-written: the game being restored finishes first." : undefined}
-        onclick={() => gameSaves.cancel()}
-      >
-        {gameSaves.cancelling ? (writingSaves ? "Stopping after this game…" : "Cancelling…") : writingSaves ? "Stop after this game" : "Cancel"}
-      </button>
+           then stops before the next game. The scheduled backup is a process
+           of its own, and goes on until it is done. -->
+      {#if gameSaves.operation.kind !== "scheduledBackup"}
+        <button
+          class="btn small"
+          disabled={gameSaves.cancelling}
+          title={writingSaves ? "Saves are never cut off half-written: the game being restored finishes first." : undefined}
+          onclick={() => gameSaves.cancel()}
+        >
+          {gameSaves.cancelling ? (writingSaves ? "Stopping after this game…" : "Cancelling…") : writingSaves ? "Stop after this game" : "Cancel"}
+        </button>
+      {/if}
       <span class="progress" class:indeterminate={progress === null} aria-hidden="true">
         <span style:width={progress === null ? undefined : `${progress}%`}></span>
       </span>

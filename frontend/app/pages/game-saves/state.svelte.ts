@@ -202,8 +202,7 @@ class GameSavesState {
     try {
       this.page = await gameSavesApi.getState();
       if (this.page.activeOperation) {
-        this.operation = { startedAt: Date.now(), kind: this.page.activeOperation, stage: "preparing", done: 0, total: 0, current: null, note: "An existing Game Saves operation is still running." };
-        void this.#waitForAdopted();
+        this.#adopt(this.page.activeOperation);
       } else if (this.page.engineAvailable) {
         // The saved list shows at once; only the games on it are re-checked (seconds). Without one, the full scan is the only way in.
         if (!this.scanResult && this.page.cachedScan) this.#applyScan(this.page.cachedScan);
@@ -216,6 +215,34 @@ class GameSavesState {
       this.#initialized = false; // let the next visit try again instead of an empty page for good
     } finally {
       this.loading = false;
+    }
+  }
+  /** Shows an operation this page did not start: one from before a reload,
+   *  or the scheduled backup, which runs in a process of its own. */
+  #adopt(kind: OperationKind) {
+    const scheduled = kind === "scheduledBackup";
+    this.operation = {
+      startedAt: Date.now(),
+      kind,
+      stage: scheduled ? "backingUp" : "preparing",
+      done: 0,
+      total: 0,
+      current: null,
+      note: scheduled ? "The scheduled backup is running. The list updates when it is done." : "An existing Game Saves operation is still running.",
+    };
+    void this.#waitForAdopted();
+  }
+  /** After an action was refused or a refresh failed: when the scheduled
+   *  backup is what holds Game Saves, the page waits for it and then shows
+   *  what it backed up, instead of being left with the error. */
+  async #adoptScheduled() {
+    try {
+      const page = await gameSavesApi.getState();
+      if (page.activeOperation !== "scheduledBackup" || this.operation) return;
+      this.page = page;
+      this.#adopt("scheduledBackup");
+    } catch {
+      // The error already shown stands.
     }
   }
   /** The page was reloaded while an operation ran: its result cannot reach this
@@ -419,6 +446,7 @@ class GameSavesState {
       discoveryDue = result.discoveryDue;
     } catch (error) {
       if (!quiet) this.fail("Refresh failed", error);
+      else void this.#adoptScheduled();
     } finally {
       this.operation = null;
     }
@@ -961,6 +989,7 @@ class GameSavesState {
   private fail(label: string, error: unknown) {
     this.error = `${label}: ${message(error)}`;
     toast.error(this.error);
+    void this.#adoptScheduled();
   }
   private pruneSelection() {
     const known = new Set([...(this.scanResult?.onThisPc ?? []), ...(this.scanResult?.inBackup ?? [])].map((game) => game.id));

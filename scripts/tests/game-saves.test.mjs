@@ -212,6 +212,47 @@ test("a late scan settings response cannot overwrite a newer preference", async 
   assert.equal(state.page.settings.schedule, "daily");
 });
 
+test("a refresh refused while the scheduled backup runs waits for it, then shows what it backed up", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let running = true; const scans = [];
+  api.scan = async (mode) => {
+    scans.push(mode);
+    if (running) throw new Error("Another Game Saves operation is already running.");
+    return scan({ onThisPc: [entry("a", { status: "backedUp", hasBackup: true }), entry("b", { status: "backedUp", hasBackup: true })] });
+  };
+  api.getState = async () => clone({ ...state.page, activeOperation: running ? "scheduledBackup" : null, cachedScan: null });
+  await state.refresh(); await settle(); await settle();
+  assert.equal(state.operation?.kind, "scheduledBackup", "the page shows it running");
+  assert.match(state.operation.note, /scheduled backup is running/);
+  assert.equal(state.locked, true, "nothing else starts meanwhile");
+  running = false;
+  t.mock.timers.tick(2000); for (let i = 0; i < 5; i++) await settle();
+  assert.equal(state.operation, null);
+  assert.deepEqual(scans, ["quick", "quick"], "the list is checked again once it is done");
+  assert.deepEqual(state.games.map((game) => game.status), ["backedUp", "backedUp"]);
+  assert.equal(state.error, null);
+});
+
+test("a background check that finds the scheduled backup running shows it, quietly", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  api.scan = async () => { throw new Error("Another Game Saves operation is already running."); };
+  api.getState = async () => clone({ ...state.page, activeOperation: "scheduledBackup", cachedScan: null });
+  await state.refresh(true); await settle(); await settle();
+  assert.equal(state.operation?.kind, "scheduledBackup");
+  assert.equal(toast.visible.length, 0, "no error for what is not one");
+  api.getState = async () => clone({ ...state.page, activeOperation: null, cachedScan: null });
+  api.scan = async () => scan();
+  t.mock.timers.tick(2000); for (let i = 0; i < 5; i++) await settle();
+  assert.equal(state.operation, null);
+});
+
+test("a refresh that fails for another reason stays an error", async () => {
+  api.scan = async () => { throw new Error("The engine stopped"); };
+  await state.refresh(); await settle(); await settle();
+  assert.equal(state.operation, null);
+  assert.match(state.error, /Refresh failed: The engine stopped/);
+});
+
 test("a pending folder picker prevents starting scans or backup", async () => {
   const wait = deferred(); const calls = [];
   api.pickFolder = () => wait.promise;
