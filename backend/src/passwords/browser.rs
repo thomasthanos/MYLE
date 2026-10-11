@@ -889,6 +889,10 @@ struct Login {
     icon: Option<String>,
     /// It has a 2FA key: its code can be filled in.
     totp: bool,
+    /// It has a password (a login made from a 2FA QR code may not). Older
+    /// MYLE versions leave this out; the extension then takes it as true.
+    #[serde(rename = "hasPassword")]
+    has_password: bool,
 }
 
 /// The page's host, if it is one we fill: https, or http on this PC.
@@ -929,11 +933,19 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         }
         return json!({ "ok": true });
     }
-    let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling)).unwrap_or(false);
-    let status = state.with_quiet(|vault| Ok(vault.status())).unwrap_or(Status::New);
+    let opened = state.with_quiet(|vault| Ok((vault.prefs().browser_filling, vault.status())));
+    let app_version = app.package_info().version.to_string();
     if let Request::Status = request {
-        return json!({ "ok": true, "enabled": enabled, "state": status });
+        // `appVersion` tells the extension how old this MYLE is. A vault file
+        // that can't be read is said so, never taken for "no vault yet".
+        return match opened {
+            Ok((enabled, status)) => json!({ "ok": true, "enabled": enabled, "state": status, "appVersion": app_version }),
+            Err(_) => json!({ "ok": false, "error": "vaultError", "appVersion": app_version }),
+        };
     }
+    let Ok((enabled, status)) = opened else {
+        return json!({ "ok": false, "error": "vaultError" });
+    };
     if !enabled {
         return json!({ "ok": false, "error": "disabled" });
     }
@@ -1016,6 +1028,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
                         exact,
                         icon: None,
                         totp: entry.has_totp,
+                        has_password: entry.has_password,
                     })
                 })
                 .collect();
@@ -1601,6 +1614,24 @@ pub fn open_vault(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_login_says_whether_it_has_a_password() {
+        let login = Login {
+            id: "a".into(),
+            title: "Example".into(),
+            username: "ana".into(),
+            exact: true,
+            site: "example.com".into(),
+            icon: None,
+            totp: true,
+            has_password: false,
+        };
+        let json = serde_json::to_value(&login).unwrap();
+        assert_eq!(json["hasPassword"], false);
+        assert_eq!(json["totp"], true);
+        assert!(json.get("icon").is_none());
+    }
 
     #[test]
     fn passkey_cancel_request_is_supported() {

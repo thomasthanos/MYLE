@@ -6,39 +6,50 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <header>
+    <header class="top">
       <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
         <defs>
           <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#a3acff" />
-            <stop offset="1" stop-color="#6b5cf2" />
+            <stop offset="0" stop-color="#a7b2f0" />
+            <stop offset="1" stop-color="#5f6cc0" />
           </linearGradient>
         </defs>
         <rect x="1" y="1" width="22" height="22" rx="7" fill="url(#mark)" />
         <path d="M12 5.2 17.4 7.3v4.3c0 3.3-2.2 5.8-5.4 7.1-3.2-1.3-5.4-3.8-5.4-7.1V7.3z" fill="#fff" fill-opacity=".96" />
-        <circle cx="12" cy="10.7" r="1.7" fill="#6b5cf2" />
-        <path d="M11.2 11.9h1.6l.45 2.7h-2.5z" fill="#6b5cf2" />
+        <circle cx="12" cy="10.7" r="1.7" fill="#5f6cc0" />
+        <path d="M11.2 11.9h1.6l.45 2.7h-2.5z" fill="#5f6cc0" />
       </svg>
       <div class="titles">
-        <strong>MYLE Passwords</strong>
-        <small id="site">…</small>
+        <h1>MYLE Passwords</h1>
+        <span class="site" id="site">…</span>
       </div>
-      <span class="count" id="count" hidden></span>
+      <button class="chip idle" id="chip" type="button" aria-disabled="true" hidden>
+        <span class="dot" aria-hidden="true"></span><span id="chip-text">Checking…</span>
+      </button>
     </header>
     <div class="search" id="search-row" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      <input id="search" type="search" placeholder="Search logins  ( / )" autocomplete="off" spellcheck="false" aria-label="Search logins" />
+      <input id="search" type="search" placeholder="Search logins" autocomplete="off" spellcheck="false" aria-label="Search this site's logins" aria-keyshortcuts="/" />
+      <kbd aria-hidden="true">/</kbd>
+      <span class="count" id="count" hidden></span>
     </div>
-    <main id="content" aria-live="polite">
+    <main id="content">
       <div class="skeleton" aria-hidden="true"><i></i><i></i><i></i></div>
     </main>
+    <p class="sr-only" id="live" role="status">Loading logins…</p>
     <p class="toast" id="toast" role="status" hidden></p>
     <footer>
-      <button id="scan" type="button" title="Read the site's 2FA QR code on this page, and keep its key in MYLE">2FA from a QR code</button>
-      <button id="open" type="button">Open MYLE</button>
+      <button class="btn ghost" id="scan" type="button" title="Read the site's 2FA QR code on this page, and keep its key in MYLE">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="5" height="5" x="3" y="3" rx="1" /><rect width="5" height="5" x="16" y="3" rx="1" /><rect width="5" height="5" x="3" y="16" rx="1" />
+          <path d="M21 16h-3a2 2 0 0 0-2 2v3" /><path d="M21 21v.01" /><path d="M12 7v3a2 2 0 0 1-2 2H7" /><path d="M3 12h.01" /><path d="M12 3h.01" /><path d="M12 16v.01" /><path d="M16 12h1" /><path d="M21 12v.01" /><path d="M12 21v-1" />
+        </svg>
+        2FA from a QR code
+      </button>
+      <button class="btn secondary" id="open" type="button">Open MYLE</button>
     </footer>
     <div class="about">
-      <span id="version">MYLE Passwords</span>
+      <span><span id="version">MYLE Passwords</span><span id="app-version" hidden></span></span>
       <label title="Writes each passkey step to the page's console (F12 → Console), to send when something goes wrong. Never passwords or keys.">
         <input id="debug" type="checkbox" /> Debug log
       </label>

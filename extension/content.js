@@ -635,6 +635,7 @@
     noTotp: "That login has no 2FA key in MYLE any more.",
     badKey: "MYLE could not read that 2FA key.",
     reloaded: "MYLE Passwords was updated. Reload this page to use it.",
+    vaultError: "MYLE could not read your vault just now. Try again in a moment.",
   };
 
   function entryButton(login) {
