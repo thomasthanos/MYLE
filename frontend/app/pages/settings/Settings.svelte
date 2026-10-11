@@ -427,7 +427,7 @@
             </span>
             {#if EXTENSION_URL.startsWith("https://")}
               <button class="btn small primary" onclick={() => open(EXTENSION_URL)}>
-                <Download size={12} /> Install
+                <Download size={12} /> Install from Chrome Web Store
               </button>
             {/if}
           </div>
@@ -810,7 +810,8 @@
     .brand {
       font-size: 15px;
     }
-    .links .btn {
+    .links .btn,
+    .extension-row .btn {
       height: 29px;
       padding: 0 11px;
       font-size: 12px;
@@ -904,7 +905,8 @@
     .mockup {
       height: 42px;
     }
-    .links .btn {
+    .links .btn,
+    .extension-row .btn {
       height: 24px;
       font-size: 10.5px;
     }
