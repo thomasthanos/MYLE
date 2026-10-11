@@ -45,6 +45,10 @@ const hooks = registerHooks({
 });
 
 const { projectBackupsState: state } = await import("../../frontend/app/pages/project-backups/state.svelte.ts");
+const { projectBackupsApi: api } = await import("../../frontend/app/pages/project-backups/api.ts");
+const { badges } = await import("../../frontend/lib/badges.svelte.ts");
+const { toast } = await import("../../frontend/lib/toast.svelte.ts");
+const { nav } = await import("../../frontend/lib/nav.svelte.ts");
 hooks.deregister();
 
 const DAY = 86_400_000;
@@ -167,4 +171,69 @@ test("a search filters inside the groups, not across them", () => {
   assert.deepEqual(state.groups.map((group) => group.projects[0].id), ["gamma"]);
   state.setFilter("all");
   assert.deepEqual(keys(state.groups), ["never", "stale", "ok"]);
+});
+const answer = (projectId, state, checkedAt, extra = {}) => ({
+  projectId, state, backupId: null, added: 0, modified: 0, deleted: 0, unreadable: 0, files: [], checkedAt, message: null, ...extra,
+});
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((yes) => (resolve = yes));
+  return { promise, resolve };
+};
+
+test("a check started before a backup never replaces the answer after it", async () => {
+  const original = api.changes;
+  const pending = [];
+  api.changes = () => {
+    const call = deferred();
+    pending.push(call);
+    return call.promise;
+  };
+  try {
+    state.changes = {};
+    const stale = state.checkChanges(["A"]);
+    // The backup of A ended: its check is always asked for, even while the
+    // older one still runs.
+    const fresh = state.checkChanges(["A"], true);
+    assert.equal(pending.length, 2, "the check after the backup is not dropped");
+    pending[1].resolve([answer("A", "upToDate", 2_000)]);
+    await fresh;
+    pending[0].resolve([answer("A", "changed", 1_000, { modified: 1 })]);
+    await stale;
+    assert.equal(state.changes.A.state, "upToDate");
+    assert.deepEqual([...state.checking], [], "nothing is shown as being checked any more");
+  } finally {
+    api.changes = original;
+  }
+});
+
+test("a backups folder out of reach or a failed check is not a change", () => {
+  state.page = { ...state.page, settings: { ...state.page.settings, projects: ["A", "B", "C", "D", "E"].map((id) => project(id)) } };
+  state.changes = {};
+  state.applyChanges([
+    answer("A", "unreachable", 1, { message: "Is Google Drive running?" }),
+    answer("B", "error", 1, { message: "not a readable zip" }),
+    answer("C", "changed", 1, { modified: 2 }),
+    answer("D", "noBackup", 1, { added: 4 }),
+    answer("E", "upToDate", 1),
+  ]);
+  assert.deepEqual(state.changedIds, ["C", "D"], "Back up changed takes only what changed or has no backup");
+  assert.equal(state.changedCount, 1);
+  assert.equal(badges.of("project-backups"), 1, "the sidebar shows the changed projects");
+});
+
+test("more changed projects while another page is open are told once", () => {
+  while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  state.page = { ...state.page, settings: { ...state.page.settings, projects: ["A", "B"].map((id) => project(id)) } };
+  state.changes = {};
+  state.applyChanges([answer("A", "upToDate", 10), answer("B", "upToDate", 10)]);
+  nav.current = "install-apps";
+  state.applyChanges([answer("A", "changed", 20, { modified: 1 })]);
+  assert.equal(toast.visible.length, 1);
+  assert.match(toast.visible[0].message, /1 project has changes not backed up yet/);
+  // The same count again says nothing new.
+  state.applyChanges([answer("A", "changed", 30, { modified: 2 })]);
+  assert.equal(toast.visible[0].count, 1);
+  assert.equal(badges.of("project-backups"), 1);
+  while (toast.visible.length) toast.dismiss(toast.visible[0].id);
 });

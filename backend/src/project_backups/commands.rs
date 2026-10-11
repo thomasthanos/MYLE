@@ -709,6 +709,9 @@ pub async fn project_backups_backup(
     }
     let cancelled = running.cancelled();
     drop(running);
+    // What was just backed up is checked again at once (and anything that
+    // changed meanwhile, which waited for the backup to end).
+    super::changes::recheck(results.iter().map(|result| result.project_id.clone()).collect());
     let now = super::naming::unix_millis(std::time::SystemTime::now());
     let finished: Vec<(String, Option<LastBackup>, LastResult)> = results
         .iter()
@@ -860,22 +863,32 @@ fn project_and_dir(project_id: &str) -> Result<(Settings, Project, PathBuf), Str
     Ok((settings, project, dir))
 }
 
-/// Whether each project's folder differs from its newest backup.
+/// Whether each project's folder differs from its newest backup. A check
+/// that fails answers `error` with the reason, never nothing.
 #[tauri::command]
 pub async fn project_backups_changes(project_ids: Vec<String>, fresh: bool) -> Result<Vec<super::changes::ProjectChanges>, String> {
     blocking(move || {
+        let settings = store::load()?;
         Ok(project_ids
             .iter()
-            .filter_map(|id| super::changes::check(id, fresh).ok())
+            .filter_map(|id| settings.project(id).ok())
+            .map(|project| super::changes::check(&settings, project, fresh))
             .collect())
     })
     .await?
 }
 
-/// (Re)starts watching the project folders for changes.
+/// The latest answer of the background detection for every project.
+#[tauri::command]
+pub async fn project_backups_latest_changes() -> Result<Vec<super::changes::ProjectChanges>, String> {
+    blocking(move || store::load().map(|settings| super::changes::latest(&settings))).await?
+}
+
+/// Starts the background detection of changes, or after the project list
+/// changed, watches the folders again and checks every project.
 #[tauri::command]
 pub async fn project_backups_watch(app: AppHandle) -> Result<(), String> {
-    blocking(move || super::changes::watch(app)).await?
+    super::changes::start(app)
 }
 
 #[tauri::command]

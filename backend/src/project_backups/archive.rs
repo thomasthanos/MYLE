@@ -67,7 +67,7 @@ fn io_failure(context: String, error: io::Error, path: &Path) -> Failure {
     Failure::Message(format!("{context}: {error}"))
 }
 
-fn dos_time(time: Option<SystemTime>) -> DateTime {
+pub(crate) fn dos_time(time: Option<SystemTime>) -> DateTime {
     let local = naming::local(time.unwrap_or_else(SystemTime::now));
     let year = local.year.clamp(1980, 2107) as u16;
     DateTime::from_date_and_time(

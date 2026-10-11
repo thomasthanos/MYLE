@@ -252,18 +252,27 @@ export interface ChangedFile {
   status: "added" | "modified" | "deleted";
   size: number | null;
 }
+/** `unreachable`: the backups folder can't be reached now (the cloud app is
+ *  not running), so nothing is known; `error`: the check failed (`message`). */
+export type ChangeState = "upToDate" | "changed" | "noBackup" | "missing" | "unreachable" | "error";
 export interface ProjectChanges {
   projectId: string;
-  state: "upToDate" | "changed" | "noBackup" | "missing";
+  state: ChangeState;
   backupId: string | null;
   added: number;
   modified: number;
   deleted: number;
+  /** Files open in another program that could not be compared. */
+  unreadable: number;
   /** At most 300; the counts are whole. */
   files: ChangedFile[];
+  /** When the check started: of two answers, the later one is the true one. */
   checkedAt: number;
+  message: string | null;
 }
 export type Job = "backup" | "compare";
+/** The background detection's answers (`ProjectChanges[]`). */
+export const CHANGES_EVENT = "project-backups-changes";
 /** Stands for the project folder itself in a comparison. */
 export const SOURCE_ID = "source";
 export type OpenTarget = "root" | "backups" | "source";
@@ -291,7 +300,11 @@ export const projectBackupsApi = {
   preview: (request: PreviewRequest) => invoke<Preview>("project_backups_preview", { request }),
   cancelPreview: () => invoke<void>("project_backups_cancel_preview"),
   changes: (projectIds: string[], fresh: boolean) => invoke<ProjectChanges[]>("project_backups_changes", { projectIds, fresh }),
+  /** Starts the app's background detection, or watches the folders again
+   *  after the project list changed. Its answers come as `CHANGES_EVENT`. */
   watch: () => invoke<void>("project_backups_watch"),
+  /** The latest answer of the background detection for every project. */
+  latestChanges: () => invoke<ProjectChanges[]>("project_backups_latest_changes"),
   backup: (projectIds: string[], onEvent: (event: ProjectBackupsEvent) => void) =>
     invoke<BackupRun>("project_backups_backup", { projectIds, onEvent: channel(onEvent) }),
   /** Cancels the running `job` (any job when null). */

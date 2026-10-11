@@ -21,6 +21,15 @@
 
   let maximized = $state(false);
 
+  // Notices changed project folders for the owner, whichever page is open.
+  // Only the page's state is loaded here; the page itself stays lazy.
+  let projectBackupsStarted = false;
+  $effect(() => {
+    if (!account.owner || projectBackupsStarted || !isTauri()) return;
+    projectBackupsStarted = true;
+    void import("./pages/project-backups/state.svelte").then(({ projectBackupsState }) => projectBackupsState.startDetection());
+  });
+
   onMount(() => {
     // Notices game saves changed by playing, whichever page is open.
     gameSavesState.startWatcher();

@@ -29,6 +29,17 @@ pub(crate) struct FileInfo {
     pub stored: String,
     pub size: u64,
     pub crc: Option<u32>,
+    /// When the file was last written, as the backup recorded it.
+    pub recorded: Option<Recorded>,
+}
+
+/// A backup's record of when one of its files was last written.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Recorded {
+    /// A zip entry's DOS date and time (local time, in 2-second steps).
+    Dos { date: u16, time: u16 },
+    /// The date of a folder backup's file.
+    Time(std::time::SystemTime),
 }
 
 /// `\` → `/`, Unicode NFC, no empty or `.` parts: the same file under any
@@ -73,6 +84,10 @@ pub(crate) fn list_files(
                         stored,
                         size: entry.size(),
                         crc: Some(entry.crc32()),
+                        recorded: entry.last_modified().map(|at| Recorded::Dos {
+                            date: at.datepart(),
+                            time: at.timepart(),
+                        }),
                     },
                 );
             }
@@ -90,6 +105,7 @@ pub(crate) fn list_files(
                         stored: file.rel,
                         size: file.size,
                         crc: None,
+                        recorded: file.modified.map(Recorded::Time),
                     },
                 );
             }
@@ -900,7 +916,7 @@ pub(crate) fn side_for(path: &Path) -> Result<Side, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::project_backups::rules::{DEFAULT_PATTERNS, RuleInput};
     use std::io::Write;

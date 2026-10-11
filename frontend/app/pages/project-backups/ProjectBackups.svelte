@@ -47,7 +47,7 @@
   let searchInput = $state<HTMLInputElement>();
 
   onMount(() => {
-    void pb.init().then(() => pb.startWatching());
+    void pb.init().then(() => pb.showChanges());
     const timer = setInterval(() => (pb.clock = Date.now()), 30_000);
     return () => clearInterval(timer);
   });
@@ -183,6 +183,7 @@
     if (!hasDestination) return "Choose where backups go — Google Drive or Dropbox.";
     if (summary.missing) return `${summary.missing} ${summary.missing === 1 ? "folder was" : "folders were"} not found.`;
     if (summary.attention) return `${summary.attention} of ${summary.projects} ${summary.attention === 1 ? "project wants" : "projects want"} a look.`;
+    if (pb.changedCount) return `${pb.changedCount} ${pb.changedCount === 1 ? "project has" : "projects have"} changes not backed up yet.`;
     return "Everything is backed up and checked.";
   });
 
