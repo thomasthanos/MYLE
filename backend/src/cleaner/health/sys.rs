@@ -158,6 +158,78 @@ pub fn program_of(command: &str) -> Option<String> {
     Some(path.trim().to_string()).filter(|p| !p.is_empty())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Presence {
+    Present,
+    Missing,
+    Unknown,
+}
+
+pub fn path_status(path: &Path, directory: bool) -> Presence {
+    match std::fs::metadata(path) {
+        Ok(meta)
+            if if directory {
+                meta.is_dir()
+            } else {
+                meta.is_file()
+            } =>
+        {
+            Presence::Present
+        }
+        Ok(_) => Presence::Unknown,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Presence::Missing,
+        Err(_) => Presence::Unknown,
+    }
+}
+
+fn program_status_in(command: &str, search: &[PathBuf]) -> Presence {
+    let Some(program) = program_of(command) else {
+        return Presence::Unknown;
+    };
+    if program.contains('%') {
+        return Presence::Unknown;
+    }
+    let path = Path::new(&program);
+    if path.is_absolute() {
+        return path_status(path, false);
+    }
+    if program.contains(['\\', '/']) {
+        return Presence::Unknown;
+    }
+    let mut unknown = false;
+    for dir in search {
+        let candidates = if path.extension().is_none() {
+            vec![dir.join(&program).with_extension("exe"), dir.join(&program)]
+        } else {
+            vec![dir.join(&program)]
+        };
+        for candidate in candidates {
+            match path_status(&candidate, false) {
+                Presence::Present => return Presence::Present,
+                Presence::Unknown => unknown = true,
+                Presence::Missing => {}
+            }
+        }
+    }
+    if unknown || search.is_empty() {
+        Presence::Unknown
+    } else {
+        Presence::Missing
+    }
+}
+
+pub fn program_status(command: &str) -> Presence {
+    let mut search = Vec::new();
+    if let Some(windows) = env_dir("SystemRoot") {
+        search.push(windows.join("System32"));
+        search.push(windows);
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        search.extend(std::env::split_paths(&path));
+    }
+    program_status_in(command, &search)
+}
+
 /// `%VAR%` expanded from the environment.
 pub fn expand(text: &str) -> String {
     let mut out = String::new();
@@ -215,6 +287,7 @@ pub fn protected_name(name: &str) -> bool {
         "myle",
         "driver",
         "dell",
+        "alienware",
         "lenovo",
         "hewlettpackard",
         "asus",
@@ -369,4 +442,34 @@ pub fn running(image: &str) -> bool {
     )
     .map(|text| text.to_lowercase().contains(&image.to_lowercase()))
     .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod executable_tests {
+    use super::*;
+
+    #[test]
+    fn uninstaller_on_search_path_is_not_missing() {
+        let dir = std::env::temp_dir().join(format!("myle-health-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("uninstall.exe"), b"fixture").unwrap();
+        assert_eq!(
+            program_status_in("uninstall.exe /quiet", std::slice::from_ref(&dir)),
+            Presence::Present
+        );
+        assert_eq!(
+            program_status_in("missing.exe", std::slice::from_ref(&dir)),
+            Presence::Missing
+        );
+        assert_eq!(
+            program_status_in(
+                "%MYLE_UNDEFINED_TEST_VARIABLE%\\app.exe",
+                std::slice::from_ref(&dir)
+            ),
+            Presence::Unknown
+        );
+        assert_eq!(path_status(&dir, false), Presence::Unknown);
+        std::fs::remove_file(dir.join("uninstall.exe")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 }

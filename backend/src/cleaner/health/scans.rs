@@ -3,7 +3,7 @@
 //! holds to the safety lists in `sys`: Windows, Microsoft, drivers, hardware
 //! vendors and MYLE are never offered for a change.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
@@ -16,7 +16,7 @@ pub type Tick<'a> = &'a (dyn Fn(f32) + Sync);
 
 pub fn scan(module: &str, tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     match module {
-        "leftovers" => Ok(leftovers(tick)),
+        "leftovers" => leftovers(tick),
         "broken" => Ok(broken()),
         "redundant" => Ok(redundant()),
         "hibernation" => Ok(hibernation(tick)),
@@ -44,6 +44,9 @@ fn finding(module: &'static str, title: impl Into<String>) -> Finding {
         enabled: None,
         flags: Vec::new(),
         actions: Vec::new(),
+        cleanup_action: None,
+        recommended: false,
+        review_reason: None,
     }
 }
 
@@ -55,18 +58,35 @@ struct Installed {
     install_location: Option<String>,
     uninstall: Option<String>,
     publisher: String,
+    display_icon: Option<String>,
 }
 
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 
 fn uninstall_keys() -> Vec<(&'static str, String, Installed)> {
+    uninstall_keys_at(&[
+        ("HKLM", UNINSTALL),
+        ("HKCU", UNINSTALL),
+        (
+            "HKLM",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            "HKCU",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+    ])
+}
+
+fn uninstall_keys_at(roots: &[(&'static str, &str)]) -> Vec<(&'static str, String, Installed)> {
     let mut out = Vec::new();
-    for hive in ["HKLM", "HKCU"] {
-        let Some(root) = sys::open(hive, UNINSTALL) else {
+    for &(hive, uninstall_root) in roots {
+        let Some(root) = sys::open(hive, uninstall_root) else {
             continue;
         };
         for name in sys::subkeys(&root) {
-            let Some(key) = sys::open(hive, &format!("{UNINSTALL}\\{name}")) else {
+            let full_path = format!("{uninstall_root}\\{name}");
+            let Some(key) = sys::open(hive, &full_path) else {
                 continue;
             };
             // Updates and components without a display name are skipped.
@@ -78,13 +98,14 @@ fn uninstall_keys() -> Vec<(&'static str, String, Installed)> {
             }
             out.push((
                 hive,
-                name,
+                full_path,
                 Installed {
                     name: display,
                     install_location: sys::string(&key, "InstallLocation"),
                     uninstall: sys::string(&key, "UninstallString")
                         .or_else(|| sys::string(&key, "QuietUninstallString")),
                     publisher: sys::string(&key, "Publisher").unwrap_or_default(),
+                    display_icon: sys::string(&key, "DisplayIcon"),
                 },
             ));
         }
@@ -99,23 +120,182 @@ fn installed_list() -> Vec<Installed> {
         .collect()
 }
 
+fn installation_status(app: &Installed) -> (sys::Presence, sys::Presence, sys::Presence) {
+    let location = app
+        .install_location
+        .as_deref()
+        .map(|p| sys::path_status(Path::new(&sys::expand(p.trim_matches('"'))), true))
+        .unwrap_or(sys::Presence::Unknown);
+    let uninstaller = app
+        .uninstall
+        .as_deref()
+        .map(sys::program_status)
+        .unwrap_or(sys::Presence::Unknown);
+    let icon = app
+        .display_icon
+        .as_deref()
+        .map(icon_path)
+        .map(|p| sys::path_status(Path::new(&p), false))
+        .unwrap_or(sys::Presence::Unknown);
+    (location, uninstaller, icon)
+}
+
+fn icon_path(icon: &str) -> String {
+    let text = sys::expand(icon.trim());
+    let path = text
+        .rsplit_once(',')
+        .filter(|(_, index)| index.trim().parse::<i32>().is_ok())
+        .map_or(text.as_str(), |(path, _)| path);
+    path.trim().trim_matches('"').to_string()
+}
+
+fn broken_candidate(
+    location: sys::Presence,
+    uninstaller: sys::Presence,
+    icon: sys::Presence,
+) -> bool {
+    let evidence = [location, uninstaller, icon];
+    !evidence.contains(&sys::Presence::Present)
+        && [location, uninstaller].contains(&sys::Presence::Missing)
+}
+
+fn installed_elsewhere(app: &Installed, list: &[Installed]) -> bool {
+    list.iter().any(|other| {
+        sys::norm(&other.name) == sys::norm(&app.name) && {
+            let (folder, command, icon) = installation_status(other);
+            [folder, command, icon].contains(&sys::Presence::Present)
+        }
+    })
+}
+
+fn registered_paths(app: &Installed) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(location) = &app.install_location {
+        paths.push(PathBuf::from(sys::expand(location.trim_matches('"'))));
+    }
+    for exe in app
+        .uninstall
+        .as_deref()
+        .and_then(sys::program_of)
+        .into_iter()
+        .chain(app.display_icon.as_deref().map(icon_path))
+    {
+        if !exe.is_empty()
+            && !sys::system_path(&exe)
+            && let Some(parent) = Path::new(&exe).parent()
+        {
+            // A shared Program Files or drive root is not an application folder.
+            if parent.components().count() > 2 {
+                paths.push(parent.to_path_buf());
+            }
+        }
+    }
+    paths
+}
+
+fn related_folder(folder: &Path, installed: &Path) -> bool {
+    let normalize = |p: &Path| {
+        p.to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    };
+    let folder = normalize(folder);
+    let installed = normalize(installed);
+    !installed.is_empty()
+        && (folder == installed
+            || folder.starts_with(&format!("{installed}\\"))
+            || installed.starts_with(&format!("{folder}\\")))
+}
+
+fn orphan_folder_evidence(
+    registered_location: bool,
+    uninstaller: sys::Presence,
+    icon: sys::Presence,
+) -> bool {
+    registered_location && uninstaller == sys::Presence::Missing && icon != sys::Presence::Present
+}
+
+fn orphan_folder_owner<'a>(path: &Path, list: &'a [Installed]) -> Option<&'a Installed> {
+    list.iter().find(|app| {
+        if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {
+            return false;
+        }
+        // A name match or nearby vendor folder does not establish ownership.
+        let registered_location = app.install_location.as_deref().is_some_and(|location| {
+            Path::new(&sys::expand(location.trim_matches('"')))
+                .as_os_str()
+                .to_string_lossy()
+                .trim_end_matches(['\\', '/'])
+                .eq_ignore_ascii_case(path.to_string_lossy().trim_end_matches(['\\', '/']))
+        });
+        let (_, uninstaller, icon) = installation_status(app);
+        orphan_folder_evidence(registered_location, uninstaller, icon)
+    })
+}
+
+fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
+    // An unreadable/truncated tree cannot be verified as abandoned.
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return true;
+    };
+    for entry in entries {
+        if *budget == 0 {
+            return true;
+        }
+        *budget -= 1;
+        let Ok(entry) = entry else {
+            return true;
+        };
+        let Ok(kind) = entry.file_type() else {
+            return true;
+        };
+        if kind.is_symlink() {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if kind.is_file()
+            && ["exe", "lnk", "sav", "save"].contains(
+                &entry
+                    .path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .as_str(),
+            )
+        {
+            return true;
+        }
+        if kind.is_dir()
+            && (["saves", "savegames", "savedgames", "mods", "profiles"].contains(&name.as_str())
+                || depth == 0
+                || has_program_files(&entry.path(), depth - 1, budget))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Normalised vendor and product words of everything installed, for matching
 /// a folder's name against software that is really there.
 fn installed_tokens(list: &[Installed]) -> HashSet<String> {
     let mut set = HashSet::new();
     for app in list {
+        set.insert(sys::norm(&app.name));
         for word in app.name.split(|c: char| !c.is_alphanumeric()) {
             let w = sys::norm(word);
             if w.len() >= 4 {
                 set.insert(w);
             }
         }
-        if let Some(location) = &app.install_location
-            && let Some(folder) = Path::new(location).file_name()
-        {
-            let w = sys::norm(&folder.to_string_lossy());
-            if w.len() >= 4 {
-                set.insert(w);
+        for location in registered_paths(app) {
+            for folder in location.components().rev().take(2) {
+                let w = sys::norm(&folder.as_os_str().to_string_lossy());
+                if w.len() >= 4 {
+                    set.insert(w);
+                }
             }
         }
         let pub_norm = sys::norm(&app.publisher);
@@ -128,10 +308,11 @@ fn installed_tokens(list: &[Installed]) -> HashSet<String> {
 
 /// Folder names of running programs, services and AppX packages: whatever
 /// runs or is installed outside the Uninstall list still counts as present.
-fn live_tokens() -> HashSet<String> {
-    let script = "$p = Get-Process | Where-Object Path | ForEach-Object { Split-Path (Split-Path $_.Path) -Leaf; Split-Path $_.Path -Leaf }; $s = Get-CimInstance Win32_Service | ForEach-Object { $_.PathName }; $a = Get-AppxPackage | ForEach-Object { $_.Name }; @($p) + @($s) + @($a) | ConvertTo-Json -Compress";
+fn live_tokens() -> Result<HashSet<String>, String> {
+    let script = "$ErrorActionPreference = 'Stop'; $p = Get-Process | Where-Object Path | ForEach-Object { Split-Path (Split-Path $_.Path) -Leaf; Split-Path $_.Path -Leaf }; $s = Get-CimInstance Win32_Service | ForEach-Object { $_.PathName }; $a = Get-AppxPackage | ForEach-Object { $_.Name }; $w = New-Object -ComObject WScript.Shell; $l = @([Environment]::GetFolderPath('StartMenu'),[Environment]::GetFolderPath('CommonStartMenu'),[Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('CommonDesktopDirectory')) | Where-Object { $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName; $w.CreateShortcut($_.FullName).TargetPath } }; @($p) + @($s) + @($a) + @($l) | ConvertTo-Json -Compress";
     let mut set = HashSet::new();
-    if let Ok(text) = sys::powershell(script) {
+    let text = sys::powershell(script).map_err(|e| format!("Installed apps and shortcuts could not be checked. Leftover folders were not classified: {e}"))?;
+    {
         for item in sys::json_list(&text) {
             let Some(text) = item.as_str() else { continue };
             for part in text.split(['\\', '"', '.']) {
@@ -142,16 +323,24 @@ fn live_tokens() -> HashSet<String> {
             }
         }
     }
-    set
+    Ok(set)
 }
 
 // ─── 1. Uninstallation leftovers ─────────────────────────────────────────────
 
-fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
+fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     let list = installed_list();
-    let mut tokens = installed_tokens(&list);
+    let active: Vec<_> = list
+        .iter()
+        .filter(|app| {
+            let (_, uninstaller, icon) = installation_status(app);
+            !orphan_folder_evidence(true, uninstaller, icon)
+        })
+        .cloned()
+        .collect();
+    let mut tokens = installed_tokens(&active);
     tick(0.1);
-    tokens.extend(live_tokens());
+    tokens.extend(live_tokens()?);
     tick(0.4);
     let mut out = Vec::new();
 
@@ -192,6 +381,25 @@ fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
             {
                 continue;
             }
+            // Age and an absent inventory match never prove uninstallation.
+            let Some(owner) = orphan_folder_owner(&path, &list) else {
+                continue;
+            };
+            if active
+                .iter()
+                .flat_map(registered_paths)
+                .any(|installed| related_folder(&path, &installed))
+                || has_program_files(&path, 2, &mut 1500)
+                || [
+                    "kojimaproductions",
+                    "fromsoftware",
+                    "rockstargames",
+                    "cdprojektred",
+                ]
+                .contains(&folder.as_str())
+            {
+                continue;
+            }
             // Common shared folders no single app owns.
             const SHARED: &[&str] = &[
                 "temp", "cache", "packages", "programs", "common", "data", "logs", "crashpad",
@@ -213,20 +421,18 @@ fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
             if idle < 30 {
                 continue;
             }
-            let confidence: u8 =
-                (if folder.len() >= 6 { 60 } else { 45 }) + if idle > 180 { 20 } else { 5 };
             let size = sys::dir_size(&path, 20_000);
             if size == 0 {
                 continue;
             }
             let mut f = finding("leftovers", name.clone());
             f.detail = format!(
-                "In {}; no installed software matches this folder.",
-                root.display()
+                "The registered uninstaller for {} is missing. No app executable was found in its old installation folder.",
+                owner.name
             );
             f.path = Some(path.to_string_lossy().into_owned());
             f.size = Some(size);
-            f.confidence = Some(confidence);
+            f.review_reason = Some("A missing uninstaller does not prove all remaining data is unwanted. Review the folder before moving it to the Recycle Bin.".into());
             if root
                 .to_string_lossy()
                 .to_lowercase()
@@ -244,18 +450,18 @@ fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
         if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {
             continue;
         }
-        let has_location = app
-            .install_location
-            .as_deref()
-            .map(|l| Path::new(l).is_dir())
-            .unwrap_or(false);
+        let (location_status, _, icon_status) = installation_status(&app);
+        let has_location =
+            location_status == sys::Presence::Present || icon_status == sys::Presence::Present;
         let has_uninstaller = app
             .uninstall
             .as_deref()
-            .and_then(sys::program_of)
-            .map(|p| Path::new(&p).is_file())
-            .unwrap_or(false);
-        if has_location || has_uninstaller || app.uninstall.is_none() {
+            .map(sys::program_status)
+            .unwrap_or(sys::Presence::Unknown);
+        if has_location
+            || has_uninstaller != sys::Presence::Missing
+            || installed_elsewhere(&app, &list)
+        {
             continue;
         }
         // This is a dead record; Broken uninstalls offers Force Clean. Here,
@@ -265,47 +471,44 @@ fn leftovers(tick: Tick) -> Vec<(Finding, Target)> {
         }
         let mut f = finding("leftovers", format!("Registry: {}", app.name));
         f.detail = format!("An Uninstall entry under {hive} with no uninstaller and no folder.");
-        f.path = Some(format!("{hive}\\{UNINSTALL}\\{key_name}"));
+        f.path = Some(format!("{hive}\\{key_name}"));
         f.confidence = Some(60);
+        f.review_reason = Some("No installation folder was registered. This entry alone cannot prove the application was uninstalled.".into());
         f.actions = vec!["deleteKey"];
         out.push((
             f,
             Target::UninstallKey {
                 hive,
-                path: format!("{UNINSTALL}\\{key_name}"),
+                path: key_name,
                 dirs: Vec::new(),
             },
         ));
     }
 
-    out
+    Ok(out)
 }
 
 // ─── 2. Broken uninstalls ────────────────────────────────────────────────────
 
 fn broken() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
+    let list = installed_list();
     for (hive, key_name, app) in uninstall_keys() {
         if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {
             continue;
         }
         let location = app.install_location.clone();
-        let location_missing = location
-            .as_deref()
-            .map(|l| !l.trim().is_empty() && !Path::new(l).is_dir())
-            .unwrap_or(false);
-        let uninstaller_missing = app
-            .uninstall
-            .as_deref()
-            .and_then(sys::program_of)
-            .map(|p| !Path::new(&p).is_file())
-            .unwrap_or(app.uninstall.is_none());
-        if !location_missing && !uninstaller_missing {
+        let (location_status, uninstaller_status, icon_status) = installation_status(&app);
+        let location_missing = location_status == sys::Presence::Missing;
+        let uninstaller_missing = uninstaller_status == sys::Presence::Missing;
+        if !broken_candidate(location_status, uninstaller_status, icon_status)
+            || installed_elsewhere(&app, &list)
+        {
             continue;
         }
         let dirs: Vec<PathBuf> = location
             .as_deref()
-            .map(PathBuf::from)
+            .map(|location| PathBuf::from(sys::expand(location)))
             .filter(|p| p.is_dir())
             .into_iter()
             .collect();
@@ -321,15 +524,20 @@ fn broken() -> Vec<(Finding, Target)> {
             "This entry is broken: {}. Windows still lists it.",
             why.join(" and ")
         );
-        f.path = Some(format!("{hive}\\{UNINSTALL}\\{key_name}"));
+        f.path = Some(format!("{hive}\\{key_name}"));
         f.confidence = Some(75);
+        f.recommended = location_missing && uninstaller_missing;
+        if location_status == sys::Presence::Unknown || uninstaller_status == sys::Presence::Unknown
+        {
+            f.review_reason = Some("Some installation information could not be verified. Review this entry; remaining folders are kept by default.".into());
+        }
         f.flags = why.iter().map(|w| w.to_string()).collect();
         f.actions = vec!["forceClean", "deleteKey"];
         out.push((
             f,
             Target::UninstallKey {
                 hive,
-                path: format!("{UNINSTALL}\\{key_name}"),
+                path: key_name,
                 dirs,
             },
         ));
@@ -443,6 +651,7 @@ fn redundant() -> Vec<(Finding, Target)> {
         f.path = Some(path.to_string_lossy().into_owned());
         f.size = Some(size);
         f.confidence = Some(90);
+        f.recommended = true;
         f.actions = vec!["recycle"];
         out.push((f, Target::Paths(vec![path])));
     }
@@ -611,10 +820,11 @@ const CONSENT: &str =
 
 fn permissions() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
+    let names = app_names();
     let caps = [
-        ("webcam", "Camera"),
-        ("microphone", "Microphone"),
-        ("location", "Location"),
+        ("webcam", "Κάμερα"),
+        ("microphone", "Μικρόφωνο"),
+        ("location", "Τοποθεσία"),
     ];
     for (cap, label) in caps {
         for scope in ["", r"\NonPackaged"] {
@@ -623,23 +833,42 @@ fn permissions() -> Vec<(Finding, Target)> {
                 continue;
             };
             for app in sys::subkeys(&root) {
+                if app == "NonPackaged" {
+                    continue;
+                }
                 let path = format!("{base}\\{app}");
                 let Some(key) = sys::open("HKCU", &path) else {
                     continue;
                 };
                 let value = sys::string(&key, "Value").unwrap_or_default();
-                if value != "Allow" {
+                if value != "Allow" && value != "Deny" {
                     continue;
                 }
-                let name = pretty_app(&app);
-                if sys::protected_name(&name) {
+                let name = friendly_app(&app, &names);
+                if sys::protected_name(&name) || sys::protected_name(&app) {
                     continue;
                 }
-                let mut f = finding("permissions", format!("{name}: {label}"));
-                f.detail = format!("This app may use your {}.", label.to_lowercase());
-                f.enabled = Some(true);
+                let mut f = finding("permissions", name);
+                f.detail = format!(
+                    "{label}: {}.",
+                    if value == "Allow" {
+                        "η πρόσβαση επιτρέπεται"
+                    } else {
+                        "η πρόσβαση έχει αποκλειστεί"
+                    }
+                );
+                f.path = Some(if app.contains('#') {
+                    app.replace('#', "\\")
+                } else {
+                    app
+                });
+                f.enabled = Some(value == "Allow");
                 f.flags = vec![label.into()];
-                f.actions = vec!["revoke"];
+                f.actions = if value == "Allow" {
+                    vec!["revoke"]
+                } else {
+                    vec!["allow"]
+                };
                 out.push((f, Target::Consent { path }));
             }
         }
@@ -654,14 +883,20 @@ fn permissions() -> Vec<(Finding, Target)> {
                 continue;
             };
             let disabled = sys::dword(&key, "Disabled").unwrap_or(0) == 1;
-            let name = pretty_app(&app);
-            if sys::protected_name(&name) {
+            let name = friendly_app(&app, &names);
+            if sys::protected_name(&name) || sys::protected_name(&app) {
                 continue;
             }
-            let mut f = finding("permissions", format!("{name}: background"));
-            f.detail = "This app may keep running in the background.".into();
+            let mut f = finding("permissions", name);
+            f.detail = if disabled {
+                "Η εκτέλεση στο παρασκήνιο έχει αποκλειστεί."
+            } else {
+                "Μπορεί να εκτελείται στο παρασκήνιο όταν δεν είναι ανοιχτή."
+            }
+            .into();
+            f.path = Some(app);
             f.enabled = Some(!disabled);
-            f.flags = vec!["Background".into()];
+            f.flags = vec!["Παρασκήνιο".into()];
             f.actions = if disabled {
                 vec!["allow"]
             } else {
@@ -689,12 +924,110 @@ fn pretty_app(app: &str) -> String {
     app.split('_').next().unwrap_or(app).to_string()
 }
 
+fn app_names() -> HashMap<String, String> {
+    let mut names = HashMap::new();
+    // Windows resolves localized resource names here, including numeric
+    // package publishers. Never execute an app to identify it.
+    if let Ok(text) = sys::powershell(
+        "$shell = New-Object -ComObject Shell.Application; @($shell.NameSpace('shell:AppsFolder').Items() | ForEach-Object { [pscustomobject]@{ id = $_.Path; name = $_.Name } }) | ConvertTo-Json -Compress",
+    ) {
+        for item in sys::json_list(&text) {
+            if let (Some(id), Some(name)) = (item["id"].as_str(), item["name"].as_str())
+                && !name.trim().is_empty()
+            {
+                names.insert(
+                    id.split('!').next().unwrap_or(id).to_lowercase(),
+                    name.to_string(),
+                );
+            }
+        }
+    }
+    let list = installed_list();
+    let mut desktop = HashSet::new();
+    for app in &list {
+        for command in [&app.uninstall, &app.display_icon].into_iter().flatten() {
+            if let Some(exe) = sys::program_of(command) {
+                names.insert(exe.to_lowercase(), app.name.clone());
+            }
+        }
+    }
+    for cap in ["webcam", "microphone", "location"] {
+        if let Some(root) = sys::open("HKCU", &format!("{CONSENT}\\{cap}\\NonPackaged")) {
+            for app in sys::subkeys(&root) {
+                desktop.insert(app.replace('#', "\\"));
+            }
+        }
+    }
+    if !desktop.is_empty() {
+        let paths = desktop
+            .iter()
+            .map(|p| crate::apps::process::ps_quote(p))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            "@({paths}) | ForEach-Object {{ $p = $_; $v = (Get-Item -LiteralPath $p -ErrorAction SilentlyContinue).VersionInfo; $n = $v.FileDescription; if (-not $n) {{ $n = $v.ProductName }}; if ($n) {{ [pscustomobject]@{{ id = $p; name = $n }} }} }} | ConvertTo-Json -Compress"
+        );
+        if let Ok(text) = sys::powershell(&script) {
+            for item in sys::json_list(&text) {
+                if let (Some(id), Some(name)) = (item["id"].as_str(), item["name"].as_str()) {
+                    names
+                        .entry(id.to_lowercase())
+                        .or_insert_with(|| name.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn friendly_app(app: &str, names: &HashMap<String, String>) -> String {
+    let id = app.replace('#', "\\");
+    let key = id.split('!').next().unwrap_or(&id).to_lowercase();
+    if let Some(name) = names.get(&key) {
+        return name.clone();
+    }
+    let raw = if id.contains(['\\', '/']) {
+        id.clone()
+    } else {
+        pretty_app(&id)
+    };
+    let raw = raw
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&raw)
+        .trim_end_matches(".exe");
+    if raw.starts_with('{')
+        || !raw.chars().any(char::is_alphabetic)
+        || raw.len() >= 8 && raw.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return "Unidentified app".into();
+    }
+    let product = raw
+        .rsplit('.')
+        .find(|part| part.chars().any(char::is_alphabetic))
+        .unwrap_or(raw);
+    if product == "WhatsAppDesktop" {
+        return "WhatsApp Desktop".into();
+    }
+    let mut readable = String::new();
+    let mut lower = false;
+    for c in product.chars() {
+        if c.is_uppercase() && lower {
+            readable.push(' ');
+        }
+        readable.push(if c == '-' { ' ' } else { c });
+        lower = c.is_lowercase();
+    }
+    readable
+}
+
 // ─── 6. Disturbing notifications ─────────────────────────────────────────────
 
 const NOTIFY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings";
 
 fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
+    let names = app_names();
     if let Some(root) = sys::open("HKCU", NOTIFY) {
         for app in sys::subkeys(&root) {
             let path = format!("{NOTIFY}\\{app}");
@@ -702,8 +1035,8 @@ fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
                 continue;
             };
             let enabled = sys::dword(&key, "Enabled").unwrap_or(1) == 1;
-            let name = pretty_app(&app);
-            if sys::protected_name(&name) {
+            let name = friendly_app(&app, &names);
+            if sys::protected_name(&name) || sys::protected_name(&app) {
                 continue;
             }
             let mut f = finding("notifications", name);
@@ -903,6 +1236,7 @@ fn installers() -> Vec<(Finding, Target)> {
             f.path = Some(path.to_string_lossy().into_owned());
             f.size = Some(meta.len());
             f.confidence = Some(85);
+            f.recommended = true;
             f.actions = vec!["recycle"];
             out.push((f, Target::Paths(vec![path])));
         }
@@ -1135,5 +1469,227 @@ mod tests {
             "Microsoft.WindowsStore"
         );
         assert_eq!(pretty_app(r"C:#Program Files#Foo#foo.exe"), "foo.exe");
+    }
+
+    #[test]
+    fn existing_installation_evidence_prevents_false_broken_entries() {
+        assert!(!broken_candidate(
+            sys::Presence::Present,
+            sys::Presence::Missing,
+            sys::Presence::Unknown
+        ));
+        assert!(!broken_candidate(
+            sys::Presence::Missing,
+            sys::Presence::Present,
+            sys::Presence::Unknown
+        ));
+        assert!(!broken_candidate(
+            sys::Presence::Missing,
+            sys::Presence::Missing,
+            sys::Presence::Present
+        ));
+        assert!(!broken_candidate(
+            sys::Presence::Unknown,
+            sys::Presence::Unknown,
+            sys::Presence::Unknown
+        ));
+        assert!(broken_candidate(
+            sys::Presence::Missing,
+            sys::Presence::Missing,
+            sys::Presence::Unknown
+        ));
+    }
+
+    #[test]
+    fn registry_product_names_match_vendor_and_portable_folder_names() {
+        let root_path = format!("Software\\MYLE-Health-Scan-Test-{}", uuid::Uuid::new_v4());
+        let registry = sys::root("HKCU");
+        for (key_name, display, folder) in [
+            (
+                "Java",
+                "Java 8 Update 451",
+                r"C:\Program Files (x86)\Java\jre1.8",
+            ),
+            (
+                "Alienware",
+                "Alienware Command Center",
+                r"C:\Program Files\Alienware\Command Center",
+            ),
+            ("MO2", "Mod Organizer 2", r"C:\Tools\ModOrganizer"),
+            ("Loot", "LOOT", r"C:\Tools\LOOT"),
+        ] {
+            let (key, _) = registry
+                .create_subkey(format!("{root_path}\\WOW6432Node\\{key_name}"))
+                .unwrap();
+            key.set_value("DisplayName", &display).unwrap();
+            key.set_value("InstallLocation", &folder).unwrap();
+        }
+        let fixture_root = format!("{root_path}\\WOW6432Node");
+        let records = uninstall_keys_at(&[("HKCU", &fixture_root)]);
+        assert_eq!(records.len(), 4);
+        assert!(
+            records
+                .iter()
+                .all(|(_, path, _)| path.starts_with(&fixture_root))
+        );
+        let tokens = installed_tokens(
+            &records
+                .into_iter()
+                .map(|(_, _, app)| app)
+                .collect::<Vec<_>>(),
+        );
+        for folder in ["Java", "Alienware", "ModOrganizer", "LOOT"] {
+            let folder = sys::norm(folder);
+            assert!(
+                tokens
+                    .iter()
+                    .any(|t| folder.contains(t) || t.contains(&folder)),
+                "{folder} missing from installed inventory"
+            );
+        }
+        registry.delete_subkey_all(root_path).unwrap();
+    }
+
+    #[test]
+    fn permission_names_resolve_packages_and_desktop_paths_without_showing_ids() {
+        let names = std::collections::HashMap::from([(
+            "5319275a.whatsappdesktop_cv1g1gvanyjgm".into(),
+            "WhatsApp".into(),
+        )]);
+        assert_eq!(
+            friendly_app("5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", &names),
+            "WhatsApp"
+        );
+        assert_eq!(
+            friendly_app(r"C:#Program Files#Discord#Discord.exe", &names),
+            "Discord"
+        );
+        assert_eq!(
+            friendly_app("{019AD101-4321-4567-89AB-112233445566}", &names),
+            "Unidentified app"
+        );
+        assert_eq!(
+            friendly_app(
+                "5319275A.WhatsAppDesktop_cv1g1gvanyjgm",
+                &Default::default()
+            ),
+            "WhatsApp Desktop"
+        );
+    }
+
+    #[test]
+    fn registered_paths_protect_vendor_folders_and_their_children() {
+        assert!(related_folder(
+            Path::new(r"C:\Program Files\Vendor"),
+            Path::new(r"C:\Program Files\Vendor\App")
+        ));
+        assert!(related_folder(
+            Path::new(r"C:\Program Files\Vendor\App\Data"),
+            Path::new(r"c:\program files\vendor\app")
+        ));
+        assert!(!related_folder(
+            Path::new(r"C:\Program Files\Vendor2"),
+            Path::new(r"C:\Program Files\Vendor")
+        ));
+    }
+
+    #[test]
+    fn existing_icon_and_portable_executables_are_installation_evidence() {
+        let dir =
+            std::env::temp_dir().join(format!("myle-health-evidence-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("App icon.ico"), b"fixture").unwrap();
+        let mut app = Installed {
+            name: "Fixture".into(),
+            install_location: Some(dir.join("missing").to_string_lossy().into_owned()),
+            uninstall: Some(dir.join("missing.exe").to_string_lossy().into_owned()),
+            publisher: String::new(),
+            display_icon: Some(format!("\"{}\",0", dir.join("App icon.ico").display())),
+        };
+        let (location, uninstaller, icon) = installation_status(&app);
+        assert!(!broken_candidate(location, uninstaller, icon));
+        app.display_icon = Some(format!("{},0", dir.join("App icon.ico").display()));
+        let (location, uninstaller, icon) = installation_status(&app);
+        assert!(!broken_candidate(location, uninstaller, icon));
+        std::fs::write(dir.join("ModOrganizer.exe"), b"fixture").unwrap();
+        assert!(has_program_files(&dir, 2, &mut 1500));
+        std::fs::remove_file(dir.join("ModOrganizer.exe")).unwrap();
+        std::fs::remove_file(dir.join("App icon.ico")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn deeply_nested_portable_apps_are_not_classified_as_abandoned() {
+        let dir = std::env::temp_dir().join(format!("myle-health-deep-{}", uuid::Uuid::new_v4()));
+        let nested = dir.join(r"a\b\c");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("LOOT.exe"), b"fixture").unwrap();
+        assert!(has_program_files(&dir, 2, &mut 1500));
+        std::fs::remove_file(nested.join("LOOT.exe")).unwrap();
+        for path in [&nested, &dir.join(r"a\b"), &dir.join("a"), &dir] {
+            std::fs::remove_dir(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn unrecognized_folders_need_positive_uninstallation_evidence() {
+        assert!(!orphan_folder_evidence(
+            false,
+            sys::Presence::Missing,
+            sys::Presence::Unknown
+        ));
+        assert!(!orphan_folder_evidence(
+            true,
+            sys::Presence::Present,
+            sys::Presence::Missing
+        ));
+        assert!(!orphan_folder_evidence(
+            true,
+            sys::Presence::Missing,
+            sys::Presence::Present
+        ));
+        assert!(!orphan_folder_evidence(
+            true,
+            sys::Presence::Unknown,
+            sys::Presence::Missing
+        ));
+        assert!(orphan_folder_evidence(
+            true,
+            sys::Presence::Missing,
+            sys::Presence::Unknown
+        ));
+    }
+
+    #[test]
+    fn folder_ownership_requires_an_exact_registered_installation() {
+        let dir = std::env::temp_dir().join(format!("myle-health-owner-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        for name in [
+            "LOOT",
+            "ModOrganizer",
+            "NuGet",
+            "AvaloniaUI",
+            "KojimaProductions",
+        ] {
+            assert!(orphan_folder_owner(&dir.join(name), &[]).is_none());
+        }
+        let mut app = Installed {
+            name: "Fixture application".into(),
+            install_location: Some(dir.to_string_lossy().into_owned()),
+            uninstall: Some(format!(
+                "\"{}\" /uninstall",
+                dir.join("missing.exe").display()
+            )),
+            publisher: String::new(),
+            display_icon: None,
+        };
+        assert!(orphan_folder_owner(&dir, std::slice::from_ref(&app)).is_some());
+        assert!(orphan_folder_owner(&dir.join("Data"), std::slice::from_ref(&app)).is_none());
+        assert!(orphan_folder_owner(dir.parent().unwrap(), std::slice::from_ref(&app)).is_none());
+        std::fs::write(dir.join("uninstall.exe"), b"fixture").unwrap();
+        app.uninstall = Some(format!("\"{}\"", dir.join("uninstall.exe").display()));
+        assert!(orphan_folder_owner(&dir, std::slice::from_ref(&app)).is_none());
+        std::fs::remove_file(dir.join("uninstall.exe")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 }

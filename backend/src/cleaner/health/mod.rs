@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use winreg::RegValue;
 use winreg::enums::{KEY_ALL_ACCESS, KEY_WOW64_64KEY, RegType};
@@ -51,6 +52,9 @@ pub struct Finding {
     /// What can be done: "recycle", "forceClean", "deleteKey", "disable",
     /// "enable", "manual", "revoke", "allow", "mute", "unmute", "block", "open".
     pub actions: Vec<&'static str>,
+    pub cleanup_action: Option<&'static str>,
+    pub recommended: bool,
+    pub review_reason: Option<String>,
 }
 
 /// What a finding points at; never leaves the backend.
@@ -186,6 +190,305 @@ pub struct ApplyResult {
 }
 
 static FOUND: LazyLock<Mutex<HashMap<String, (Finding, Target)>>> = LazyLock::new(Default::default);
+static OPERATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Target identity is independent of the scan, display name and switch state.
+fn target_identity(target: &Target) -> String {
+    let lower = |s: &str| s.replace('/', "\\").to_lowercase();
+    match target {
+        Target::Paths(paths) => {
+            let mut paths: Vec<_> = paths.iter().map(|p| lower(&p.to_string_lossy())).collect();
+            paths.sort();
+            format!("paths:{paths:?}")
+        }
+        Target::UninstallKey { hive, path, .. } => {
+            format!("uninstall:{}:{}", lower(hive), lower(path))
+        }
+        Target::Startup {
+            hive,
+            approved,
+            name,
+        } => format!(
+            "startup:{}:{}:{}",
+            lower(hive),
+            lower(approved),
+            lower(name)
+        ),
+        Target::Service { name, .. } => format!("service:{}", lower(name)),
+        Target::Consent { path } => format!("consent:{}", lower(path)),
+        Target::Background { path } => format!("background:{}", lower(path)),
+        Target::Notify { path } => format!("notify:{}", lower(path)),
+        Target::ChromeSite { prefs, key, .. } => {
+            format!("chrome:{}:{key}", lower(&prefs.to_string_lossy()))
+        }
+        Target::FirefoxNotify { user_js, .. } => {
+            format!("firefox:{}", lower(&user_js.to_string_lossy()))
+        }
+        Target::Open { exe, url } => format!("open:{}:{url}", lower(exe)),
+        Target::Task { name } => format!("task:{}", lower(name)),
+        Target::Info => "info".into(),
+    }
+}
+
+fn prepare_finding(f: &mut Finding, target: &Target) {
+    let identity = if matches!(target, Target::Info) {
+        format!("info:{}:{:?}", f.title, f.path)
+    } else {
+        target_identity(target)
+    };
+    let digest: String = Sha256::digest(identity.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    f.id = format!("{}-{digest}", f.module);
+    f.cleanup_action = match (f.module, target) {
+        ("leftovers" | "redundant" | "installers", Target::Paths(_)) => Some("recycle"),
+        ("leftovers" | "broken", Target::UninstallKey { .. }) => Some("deleteKey"),
+        _ => None,
+    };
+    if f.cleanup_action.is_some() && !f.recommended && f.review_reason.is_none() {
+        f.review_reason =
+            Some("Review before cleaning; this may still belong to software you use.".into());
+    }
+}
+
+fn target_claims(target: &Target) -> Vec<String> {
+    match target {
+        Target::Paths(paths) => paths
+            .iter()
+            .map(|p| {
+                format!(
+                    "path:{}",
+                    p.to_string_lossy()
+                        .replace('/', "\\")
+                        .trim_end_matches('\\')
+                        .to_lowercase()
+                )
+            })
+            .collect(),
+        _ => vec![target_identity(target)],
+    }
+}
+
+#[cfg(test)]
+fn claim_target(target: &Target, seen: &mut std::collections::HashSet<String>) -> bool {
+    claim_keys(&target_claims(target), seen)
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BatchItem {
+    pub id: String,
+    pub action: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchProgress {
+    pub done: usize,
+    pub total: usize,
+    pub current: String,
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn target_identity_is_stable_and_windows_paths_ignore_case() {
+        assert_eq!(
+            target_identity(&Target::Paths(vec![PathBuf::from(r"C:\Cache\App")])),
+            target_identity(&Target::Paths(vec![PathBuf::from(r"c:\cache\app")]))
+        );
+        assert_ne!(
+            target_identity(&Target::Consent {
+                path: "camera".into()
+            }),
+            target_identity(&Target::Consent {
+                path: "microphone".into()
+            })
+        );
+    }
+
+    #[test]
+    fn batch_rejects_duplicate_and_conflicting_targets_before_execution() {
+        let target = Target::Paths(vec![PathBuf::from(r"C:\Cache")]);
+        let mut seen = std::collections::HashSet::new();
+        assert!(claim_target(&target, &mut seen));
+        assert!(!claim_target(&target, &mut seen));
+        let nested = Target::Paths(vec![PathBuf::from(r"C:\Cache\child")]);
+        assert!(!claim_target(&nested, &mut seen));
+    }
+
+    #[test]
+    fn overlap_does_not_discard_unprocessed_folders_or_registry_keys() {
+        let covered = std::collections::HashSet::from(["path:c:\\cache".to_string()]);
+        let target = Target::Paths(vec![
+            PathBuf::from(r"C:\Cache\child"),
+            PathBuf::from(r"C:\Other"),
+        ]);
+        let Some(Target::Paths(paths)) = uncovered_target(&target, "recycle", &covered) else {
+            panic!("Other folder was lost");
+        };
+        assert_eq!(paths, vec![PathBuf::from(r"C:\Other")]);
+        let target = Target::UninstallKey {
+            hive: "HKCU",
+            path: "Software\\Fixture".into(),
+            dirs: vec![PathBuf::from(r"C:\Cache")],
+        };
+        let Some(Target::UninstallKey { dirs, .. }) =
+            uncovered_target(&target, "forceClean", &covered)
+        else {
+            panic!("Registry key was lost");
+        };
+        assert!(dirs.is_empty());
+        let child_covered = std::collections::HashSet::from(["path:c:\\cache\\child".to_string()]);
+        assert!(
+            uncovered_target(
+                &Target::Paths(vec![PathBuf::from(r"C:\Cache")]),
+                "recycle",
+                &child_covered
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn recommendation_never_uses_confidence_as_automatic_permission() {
+        let mut f = Finding {
+            id: String::new(),
+            module: "leftovers",
+            title: "old folder".into(),
+            detail: String::new(),
+            path: None,
+            size: None,
+            confidence: Some(100),
+            enabled: None,
+            flags: vec![],
+            actions: vec!["recycle"],
+            cleanup_action: None,
+            recommended: false,
+            review_reason: None,
+        };
+        prepare_finding(&mut f, &Target::Paths(vec![PathBuf::from(r"C:\old")]));
+        assert!(!f.recommended);
+        assert_eq!(f.cleanup_action, Some("recycle"));
+        let original = f.id.clone();
+        prepare_finding(&mut f, &Target::Paths(vec![PathBuf::from(r"C:\old")]));
+        assert_eq!(original, f.id);
+        f.module = "broken";
+        f.actions = vec!["forceClean", "deleteKey"];
+        prepare_finding(
+            &mut f,
+            &Target::UninstallKey {
+                hive: "HKCU",
+                path: "Software\\Example".into(),
+                dirs: vec![PathBuf::from(r"C:\old")],
+            },
+        );
+        assert_eq!(f.cleanup_action, Some("deleteKey"));
+        assert!(!f.recommended);
+    }
+
+    #[tokio::test]
+    async fn native_commands_refuse_concurrent_changes_and_stale_ids() {
+        let guard = OPERATION.lock().await;
+        assert!(
+            apply_batch(vec![], None)
+                .await
+                .unwrap_err()
+                .contains("busy")
+        );
+        assert!(
+            cleaner_health_restore("no-such-fixture".into())
+                .await
+                .unwrap_err()
+                .contains("busy")
+        );
+        drop(guard);
+        let results = apply_batch(
+            vec![BatchItem {
+                id: "no-such-fixture".into(),
+                action: "recycle".into(),
+            }],
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].ok);
+        assert!(results[0].message.as_ref().unwrap().contains("Scan again"));
+    }
+
+    #[test]
+    fn conflicting_actions_are_rejected_without_touching_targets() {
+        let target = Target::UninstallKey {
+            hive: "HKCU",
+            path: "Software\\Fixture".into(),
+            dirs: vec![],
+        };
+        let f = Finding {
+            id: "fixture".into(),
+            module: "broken",
+            title: "fixture".into(),
+            detail: String::new(),
+            path: None,
+            size: None,
+            confidence: None,
+            enabled: None,
+            flags: vec![],
+            actions: vec!["deleteKey", "forceClean"],
+            cleanup_action: Some("deleteKey"),
+            recommended: false,
+            review_reason: None,
+        };
+        let requests = vec![
+            (
+                BatchItem {
+                    id: f.id.clone(),
+                    action: "deleteKey".into(),
+                },
+                Some((f.clone(), target.clone())),
+            ),
+            (
+                BatchItem {
+                    id: f.id.clone(),
+                    action: "forceClean".into(),
+                },
+                Some((f.clone(), target)),
+            ),
+        ];
+        assert!(
+            validate_batch(&requests)
+                .unwrap_err()
+                .contains("different actions")
+        );
+    }
+
+    #[tokio::test]
+    async fn exported_registry_fixture_can_be_restored() {
+        let path = format!("Software\\MYLE-Health-Test-{}", uuid::Uuid::new_v4());
+        let root = sys::root("HKCU");
+        let (key, _) = root.create_subkey(&path).unwrap();
+        key.set_value("Fixture", &"original").unwrap();
+        drop(key);
+        let file = std::env::temp_dir().join(format!("myle-health-{}.reg", uuid::Uuid::new_v4()));
+        sys::export_key("HKCU", &path, &file).unwrap();
+        root.delete_subkey_all(&path).unwrap();
+        undo(&Undo::RegImport {
+            file: file.to_string_lossy().into_owned(),
+        })
+        .await
+        .unwrap();
+        let restored = root.open_subkey(&path).unwrap();
+        assert_eq!(
+            restored.get_value::<String, _>("Fixture").unwrap(),
+            "original"
+        );
+        drop(restored);
+        root.delete_subkey_all(&path).unwrap();
+        std::fs::remove_file(file).unwrap();
+    }
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -213,7 +516,7 @@ fn read_journal() -> Vec<RestoreEntry> {
 
 fn write_journal(list: &[RestoreEntry]) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(list).map_err(|e| e.to_string())?;
-    std::fs::write(journal_path()?, bytes).map_err(|e| e.to_string())
+    crate::game_saves::atomic::write(&journal_path()?, &bytes)
 }
 
 fn remember(module: &str, title: &str, undo: Undo) -> Result<(), String> {
@@ -240,6 +543,9 @@ pub async fn cleaner_health_scan(
     modules: Vec<String>,
     on_event: Channel<HealthEvent>,
 ) -> Result<Vec<ModuleReport>, String> {
+    let _operation = OPERATION
+        .try_lock()
+        .map_err(|_| "Software Health is busy. Wait for the current operation.".to_string())?;
     let wanted: Vec<&'static str> = MODULES
         .iter()
         .copied()
@@ -258,10 +564,13 @@ pub async fn cleaner_health_scan(
                     let tick = |fraction: f32| {
                         let _ = on_event.send(HealthEvent::Step { module, fraction });
                     };
-                    let (items, error) = match scans::scan(module, &tick) {
+                    let (mut items, error) = match scans::scan(module, &tick) {
                         Ok(items) => (items, None),
                         Err(error) => (Vec::new(), Some(error)),
                     };
+                    for (finding, target) in &mut items {
+                        prepare_finding(finding, target);
+                    }
                     let findings: Vec<Finding> = items.iter().map(|(f, _)| f.clone()).collect();
                     {
                         let mut store = FOUND.lock().unwrap_or_else(|p| p.into_inner());
@@ -297,14 +606,74 @@ pub async fn cleaner_health_apply(
     ids: Vec<String>,
     action: String,
 ) -> Result<Vec<ApplyResult>, String> {
-    let items: Vec<(String, Option<(Finding, Target)>)> = {
+    apply_batch(
+        ids.into_iter()
+            .map(|id| BatchItem {
+                id,
+                action: action.clone(),
+            })
+            .collect(),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn cleaner_health_apply_batch(
+    items: Vec<BatchItem>,
+    on_event: Channel<BatchProgress>,
+) -> Result<Vec<ApplyResult>, String> {
+    apply_batch(items, Some(on_event)).await
+}
+
+async fn apply_batch(
+    items: Vec<BatchItem>,
+    on_event: Option<Channel<BatchProgress>>,
+) -> Result<Vec<ApplyResult>, String> {
+    let _operation = OPERATION
+        .try_lock()
+        .map_err(|_| "Software Health is busy. Wait for the current operation.".to_string())?;
+    if items.len() > 10_000 {
+        return Err("Too many selected items. Scan again.".into());
+    }
+    // Snapshot every target before any change. Inputs only contain scan IDs.
+    let mut items: Vec<_> = {
         let store = FOUND.lock().unwrap_or_else(|p| p.into_inner());
-        ids.iter()
-            .map(|id| (id.clone(), store.get(id).cloned()))
+        items
+            .into_iter()
+            .map(|item| {
+                let found = store.get(&item.id).cloned();
+                (item, found)
+            })
             .collect()
     };
+    validate_batch(&items)?;
+    // Cover parents before their children so overlapping folder selections
+    // never skip an unprocessed part of a parent directory.
+    items.sort_by_key(|(request, found)| {
+        found.as_ref().map_or(usize::MAX, |(_, target)| {
+            action_claims(target, &request.action)
+                .iter()
+                .filter(|claim| claim.starts_with("path:"))
+                .map(|claim| claim.matches('\\').count())
+                .min()
+                .unwrap_or(usize::MAX)
+        })
+    });
+    let total = items.len();
+    let mut covered: HashMap<String, ApplyResult> = HashMap::new();
     let mut results = Vec::new();
-    for (id, item) in items {
+    for (index, (request, item)) in items.into_iter().enumerate() {
+        let BatchItem { id, action } = request;
+        if let Some(channel) = &on_event {
+            let _ = channel.send(BatchProgress {
+                done: index,
+                total,
+                current: item
+                    .as_ref()
+                    .map_or_else(|| "Unavailable item".into(), |(f, _)| f.title.clone()),
+            });
+        }
         let Some((finding, target)) = item else {
             results.push(ApplyResult {
                 id,
@@ -321,8 +690,37 @@ pub async fn cleaner_health_apply(
             });
             continue;
         }
+        let claims = action_claims(&target, &action);
+        let target = if action != "open" {
+            let earlier = covered
+                .iter()
+                .filter(|(old, _)| claims.iter().any(|claim| overlaps(claim, old)))
+                .map(|(_, result)| result)
+                .find(|result| !result.ok);
+            if let Some(earlier) = earlier {
+                results.push(ApplyResult {
+                    id,
+                    ok: false,
+                    message: earlier.message.clone(),
+                });
+                continue;
+            }
+            let seen = covered.keys().cloned().collect();
+            let Some(remaining) = uncovered_target(&target, &action, &seen) else {
+                results.push(ApplyResult {
+                    id,
+                    ok: true,
+                    message: Some("Already covered by another selected item.".into()),
+                });
+                continue;
+            };
+            remaining
+        } else {
+            target
+        };
+        let claims = action_claims(&target, &action);
         let outcome = apply_one(&finding, &target, &action).await;
-        results.push(match outcome {
+        let result = match outcome {
             Ok(()) => ApplyResult {
                 id,
                 ok: true,
@@ -333,9 +731,110 @@ pub async fn cleaner_health_apply(
                 ok: false,
                 message: Some(message),
             },
+        };
+        for claim in claims {
+            covered.insert(claim, result.clone());
+        }
+        results.push(result);
+    }
+    if let Some(channel) = &on_event {
+        let _ = channel.send(BatchProgress {
+            done: total,
+            total,
+            current: String::new(),
         });
     }
     Ok(results)
+}
+
+type ScannedRequest = (BatchItem, Option<(Finding, Target)>);
+
+fn validate_batch(items: &[ScannedRequest]) -> Result<(), String> {
+    let mut actions = HashMap::new();
+    for (request, found) in items {
+        let Some((finding, target)) = found else {
+            continue;
+        };
+        if !finding.actions.contains(&request.action.as_str()) {
+            continue;
+        }
+        if let Some(previous) = actions.insert(target_identity(target), &request.action)
+            && previous != &request.action
+        {
+            return Err(
+                "The same item has different actions selected. Choose one action and review again."
+                    .into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn action_claims(target: &Target, action: &str) -> Vec<String> {
+    let mut claims = target_claims(target);
+    if action == "forceClean"
+        && let Target::UninstallKey { dirs, .. } = target
+    {
+        claims.extend(target_claims(&Target::Paths(dirs.clone())));
+    }
+    claims
+}
+
+fn overlaps(a: &str, b: &str) -> bool {
+    a == b
+        || a.starts_with("path:")
+            && b.starts_with("path:")
+            && (a.starts_with(&format!("{b}\\")) || b.starts_with(&format!("{a}\\")))
+}
+
+fn uncovered_target(
+    target: &Target,
+    action: &str,
+    seen: &std::collections::HashSet<String>,
+) -> Option<Target> {
+    let uncovered_paths = |paths: &[PathBuf]| {
+        paths
+            .iter()
+            .filter(|path| {
+                !target_claims(&Target::Paths(vec![(*path).clone()]))
+                    .iter()
+                    .any(|claim| {
+                        seen.iter()
+                            .any(|old| claim == old || claim.starts_with(&format!("{old}\\")))
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    match target {
+        Target::Paths(paths) => {
+            let paths = uncovered_paths(paths);
+            (!paths.is_empty()).then_some(Target::Paths(paths))
+        }
+        Target::UninstallKey { hive, path, dirs } if action == "forceClean" => {
+            if seen.contains(&target_identity(target)) {
+                return None;
+            }
+            Some(Target::UninstallKey {
+                hive,
+                path: path.clone(),
+                dirs: uncovered_paths(dirs),
+            })
+        }
+        _ => (!seen.contains(&target_identity(target))).then(|| target.clone()),
+    }
+}
+
+#[cfg(test)]
+fn claim_keys(claims: &[String], seen: &mut std::collections::HashSet<String>) -> bool {
+    if claims
+        .iter()
+        .any(|claim| seen.iter().any(|old| overlaps(claim, old)))
+    {
+        return false;
+    }
+    seen.extend(claims.iter().cloned());
+    true
 }
 
 #[tauri::command]
@@ -346,6 +845,9 @@ pub fn cleaner_health_restore_list() -> Vec<RestoreEntry> {
 /// Puts back what a restore entry changed, and drops it from the list.
 #[tauri::command]
 pub async fn cleaner_health_restore(id: String) -> Result<(), String> {
+    let _operation = OPERATION
+        .try_lock()
+        .map_err(|_| "Software Health is busy. Wait for the current operation.".to_string())?;
     let list = read_journal();
     let entry = list
         .iter()
@@ -395,7 +897,6 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
             if present.is_empty() {
                 return Ok(());
             }
-            sys::recycle(&present)?;
             remember(
                 module,
                 title,
@@ -405,7 +906,8 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                         .map(|p| p.to_string_lossy().into_owned())
                         .collect(),
                 },
-            )
+            )?;
+            sys::recycle(&present)
         }
         (Target::UninstallKey { hive, path, dirs }, "deleteKey" | "forceClean") => {
             let file = health_dir()?.join("backups").join(format!(
@@ -414,10 +916,18 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 now_ms()
             ));
             sys::export_key(hive, path, &file)?;
+            // Persist the backup before any removal, including a partially
+            // completed force-clean. A failed journal write leaves data intact.
+            remember(
+                module,
+                title,
+                Undo::RegImport {
+                    file: file.to_string_lossy().into_owned(),
+                },
+            )?;
             if action == "forceClean" {
                 let present: Vec<PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();
                 if !present.is_empty() {
-                    sys::recycle(&present)?;
                     remember(
                         module,
                         &format!("{title}: folders"),
@@ -428,18 +938,12 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                                 .collect(),
                         },
                     )?;
+                    sys::recycle(&present)?;
                 }
             }
             sys::root(hive)
                 .delete_subkey_all(path)
-                .map_err(|e| denied(hive, e))?;
-            remember(
-                module,
-                title,
-                Undo::RegImport {
-                    file: file.to_string_lossy().into_owned(),
-                },
-            )
+                .map_err(|e| denied(hive, e))
         }
         (
             Target::Startup {
@@ -470,14 +974,6 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 let ft = (now_ms() as u64 / 1000 + 11_644_473_600) * 10_000_000;
                 bytes[4..12].copy_from_slice(&ft.to_le_bytes());
             }
-            key.set_raw_value(
-                name,
-                &RegValue {
-                    bytes: bytes.into(),
-                    vtype: RegType::REG_BINARY,
-                },
-            )
-            .map_err(|e| denied(hive, e))?;
             remember(
                 module,
                 &format!("{title} ({action}d)"),
@@ -487,10 +983,17 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                     name: name.clone(),
                     old,
                 },
+            )?;
+            key.set_raw_value(
+                name,
+                &RegValue {
+                    bytes: bytes.into(),
+                    vtype: RegType::REG_BINARY,
+                },
             )
+            .map_err(|e| denied(hive, e))
         }
         (Target::Service { name, start }, "manual") => {
-            set_service_start(name, "demand").await?;
             remember(
                 module,
                 &format!("{title}: Manual"),
@@ -498,13 +1001,12 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                     name: name.clone(),
                     start: *start,
                 },
-            )
+            )?;
+            set_service_start(name, "demand").await
         }
         (Target::Consent { path }, "revoke" | "allow") => {
             let key = writable("HKCU", path)?;
             let old = sys::string(&key, "Value");
-            key.set_value("Value", &if action == "revoke" { "Deny" } else { "Allow" })
-                .map_err(|e| e.to_string())?;
             remember(
                 module,
                 &format!("{title} ({action})"),
@@ -514,7 +1016,9 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                     name: "Value".into(),
                     old,
                 },
-            )
+            )?;
+            key.set_value("Value", &if action == "revoke" { "Deny" } else { "Allow" })
+                .map_err(|e| e.to_string())
         }
         (Target::Background { path }, "revoke" | "allow") => {
             let names = vec!["Disabled".to_string(), "DisabledByUser".to_string()];
@@ -554,8 +1058,6 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
             site["setting"] = serde_json::json!(2);
-            std::fs::write(prefs, serde_json::to_vec(&json).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
             remember(
                 module,
                 &format!("{title} (blocked)"),
@@ -565,6 +1067,10 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                     key: key.clone(),
                     old,
                 },
+            )?;
+            crate::game_saves::atomic::write(
+                prefs,
+                &serde_json::to_vec(&json).map_err(|e| e.to_string())?,
             )
         }
         (Target::FirefoxNotify { exe, user_js }, "block") => {
@@ -575,7 +1081,6 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 text.push('\n');
             }
             text.push_str("user_pref(\"permissions.default.desktop-notification\", 2); // MYLE: block new notification requests\n");
-            std::fs::write(user_js, text).map_err(|e| e.to_string())?;
             remember(
                 module,
                 &format!("{title} (blocked)"),
@@ -584,7 +1089,8 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                     path: user_js.to_string_lossy().into_owned(),
                     old,
                 },
-            )
+            )?;
+            crate::game_saves::atomic::write(user_js, text.as_bytes())
         }
         (Target::Open { exe, url }, "open") => std::process::Command::new(exe)
             .arg(url)
@@ -592,13 +1098,14 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
             .map(|_| ())
             .map_err(|e| format!("Could not open {exe}: {e}")),
         (Target::Task { name }, "disable") => {
-            sys::run("schtasks.exe", &["/Change", "/TN", name, "/Disable"])
-                .map_err(|e| task_error(&e))?;
             remember(
                 module,
                 &format!("{title} (disabled)"),
                 Undo::Task { name: name.clone() },
-            )
+            )?;
+            sys::run("schtasks.exe", &["/Change", "/TN", name, "/Disable"])
+                .map(|_| ())
+                .map_err(|e| task_error(&e))
         }
         (Target::Task { name }, "enable") => {
             sys::run("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
@@ -628,9 +1135,6 @@ fn set_dwords(
 ) -> Result<(), String> {
     let key = writable(hive, path)?;
     let old: Vec<Option<u32>> = names.iter().map(|n| sys::dword(&key, n)).collect();
-    for name in names {
-        key.set_value(name, &value).map_err(|e| denied(hive, e))?;
-    }
     remember(
         module,
         &format!("{title} ({action})"),
@@ -640,7 +1144,11 @@ fn set_dwords(
             names: names.to_vec(),
             old,
         },
-    )
+    )?;
+    for name in names {
+        key.set_value(name, &value).map_err(|e| denied(hive, e))?;
+    }
+    Ok(())
 }
 
 /// `sc config <name> start= <kind>` through a UAC prompt.

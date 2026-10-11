@@ -407,6 +407,7 @@ pub fn run() {
             cleaner::downloads::cleaner_downloads_delete,
             cleaner::health::cleaner_health_scan,
             cleaner::health::cleaner_health_apply,
+            cleaner::health::cleaner_health_apply_batch,
             cleaner::health::cleaner_health_restore_list,
             cleaner::health::cleaner_health_restore,
             debloat::debloat_status,
