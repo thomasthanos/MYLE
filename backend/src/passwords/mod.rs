@@ -355,6 +355,13 @@ pub struct BrowserSetup {
     /// A side-loaded copy (the folder, or the one that asked last) is older
     /// than the bundled one.
     local_update: bool,
+    /// The app's end of the bridge: waiting for the browsers, what went
+    /// wrong last, and when a browser was last answered (Unix ms).
+    server_listening: bool,
+    server_error: Option<String>,
+    last_served_at: Option<u64>,
+    /// MYLE runs as administrator: the browsers cannot reach it.
+    elevated: bool,
 }
 
 /// The `version` of an extension folder's manifest.
@@ -453,6 +460,7 @@ pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -
     let local = local_extension_dir().filter(|d| d.join("manifest.json").is_file());
     let local_version = local.as_deref().and_then(manifest_version);
     let contact = browser::last_contact();
+    let health = browser::server_health();
     let local_update = bundled_version.as_deref().is_some_and(|ours| {
         let folder_old = local_version.as_deref().is_some_and(|have| older(have, ours));
         // The unpacked copy that asked last said an older version.
@@ -476,13 +484,31 @@ pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -
         last_refusal: browser::last_refusal(),
         vault: status,
         now: vault::now(),
+        server_listening: health.listening,
+        server_error: health.error,
+        last_served_at: health.last_served_at,
+        elevated: windows_fill::this_app_elevated(),
     })
+}
+
+/// Points the browsers at this program again (their host registration and
+/// the `myle:` link), without changing any setting: the "Repair" of Browser
+/// filling.
+#[tauri::command(async)]
+pub fn passwords_browser_repair(state: State<'_, PasswordsState>) -> Result<(), String> {
+    let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling))?;
+    if !enabled {
+        return Err("Browser filling is off: turn it on first.".into());
+    }
+    browser::register_hosts()?;
+    browser::register_protocol()
 }
 
 /// Browser filling on or off: registers the native messaging host with the
 /// browsers, or removes it.
 #[tauri::command(async)]
 pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) -> Result<(), String> {
+    let was = state.with_quiet(|vault| Ok(vault.prefs().browser_filling)).unwrap_or(false);
     if enabled {
         browser::register_hosts()?;
     }
@@ -491,7 +517,9 @@ pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) ->
         prefs.browser_filling = enabled;
         vault.set_prefs(prefs)
     });
-    if saved.is_err() && enabled {
+    // Taken back only when filling was off before: a save that failed never
+    // disconnects browsers that were working.
+    if saved.is_err() && enabled && !was {
         browser::unregister_hosts();
     }
     saved?;
@@ -518,7 +546,8 @@ pub fn passwords_open_extension_dir(app: AppHandle) -> Result<(), String> {
 pub fn serve_browser(app: AppHandle, state: PasswordsState) {
     // On by default now: a vault made before that gets it once.
     let _ = state.with_quiet(|vault| vault.apply_filling_default());
-    let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling)).unwrap_or(false);
+    // Read errors are passed on: they leave the browsers' registration alone.
+    let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling));
     browser::serve(app, state, enabled);
 }
 

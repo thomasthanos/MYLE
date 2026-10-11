@@ -897,6 +897,8 @@
     badKey: "MYLE could not read that 2FA key.",
     reloaded: "MYLE Passwords was updated. Reload this page to use it.",
     vaultError: "MYLE could not read your vault just now. Try again in a moment.",
+    elevated: "MYLE runs as administrator, so this browser cannot reach it. Close MYLE and start it normally.",
+    timeout: "MYLE took too long to answer. Try again.",
   };
 
   function entryButton(login) {
@@ -987,6 +989,8 @@
       case "busy":
       case "reloaded":
       case "vaultError":
+      case "elevated":
+      case "timeout":
         return [note(problems[answer.error])];
       default:
         return [];

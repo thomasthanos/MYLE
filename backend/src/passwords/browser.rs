@@ -450,7 +450,15 @@ fn started_by_our_extension(args: &[String]) -> bool {
     which_copy(args).is_some()
 }
 
-fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
+/// One message from the browser, or why it was not taken (its bytes are
+/// read all the same, so the next message is read as it should be).
+enum Frame {
+    Message(Value),
+    TooLarge,
+    Invalid,
+}
+
+fn read_frame(input: &mut impl Read) -> std::io::Result<Option<Frame>> {
     let mut length = [0u8; 4];
     match input.read_exact(&mut length) {
         Ok(()) => {}
@@ -459,11 +467,22 @@ fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
     }
     let length = u32::from_le_bytes(length);
     if length > MAX_MESSAGE {
-        return Err(std::io::ErrorKind::InvalidData.into());
+        // Skipped in pieces, never held: the browser gets "tooLarge".
+        std::io::copy(&mut input.by_ref().take(u64::from(length)), &mut std::io::sink())?;
+        return Ok(Some(Frame::TooLarge));
     }
     let mut body = Zeroizing::new(vec![0u8; length as usize]);
     input.read_exact(&mut body)?;
-    Ok(Some(serde_json::from_slice(&body).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidData))?))
+    Ok(Some(serde_json::from_slice(&body).map_or(Frame::Invalid, Frame::Message)))
+}
+
+#[cfg(test)]
+fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
+    match read_frame(input)? {
+        None => Ok(None),
+        Some(Frame::Message(value)) => Ok(Some(value)),
+        Some(_) => Err(std::io::ErrorKind::InvalidData.into()),
+    }
 }
 
 fn write_message(output: &mut impl Write, value: &Value) -> std::io::Result<()> {
@@ -484,19 +503,43 @@ const APP_START_POLL: Duration = Duration::from_millis(250);
 fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
-    while let Some(message) = read_message(&mut input)? {
+    relay(&mut input, &mut output, |message| reply_for(browser, copy, message))
+}
+
+/// Answers each message with `reply`; one too large or not understood is
+/// answered too, and the next one read.
+fn relay(input: &mut impl Read, output: &mut impl Write, mut reply: impl FnMut(&Value) -> Value) -> std::io::Result<()> {
+    while let Some(frame) = read_frame(input)? {
+        let answer = match frame {
+            Frame::Message(message) => reply(&message),
+            Frame::TooLarge => json!({ "ok": false, "error": "tooLarge" }),
+            Frame::Invalid => json!({ "ok": false, "error": "badRequest" }),
+        };
+        write_message(output, &answer)?;
+    }
+    Ok(())
+}
+
+/// The app's answer to one message from the browser.
+fn reply_for(browser: &str, copy: &str, message: &Value) -> Value {
+    {
         // An open-and-close availability probe consumes the listening pipe
         // instance. Send the request on our first connection instead.
-        let request = request_from(browser, copy, &message);
-        let reply = match ask_app(&request) {
+        let request = request_from(browser, copy, message);
+        match ask_app(&request) {
             Ok(reply) => reply,
             Err(AppError::Failed) => lost_app_reply(),
-            Err(AppError::Unavailable) if is_open(&message) => {
+            // MYLE runs as administrator: the browser's host may not reach it,
+            // and a second MYLE is never started next to it.
+            Err(AppError::Denied) => json!({ "ok": false, "error": "elevated" }),
+            Err(AppError::Busy) => json!({ "ok": false, "error": "busy" }),
+            Err(AppError::TimedOut) => json!({ "ok": false, "error": "timeout" }),
+            Err(AppError::Unavailable) if is_open(message) => {
                 // The extension's own "open": start it (it shows the vault).
                 let how = launch_app(browser, copy);
                 json!({ "ok": how.is_some(), "detail": how.unwrap_or("could not start MYLE") })
             }
-            Err(AppError::Unavailable) if !wants_the_app(&message) => {
+            Err(AppError::Unavailable) if !wants_the_app(message) => {
                 // A page's status poll or logins never starts the app.
                 json!({ "ok": false, "error": "notRunning" })
             }
@@ -508,6 +551,9 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
                 match answer {
                     Ok(answer) => answer,
                     Err(AppError::Failed) => lost_app_reply(),
+                    Err(AppError::Denied) => json!({ "ok": false, "error": "elevated" }),
+                    Err(AppError::Busy) => json!({ "ok": false, "error": "busy" }),
+                    Err(AppError::TimedOut) => json!({ "ok": false, "error": "timeout" }),
                     Err(AppError::Unavailable) => json!({
                         "ok": false,
                         "error": "notRunning",
@@ -518,10 +564,8 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
                     }),
                 }
             }
-        };
-        write_message(&mut output, &reply)?;
+        }
     }
-    Ok(())
 }
 
 fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
@@ -673,12 +717,46 @@ fn ask_app(message: &Value) -> Result<Value, AppError> {
 
 #[derive(Debug, PartialEq, Eq)]
 enum AppError {
+    /// No connection was made: MYLE is not running (or not yet).
     Unavailable,
+    /// Connected, but the answer was lost: never asked again.
     Failed,
+    /// MYLE runs as administrator: this host may not open its pipe.
+    Denied,
+    /// MYLE's pipe stayed busy.
+    Busy,
+    /// MYLE took the request and did not answer in time.
+    TimedOut,
+}
+
+/// What a failure to open MYLE's pipe means. Only "not there" may lead to
+/// starting MYLE: an elevated or busy MYLE is running already.
+fn open_error(error: &std::io::Error) -> AppError {
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    match error.raw_os_error() {
+        Some(ERROR_ACCESS_DENIED) => AppError::Denied,
+        Some(code) if code == ERROR_PIPE_BUSY as i32 => AppError::Busy,
+        _ => AppError::Unavailable,
+    }
+}
+
+/// How long the host waits for MYLE's pipe to have a free instance (the app
+/// makes the next one right after each connection, retrying if it fails).
+const PIPE_BUSY_WAIT: Duration = Duration::from_secs(10);
+/// How long the host waits for MYLE's answer; a passkey waits for the user
+/// (Windows Hello, picking one) a good while longer.
+const REPLY_WAIT: Duration = Duration::from_secs(25);
+const PASSKEY_REPLY_WAIT: Duration = Duration::from_secs(140);
+
+fn reply_wait(message: &Value) -> Duration {
+    match message.pointer("/request/type").and_then(Value::as_str) {
+        Some("passkeyGet" | "passkeyCreate") => PASSKEY_REPLY_WAIT,
+        _ => REPLY_WAIT,
+    }
 }
 
 fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
-    let pipe = open_app_pipe(name, Duration::from_secs(2)).map_err(|_| AppError::Unavailable)?;
+    let pipe = open_app_pipe(name, PIPE_BUSY_WAIT).map_err(|error| open_error(&error))?;
     let mut server = 0u32;
     let ok = unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut server) };
     if ok == 0 || !is_this_program(server) {
@@ -689,9 +767,19 @@ fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
     line.push('\n');
     writer.write_all(line.as_bytes()).map_err(|_| AppError::Failed)?;
     writer.flush().map_err(|_| AppError::Failed)?;
-    let mut answer = Zeroizing::new(String::new());
-    BufReader::new(pipe).read_line(&mut answer).map_err(|_| AppError::Failed)?;
-    serde_json::from_str(answer.trim()).map_err(|_| AppError::Failed)
+    // Read on a thread of its own, so a MYLE that never answers cannot keep
+    // this host (and the browser's request) waiting for ever.
+    let (sent, answered) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut answer = Zeroizing::new(String::new());
+        let read = BufReader::new(pipe).read_line(&mut answer).map(|_| answer);
+        let _ = sent.send(read);
+    });
+    match answered.recv_timeout(reply_wait(message)) {
+        Ok(Ok(answer)) => serde_json::from_str(answer.trim()).map_err(|_| AppError::Failed),
+        Ok(Err(_)) => Err(AppError::Failed),
+        Err(_) => Err(AppError::TimedOut),
+    }
 }
 
 fn lost_app_reply() -> Value {
@@ -701,82 +789,247 @@ fn lost_app_reply() -> Value {
 // ---------------------------------------------------------------------------
 // The app's side
 
-async fn browser_listener(name: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+/// How the app's end of the bridge stands, for Browser filling's health.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerHealth {
+    /// A pipe instance is waiting for the browsers.
+    pub listening: bool,
+    /// The last thing that went wrong, while it lasts.
+    pub error: Option<String>,
+    /// Unix milliseconds of the last request answered.
+    pub last_served_at: Option<u64>,
+}
+
+static HEALTH: Mutex<ServerHealth> = Mutex::new(ServerHealth { listening: false, error: None, last_served_at: None });
+
+pub fn server_health() -> ServerHealth {
+    HEALTH.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+fn health(update: impl FnOnce(&mut ServerHealth)) {
+    update(&mut HEALTH.lock().unwrap_or_else(|p| p.into_inner()));
+}
+
+/// Waits between failed tries, twice as long each time up to `limit`.
+struct Backoff {
+    first: Duration,
+    next: Duration,
+    limit: Duration,
+}
+
+impl Backoff {
+    fn new(first: Duration, limit: Duration) -> Self {
+        Self { first, next: first, limit }
+    }
+
+    fn wait(&mut self) -> Duration {
+        let wait = self.next;
+        self.next = (self.next * 2).min(self.limit);
+        wait
+    }
+
+    fn reset(&mut self) {
+        self.next = self.first;
+    }
+}
+
+type PipeServer = tokio::net::windows::named_pipe::NamedPipeServer;
+
+/// A pipe instance: the first (only this copy may own the name) or another.
+fn pipe_instance(name: &str, first: bool) -> std::io::Result<PipeServer> {
+    ServerOptions::new().first_pipe_instance(first).reject_remote_clients(true).create(name)
+}
+
+/// The pipe's first instance, tried until it is this copy's. A previous copy
+/// holding it (a live update) is waited for; any other error is retried
+/// too, longer and longer: browser filling is never off for the whole run.
+async fn browser_listener(make: &mut impl FnMut(bool) -> std::io::Result<PipeServer>) -> PipeServer {
+    let mut backoff = Backoff::new(Duration::from_millis(250), Duration::from_secs(30));
     loop {
-        match ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(name) {
-            Ok(server) => return Ok(server),
-            // A live update starts this copy while the previous one still
-            // owns the pipe. Keep exclusive ownership and take over once it
-            // exits, instead of disabling browser filling for this whole run.
+        match make(true) {
+            Ok(server) => {
+                health(|h| {
+                    h.listening = true;
+                    h.error = None;
+                });
+                return server;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 tokio::time::sleep(APP_START_POLL).await;
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                health(|h| {
+                    h.listening = false;
+                    h.error = Some(error.to_string());
+                });
+                tokio::time::sleep(backoff.wait()).await;
+            }
         }
     }
 }
 
-/// Answers the host while the app runs. `filling`: browser filling is on.
-pub fn serve(app: AppHandle, state: PasswordsState, filling: bool) {
-    tauri::async_runtime::spawn(async move {
-        let name = pipe_name();
-        let Ok(mut server) = browser_listener(&name).await else {
-            // A creation error other than the previous copy holding the pipe.
-            return;
-        };
-        // This copy answers: the browsers start this program as the host (or,
-        // with filling off, forget an old registration).
-        tauri::async_runtime::spawn_blocking(move || {
-            if filling {
-                let _ = ensure_registered();
-                let _ = register_protocol();
-            } else {
-                unregister_hosts();
-            }
-        });
-        loop {
-            if server.connect().await.is_err() {
-                continue;
-            }
-            let client = server;
-            server = match ServerOptions::new().reject_remote_clients(true).create(&name) {
-                Ok(next) => next,
-                Err(_) => return,
-            };
-            let (app, state) = (app.clone(), state.clone());
-            tauri::async_runtime::spawn(async move {
-                let mut pid = 0u32;
-                let ok = unsafe { GetNamedPipeClientProcessId(client.as_raw_handle() as HANDLE, &mut pid) };
-                if ok == 0 || !is_this_program(pid) {
-                    return;
-                }
-                let mut client = tokio::io::BufReader::new(client);
-                let mut line = Zeroizing::new(String::new());
-                if client.read_line(&mut line).await.unwrap_or(0) == 0 {
-                    return;
-                }
-                let reply = match serde_json::from_str::<Envelope>(line.trim()) {
-                    Ok(Envelope { browser, copy, version, request }) => {
-                        if note_contact(&browser, &copy, &version) {
-                            let _ = app.emit(CONTACT_EVENT, last_contact());
+/// Accepts the browsers' hosts forever, handing each to `serve_client`. A
+/// host that could not be accepted, or a next instance that could not be
+/// made, never stops it: the host just connected is answered all the same
+/// and the next instance is tried again (the one in use keeps the name).
+async fn accept_loop(
+    mut make: impl FnMut(bool) -> std::io::Result<PipeServer>,
+    mut serve_client: impl FnMut(PipeServer),
+) {
+    let mut server = browser_listener(&mut make).await;
+    let mut backoff = Backoff::new(Duration::from_millis(50), Duration::from_secs(5));
+    loop {
+        match server.connect().await {
+            Ok(()) => {
+                serve_client(server);
+                server = loop {
+                    match make(false) {
+                        Ok(next) => {
+                            backoff.reset();
+                            health(|h| {
+                                h.listening = true;
+                                h.error = None;
+                            });
+                            break next;
                         }
-                        if request.is_passkey() {
-                            passkey_reply(&app, &state, &browser, &copy, request)
-                                .await
-                                .unwrap_or_else(|error| json!({ "ok": false, "error": error }))
-                        } else {
-                            answer(&app, &state, request)
+                        Err(error) => {
+                            health(|h| {
+                                h.listening = false;
+                                h.error = Some(error.to_string());
+                            });
+                            tokio::time::sleep(backoff.wait()).await;
                         }
                     }
-                    Err(_) => json!({ "ok": false, "error": "badRequest" }),
                 };
-                let mut out = Zeroizing::new(reply.to_string());
-                out.push('\n');
-                let _ = client.get_mut().write_all(out.as_bytes()).await;
-                let _ = client.get_mut().flush().await;
-            });
+            }
+            Err(error) => {
+                health(|h| h.error = Some(error.to_string()));
+                drop(server);
+                tokio::time::sleep(backoff.wait()).await;
+                server = match make(false) {
+                    Ok(next) => next,
+                    // No instance of ours is left: the name is taken again.
+                    Err(_) => browser_listener(&mut make).await,
+                };
+            }
         }
+    }
+}
+
+/// What to do with the browsers' registration at start: point them at this
+/// program, remove it (filling off), or, when the preference could not be
+/// read (the vault file held by a backup or an antivirus), leave it as is:
+/// a passing read error never disconnects the browsers.
+#[derive(Debug, PartialEq, Eq)]
+enum Registration {
+    Register,
+    Unregister,
+    Keep,
+}
+
+fn registration_for(filling: &Result<bool, String>) -> Registration {
+    match filling {
+        Ok(true) => Registration::Register,
+        Ok(false) => Registration::Unregister,
+        Err(_) => Registration::Keep,
+    }
+}
+
+/// How long a connected host may take to send its request.
+const REQUEST_WAIT: Duration = Duration::from_secs(10);
+
+/// Answers the hosts while the app runs. `filling`: browser filling is on
+/// (an error: the vault could not be read just now).
+pub fn serve(app: AppHandle, state: PasswordsState, filling: Result<bool, String>) {
+    // The browsers are pointed at this program (or, filling off, forget it)
+    // whether or not the pipe is this copy's yet.
+    let registration = registration_for(&filling);
+    tauri::async_runtime::spawn_blocking(move || match registration {
+        Registration::Register => {
+            let _ = ensure_registered();
+            let _ = register_protocol();
+        }
+        Registration::Unregister => unregister_hosts(),
+        Registration::Keep => {}
     });
+    tauri::async_runtime::spawn(async move {
+        let name = pipe_name();
+        accept_loop(
+            |first| pipe_instance(&name, first),
+            |client| {
+                tauri::async_runtime::spawn(serve_client(app.clone(), state.clone(), client));
+            },
+        )
+        .await;
+    });
+}
+
+/// Reads until the host goes away (it sends nothing after its request).
+async fn until_gone(reader: &mut (impl tokio::io::AsyncRead + Unpin)) {
+    use tokio::io::AsyncReadExt;
+    let mut byte = [0u8; 1];
+    loop {
+        match reader.read(&mut byte).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+    }
+}
+
+/// Runs `work` while the host is there: the host gone (the browser closed
+/// the tab, or the extension gave up), `work` is dropped, which cancels a
+/// passkey operation and closes its Windows Hello prompt. `None` then.
+async fn while_connected<T>(client: &mut (impl tokio::io::AsyncRead + Unpin), work: impl std::future::Future<Output = T>) -> Option<T> {
+    tokio::select! {
+        done = work => Some(done),
+        () = until_gone(client) => None,
+    }
+}
+
+/// One host's request, answered.
+async fn serve_client(app: AppHandle, state: PasswordsState, client: PipeServer) {
+    let mut pid = 0u32;
+    let ok = unsafe { GetNamedPipeClientProcessId(client.as_raw_handle() as HANDLE, &mut pid) };
+    let ours = ok != 0 && tauri::async_runtime::spawn_blocking(move || is_this_program(pid)).await.unwrap_or(false);
+    if !ours {
+        return;
+    }
+    let mut client = tokio::io::BufReader::new(client);
+    let mut line = Zeroizing::new(String::new());
+    // A host that connects and says nothing is not waited for.
+    match tokio::time::timeout(REQUEST_WAIT, client.read_line(&mut line)).await {
+        Ok(Ok(read)) if read > 0 => {}
+        _ => return,
+    }
+    let reply = match serde_json::from_str::<Envelope>(line.trim()) {
+        Ok(Envelope { browser, copy, version, request }) => {
+            let (who, which, ext) = (browser.clone(), copy.clone(), version);
+            if tauri::async_runtime::spawn_blocking(move || note_contact(&who, &which, &ext)).await.unwrap_or(false) {
+                let _ = app.emit(CONTACT_EVENT, last_contact());
+            }
+            if request.is_passkey() {
+                let work = passkey_reply(&app, &state, &browser, &copy, request);
+                match while_connected(&mut client, work).await {
+                    Some(reply) => reply.unwrap_or_else(|error| json!({ "ok": false, "error": error })),
+                    None => return,
+                }
+            } else {
+                // The vault's lock, files and the clipboard block: not on the
+                // runtime's own threads.
+                let (app, state) = (app.clone(), state.clone());
+                tauri::async_runtime::spawn_blocking(move || answer(&app, &state, request))
+                    .await
+                    .unwrap_or_else(|_| json!({ "ok": false, "error": "failed" }))
+            }
+        }
+        Err(_) => json!({ "ok": false, "error": "badRequest" }),
+    };
+    health(|h| h.last_served_at = Some(super::vault::now() * 1000));
+    let mut out = Zeroizing::new(reply.to_string());
+    out.push('\n');
+    let _ = client.get_mut().write_all(out.as_bytes()).await;
+    let _ = client.get_mut().flush().await;
 }
 
 /// What the host passes on: the browser's request, and which browser.
@@ -1496,10 +1749,7 @@ async fn verify_user(app: &AppHandle, wanted: &str, site: &str) -> Result<bool, 
     if wanted == "discouraged" {
         return Ok(false);
     }
-    let message = format!("Use your passkey for {site}");
-    let consent = tauri::async_runtime::spawn_blocking(move || super::hello::verify(&message))
-        .await
-        .map_err(|e| e.to_string())?;
+    let consent = super::hello::verify(format!("Use your passkey for {site}")).await;
     match consent {
         Consent::Verified => Ok(true),
         Consent::Refused => Err("notVerified".into()),
@@ -1741,17 +1991,118 @@ mod tests {
         assert!(read_message(&mut &too_big[..]).is_err());
     }
 
+    #[test]
+    fn a_vault_that_cannot_be_read_at_start_leaves_the_browsers_registered() {
+        assert_eq!(registration_for(&Ok(true)), Registration::Register);
+        assert_eq!(registration_for(&Ok(false)), Registration::Unregister);
+        assert_eq!(registration_for(&Err("locked by a backup".into())), Registration::Keep);
+    }
+
+    #[test]
+    fn only_a_missing_pipe_may_lead_to_starting_myle() {
+        assert_eq!(open_error(&std::io::Error::from_raw_os_error(2)), AppError::Unavailable);
+        // Running as administrator, or busy: running already, never started again.
+        assert_eq!(open_error(&std::io::Error::from_raw_os_error(5)), AppError::Denied);
+        assert_eq!(open_error(&std::io::Error::from_raw_os_error(231)), AppError::Busy);
+    }
+
+    #[test]
+    fn a_passkey_waits_longer_for_its_answer_than_a_look_up() {
+        let passkey = request_from("Edge", "store", &json!({ "type": "passkeyGet" }));
+        let logins = request_from("Edge", "store", &json!({ "type": "logins", "url": "https://a.com" }));
+        assert_eq!(reply_wait(&passkey), PASSKEY_REPLY_WAIT);
+        assert_eq!(reply_wait(&logins), REPLY_WAIT);
+        assert!(REPLY_WAIT < Duration::from_secs(30), "within the extension's own limit");
+    }
+
+    #[test]
+    fn a_message_too_large_is_answered_and_the_next_one_still_read() {
+        let mut input = Vec::new();
+        input.extend_from_slice(&(MAX_MESSAGE + 1).to_le_bytes());
+        input.extend(std::iter::repeat_n(b'x', (MAX_MESSAGE + 1) as usize));
+        input.extend_from_slice(&3u32.to_le_bytes());
+        input.extend_from_slice(b"{x}");
+        write_message(&mut input, &json!({ "type": "status" })).unwrap();
+        let mut output = Vec::new();
+        relay(&mut &input[..], &mut output, |message| json!({ "ok": true, "type": message["type"] })).unwrap();
+        let mut answers = &output[..];
+        assert_eq!(read_message(&mut answers).unwrap().unwrap()["error"], "tooLarge");
+        assert_eq!(read_message(&mut answers).unwrap().unwrap()["error"], "badRequest");
+        assert_eq!(read_message(&mut answers).unwrap().unwrap()["type"], "status");
+        assert!(read_message(&mut answers).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_passkey_request_is_dropped_when_its_host_goes_away() {
+        let (mut ours, theirs) = tokio::io::duplex(64);
+        drop(theirs);
+        let never = std::future::pending::<Value>();
+        assert!(while_connected(&mut ours, never).await.is_none(), "the browser went: the request ends");
+        let (mut ours, _theirs) = tokio::io::duplex(64);
+        assert_eq!(while_connected(&mut ours, async { 7 }).await, Some(7));
+    }
+
+    #[tokio::test]
+    async fn the_pipe_keeps_answering_after_its_next_instance_could_not_be_made() {
+        let name = format!(r"\\.\pipe\myle-browser-supervision-test-{}", uuid::Uuid::new_v4());
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (pipe, fail, count) = (name.clone(), failed.clone(), served.clone());
+        let server = tokio::spawn(accept_loop(
+            move |first| {
+                // The first next instance fails once.
+                if !first && !fail.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    return Err(std::io::Error::other("no more instances just now"));
+                }
+                pipe_instance(&pipe, first)
+            },
+            move |client| {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(client);
+            },
+        ));
+        for expected in 1..=2 {
+            let open = name.clone();
+            // While the server makes its next instance again, a host finds no
+            // pipe for a moment (and asks again, as the extension does).
+            tokio::task::spawn_blocking(move || {
+                let until = Instant::now() + Duration::from_secs(5);
+                loop {
+                    match open_app_pipe(&open, Duration::from_secs(1)) {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound && Instant::now() < until => {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        result => return result,
+                    }
+                }
+            })
+            .await
+            .unwrap()
+            .expect("the pipe is there for the next host too");
+            for _ in 0..100 {
+                if served.load(std::sync::atomic::Ordering::SeqCst) >= expected {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), expected);
+        }
+        assert!(failed.load(std::sync::atomic::Ordering::SeqCst));
+        server.abort();
+    }
+
     #[tokio::test]
     async fn browser_listener_takes_over_after_the_previous_version_exits() {
         let name = format!(r"\\.\pipe\myle-browser-update-test-{}", uuid::Uuid::new_v4());
         let previous = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
-        let listener = browser_listener(&name);
+        let mut make = |first| pipe_instance(&name, first);
+        let listener = browser_listener(&mut make);
         tokio::pin!(listener);
         // Updates deliberately overlap the two app processes. The new one
         // must wait without joining the previous version's pipe.
         assert!(tokio::time::timeout(Duration::from_millis(50), &mut listener).await.is_err());
         drop(previous);
-        let server = tokio::time::timeout(Duration::from_secs(2), listener).await.unwrap().unwrap();
+        let server = tokio::time::timeout(Duration::from_secs(2), listener).await.unwrap();
         drop(server);
     }
 

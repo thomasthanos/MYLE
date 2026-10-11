@@ -322,6 +322,7 @@ pub fn run() {
             start_page,
             passwords::passwords_browser_get,
             passwords::passwords_browser_set,
+            passwords::passwords_browser_repair,
             passwords::passwords_open_extension_dir,
             passwords::passwords_extension_sync,
             passwords::windows_fill::passwords_windows_hotkey_status,

@@ -88,8 +88,10 @@
     return `${Math.round(hours / 24)} days ago`;
   }
 
+  /** MYLE's own end of the bridge is not taking the browsers' requests. */
+  const notListening = $derived(!!setup?.enabled && setup.serverListening === false);
   const registered = $derived(!!setup?.enabled && !setup.registrationError);
-  const connected = $derived(registered && !!setup?.lastContact);
+  const connected = $derived(registered && !!setup?.lastContact && !notListening && !setup?.elevated);
   /** A start MYLE turned away after the last good one: worth saying. */
   const refusal = $derived(
     setup?.lastRefusal && (!setup.lastContact || setup.lastRefusal.at > setup.lastContact.at) ? setup.lastRefusal : null,
@@ -111,11 +113,11 @@
     }
   }
 
-  /** Writes the browsers' registration again. */
+  /** Writes the browsers' registration again (no setting changes). */
   async function repair() {
     saving = true;
     try {
-      await api.browserSet(true);
+      await api.browserRepair();
       await load();
       if (setup && !setup.registrationError) toast.success("The browsers know where MYLE is again.");
     } catch (error) {
@@ -182,6 +184,19 @@
           onchange={(e) => toggle(e.currentTarget.checked, e.currentTarget)}
         />
       </div>
+
+      {#if setup?.elevated}
+        <p class="refusal">
+          <CircleAlert size={13} />
+          <span>MYLE runs as administrator, so the browsers cannot reach it. Close MYLE and start it normally (not "Run as administrator").</span>
+        </p>
+      {:else if notListening}
+        <p class="refusal">
+          <CircleAlert size={13} />
+          <span>MYLE is not taking the browsers' requests right now{setup?.serverError ? ` (${setup.serverError})` : ""}. It keeps trying by itself; Repair points the browsers at MYLE again.</span>
+          <button type="button" class="btn small" disabled={saving} onclick={repair}><Wrench size={13} /> Repair</button>
+        </p>
+      {/if}
 
       {#if setup?.enabled && !connected}
         <ul class="checks">

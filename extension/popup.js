@@ -59,6 +59,9 @@ function reasonFor(error) {
     case "oldApp": return "Update MYLE to copy from here. Filling works as before.";
     case "vaultError": return "MYLE could not read your vault just now. Try again in a moment.";
     case "notRunning": return "MYLE is not running. Open it, then try again.";
+    case "elevated": return "MYLE runs as administrator, so the browser cannot reach it. Start MYLE normally.";
+    case "timeout": return "MYLE took too long to answer. Try again.";
+    case "tooLarge": return "That was too large to send to MYLE.";
     default: return null;
   }
 }
@@ -96,6 +99,14 @@ function errorView(error) {
       return { title: "Not a secure page", text: "Logins are filled only on https pages, and on this computer's own sites.", actions: [] };
     case "busy":
       return { title: "Busy", text: reasonFor("busy"), actions: [["Try again", "retry"]] };
+    case "elevated":
+      return {
+        title: "MYLE runs as administrator",
+        text: "The browser cannot reach a MYLE started as administrator. Close MYLE and start it normally (not \"Run as administrator\").",
+        actions: [["Try again", "retry"]],
+      };
+    case "timeout":
+      return { title: "MYLE did not answer in time", text: reasonFor("timeout"), actions: [["Try again", "retry"]] };
     case "reloaded":
     case "noContent":
       return { title: "Reload the page", text: "The browser updated MYLE Passwords and this page still runs the old copy. Reload it, then try again.", actions: [] };
@@ -125,6 +136,8 @@ function chipFor(answer, tooOld = false) {
       return { tone: "warn", text: "No vault", title: "Create your vault in MYLE first. Click to open MYLE.", action: "open" };
     case "vaultError":
       return { tone: "bad", text: "Vault error", title: reasonFor("vaultError"), action: null };
+    case "elevated":
+      return { tone: "bad", text: "Run as admin", title: reasonFor("elevated"), action: null };
     case "oldApp":
       return { tone: "warn", text: "Update MYLE", title: "This MYLE is older than the extension: update it for every feature.", action: "open" };
     default:
