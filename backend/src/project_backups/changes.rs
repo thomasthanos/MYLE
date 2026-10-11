@@ -30,7 +30,7 @@ use zip::ZipArchive;
 use super::compare::{self, FileInfo, Recorded, Side};
 use super::rules::{BACKUP_INFO_FILE, Early, Rules, TreeListing, parent_of};
 use super::store::{Project, Settings};
-use super::{archive, engine, store, walk};
+use super::{archive, engine, incremental, store, walk};
 
 /// At most this many files are listed per project (the counts are whole).
 const LIST_LIMIT: usize = 300;
@@ -136,7 +136,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn crc_of(path: &Path) -> Option<u32> {
+pub(crate) fn crc_of(path: &Path) -> Option<u32> {
     let mut file = File::open(path).ok()?;
     let mut hasher = crc32fast::Hasher::new();
     let mut buf = vec![0u8; 256 * 1024];
@@ -242,6 +242,12 @@ fn examine(
         let path = engine::resolve_backup(dir, &project.app_name, &entry.id).ok()?;
         Some((entry, path))
     });
+    // The newest increment on that backup, if any: the project as last
+    // backed up is what it records.
+    let increment = latest
+        .as_ref()
+        .zip(dir.as_ref())
+        .and_then(|((entry, _), dir)| incremental::chain(dir, entry).pop());
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for file in &found.files {
@@ -251,6 +257,9 @@ fn examine(
     }
     if let Some((entry, _)) = &latest {
         (&entry.id, entry.size, entry.modified).hash(&mut hasher);
+    }
+    if let Some(increment) = &increment {
+        (increment.id(), increment.size, increment.modified).hash(&mut hasher);
     }
     let fingerprint = hasher.finish();
     if !fresh {
@@ -269,12 +278,23 @@ fn examine(
         store_cache(&project.id, fingerprint, result);
         return Ok(());
     };
-    result.backup_id = Some(entry.id.clone());
-    let side = compare::side_for(&path)?;
-    let (old, started) = listing(&project.id, &side, &path, &entry)
-        .map_err(|error| format!("The newest backup ({}) can't be read: {error}", entry.name))?;
+    let (side, old, started, modified) = match &increment {
+        Some(increment) => {
+            result.backup_id = Some(increment.id());
+            let started = UNIX_EPOCH + Duration::from_millis(increment.info.timestamp.max(0) as u64);
+            let old = Arc::new(incremental::listing_of(&increment.info));
+            (Side::Zip(increment.path.clone()), old, Some(started), increment.modified)
+        }
+        None => {
+            result.backup_id = Some(entry.id.clone());
+            let side = compare::side_for(&path)?;
+            let (old, started) = listing(&project.id, &side, &path, &entry)
+                .map_err(|error| format!("The newest backup ({}) can't be read: {error}", entry.name))?;
+            (side, old, started, entry.modified)
+        }
+    };
     // Files written after this were not seen by the backup.
-    let backup_time = entry.modified.map(|ms| UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64));
+    let backup_time = modified.map(|ms| UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64));
     let reference = match (started, backup_time) {
         (Some(started), Some(at)) => Some(started.min(at).checked_sub(MARGIN).unwrap_or(UNIX_EPOCH)),
         (Some(started), None) => started.checked_sub(MARGIN),
@@ -344,7 +364,7 @@ fn backup_started(side: &Side) -> Option<SystemTime> {
 
 /// Whether a same-size file's content has to be read: its date is not the
 /// one the backup recorded, or it was written after the backup started.
-fn may_differ(info: &FileInfo, modified: Option<SystemTime>, reference: Option<SystemTime>) -> bool {
+pub(crate) fn may_differ(info: &FileInfo, modified: Option<SystemTime>, reference: Option<SystemTime>) -> bool {
     let Some(modified) = modified else {
         return true;
     };

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
   import Archive from "@lucide/svelte/icons/archive";
+  import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
@@ -81,7 +82,11 @@
       </div>
       <span class="source selectable" title={project.sourcePath}>{project.sourcePath || "No folder chosen"}</span>
       <small>
-        {#if project.lastBackup}
+        {#if project.lastBackup?.kind === "incremental"}
+          Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · Incremental
+          +{project.lastBackup.fileCount.toLocaleString()} {project.lastBackup.fileCount === 1 ? "file" : "files"} (on {project.lastBackup.base ?? "the last full backup"}) ·
+          {formatBytes(project.lastBackup.zipSize)}
+        {:else if project.lastBackup}
           Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · {project.lastBackup.name} ·
           {formatBytes(project.lastBackup.zipSize)} · {project.lastBackup.fileCount.toLocaleString()} files
         {:else}
@@ -114,7 +119,7 @@
       </ul>
       {#if changeCount > change.files.length}<p class="muted">…and {changeCount - change.files.length} more</p>{/if}
       <div class="changes-actions">
-        <button class="btn small primary" disabled={pb.locked} onclick={() => pb.backup([project.id])}><CloudUpload size={13} /> Back up changes</button>
+        <button class="btn small primary" disabled={pb.locked} title="Saves only the changed files when the last full backup allows it, else a full backup" onclick={() => pb.backup([project.id], true)}><CloudUpload size={13} /> Back up changes</button>
       </div>
     </div>
   {/if}
@@ -134,6 +139,9 @@
           </button>
           <button class="icon-btn" title="Read the list again" aria-label="Read the list again" onclick={() => pb.loadBackups(project.id)}>
             <RefreshCw size={13} class={pb.backupsLoading === project.id ? "spin" : ""} />
+          </button>
+          <button class="btn small" disabled={pb.locked} title="Puts the project as last backed up (with its increments) into an empty folder, checking every file" onclick={() => pb.restore(project)}>
+            {#if pb.busy === "restore"}<LoaderCircle size={13} class="spin" /> Restoring…{:else}<ArchiveRestore size={13} /> Restore to folder…{/if}
           </button>
           <button class="icon-btn" title="Open in Explorer" aria-label="Open the project's backups folder" onclick={() => pb.open("backups", project.id)}><FolderOpen size={14} /></button>
         </div>

@@ -373,7 +373,7 @@
         onclick={() => pb.backup(pb.projects.map((project) => project.id))}>
         <CloudUpload size={15} /> Back up all
       </button>
-      <button class="btn" disabled={pb.locked || !pb.changedIds.length} title="Backs up only the projects whose folders changed since their last backup" onclick={() => pb.backup(pb.changedIds)}>
+      <button class="btn" disabled={pb.locked || !pb.changedIds.length} title="Backs up only the projects whose folders changed, saving only their changed files where the last full backup allows it" onclick={() => pb.backup(pb.changedIds, true)}>
         <CloudUpload size={15} /> Back up changed{pb.changedIds.length ? ` (${pb.changedIds.length})` : ""}
       </button>
       <button class="icon-btn" title="Check every project folder for changes now" aria-label="Check for changes" disabled={pb.checking.length > 0} onclick={() => pb.checkChanges(undefined, true)}>

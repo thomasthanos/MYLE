@@ -237,3 +237,36 @@ test("more changed projects while another page is open are told once", () => {
   assert.equal(badges.of("project-backups"), 1);
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
 });
+
+test("backing up the changes asks for an increment, Back up all does not", async () => {
+  const original = { backup: api.backup, getState: api.getState, changes: api.changes };
+  const asked = [];
+  api.backup = async (ids, _onEvent, incremental) => {
+    asked.push([ids, incremental]);
+    return { results: [], cancelled: false, settings: state.page.settings };
+  };
+  api.getState = async () => state.page;
+  api.changes = async () => [];
+  try {
+    state.page = { ...state.page, settings: { ...state.page.settings, provider: "googleDrive", projects: [project("A")] } };
+    await state.backup(["A"], true);
+    await state.backup(["A"]);
+    assert.deepEqual(asked, [[["A"], true], [["A"], false]]);
+  } finally {
+    Object.assign(api, original);
+  }
+});
+
+test("a restore names what it was put together from", async () => {
+  while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  const original = { restore: api.restore, pickFolder: api.pickFolder };
+  api.pickFolder = async () => "D:\\Restored";
+  api.restore = async (projectId, folder) => ({ folder, files: 12, bytes: 4096, from: ["A_D5_V12", "increment-V12-1", "increment-V12-2"] });
+  try {
+    await state.restore(project("A"));
+    assert.match(toast.visible[0].message, /A: 12 files restored and checked from A_D5_V12 and 2 increments\./);
+  } finally {
+    Object.assign(api, original);
+    while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  }
+});

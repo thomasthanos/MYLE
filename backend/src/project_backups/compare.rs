@@ -258,7 +258,7 @@ pub struct Comparison {
 }
 
 /// A file inside `root` by its relative name, refusing names that leave it.
-fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
+pub(crate) fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let mut path = root.to_path_buf();
     for part in rel.split(['/', '\\']) {
         if part.is_empty() || part == "." {

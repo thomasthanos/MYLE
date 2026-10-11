@@ -460,6 +460,7 @@ pub fn run() {
             project_backups::commands::project_backups_list,
             project_backups::commands::project_backups_changes,
             project_backups::commands::project_backups_latest_changes,
+            project_backups::commands::project_backups_restore,
             project_backups::commands::project_backups_watch,
             project_backups::commands::project_backups_compare,
             project_backups::commands::project_backups_file_diff,

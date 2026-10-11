@@ -35,6 +35,10 @@ pub struct LastBackup {
     pub created_at: i64,
     pub file_count: u64,
     pub zip_size: u64,
+    /// `incremental` for an increment (none: a full backup).
+    pub kind: Option<String>,
+    /// The full backup an increment builds on.
+    pub base: Option<String>,
 }
 
 /// How the last backup attempt of a project ended.

@@ -359,7 +359,9 @@ class ProjectBackupsState {
       return null;
     }
   }
-  async backup(projectIds: string[]) {
+  /** Backs up `projectIds`; `incremental`: only what changed where an
+   *  increment fits (the app makes a full backup otherwise). */
+  async backup(projectIds: string[], incremental = false) {
     if (this.locked || !projectIds.length) return;
     if (!this.provider) {
       toast.info("Choose Google Drive or Dropbox first.");
@@ -369,7 +371,7 @@ class ProjectBackupsState {
     this.failures = [];
     this.operation = { startedAt: Date.now(), index: 0, total: projectIds.length, projectName: "", stage: "preparing", doneBytes: 0, totalBytes: 0, doneFiles: 0, totalFiles: 0, note: null };
     try {
-      const run = await api.backup(projectIds, (event) => this.onEvent(event));
+      const run = await api.backup(projectIds, (event) => this.onEvent(event), incremental);
       this.page = { ...this.page, settings: run.settings };
       const done = run.results.filter((result) => result.ok);
       const failed = run.results.filter((result) => !result.ok && result.code !== "CANCELLED");
@@ -385,6 +387,13 @@ class ProjectBackupsState {
         for (const result of done) {
           const outcome = result.outcome!;
           const late = outcome.finalCheckOk ? "" : " The cloud app is still catching up with it.";
+          if (outcome.kind === "incremental") {
+            const gone = outcome.deletedCount ? `, ${outcome.deletedCount.toLocaleString()} deleted` : "";
+            toast.success(`${result.name}: only the changes were saved (${outcome.fileCount.toLocaleString()} files${gone}, on ${outcome.base ?? "the last full backup"}).${late}`, {
+              label: "Show", run: () => void api.open("backups", result.projectId),
+            });
+            continue;
+          }
           toast.success(`${result.name}: ${outcome.name}.zip saved (${outcome.fileCount.toLocaleString()} files).${late}`, {
             label: "Show", run: () => void api.open("backups", result.projectId, `${outcome.monthFolder}/${outcome.name}.zip`),
           });
@@ -456,6 +465,16 @@ class ProjectBackupsState {
     const text = await this.run("cloud", () => api.startCloud(provider));
     if (text) toast.info(`${text} Try the backup again once it is signed in.`);
     await this.refresh();
+  }
+  /** Puts the project as last backed up (its full backup and the increments
+   *  on it) into an empty folder the user picks; every file is checked. */
+  async restore(project: Project) {
+    const folder = await this.pickFolder(`Restore ${project.name} into an empty folder`);
+    if (!folder) return;
+    const restored = await this.run("restore", () => api.restore(project.id, folder));
+    if (!restored) return;
+    const parts = restored.from.length > 1 ? ` from ${restored.from[0]} and ${restored.from.length - 1} ${restored.from.length === 2 ? "increment" : "increments"}` : ` from ${restored.from[0]}`;
+    toast.success(`${project.name}: ${restored.files.toLocaleString()} files restored and checked${parts}.`);
   }
   async toggleBackups(projectId: string) {
     if (this.expanded === projectId) {
