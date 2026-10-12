@@ -34,6 +34,8 @@ pub struct Mobile<R: Runtime>(std::marker::PhantomData<fn() -> R>);
 struct SignInArgs<'a> {
     url: &'a str,
     callback_scheme: &'a str,
+    /// iOS: a private sheet, without Safari's cookies.
+    ephemeral: bool,
 }
 
 #[cfg(mobile)]
@@ -70,9 +72,9 @@ impl<R: Runtime> Mobile<R> {
     /// address (an error with `CANCELLED` when the user closed it); on
     /// Android it answers `None` at once, and the page comes back as a link
     /// to the app. Blocks: call it off the async runtime.
-    pub fn sign_in(&self, url: &str, callback_scheme: &str) -> Result<Option<String>, String> {
+    pub fn sign_in(&self, url: &str, callback_scheme: &str, ephemeral: bool) -> Result<Option<String>, String> {
         self.0
-            .run_mobile_plugin::<SignInAnswer>("signIn", SignInArgs { url, callback_scheme })
+            .run_mobile_plugin::<SignInAnswer>("signIn", SignInArgs { url, callback_scheme, ephemeral })
             .map(|answer| answer.callback_url.filter(|url| !url.is_empty()))
             .map_err(|e| e.to_string())
     }
@@ -119,7 +121,7 @@ impl<R: Runtime> Mobile<R> {
 
 #[cfg(not(mobile))]
 impl<R: Runtime> Mobile<R> {
-    pub fn sign_in(&self, _url: &str, _callback_scheme: &str) -> Result<Option<String>, String> {
+    pub fn sign_in(&self, _url: &str, _callback_scheme: &str, _ephemeral: bool) -> Result<Option<String>, String> {
         Err("Signing in inside the app is for phones.".into())
     }
 

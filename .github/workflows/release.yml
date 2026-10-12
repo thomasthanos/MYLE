@@ -28,6 +28,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Optional sign-in start page (docs/auth-worker.js); empty uses Supabase.
+  MYLE_AUTH_URL: ${{ vars.MYLE_AUTH_URL }}
+
 jobs:
   windows:
     runs-on: windows-latest

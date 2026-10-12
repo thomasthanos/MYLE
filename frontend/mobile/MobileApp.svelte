@@ -112,7 +112,7 @@
 
   <UpdateBanner />
 
-  <main>
+  <main class:fixed={welcome}>
     {#if !account.loaded || hasVault === null}
       <!-- A moment: whether this phone has a vault and an account. -->
     {:else if welcome}
@@ -142,6 +142,13 @@
   .account.signed-in { color: #8fe3b6; }
 
   main { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 14px 14px calc(env(safe-area-inset-bottom) + 12px); overflow: auto; }
+
+  /* The welcome screen fits the screen: no scrolling, no bounce. */
+  main.fixed {
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
 
   /* Out of sight: nothing readable in the app switcher. */
   .away main { filter: blur(18px); }

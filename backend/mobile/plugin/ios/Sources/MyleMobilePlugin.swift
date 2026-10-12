@@ -7,6 +7,7 @@ import WebKit
 class SignInArgs: Decodable {
   let url: String
   let callbackScheme: String
+  let ephemeral: Bool?
 }
 
 class ShareArgs: Decodable {
@@ -41,7 +42,9 @@ class MyleMobilePlugin: Plugin {
       session.presentationContextProvider = self
       // Safari's sign-ins carry over: someone already signed in to Discord
       // or Google there is not asked for their password again.
-      session.prefersEphemeralWebBrowserSession = false
+      // Private for Discord: its page, with Safari's cookies, tells Apple
+      // Passwords about the account on every visit ("Passkey Updated").
+      session.prefersEphemeralWebBrowserSession = args.ephemeral ?? false
       self.session = session
       if !session.start() {
         self.session = nil

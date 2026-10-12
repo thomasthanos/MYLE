@@ -31,6 +31,7 @@ private val BACKGROUND = Color.rgb(0x0a, 0x0c, 0x12)
 class SignInArgs {
     var url: String = ""
     var callbackScheme: String = ""
+    var ephemeral: Boolean = false
 }
 
 @InvokeArg

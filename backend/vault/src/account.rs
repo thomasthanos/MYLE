@@ -109,9 +109,18 @@ pub fn pkce_pair() -> (String, String) {
 
 /// Supabase's sign-in page for `provider`, which comes back to `redirect`
 /// with a code for `exchange_code`.
+///
+/// Built with `MYLE_AUTH_URL` set (e.g. `https://login.thomast.uk/authorize`),
+/// the sign-in starts on that page instead, which passes the same query on
+/// to Supabase (`docs/auth-worker.js`): iOS's "wants to use … to sign in"
+/// prompt then names that host instead of the Supabase project's.
 pub fn authorize_url(provider: Provider, redirect: &str, challenge: &str) -> Result<reqwest::Url, String> {
+    let start = match option_env!("MYLE_AUTH_URL") {
+        Some(url) if url.starts_with("https://") => url.to_string(),
+        _ => format!("{SUPABASE_URL}/auth/v1/authorize"),
+    };
     reqwest::Url::parse_with_params(
-        &format!("{SUPABASE_URL}/auth/v1/authorize"),
+        &start,
         &[
             ("provider", provider.id()),
             ("redirect_to", redirect),

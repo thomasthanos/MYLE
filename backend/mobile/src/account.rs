@@ -308,7 +308,12 @@ pub async fn account_sign_in(
     // back as a link, `listen`).
     let handle = app.clone();
     let address = authorize.to_string();
-    let shown = tauri::async_runtime::spawn_blocking(move || handle.myle_mobile().sign_in(&address, SCHEME))
+    // Discord's page, opened with Safari's cookies, reports the account to
+    // Apple Passwords on every visit ("Passkey Updated: discord.com changed
+    // the username…"). A private sheet keeps it from doing so; Google keeps
+    // Safari's sign-in.
+    let private = matches!(provider, Provider::Discord);
+    let shown = tauri::async_runtime::spawn_blocking(move || handle.myle_mobile().sign_in(&address, SCHEME, private))
         .await
         .map_err(err)?;
     match shown {

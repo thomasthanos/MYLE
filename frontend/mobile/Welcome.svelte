@@ -51,6 +51,10 @@
   .account-note { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--glass-border); color: var(--text-3); font-size: 12.5px; text-align: center; line-height: 1.5; }
   .privacy { display: flex; align-items: flex-start; justify-content: center; gap: 9px; color: var(--text-3); font-size: 12px; line-height: 1.5; text-align: left; }
   .privacy :global(svg) { flex: none; margin-top: 2px; }
+  /* Always one screen: tighter, then smaller, on shorter phones. */
+  .welcome { max-height: 100%; }
+  @media (max-height: 800px) { .welcome { gap: 18px; padding-top: 12px; } }
+  @media (max-height: 620px) { .welcome { gap: 10px; padding-top: 0; } .vault-art { height: 92px; transform: scale(.66); margin-block: -14px; } h1 { margin-bottom: 6px; font-size: 25px; } .intro p { font-size: 13.5px; } .connect { padding: 14px; } .connect-heading { margin-bottom: 10px; } .account-note { margin-top: 10px; padding-top: 10px; } .privacy { display: none; } }
   @media (max-height: 740px) { .welcome { gap: 16px; padding-top: 10px; } .vault-art { height: 120px; transform: scale(.85); margin-block: -6px; } h1 { font-size: 29px; } .connect { padding: 16px; } }
   @media (min-width: 650px) { .welcome { padding-top: 40px; gap: 28px; } }
 </style>
