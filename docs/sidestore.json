@@ -16,11 +16,13 @@
       "category": "utilities",
       "versions": [
         {
-          "version": "10.0.1",
-          "date": "2026-10-11",
-          "downloadURL": "https://github.com/thomasthanos/MYLE/releases/download/v10.0.1/MYLE-Passwords.ipa",
-          "size": 6164297,
-          "minOSVersion": "15.0"
+          "version": "10.0.2",
+          "date": "2026-10-12",
+          "downloadURL": "https://github.com/thomasthanos/MYLE/releases/download/v10.0.2/MYLE-Passwords.ipa",
+          "size": 6165022,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Improved\n• SideStore now shows what's new for each version (taken from these release notes) instead of \"nil\".\n• Welcome screen (phone) always fits on one screen, without scrolling or bouncing, even on small iPhones.\n• Notifications (phone) appear as a floating glass card above the home indicator instead of under the status bar and Dynamic Island.\n• Sign-in prompt: MYLE can now start sign-in on its own address (for example login.thomast.uk), so iOS asks to use \"thomast.uk\" instead of the Supabase project address. This takes effect once that address is set up.\n\nFixed\n• Discord sign-in (iPhone) opens in a private sheet without Safari's cookies, so Discord no longer triggers \"Passkey Updated: discord.com changed the username…\" on every sign-in. Google sign-in still uses Safari's.",
+          "versionDescription": "Improved\n• SideStore now shows what's new for each version (taken from these release notes) instead of \"nil\".\n• Welcome screen (phone) always fits on one screen, without scrolling or bouncing, even on small iPhones.\n• Notifications (phone) appear as a floating glass card above the home indicator instead of under the status bar and Dynamic Island.\n• Sign-in prompt: MYLE can now start sign-in on its own address (for example login.thomast.uk), so iOS asks to use \"thomast.uk\" instead of the Supabase project address. This takes effect once that address is set up.\n\nFixed\n• Discord sign-in (iPhone) opens in a private sheet without Safari's cookies, so Discord no longer triggers \"Passkey Updated: discord.com changed the username…\" on every sign-in. Google sign-in still uses Safari's."
         }
       ]
     }

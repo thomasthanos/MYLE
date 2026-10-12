@@ -386,44 +386,7 @@ jobs:
           size=$(stat -c %s out/MYLE-Passwords.ipa)
           git fetch --depth=1 origin main
           git checkout -B sidestore-update origin/main
-          node -e '
-            const fs = require("fs");
-            const file = "docs/sidestore.json";
-            const source = JSON.parse(fs.readFileSync(file, "utf8"));
-            const app = source.apps[0];
-            const old = app.versions[0] || {};
-            // What's new, as SideStore shows it: the release notes in plain
-            // text (no markdown or HTML), kept short.
-            const tag = process.env.TAG;
-            const candidates = tag.startsWith("mobile-v")
-              ? [`docs/release-notes/mobile-${process.env.VERSION}.md`]
-              : [`docs/release-notes/mobile-${process.env.VERSION}.md`, `docs/release-notes/${process.env.VERSION}.md`];
-            const notesFile = candidates.find((f) => fs.existsSync(f));
-            let notes = notesFile ? fs.readFileSync(notesFile, "utf8") : "";
-            notes = notes
-              .replace(/<[^>]+>/g, "")
-              .replace(/`([^`]*)`/g, "$1")
-              .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-              .replace(/\*\*|__|\*/g, "")
-              .split("\n")
-              .map((line) => line.replace(/^#+\s*/, "").replace(/^\s*[-+]\s+/, "• ").trimEnd())
-              .filter((line, i, all) => line || (all[i - 1] ?? "") !== "")
-              .join("\n")
-              .trim();
-            if (notes.length > 1200) notes = notes.slice(0, 1200).replace(/\s+\S*$/, "") + "…";
-            if (!notes) notes = `MYLE Passwords ${process.env.VERSION}`;
-            app.versions = [{
-              ...old,
-              version: process.env.VERSION,
-              date: new Date().toISOString().slice(0, 10),
-              downloadURL: `https://github.com/thomasthanos/MYLE/releases/download/${process.env.TAG}/MYLE-Passwords.ipa`,
-              size: Number(process.argv[1]),
-              minOSVersion: old.minOSVersion || "15.0",
-              localizedDescription: notes,
-              versionDescription: notes,
-            }];
-            fs.writeFileSync(file, JSON.stringify(source, null, 2) + "\n");
-          ' "$size"
+          node scripts/update-sidestore.cjs "$size"
           if git diff --quiet docs/sidestore.json; then
             echo "docs/sidestore.json is already current"
             exit 0
