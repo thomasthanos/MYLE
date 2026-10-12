@@ -36,6 +36,7 @@ test("SideStore gets the IPA with the app's identity", async () => {
     buildVersion: "1.2.3",
     date: "2026-10-04",
     localizedDescription: "What's new: https://github.com/thomasthanos/MYLE/releases/tag/mobile-v1.2.3",
+    versionDescription: "What's new: https://github.com/thomasthanos/MYLE/releases/tag/mobile-v1.2.3",
     downloadURL: "https://downloads.thomast.uk/MYLE-Passwords-1.2.3.ipa",
     size: 200,
     sha256: "bb",
@@ -55,3 +56,12 @@ test("iOS Info.plist template registers the deep link scheme", async () => {
   assert.match(plist, /<string>uk\.thomast\.myle\.passwords<\/string>/);
 });
 
+
+test("SideStore shows the release notes as plain text when there are some", async () => {
+  const { feeds: make, plainNotes } = await import("../mobile-feeds.mjs");
+  const text = plainNotes("### Fixed\n- **Discord** sign-in uses a `private` sheet ([details](https://x)).");
+  assert.equal(text, "Fixed\n• Discord sign-in uses a private sheet (details).");
+  const { sidestore } = make({ version: "1.0.0", tag: "v1.0.0", base: "https://d", repo: "o/r", apk: { size: 1, sha256: "a" }, ipa: { size: 2, sha256: "b" }, whatsNew: text });
+  assert.equal(sidestore.apps[0].versions[0].versionDescription, text);
+  assert.equal(sidestore.apps[0].versions[0].localizedDescription, text);
+});

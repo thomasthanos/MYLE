@@ -386,7 +386,7 @@ jobs:
           size=$(stat -c %s out/MYLE-Passwords.ipa)
           git fetch --depth=1 origin main
           git checkout -B sidestore-update origin/main
-          node scripts/update-sidestore.cjs "$size"
+          node scripts/update-sidestore.mjs "$size"
           if git diff --quiet docs/sidestore.json; then
             echo "docs/sidestore.json is already current"
             exit 0
