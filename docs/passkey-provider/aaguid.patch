@@ -1,0 +1,10 @@
+diff --git a/aaguid.json b/aaguid.json
+index aba7066..c76f0ac 100644
+--- a/aaguid.json
++++ b/aaguid.json
+@@ -1,2 +1,5 @@
+ {
++    "1afc30cd-b888-46ee-8d17-ef0f4e5e5089": {
++        "name": "MYLE"
++    },
+     "7c30bcef-f035-4e21-9175-5c985b4b239c": {
