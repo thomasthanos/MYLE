@@ -1492,9 +1492,122 @@
     return null;
   }
 
+  // --- Passkey naming -------------------------------------------------------
+
+  // A site's display name is separate from WebAuthn's random credential id.
+  // After a creation the user chose in MYLE, fill an explicit new naming
+  // field if the site offers one. Never submit it or guess an existing key.
+  const PASSKEY_NAMING_FOR = 120_000;
+  let passkeyNaming = null;
+
+  function capturePasskeyNaming() {
+    try {
+      return new Set(deepAll("input"));
+    } catch {
+      return null;
+    }
+  }
+
+  function stopPasskeyNaming() {
+    const pending = passkeyNaming;
+    passkeyNaming = null;
+    if (!pending) return;
+    pending.observer?.disconnect();
+    clearTimeout(pending.expiry);
+    clearTimeout(pending.checkTimer);
+    for (const root of pending.roots) root.removeEventListener("input", pending.onInput, true);
+  }
+
+  function passkeyNamingTitle(dialog) {
+    const labelled = (getAttr(dialog, "aria-labelledby") ?? "").split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+    const text = labelled || getAttr(dialog, "aria-label") ||
+      dialog.querySelector('[role="heading"], h1, h2, h3')?.textContent || "";
+    return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  }
+
+  function passkeyNameField(dialog, pending) {
+    if (!visible(dialog)) return null;
+    const title = passkeyNamingTitle(dialog);
+    if (!/(?:pass\s*key|security\s*key|κλειδι.{0,30}(?:προσβα|ασφαλ))/u.test(title) ||
+        !/\b(?:name|rename|nickname|label)\b|ονομα/u.test(title)) return null;
+    // A rename editor might belong to an older key. Only an explicit
+    // credential-id match makes that editor eligible for this creation.
+    const identifiers = [dialog, ...dialog.querySelectorAll("[data-credential-id]")]
+      .map((element) => getAttr(element, "data-credential-id")).filter(Boolean);
+    if (identifiers.some((id) => id !== pending.credentialId)) return null;
+    // A newly mounted editor can still belong to an old credential. Without an
+    // exact ID, accept only a prompt explicitly naming a newly created key.
+    const explicitlyNew = /\bnew(?:ly created)?\s+pass\s*key\b|\bpass\s*key\s+(?:you\s+)?just created\b|(?:^|\s)νεο(?:υ)?\s+κλειδι/u.test(title);
+    if (!identifiers.includes(pending.credentialId) &&
+        (!explicitlyNew || /\brename\b|μετονομα/u.test(title))) return null;
+    const fields = [...dialog.querySelectorAll("input")].filter((field) =>
+      usable(field) && ["text", ""].includes(field.type) && !pending.before.has(field) && !pending.edited.has(field) &&
+      !/username|user.?name|email|password|search/i.test(`${field.name} ${field.id} ${field.autocomplete}`),
+    );
+    return fields.length === 1 ? fields[0] : null;
+  }
+
+  function scanPasskeyNaming() {
+    const pending = passkeyNaming;
+    if (!pending) return;
+    try {
+      observePasskeyNaming(pending);
+      const fields = deepAll('dialog, [role="dialog"]').map((dialog) => passkeyNameField(dialog, pending)).filter(Boolean);
+      if (fields.length !== 1) return;
+      // Disconnect before typing: the page's input handlers can redraw it.
+      stopPasskeyNaming();
+      setValue(fields[0], "MYLE");
+    } catch {
+      // Naming is best effort; it must never interrupt credential creation.
+      stopPasskeyNaming();
+    }
+  }
+
+  function observePasskeyNaming(pending) {
+    for (const root of [document, ...shadowRoots()]) {
+      if (pending.roots.has(root)) continue;
+      pending.roots.add(root);
+      // Root-local listeners see edits inside closed shadow roots as well.
+      root.addEventListener("input", pending.onInput, true);
+      pending.observer.observe(root === document ? document.documentElement : root, {
+        childList: true, subtree: true, characterData: true, attributes: true,
+        attributeFilter: ["role", "aria-label", "aria-labelledby", "aria-hidden", "hidden", "class", "style", "data-credential-id"],
+      });
+    }
+  }
+
+  function startPasskeyNaming(credentialId, before) {
+    stopPasskeyNaming();
+    if (typeof credentialId !== "string" || !credentialId || !(before instanceof Set)) return;
+    try {
+      const pending = { credentialId, before, edited: new WeakSet(), roots: new Set(), observer: null, expiry: 0, checkTimer: 0, onInput: null };
+      passkeyNaming = pending;
+      pending.onInput = (event) => {
+        const field = event.composedPath?.()[0] ?? event.target;
+        if (event.isTrusted && field instanceof HTMLInputElement) pending.edited.add(field);
+      };
+      pending.observer = new MutationObserver(() => {
+        if (passkeyNaming !== pending || pending.checkTimer) return;
+        pending.checkTimer = setTimeout(() => {
+          pending.checkTimer = 0;
+          if (passkeyNaming === pending) scanPasskeyNaming();
+        }, 200);
+      });
+      observePasskeyNaming(pending);
+      pending.expiry = setTimeout(() => passkeyNaming === pending && stopPasskeyNaming(), PASSKEY_NAMING_FOR);
+      scanPasskeyNaming();
+    } catch {
+      stopPasskeyNaming();
+    }
+  }
+
+  addEventListener("pagehide", stopPasskeyNaming);
+
   const busyLine = "If Windows Hello asks, confirm it is you.";
 
   async function offerNewPasskey(id, options) {
+    stopPasskeyNaming();
     const listed = await passkeysHere(id, options, () => offerNewPasskey(id, options));
     if (!listed) return;
     const who = options.userName || options.userDisplayName || "your account";
@@ -1505,6 +1618,7 @@
         ["Save in MYLE", true, async (button, text) => {
           button.disabled = true;
           text.textContent = `Saving… ${busyLine}`;
+          const beforeNaming = capturePasskeyNaming();
           const answer = await passkeyCall({
             type: "passkeyCreate",
             requestId: id,
@@ -1523,6 +1637,7 @@
           if (answer?.ok && answer.credential) {
             closePrompt();
             answerPage(id, { result: "credential", credential: answer.credential });
+            startPasskeyNaming(answer.credential.id, beforeNaming);
           } else if (answer?.error === "notSupported") {
             // The site takes no key MYLE makes: the browser's own then.
             closePrompt();
