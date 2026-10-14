@@ -31,7 +31,7 @@
   let showSteps = $state<boolean | null>(null);
   /** The extensions page of the browser that connected. */
   const extensionsPage = $derived(
-    { Edge: "edge://extensions", Brave: "brave://extensions" }[setup?.lastContact?.browser ?? ""] ?? "chrome://extensions",
+    { Edge: "edge://extensions", Brave: "brave://extensions", Vivaldi: "vivaldi://extensions" }[setup?.lastContact?.browser ?? ""] ?? "chrome://extensions",
   );
   /** Ticks every half minute, so "2 minutes ago" stays true. */
   let clock = $state(Date.now());
@@ -168,7 +168,7 @@
           <small>
             {#if loadError}{loadError}
             {:else if !setup}&nbsp;
-            {:else if !setup.enabled}Turn it on to fill in logins in Chrome, Edge, Brave and Firefox.
+            {:else if !setup.enabled}Turn it on to fill in logins in Chrome, Edge, Brave, Vivaldi and Firefox.
             {:else if !registered}{setup.registrationError}
             {:else if connected && setup.lastContact}Last asked {ago(setup.lastContact.at)}.
             {:else}Add the extension below, then click a sign-in field.{/if}
@@ -202,7 +202,7 @@
         <ul class="checks">
           <li class:done={registered}>
             {#if registered}<Check size={14} />{:else}<CircleAlert size={14} />{/if}
-            <span>Chrome, Edge, Brave and Firefox know where MYLE is</span>
+            <span>Chrome, Edge, Brave, Vivaldi and Firefox know where MYLE is</span>
             {#if !registered}
               <button type="button" class="btn small" disabled={saving} onclick={repair}><Wrench size={13} /> Repair</button>
             {/if}
@@ -235,7 +235,7 @@
       {#if refusal}
         <p class="refusal">
           <CircleAlert size={13} />
-          <span><code>{refusal.program}</code> tried to connect {ago(refusal.at)}: {refusal.reason}. MYLE works with Chrome, Edge, Brave and Firefox.</span>
+          <span><code>{refusal.program}</code> tried to connect {ago(refusal.at)}: {refusal.reason}. MYLE works with Chrome, Edge, Brave, Vivaldi and Firefox.</span>
         </p>
       {/if}
 
@@ -245,7 +245,7 @@
             <Download size={14} /> Install from Chrome Web Store
           </button>
           <p class="or">
-            MYLE Passwords for Chrome, Edge and Brave; it updates itself. In Edge, allow extensions from other stores when
+            MYLE Passwords for Chrome, Edge, Brave and Vivaldi; it updates itself. In Edge, allow extensions from other stores when
             it asks.
           </p>
         </div>
@@ -268,12 +268,13 @@
 
           <div class="browsers">
             <div class="browser">
-              <strong>Chrome, Edge, Brave</strong>
+              <strong>Chrome, Edge, Brave, Vivaldi</strong>
               <ol>
                 <li>
                   Open
                   <button type="button" class="link" onclick={() => copy("chrome://extensions")}><code>chrome://extensions</code></button>
-                  (Edge: <button type="button" class="link" onclick={() => copy("edge://extensions")}><code>edge://extensions</code></button>).
+                  (Edge: <button type="button" class="link" onclick={() => copy("edge://extensions")}><code>edge://extensions</code></button>;
+                  Vivaldi: <button type="button" class="link" onclick={() => copy("vivaldi://extensions")}><code>vivaldi://extensions</code></button>).
                 </li>
                 <li>Turn on <b>Developer mode</b>.</li>
                 <li><b>Load unpacked</b>, and choose the folder above.</li>

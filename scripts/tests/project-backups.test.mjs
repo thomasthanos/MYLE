@@ -238,6 +238,157 @@ test("more changed projects while another page is open are told once", () => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
 });
 
+test("the three-day check reads every current project and reminds about unchanged pending work without backing up", async () => {
+  const original = { getState: api.getState, changes: api.changes, backup: api.backup };
+  const calls = [];
+  setup([project("A"), project("B")]);
+  state.changes = {};
+  state.lastChangeCheck = null;
+  state.operation = null;
+  state.busy = null;
+  state.checking = [];
+  nav.current = "project-backups";
+  while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  api.getState = async () => state.page;
+  api.changes = async (ids, fresh) => {
+    calls.push([ids, fresh]);
+    return [answer("A", "changed", now, { modified: 1 }), answer("B", "upToDate", now)];
+  };
+  api.backup = async () => { throw new Error("the reminder must never create a backup"); };
+  try {
+    await state.checkScheduledChanges(now);
+    assert.deepEqual(calls, [[["A", "B"], true]]);
+    assert.equal(state.lastChangeCheck, now);
+    assert.match(toast.visible[0].message, /3-day check: 1 project needs a backup/);
+    while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+    await state.checkScheduledChanges(now + 3 * DAY - 1);
+    assert.equal(calls.length, 1, "not due until the full three days have passed");
+    await state.checkScheduledChanges(now + 3 * DAY);
+    assert.equal(calls.length, 2);
+    assert.equal(toast.visible.length, 1, "pending work is reminded about even with the same changed count");
+  } finally {
+    Object.assign(api, original);
+    while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  }
+});
+
+test("a three-day check skips a busy app, does not overlap and retries a failed native request", async () => {
+  const original = { getState: api.getState, changes: api.changes };
+  setup([project("A")]);
+  state.lastChangeCheck = null;
+  state.checking = [];
+  state.operation = null;
+  const pending = deferred();
+  let calls = 0;
+  api.getState = async () => state.page;
+  api.changes = async () => { calls++; return pending.promise; };
+  try {
+    state.busy = "save";
+    await state.checkScheduledChanges(now);
+    assert.equal(calls, 0);
+    state.busy = null;
+    const first = state.checkScheduledChanges(now);
+    await Promise.resolve();
+    await state.checkScheduledChanges(now);
+    assert.equal(calls, 1);
+    pending.resolve([answer("A", "upToDate", now)]);
+    await first;
+    state.lastChangeCheck = null;
+    api.changes = async () => { throw new Error("unavailable"); };
+    await state.checkScheduledChanges(now);
+    assert.equal(state.lastChangeCheck, null, "an unsuccessful request cannot postpone the next check for three days");
+    api.changes = async () => [answer("A", "upToDate", now)];
+    await state.checkScheduledChanges(now);
+    assert.equal(state.lastChangeCheck, now);
+    assert.deepEqual([...state.checking], []);
+  } finally {
+    Object.assign(api, original);
+    state.busy = null;
+  }
+});
+
+test("the three-day deadline survives restarting, and invalid or future dates recover", async () => {
+  const original = { getState: api.getState, changes: api.changes };
+  setup([project("A")]);
+  state.lastChangeCheck = null;
+  api.getState = async () => state.page;
+  let calls = 0;
+  api.changes = async () => { calls++; return [answer("A", "upToDate", now)]; };
+  try {
+    await state.checkScheduledChanges(now);
+    const restarted = new state.constructor();
+    assert.equal(restarted.lastChangeCheck, now);
+    await restarted.checkScheduledChanges(now + DAY);
+    assert.equal(calls, 1, "starting MYLE again does not start a new three-day interval");
+    await restarted.checkScheduledChanges(now + 3 * DAY);
+    assert.equal(calls, 2, "an overdue check runs on the next app start");
+    restarted.lastChangeCheck = now + 365 * DAY;
+    await restarted.checkScheduledChanges(now + 4 * DAY);
+    assert.equal(calls, 3, "a backward clock change cannot postpone checks for a year");
+    storage.set("myle.projectBackups.lastChangeCheck", '"invalid"');
+    assert.equal(new state.constructor().lastChangeCheck, null);
+  } finally {
+    Object.assign(api, original);
+    state.lastChangeCheck = null;
+  }
+});
+
+test("the three-day reminder excludes unknown states, includes missing backups, and preserves a later check", async () => {
+  const original = { getState: api.getState, changes: api.changes };
+  setup([project("A"), project("B"), project("C")]);
+  state.lastChangeCheck = null;
+  state.changes = {};
+  state.checking = [];
+  while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  api.getState = async () => state.page;
+  const pending = deferred();
+  api.changes = async () => pending.promise;
+  try {
+    const checking = state.checkScheduledChanges(now);
+    await Promise.resolve();
+    state.checking.push("A");
+    state.applyChanges([answer("A", "upToDate", now + 1)]);
+    pending.resolve([
+      answer("A", "changed", now, { modified: 1 }),
+      answer("B", "unreachable", now),
+      answer("C", "noBackup", now),
+    ]);
+    await checking;
+    assert.equal(state.changes.A.state, "upToDate");
+    assert.match(toast.visible[0].message, /3-day check: 1 project needs a backup/);
+    assert.match(toast.visible[1].message, /1 project could not be fully checked/);
+    assert.deepEqual([...state.checking], ["A"], "another overlapping check keeps its own progress entry");
+  } finally {
+    Object.assign(api, original);
+    state.checking = [];
+    while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  }
+});
+
+test("the three-day scheduler retries even when native watcher startup fails", async () => {
+  const originalInterval = globalThis.setInterval;
+  const freshState = new state.constructor();
+  let tick;
+  let checks = 0;
+  globalThis.setInterval = (callback, milliseconds) => {
+    assert.equal(milliseconds, 60_000);
+    tick = callback;
+    return 123;
+  };
+  freshState.checkScheduledChanges = async () => { checks++; };
+  try {
+    // No native event bridge in Node: listen() fails just as an unavailable
+    // event bridge can at startup; scheduled checks must still be armed.
+    await freshState.startDetection();
+    assert.equal(checks, 1, "an overdue check is attempted at startup");
+    assert.equal(typeof tick, "function", "a startup failure does not lose all future attempts");
+    tick();
+    assert.equal(checks, 2);
+  } finally {
+    globalThis.setInterval = originalInterval;
+  }
+});
+
 test("backing up the changes asks for an increment, Back up all does not", async () => {
   const original = { backup: api.backup, getState: api.getState, changes: api.changes };
   const asked = [];

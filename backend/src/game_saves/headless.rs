@@ -4,14 +4,11 @@ use std::time::Duration;
 
 use super::commands;
 use super::engine::Engine;
-use super::models::{BackupSchedule, GameSaveStatus, OperationKind, ScheduledBackupResult};
+use super::models::{BackupSchedule, GameSaveStatus, OperationKind, ScheduleWeekday, ScheduledBackupResult};
 use super::parser;
 use super::settings;
 use super::state::{self, GameSavesState};
 
-/// Two starts this close together are one run: Windows starts a missed run at
-/// sign-in, and a schedule changed after a run may start it again that day.
-const SAME_RUN: u64 = 2 * 60 * 60;
 /// A last run further ahead than this was stamped by a clock that was wrong
 /// (or is now): it must not hold every backup off until that time comes.
 const CLOCK_SLACK: u64 = 60 * 60;
@@ -179,16 +176,85 @@ async fn run_due(
     Ok((result.processed_games, result.failed_games))
 }
 
-fn is_due(value: &super::models::GameSavesSettings, now: u64) -> bool {
+pub(crate) fn is_due(value: &super::models::GameSavesSettings, now: u64) -> bool {
+    is_due_with_clock(value, now, &local_seconds)
+}
+
+fn is_due_with_clock(
+    value: &super::models::GameSavesSettings,
+    now: u64,
+    local_time: &dyn Fn(u64) -> Option<u64>,
+) -> bool {
     if value.schedule.interval_seconds().is_none() {
         return false;
     }
-    // Windows starts the task when it is time; this only keeps two starts of
-    // one run from backing up twice. (Half the interval, as before, also
-    // skipped the run on a weekday chosen right after the last one.)
-    value
-        .last_scheduled_attempt
-        .is_none_or(|last| last > now.saturating_add(CLOCK_SLACK) || now.saturating_sub(last) >= SAME_RUN)
+    let Some(local_now) = local_time(now) else { return false };
+    let Some((hour, minute)) = value.schedule_time.split_once(':') else { return false };
+    let (Ok(hour), Ok(minute)) = (hour.parse::<u64>(), minute.parse::<u64>()) else { return false };
+    if hour >= 24 || minute >= 60 {
+        return false;
+    }
+    const DAY: u64 = 24 * 60 * 60;
+    let mut slot = local_now / DAY * DAY + hour * 60 * 60 + minute * 60;
+    if slot > local_now {
+        slot = slot.saturating_sub(DAY);
+    }
+    if value.schedule == BackupSchedule::Weekly {
+        let wanted = match value.schedule_weekday {
+            ScheduleWeekday::Sunday => 0,
+            ScheduleWeekday::Monday => 1,
+            ScheduleWeekday::Tuesday => 2,
+            ScheduleWeekday::Wednesday => 3,
+            ScheduleWeekday::Thursday => 4,
+            ScheduleWeekday::Friday => 5,
+            ScheduleWeekday::Saturday => 6,
+        };
+        // January 1, 1970 was Thursday (4 with Sunday numbered zero).
+        let weekday = (slot / DAY + 4) % 7;
+        slot = slot.saturating_sub((weekday + 7 - wanted) % 7 * DAY);
+    }
+    // Both sign-in and app startup may catch up a missed slot. The selected
+    // calendar still decides when it is due; repeated starts cannot add runs.
+    [value.last_scheduled_attempt, value.schedule_started_at]
+        .into_iter()
+        .flatten()
+        .filter(|last| *last <= now.saturating_add(CLOCK_SLACK))
+        .filter_map(local_time)
+        .max()
+        .is_none_or(|last| slot > last)
+}
+
+/// Unix seconds projected onto this PC's local wall clock, matching the
+/// offset-free task boundaries. Apply the zone's DST rule for each timestamp,
+/// including a last attempt from before a clock change.
+fn local_seconds(seconds: u64) -> Option<u64> {
+    local_seconds_in_zone(seconds, None)
+}
+
+fn local_seconds_in_zone(
+    seconds: u64,
+    zone: Option<&windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION>,
+) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime, SystemTimeToFileTime};
+    const EPOCH: u64 = 116_444_736_000_000_000;
+    let ticks = seconds.checked_mul(10_000_000)?.checked_add(EPOCH)?;
+    let utc = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+    let mut utc_date = SYSTEMTIME::default();
+    let mut local_date = SYSTEMTIME::default();
+    let mut local = FILETIME::default();
+    // SAFETY: all output pointers refer to initialized live values; the zone
+    // pointer is a live borrowed fixture or null (the computer's current zone).
+    let converted = unsafe {
+        FileTimeToSystemTime(&utc, &mut utc_date) != 0
+            && SystemTimeToTzSpecificLocalTime(zone.map_or(std::ptr::null(), |zone| zone), &utc_date, &mut local_date) != 0
+            && SystemTimeToFileTime(&local_date, &mut local) != 0
+    };
+    if !converted {
+        return None;
+    }
+    let local_ticks = (local.dwHighDateTime as u64) << 32 | local.dwLowDateTime as u64;
+    local_ticks.checked_sub(EPOCH).map(|ticks| ticks / 10_000_000)
 }
 
 /// Runs `begin` until it gets the operation lock, trying again every
@@ -271,27 +337,116 @@ mod tests {
     use super::super::models::GameSavesSettings;
     use super::*;
 
+    // These fixtures name wall-clock times, independent of the test PC's zone.
+    fn local_time(seconds: u64) -> u64 {
+        use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows_sys::Win32::System::Time::{FileTimeToSystemTime, TzSpecificLocalTimeToSystemTime, SystemTimeToFileTime};
+        const EPOCH: u64 = 116_444_736_000_000_000;
+        let ticks = seconds * 10_000_000 + EPOCH;
+        let local = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+        let mut utc = FILETIME::default();
+        let mut local_date = SYSTEMTIME::default();
+        let mut utc_date = SYSTEMTIME::default();
+        // SAFETY: pointers refer to initialized live values and a null zone
+        // asks for this computer's zone; none of these calls changes it.
+        assert!(unsafe {
+            FileTimeToSystemTime(&local, &mut local_date) != 0
+                && TzSpecificLocalTimeToSystemTime(std::ptr::null(), &local_date, &mut utc_date) != 0
+                && SystemTimeToFileTime(&utc_date, &mut utc) != 0
+        });
+        (((utc.dwHighDateTime as u64) << 32 | utc.dwLowDateTime as u64) - EPOCH) / 10_000_000
+    }
+
+    #[test]
+    fn a_sign_in_before_the_next_weekly_slot_does_not_run_early() {
+        let value = GameSavesSettings {
+            schedule: BackupSchedule::Weekly,
+            // Monday October 12, 2026, noon; next Sunday is October 18.
+            last_scheduled_attempt: Some(local_time(1_791_806_400)),
+            ..Default::default()
+        };
+        assert!(!is_due(&value, local_time(1_791_979_200)), "Wednesday sign-in must wait until Sunday 03:00");
+    }
+
+    #[test]
+    fn enabling_a_future_weekly_schedule_does_not_back_up_the_previous_week() {
+        let mut json = serde_json::to_value(GameSavesSettings::default()).unwrap();
+        json["schedule"] = "weekly".into();
+        json["scheduleStartedAt"] = local_time(1_791_979_200).into(); // Wednesday noon.
+        let value: GameSavesSettings = serde_json::from_value(json).unwrap();
+        assert!(!is_due(&value, local_time(1_791_979_260)));
+        assert!(is_due(&value, local_time(1_792_292_400)), "Sunday 03:00 is the first due slot");
+    }
+
+    #[test]
+    fn a_weekly_run_missed_in_sleep_is_due_at_the_next_sign_in_or_app_start() {
+        let value = GameSavesSettings {
+            schedule: BackupSchedule::Weekly,
+            last_scheduled_attempt: Some(local_time(1_791_115_200)), // October 4 noon.
+            ..Default::default()
+        };
+        assert!(!is_due(&value, local_time(1_791_687_540)), "October 11, 02:59 is too early");
+        assert!(is_due(&value, local_time(1_791_979_200)), "October 14 must catch up October 11");
+    }
+
+    #[test]
+    fn a_new_weekly_slot_is_due_even_after_a_recent_catch_up() {
+        let value = GameSavesSettings {
+            schedule: BackupSchedule::Weekly,
+            last_scheduled_attempt: Some(local_time(1_791_685_800)), // Sunday 02:30 catches up last week.
+            ..Default::default()
+        };
+        assert!(is_due(&value, local_time(1_791_687_600)), "Sunday 03:00 is a different slot, even thirty minutes later");
+    }
+
+    #[test]
+    fn daylight_saving_uses_the_date_of_each_run_and_never_repeats_a_weekly_slot() {
+        use windows_sys::Win32::Foundation::SYSTEMTIME;
+        use windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION;
+        // Athens: March's last Sunday 03:00 -> 04:00; October's last Sunday
+        // 04:00 -> 03:00. This fixture never changes the computer's time zone.
+        let zone = TIME_ZONE_INFORMATION {
+            Bias: -120,
+            DaylightBias: -60,
+            StandardDate: SYSTEMTIME { wMonth: 10, wDay: 5, wHour: 4, ..Default::default() },
+            DaylightDate: SYSTEMTIME { wMonth: 3, wDay: 5, wHour: 3, ..Default::default() },
+            ..Default::default()
+        };
+        let clock = |seconds| local_seconds_in_zone(seconds, Some(&zone));
+        // October 25, 2026: 00:00 UTC is the first 03:00; 03:00 UTC is 05:00.
+        assert_eq!(clock(1_792_886_400), Some(1_792_897_200));
+        assert_eq!(clock(1_792_897_200), Some(1_792_904_400));
+        let value = GameSavesSettings {
+            schedule: BackupSchedule::Weekly,
+            last_scheduled_attempt: Some(1_792_886_400),
+            ..Default::default()
+        };
+        assert!(!is_due_with_clock(&value, 1_792_897_200, &clock), "the first 03:00 already covered this Sunday");
+    }
+
     #[test]
     fn duplicate_scheduler_launches_are_suppressed() {
         let value = GameSavesSettings {
             schedule: BackupSchedule::Daily,
-            last_scheduled_attempt: Some(1_000_000),
+            last_scheduled_attempt: Some(local_time(1_791_687_600)), // Sunday 03:00.
             ..Default::default()
         };
-        assert!(!is_due(&value, 1_000_100));
-        assert!(is_due(&value, 1_000_000 + 12 * 60 * 60));
+        assert!(!is_due(&value, local_time(1_791_687_700)));
+        assert!(!is_due(&value, local_time(1_791_730_800)), "same afternoon is still the same slot");
+        assert!(is_due(&value, local_time(1_791_774_000)), "Monday 03:00 is the next slot");
     }
 
     #[test]
     fn a_weekday_chosen_right_after_a_run_is_not_skipped() {
         let value = GameSavesSettings {
             schedule: BackupSchedule::Weekly,
-            last_scheduled_attempt: Some(1_000_000),
+            schedule_weekday: ScheduleWeekday::Tuesday,
+            last_scheduled_attempt: Some(local_time(1_791_687_600)),
             ..Default::default()
         };
         // Sunday's run, then Tuesday chosen: two days later it runs.
-        assert!(is_due(&value, 1_000_000 + 2 * 24 * 60 * 60));
-        assert!(!is_due(&value, 1_000_000 + 60 * 60), "an hour later it is the same run");
+        assert!(is_due(&value, local_time(1_791_860_400)));
+        assert!(!is_due(&value, local_time(1_791_691_200)), "an hour later it is the same run");
         assert!(!is_due(&GameSavesSettings { schedule: BackupSchedule::Off, ..value }, 9_000_000));
     }
 

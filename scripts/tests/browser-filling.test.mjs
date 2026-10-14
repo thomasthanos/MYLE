@@ -8,6 +8,13 @@ const read = async (path) => (await readFile(new URL(`../../frontend/app/pages/$
 const filling = await read("password-manager/BrowserFilling.svelte");
 const settings = await read("settings/Settings.svelte");
 
+test("Vivaldi is listed in browser setup and has its own extensions-page shortcut", () => {
+  assert.match(filling, /Chrome, Edge, Brave, Vivaldi and Firefox know where MYLE is/);
+  assert.match(filling, /MYLE Passwords for Chrome, Edge, Brave and Vivaldi/);
+  assert.match(filling, /Vivaldi: "vivaldi:\/\/extensions"/);
+  assert.match(filling, /copy\("vivaldi:\/\/extensions"\)/);
+});
+
 test("the Chrome Web Store button is always in view, not inside the folder steps", () => {
   const button = filling.indexOf("Install from Chrome Web Store");
   const steps = filling.indexOf("{#if showSteps}");

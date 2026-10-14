@@ -113,6 +113,11 @@ jobs:
           $name = "MYLE.exe"
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item $setup.FullName "out/$name"
+          # Store-ready extension packages, prepared by the build script.
+          foreach ($browser in @("chrome", "firefox")) {
+            $extension = Get-Item "extension/myle-passwords-$browser.zip" -ErrorAction Stop
+            Copy-Item $extension.FullName "out/$($extension.Name)"
+          }
           $signature = Get-AuthenticodeSignature "out/$name"
           Write-Host "Signature: $($signature.Status) $($signature.SignerCertificate.Subject)"
           if ($env:HAS_CERT -eq 'true' -and -not $signature.SignerCertificate) {

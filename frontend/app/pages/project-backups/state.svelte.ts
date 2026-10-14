@@ -4,6 +4,7 @@ import { badges } from "../../../lib/badges.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { confirm } from "../../../lib/confirm.svelte";
 import { nav } from "../../../lib/nav.svelte";
+import { readJson, writeJson } from "../../../lib/storage";
 import { projectBackupsApi as api, CHANGES_EVENT, SOURCE_ID, type BackupEntry, type BackupProvider, type CloudChoice, type PageState, type Project, type ProjectBackupsEvent, type ProjectResult, type Stage } from "./api";
 import { formatRelative } from "../game-saves/state.svelte";
 import { listen } from "@tauri-apps/api/event";
@@ -12,6 +13,9 @@ import type { ProjectChanges } from "./api";
 /** 30 days old is called old, a backup within 7 days counts as up to date. */
 const STALE_DAYS = 30;
 const FRESH_DAYS = 7;
+/** The full change check and reminder, independently of live folder watching. */
+const CHANGE_CHECK_EVERY = 3 * 24 * 60 * 60 * 1000;
+const LAST_CHANGE_CHECK_KEY = "myle.projectBackups.lastChangeCheck";
 export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
 export const stageLabels: Record<Stage, string> = {
   preparing: "Preparing", startingCloud: "Starting the cloud app", closingApp: "Closing the app", scanning: "Reading the project",
@@ -89,6 +93,12 @@ class ProjectBackupsState {
    *  projects being checked now (once per check asked for). */
   changes = $state<Record<string, ProjectChanges>>({});
   checking = $state<string[]>([]);
+  /** Local to this PC; opening MYLE again keeps the same three-day deadline. */
+  lastChangeCheck = $state(readJson<number | null>(LAST_CHANGE_CHECK_KEY, null, (value) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0,
+  ));
+  #scheduledChecking = false;
+  #scheduledTimer: ReturnType<typeof setInterval> | null = null;
   #detecting = false;
   /** The count the last toast was about (null: none shown yet). */
   #announced: number | null = null;
@@ -109,25 +119,80 @@ class ProjectBackupsState {
   }
   /** Takes answers in: one started earlier than the answer already shown
    *  (a check that was still running during a backup) never replaces it. */
-  applyChanges(results: ProjectChanges[]) {
+  applyChanges(results: ProjectChanges[], announce = true) {
     for (const result of results) {
       const known = this.changes[result.projectId];
       if (!known || known.checkedAt <= result.checkedAt) this.changes[result.projectId] = result;
     }
-    this.#updateBadge();
+    this.#updateBadge(announce);
   }
   /** Sidebar count of changed projects, and a toast when it goes up while
    *  another page is open. */
-  #updateBadge() {
+  #updateBadge(announce = true) {
     const changed = this.changedCount;
     badges.set("project-backups", changed);
-    if (this.#announced !== null && changed > this.#announced && nav.current !== "project-backups") {
+    if (announce && this.#announced !== null && changed > this.#announced && nav.current !== "project-backups") {
       toast.info(`${changed} ${changed === 1 ? "project has" : "projects have"} changes not backed up yet.`, {
         label: "Review",
         run: () => nav.go("project-backups"),
       });
     }
     this.#announced = changed;
+  }
+  /** Every three days, compare all current projects afresh and remind about
+   *  pending changes even when their count is unchanged. An overdue check
+   *  runs on startup; no backups are created by this check. */
+  async checkScheduledChanges(now = Date.now()) {
+    if (!isTauri() || this.#scheduledChecking || this.locked || this.checking.length) return;
+    if (this.lastChangeCheck !== null && this.lastChangeCheck <= now && now - this.lastChangeCheck < CHANGE_CHECK_EVERY) return;
+    this.#scheduledChecking = true;
+    let ids: string[] = [];
+    try {
+      // Detection starts without opening this page: use the saved list,
+      // including projects added since the page was last looked at.
+      const page = await api.getState();
+      if (page.running || this.locked || this.checking.length) return;
+      ids = page.settings.projects.map((project) => project.id);
+      if (!ids.length) return;
+      if (!this.loaded) {
+        this.page = page;
+        this.loaded = true;
+        this.loading = false;
+      }
+      this.checking = [...ids];
+      const results = await api.changes(ids, true);
+      this.applyChanges(results, false);
+      // An incomplete reply is retried, rather than silently waiting three days.
+      if (ids.some((id) => !results.some((result) => result.projectId === id))) return;
+      this.lastChangeCheck = now;
+      writeJson(LAST_CHANGE_CHECK_KEY, now);
+      const pending = ids.filter((id) => ["changed", "noBackup"].includes(this.changes[id]?.state ?? "")).length;
+      if (pending) {
+        toast.info(`3-day check: ${pending} ${pending === 1 ? "project needs" : "projects need"} a backup.`, {
+          label: "Review",
+          run: () => nav.go("project-backups"),
+        });
+      }
+      const failed = results.filter((result) => ["missing", "unreachable", "error"].includes(result.state) || result.unreadable > 0).length;
+      if (failed) {
+        toast.error(`3-day check: ${failed} ${failed === 1 ? "project could" : "projects could"} not be fully checked.`, {
+          label: "Review",
+          run: () => nav.go("project-backups"),
+        });
+      }
+    } catch {
+      // Native requests may be refused while access is being restored.
+      // Keep the deadline overdue and retry on the next timer tick.
+    } finally {
+      const done = [...ids];
+      this.checking = this.checking.filter((id) => {
+        const index = done.indexOf(id);
+        if (index < 0) return true;
+        done.splice(index, 1);
+        return false;
+      });
+      this.#scheduledChecking = false;
+    }
   }
   /** Checks `ids` (all projects by default) now. `fresh`: compare again even
    *  where the folder looks as it did. */
@@ -154,11 +219,18 @@ class ProjectBackupsState {
   async startDetection() {
     if (!isTauri() || this.#detecting) return;
     this.#detecting = true;
-    void listen<ProjectChanges[]>(CHANGES_EVENT, (event) => this.applyChanges(event.payload));
+    // The reminder retries independently if the native watcher or the
+    // owner-access check is temporarily unavailable during startup.
+    this.#scheduledTimer ??= setInterval(() => void this.checkScheduledChanges(), 60_000);
+    void this.checkScheduledChanges();
+    let stop: (() => void) | undefined;
     try {
+      stop = await listen<ProjectChanges[]>(CHANGES_EVENT, (event) => this.applyChanges(event.payload));
       await api.watch();
       this.applyChanges(await api.latestChanges());
     } catch {
+      stop?.();
+      this.#detecting = false;
       // The page checks by itself when opened.
     }
   }

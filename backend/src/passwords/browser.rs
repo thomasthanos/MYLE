@@ -1,4 +1,4 @@
-//! Filling in logins in Chrome, Edge and Firefox.
+//! Filling in logins in Chrome, Edge, Brave, Vivaldi and Firefox.
 //!
 //! The browser extension (`extension/`) talks to a "native messaging host"
 //! the browser starts: this same program, run by the browser with the
@@ -56,25 +56,26 @@ use myle_vault::sites::saved_host;
 
 /// The native messaging host's name, as the extension asks for it.
 pub const HOST_NAME: &str = "com.thomasthanos.myle";
-/// The extension's ids in Chrome, Edge and Brave: the Chrome Web Store's,
+/// The extension's ids in Chrome, Edge, Brave and Vivaldi: the Chrome Web Store's,
 /// and the one the `key` in its manifest fixes when it is loaded unpacked
 /// (the Store's zip leaves the `key` out, so the Store gives its own).
 pub const CHROME_EXTENSION_IDS: [&str; 2] = [CHROME_STORE_ID, CHROME_FOLDER_ID];
-/// The Chrome Web Store's copy (Chrome, Edge, Brave): it updates itself.
+/// The Chrome Web Store's copy (Chrome, Edge, Brave, Vivaldi): it updates itself.
 const CHROME_STORE_ID: &str = "mifjffbnaeeljjfboiglbcoaokgdilca";
 /// The copy loaded from MYLE's folder ("Load unpacked"), for testing.
 const CHROME_FOLDER_ID: &str = "gaelkhdpkgnffkfmaaklknijinjmmopo";
 /// Its id in Firefox (`browser_specific_settings.gecko.id`).
 pub const FIREFOX_EXTENSION_ID: &str = "myle-passwords@thomast.uk";
 /// Browsers the host may be started by: program file name, and what to call it.
-const BROWSERS: [(&str, &str); 4] = [
+const BROWSERS: [(&str, &str); 5] = [
     ("chrome.exe", "Chrome"),
     ("msedge.exe", "Edge"),
     ("firefox.exe", "Firefox"),
     ("brave.exe", "Brave"),
+    ("vivaldi.exe", "Vivaldi"),
 ];
 /// Where each browser looks for native messaging hosts, the manifest it
-/// reads, and the browser.
+/// reads, and the browser. Vivaldi uses Chrome's registration.
 const HOST_KEYS: [(&str, &str, &str); 4] = [
     (r"Software\Google\Chrome\NativeMessagingHosts", "chrome.json", "Chrome"),
     (r"Software\Microsoft\Edge\NativeMessagingHosts", "chrome.json", "Edge"),
@@ -210,7 +211,7 @@ impl Hosts {
     }
 }
 
-/// Tells Chrome, Edge, Brave and Firefox where the host is, unless they
+/// Tells Chrome, Edge, Brave, Vivaldi and Firefox where the host is, unless they
 /// already know: checked on every start, unlock and look at the setup, so a
 /// moved program or a deleted manifest mends itself.
 pub fn ensure_registered() -> Result<(), String> {
@@ -2272,7 +2273,9 @@ mod tests {
     fn the_host_names_the_browser_and_notes_whom_it_turned_away() {
         assert_eq!(browser_name("msedge.exe"), Some("Edge"));
         assert_eq!(browser_name("Chrome.exe"), Some("Chrome"));
-        assert_eq!(browser_name("vivaldi.exe"), None);
+        assert_eq!(browser_name("vivaldi.exe"), Some("Vivaldi"));
+        assert_eq!(browser_name("VIVALDI.EXE"), Some("Vivaldi"));
+        assert_eq!(browser_name("powershell.exe"), None);
         assert_eq!(
             parse_refusal("1700000000\tvivaldi.exe\tnot a supported browser"),
             Some(Refusal { program: "vivaldi.exe".into(), reason: "not a supported browser".into(), at: 1_700_000_000 })

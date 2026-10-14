@@ -289,7 +289,10 @@ pub async fn game_saves_set_schedule(
     }
     let mut previous = None;
     let value = edit_settings(&app, |value| {
-        previous = Some((value.schedule, value.schedule_time.clone(), value.schedule_weekday));
+        previous = Some((value.schedule, value.schedule_time.clone(), value.schedule_weekday, value.schedule_started_at));
+        if value.schedule != schedule || value.schedule_time != time || value.schedule_weekday != weekday {
+            value.schedule_started_at = Some(parser::now());
+        }
         value.schedule = schedule;
         value.schedule_time = time.clone();
         value.schedule_weekday = weekday;
@@ -298,12 +301,13 @@ pub async fn game_saves_set_schedule(
     if let Err(error) = configure_scheduled_task(schedule, &time, weekday).await {
         // Keep the persisted settings and the Windows task in agreement,
         // unless another change of the schedule came in meanwhile.
-        if let Some((old_schedule, old_time, old_weekday)) = previous {
+        if let Some((old_schedule, old_time, old_weekday, old_started_at)) = previous {
             let _ = edit_settings(&app, |value| {
                 if value.schedule == schedule && value.schedule_time == time && value.schedule_weekday == weekday {
                     value.schedule = old_schedule;
                     value.schedule_time = old_time;
                     value.schedule_weekday = old_weekday;
+                    value.schedule_started_at = old_started_at;
                 }
                 Ok(())
             });
@@ -1227,6 +1231,7 @@ pub async fn game_saves_sync_import(
             value.schedule = synced.schedule;
             value.schedule_time = synced.schedule_time;
             value.schedule_weekday = synced.schedule_weekday;
+            value.schedule_started_at = Some(parser::now());
         }
         Ok(())
     })?;
@@ -1791,11 +1796,13 @@ fn scheduled_task_script(
          $at = [datetime]::Today.Add([timespan]::ParseExact({}, 'hh\\:mm', $null)); \
          $trigger = {}; \
          $trigger.StartBoundary = $at.ToString('s'); \
+         $trigger.EndBoundary = '9999-12-31T23:59:59'; \
          $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 12); \
          $settings.WakeToRun = $false; \
          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; \
+         $logon = New-ScheduledTaskTrigger -AtLogOn -User $identity; \
          $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited; \
-         $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal; \
+         $task = New-ScheduledTask -Action $action -Trigger @($trigger, $logon) -Settings $settings -Principal $principal; \
          Register-ScheduledTask -TaskName {} -InputObject $task -Force | Out-Null; \
          exit 0 \
          }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}",
@@ -1813,6 +1820,8 @@ enum TaskFound {
     Missing,
     /// It is there, and starts this program.
     Starts(String),
+    /// Existing task lacks the catch-up triggers/settings or is disabled.
+    NeedsRepair,
     /// It could not be looked at (no PowerShell, no access): left as it is.
     Unknown,
 }
@@ -1822,7 +1831,11 @@ fn scheduled_task_query() -> String {
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
          try {{ $task = Get-ScheduledTask -TaskPath '\\' -TaskName {} -ErrorAction Stop }} \
          catch {{ if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {{ 'missing' }} else {{ 'unknown' }}; exit 0 }}; \
-         'present'; @($task.Actions)[0].Execute",
+         'present'; @($task.Actions)[0].Execute; \
+         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent(); \
+         $logon = @($task.Triggers | Where-Object {{ $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $_.Enabled -ne $false -and ($_.UserId -eq $identity.Name -or $_.UserId -eq $identity.User.Value) }}); \
+         $calendar = @($task.Triggers | Where-Object {{ $_.CimClass.CimClassName -in @('MSFT_TaskDailyTrigger', 'MSFT_TaskWeeklyTrigger') -and $_.Enabled -ne $false -and $_.EndBoundary }}); \
+         if ($task.Settings.Enabled -and $task.Settings.StartWhenAvailable -and !$task.Settings.WakeToRun -and @($task.Actions)[0].Arguments -eq '--game-saves-auto-backup' -and $logon.Count -gt 0 -and $calendar.Count -gt 0) {{ 'ready' }} else {{ 'repair' }}",
         ps_literal(TASK_NAME)
     )
 }
@@ -1831,7 +1844,11 @@ fn parse_task_query(output: &str) -> TaskFound {
     let mut lines = output.lines().map(str::trim).filter(|line| !line.is_empty());
     match (lines.next(), lines.next()) {
         (Some("missing"), _) => TaskFound::Missing,
-        (Some("present"), Some(exe)) => TaskFound::Starts(exe.trim_matches('"').to_string()),
+        (Some("present"), Some(exe)) => match lines.next() {
+            Some("ready") => TaskFound::Starts(exe.trim_matches('"').to_string()),
+            Some("repair") => TaskFound::NeedsRepair,
+            _ => TaskFound::Unknown,
+        },
         _ => TaskFound::Unknown,
     }
 }
@@ -1842,7 +1859,7 @@ fn parse_task_query(output: &str) -> TaskFound {
 /// and nothing would ever run it.
 fn needs_registering(found: &TaskFound, this_program: &Path) -> bool {
     match found {
-        TaskFound::Missing => true,
+        TaskFound::Missing | TaskFound::NeedsRepair => true,
         TaskFound::Starts(program) => !settings::paths_equal(Path::new(program), this_program),
         TaskFound::Unknown => false,
     }
@@ -1866,24 +1883,35 @@ fn check_scheduled_task_once(app: &AppHandle, value: &GameSavesSettings) {
         let Ok(this_program) = std::env::current_exe() else {
             return;
         };
-        let Ok(output) = crate::apps::process::hidden(crate::apps::process::powershell())
+        let output = crate::apps::process::hidden(crate::apps::process::powershell())
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
             .arg(crate::apps::process::encode_command(&scheduled_task_query()))
             .stdin(Stdio::null())
             .output()
-            .await
-        else {
-            return;
-        };
-        if !output.status.success() || !needs_registering(&parse_task_query(&String::from_utf8_lossy(&output.stdout)), &this_program) {
-            return;
-        }
+            .await;
+        let found = output.ok().filter(|output| output.status.success())
+            .map(|output| parse_task_query(&String::from_utf8_lossy(&output.stdout)))
+            .unwrap_or(TaskFound::Unknown);
         // What the settings say now: the schedule may have changed meanwhile.
         let Ok(value) = settings::load(&app) else {
             return;
         };
         if value.schedule != BackupSchedule::Off && settings::valid_schedule_time(&value.schedule_time) {
-            let _ = register_scheduled_task(value.schedule, &value.schedule_time, value.schedule_weekday).await;
+            if needs_registering(&found, &this_program) {
+                let _ = register_scheduled_task(value.schedule, &value.schedule_time, value.schedule_weekday).await;
+            }
+            // A task may have been recreated after its scheduled hour, or
+            // Windows may have missed a run while no user token was available.
+            // App startup catches up too; headless rechecks under its lock.
+            if super::headless::is_due(&value, parser::now()) {
+                let mut child = crate::apps::process::hidden(&this_program);
+                child.arg("--game-saves-auto-backup")
+                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+                if let Some(folder) = this_program.parent() {
+                    child.current_dir(folder);
+                }
+                let _ = child.spawn();
+            }
         }
     });
 }
@@ -2136,6 +2164,46 @@ mod tests {
         assert!(script.contains("--game-saves-auto-backup"));
     }
 
+    #[tokio::test]
+    async fn registration_provides_catch_up_after_sleep_and_user_sign_in() {
+        // Construct real Windows trigger/settings objects, replacing only the
+        // registration boundary so this test never changes Task Scheduler.
+        let capture = r#"Import-Module ScheduledTasks -ErrorAction Stop;
+        function MYLE-CaptureScheduledTask {
+            param($TaskName, $InputObject, [switch]$Force)
+            $captured = [pscustomobject]@{
+                triggers = @($InputObject.Triggers | ForEach-Object {
+                    [pscustomobject]@{kind=$_.CimClass.CimClassName; start=$_.StartBoundary; end=$_.EndBoundary; user=$_.UserId; days=$_.DaysOfWeek}
+                })
+                user = $InputObject.Principal.UserId
+                catchUp = $InputObject.Settings.StartWhenAvailable
+                wake = $InputObject.Settings.WakeToRun
+            } | ConvertTo-Json -Depth 4 -Compress
+            [Console]::Out.WriteLine($captured)
+        }; "#;
+        let script = format!("{capture}{}", scheduled_task_script(
+            BackupSchedule::Weekly, "03:00", ScheduleWeekday::Sunday,
+            Path::new(r"C:\MYLE\MYLE.exe"),
+        ).replace(TASK_NAME, &format!("MYLE test {}", uuid::Uuid::new_v4()))
+            .replace("Register-ScheduledTask", "MYLE-CaptureScheduledTask"));
+        let output = crate::apps::process::hidden(crate::apps::process::powershell())
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+            .arg(crate::apps::process::encode_command(&script))
+            .output().await.unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let task: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let triggers = task["triggers"].as_array().unwrap();
+        assert_eq!(triggers.len(), 2, "calendar plus this user's logon catches missed runs");
+        assert_eq!(triggers[0]["kind"], "MSFT_TaskWeeklyTrigger");
+        assert_eq!(triggers[0]["days"], 1, "Sunday is preserved");
+        assert!(triggers[0]["start"].as_str().unwrap().ends_with("T03:00:00"));
+        assert_eq!(triggers[0]["end"], "9999-12-31T23:59:59", "StartWhenAvailable needs an end boundary");
+        assert_eq!(triggers[1]["kind"], "MSFT_TaskLogonTrigger");
+        assert_eq!(triggers[1]["user"], task["user"]);
+        assert_eq!(task["catchUp"], true);
+        assert_eq!(task["wake"], false);
+    }
+
     #[test]
     fn the_scheduled_hour_survives_daylight_saving_and_errors_read_in_any_language() {
         let script = scheduled_task_script(
@@ -2161,7 +2229,7 @@ mod tests {
         assert_eq!(parse_task_query(""), TaskFound::Unknown, "PowerShell said nothing");
         assert_eq!(parse_task_query("present\r\n"), TaskFound::Unknown, "no program named");
         assert_eq!(
-            parse_task_query("present\r\n\"C:\\MYLE\\MakeYourLifeEasier.exe\"\r\n"),
+            parse_task_query("present\r\n\"C:\\MYLE\\MakeYourLifeEasier.exe\"\r\nready\r\n"),
             TaskFound::Starts(r"C:\MYLE\MakeYourLifeEasier.exe".into())
         );
 
@@ -2173,5 +2241,12 @@ mod tests {
         let moved = this_program.with_file_name("moved-away.exe");
         assert!(needs_registering(&TaskFound::Starts(moved.to_string_lossy().into_owned()), &this_program));
         assert!(scheduled_task_query().contains("-TaskName 'MakeYourLifeEasier Game Saves Backup'"));
+    }
+
+    #[test]
+    fn a_calendar_only_task_is_migrated_even_when_it_starts_the_same_program() {
+        let executable = std::env::current_exe().unwrap();
+        let found = parse_task_query(&format!("present\r\n{}\r\nrepair\r\n", executable.display()));
+        assert!(needs_registering(&found, &executable), "old tasks cannot catch up when this user's scheduled hour was missed");
     }
 }

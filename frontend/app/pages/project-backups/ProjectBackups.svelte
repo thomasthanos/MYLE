@@ -241,6 +241,11 @@
         />
       </div>
       <p class="headline" class:good={summary.attention === 0 && !!pb.projects.length && hasDestination}>{headline}</p>
+      <p class="helper">
+        Checks for changes and reminds you every 3 days while MYLE is running.
+        {#if pb.lastChangeCheck}Last full check {pb.ago(pb.lastChangeCheck)}.{/if}
+        Overdue checks run when you next open MYLE.
+      </p>
       {#if hasDestination}
         <button class="root-chip" title={pb.page.backupRoot ?? ""} onclick={() => pb.open("root")}>
           <FolderOpen size={13} /><span class="selectable">{pb.page.backupRoot ?? "Backups folder"}</span>

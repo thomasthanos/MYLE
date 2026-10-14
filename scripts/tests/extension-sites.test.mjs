@@ -207,9 +207,19 @@ test("browser filling off in MYLE is said, not waited out", async () => {
   assert.equal(answer.unlocked, false);
 });
 
+// These answers must terminate without polling. A fixed clock avoids losing
+// the 1 ms window before the first status request on a busy test runner.
+const terminalStatusScheduling = {
+  Date: class extends Date { static now() { return 1_000; } },
+  setTimeout(callback, milliseconds, ...args) {
+    assert.notEqual(milliseconds, 1500, "a terminal status must never poll again");
+    return setTimeout(callback, milliseconds, ...args);
+  },
+};
+
 for (const state of ["locked", "unlocked"]) {
   test(`native status with browser filling off and ${state} vault ends the wait`, async () => {
-    const { context, asked } = await backgroundWithTab({ ok: true, enabled: false, state });
+    const { context, asked } = await backgroundWithTab({ ok: true, enabled: false, state }, terminalStatusScheduling);
     const answer = await context.untilUnlocked(() => false, 1);
     assert.equal(answer.unlocked, false);
     assert.equal(answer.state, "disabled");
@@ -219,7 +229,7 @@ for (const state of ["locked", "unlocked"]) {
 
 for (const enabled of [true, false]) {
   test(`the native new vault state with filling ${enabled ? "on" : "off"} is reported as noVault without polling`, async () => {
-    const { context, asked } = await backgroundWithTab({ ok: true, enabled, state: "new" });
+    const { context, asked } = await backgroundWithTab({ ok: true, enabled, state: "new" }, terminalStatusScheduling);
     const answer = await context.untilUnlocked(() => false, 1);
     assert.equal(answer.state, "noVault");
     assert.equal(asked.length, 1);

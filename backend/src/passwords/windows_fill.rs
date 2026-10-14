@@ -36,7 +36,7 @@ const HOTKEY_ID: i32 = 0x4d59;
 /// Long enough to unlock the vault first.
 const TARGET_LIFETIME: Duration = Duration::from_secs(180);
 pub const TARGET_EVENT: &str = "passwords-windows-target";
-const BROWSERS: [&str; 4] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"];
+const BROWSERS: [&str; 5] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "vivaldi.exe"];
 /// The window Store apps run in belongs to this program, not to the app.
 const STORE_APP_HOST: &str = "applicationframehost.exe";
 /// The hotkeys tried, in order.
@@ -535,6 +535,11 @@ fn type_text(text: &str, window: *mut c_void, thread: u32, focus: Option<usize>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vivaldi_uses_browser_filling_instead_of_windows_typing() {
+        assert!(BROWSERS.contains(&"vivaldi.exe"));
+    }
 
     #[test]
     fn a_program_that_updates_into_a_new_folder_stays_linked() {

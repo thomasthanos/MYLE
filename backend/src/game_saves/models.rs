@@ -107,6 +107,10 @@ pub struct GameSavesSettings {
     pub schedule_time: String,
     #[serde(default)]
     pub schedule_weekday: ScheduleWeekday,
+    /// Local activation time: catch-up never runs a slot before this schedule
+    /// was chosen. This machine-specific timestamp is not account-synced.
+    #[serde(default)]
+    pub schedule_started_at: Option<u64>,
     #[serde(default)]
     pub last_scheduled_attempt: Option<u64>,
     #[serde(default)]
@@ -145,6 +149,7 @@ impl Default for GameSavesSettings {
             schedule: BackupSchedule::Off,
             schedule_time: default_schedule_time(),
             schedule_weekday: ScheduleWeekday::Sunday,
+            schedule_started_at: None,
             last_scheduled_attempt: None,
             last_scheduled_success: None,
             last_scheduled_result: None,
