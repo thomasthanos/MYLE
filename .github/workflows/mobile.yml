@@ -139,7 +139,8 @@ jobs:
           root=backend/mobile/gen/android/build.gradle.kts
           sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9]*/kotlin-gradle-plugin:2.1.21/' "$root"
           grep -q 'kotlin-gradle-plugin:2.1.21' "$root" || { echo "::error::Kotlin was not raised in $root"; cat "$root"; exit 1; }
-          # A backup to Google Drive would carry the account's session along.
+          # The native plugin also declares allowBackup=false, including when
+          # the app template omits it. Older templates explicitly enable it.
           manifest=backend/mobile/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
           grep -n 'allowBackup\|android:scheme' "$manifest" || true
@@ -180,6 +181,10 @@ jobs:
           # The sign-in comes back through this link.
           manifest=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml out/MYLE-Passwords.apk)
           echo "$manifest" | grep -E 'package=|versionCode|versionName|allowBackup|scheme' || true
+          if ! echo "$manifest" | grep -q ':allowBackup([^)]*)=(type 0x12)0x0'; then
+            echo "::error::The merged APK must explicitly disable Android backup"
+            exit 1
+          fi
           if ! echo "$manifest" | grep -q ':scheme([^)]*)="uk.thomast.myle.passwords"'; then
             echo "::warning::The APK's manifest shows no uk.thomast.myle.passwords scheme"
           fi
