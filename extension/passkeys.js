@@ -45,6 +45,49 @@
     return wrapper;
   }
 
+  /** MYLE only answers inputs it implements. Keep the full original request
+   *  for the browser when a site needs another authenticator or extension. */
+  function supportedRequest(publicKey, kind) {
+    if (kind === "create" && String(publicKey.authenticatorSelection?.authenticatorAttachment) === "cross-platform") return false;
+    const extensions = publicKey.extensions;
+    if (!extensions) return true;
+    const supported = kind === "create" ? "credProps" : "appid";
+    for (const key of Object.getOwnPropertyNames(extensions)) {
+      if (key !== supported && extensions[key] !== undefined) return false;
+    }
+    for (const key in extensions) {
+      if (key !== supported && extensions[key] !== undefined) return false;
+    }
+    // Web IDL dictionary members can also be non-enumerable and inherited.
+    for (const key of ["prf", "largeBlob", "uvm", "appidExclude", "credProps", "appid", "credProtect", "credentialProtectionPolicy", "enforceCredentialProtectionPolicy", "minPinLength", "hmacCreateSecret", "hmacGetSecret", "credBlob", "getCredBlob", "payment"]) {
+      if (key !== supported && extensions[key] !== undefined) return false;
+    }
+    return true;
+  }
+
+  /** A frame can borrow the top page only with its own policy permission
+   *  and an entirely same-origin ancestor chain. Missing policy data in a
+   *  frame is ambiguous, so its original browser method handles the call. */
+  function permitted(win, kind) {
+    try {
+      const framed = win !== win.top;
+      if (framed) {
+        if (win.origin === "null") return false;
+        let ancestor = win;
+        while (ancestor !== win.top) {
+          const parent = ancestor.parent;
+          if (!parent || parent === ancestor || parent.origin !== win.origin) return false;
+          ancestor = parent;
+        }
+      }
+      const policy = win.document?.permissionsPolicy ?? win.document?.featurePolicy;
+      if (typeof policy?.allowsFeature !== "function") return !framed;
+      return policy.allowsFeature(`publickey-credentials-${kind}`) === true;
+    } catch {
+      return false;
+    }
+  }
+
   if (!Object.prototype.hasOwnProperty.call(Function.prototype.toString, "__myle")) {
     const toString = {
       toString() {
@@ -365,6 +408,7 @@
         const container = this instanceof CredentialsContainer ? this : navigator.credentials;
         if (!publicKey || typeof publicKey !== "object") return native.call(container, options);
         const callNative = (given = options) => native.call(container, given);
+        if (!permitted(window, kind) || !supportedRequest(publicKey, kind)) return callNative();
         const details = kind === "create" ? forCreate(publicKey) : forGet(publicKey);
         trace(kind === "get" && options.mediation === "conditional" ? "conditional" : kind, {
           rpId: details.rpId,
@@ -450,6 +494,7 @@
       const wrapped = {
         [name](options) {
           if (!options?.publicKey || typeof options.publicKey !== "object") return native.call(this, options);
+          if (!permitted(win, name) || !supportedRequest(options.publicKey, name)) return native.call(this, options);
           trace("frame", { how: "adopted", kind: name });
           return wrappers[name].call(navigator.credentials, options);
         },
@@ -478,6 +523,7 @@
       const wrapped = {
         [name](options) {
           if (!options?.publicKey || typeof options.publicKey !== "object") return native.call(this, options);
+          if (!permitted(window, name) || !supportedRequest(options.publicKey, name)) return native.call(this, options);
           trace("frame", { how: "delegated", kind: name });
           return top.navigator.credentials[name](options);
         },

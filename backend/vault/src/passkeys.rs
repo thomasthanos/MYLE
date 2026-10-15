@@ -26,7 +26,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 /// Tells relying parties which kind of authenticator made a passkey: MYLE.
 const AAGUID: [u8; 16] = [26, 252, 48, 205, 184, 136, 70, 238, 141, 23, 239, 15, 78, 94, 80, 137];
-/// ES256: ECDSA on P-256 with SHA-256, the one algorithm every site takes.
+/// ES256: ECDSA on P-256 with SHA-256. Other requested algorithms need a
+/// different authenticator; callers must not claim MYLE supports them.
 pub const ES256: i64 = -7;
 const CHALLENGE_MAX: usize = 1024;
 const USER_HANDLE_MAX: usize = 64;
@@ -252,6 +253,35 @@ pub struct User {
     pub display_name: String,
 }
 
+/// Client context already verified by the operating-system/browser adapter.
+/// Android browsers own clientDataJSON and provide its SHA-256 hash; native
+/// apps use a certificate origin and identify their package in client data.
+pub struct ClientContext<'a> {
+    pub origin: &'a str,
+    pub android_package: Option<&'a str>,
+    pub hash: Option<&'a [u8]>,
+}
+
+impl ClientContext<'_> {
+    fn check(&self) -> Result<(), String> {
+        if self.hash.is_some_and(|hash| hash.len() != 32) {
+            return Err("badRequest".into());
+        }
+        Ok(())
+    }
+
+    fn json(&self, kind: &str, challenge: &str) -> String {
+        let original = client_data(kind, challenge, self.origin);
+        if let Some(package) = self.android_package {
+            let mut json: Value = serde_json::from_str(&original).expect("client_data is JSON");
+            json["androidPackageName"] = Value::from(package);
+            json.to_string()
+        } else {
+            original
+        }
+    }
+}
+
 /// A new passkey, and the browser's answer to `navigator.credentials.create()`.
 pub fn create(
     rp_id: &str,
@@ -262,6 +292,20 @@ pub fn create(
     user_verified: bool,
     now: u64,
 ) -> Result<(Passkey, Value), String> {
+    create_with_context(rp_id, rp_name, user, challenge_b64,
+        &ClientContext { origin, android_package: None, hash: None }, user_verified, now)
+}
+
+pub fn create_with_context(
+    rp_id: &str,
+    rp_name: &str,
+    user: &User,
+    challenge_b64: &str,
+    context: &ClientContext<'_>,
+    user_verified: bool,
+    now: u64,
+) -> Result<(Passkey, Value), String> {
+    context.check()?;
     let handle = unb64(&user.handle).ok_or("badRequest")?;
     if handle.is_empty() || handle.len() > USER_HANDLE_MAX {
         return Err("badRequest".into());
@@ -270,7 +314,7 @@ pub fn create(
     let key = new_key();
     let mut credential_id = [0u8; 16];
     OsRng.fill_bytes(&mut credential_id);
-    let client_data = client_data("webauthn.create", &challenge, origin);
+    let client_data = context.json("webauthn.create", &challenge);
     let auth_data = auth_data(rp_id, flags(user_verified) | ATTESTED, Some((&credential_id, &cose_key(&key))));
     let mut attestation = Vec::with_capacity(auth_data.len() + 32);
     cbor::map(&mut attestation, 3);
@@ -293,7 +337,7 @@ pub fn create(
         key: b64(private_key.as_bytes()),
         created_at: now,
     };
-    let response = json!({
+    let mut response = json!({
         "id": id,
         "rawId": id,
         "type": "public-key",
@@ -307,20 +351,32 @@ pub fn create(
             "transports": ["hybrid", "internal"],
         },
     });
+    if context.hash.is_some() {
+        response["response"].as_object_mut().expect("response is an object").remove("clientDataJSON");
+    }
     Ok((passkey, response))
 }
 
 /// The browser's answer to `navigator.credentials.get()` with `passkey`.
 pub fn sign_in(passkey: &Passkey, challenge_b64: &str, origin: &str, user_verified: bool) -> Result<Value, String> {
+    sign_in_with_context(passkey, challenge_b64, &ClientContext { origin, android_package: None, hash: None }, user_verified)
+}
+
+pub fn sign_in_with_context(passkey: &Passkey, challenge_b64: &str, context: &ClientContext<'_>, user_verified: bool) -> Result<Value, String> {
+    context.check()?;
     let challenge = challenge(challenge_b64)?;
     let der = Zeroizing::new(unb64(&passkey.key).ok_or("This passkey is damaged.")?);
     let key = SigningKey::from_pkcs8_der(&der).map_err(|_| "This passkey is damaged.")?;
-    let client_data = client_data("webauthn.get", &challenge, origin);
+    let client_data = context.json("webauthn.get", &challenge);
     let auth_data = auth_data(&passkey.rp_id, flags(user_verified), None);
     let mut signed = auth_data.clone();
-    signed.extend(Sha256::digest(client_data.as_bytes()));
+    if let Some(hash) = context.hash {
+        signed.extend(hash);
+    } else {
+        signed.extend(Sha256::digest(client_data.as_bytes()));
+    }
     let signature: DerSignature = key.sign(&signed);
-    Ok(json!({
+    let mut response = json!({
         "id": passkey.credential_id,
         "rawId": passkey.credential_id,
         "type": "public-key",
@@ -331,7 +387,11 @@ pub fn sign_in(passkey: &Passkey, challenge_b64: &str, origin: &str, user_verifi
             "signature": b64(signature.as_bytes()),
             "userHandle": passkey.user_handle,
         },
-    }))
+    });
+    if context.hash.is_some() {
+        response["response"].as_object_mut().expect("response is an object").remove("clientDataJSON");
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -343,6 +403,48 @@ mod tests {
 
     fn user() -> User {
         User { handle: b64(b"user-1234"), name: "thomas@example.com".into(), display_name: "Thomas".into() }
+    }
+
+    #[test]
+    fn android_browser_uses_the_supplied_client_hash() {
+        let hash = Sha256::digest(b"browser-owned clientDataJSON");
+        let context = ClientContext { origin: "https://login.example.com", android_package: None, hash: Some(&hash) };
+        let (key, made) = create_with_context("example.com", "Example", &user(), &b64(b"registration"), &context, true, 1).unwrap();
+        assert!(made["response"].get("clientDataJSON").is_none());
+        let signed = sign_in_with_context(&key, &b64(b"assertion"), &context, true).unwrap();
+        assert!(signed["response"].get("clientDataJSON").is_none());
+        let verifier = VerifyingKey::from_public_key_der(&field(&made, "/response/publicKey")).unwrap();
+        let mut bytes = field(&signed, "/response/authenticatorData");
+        assert_ne!(bytes[32] & USER_VERIFIED, 0);
+        bytes.extend(hash);
+        let signature = DerSignature::from_bytes(&field(&signed, "/response/signature")).unwrap();
+        verifier.verify(&bytes, &signature).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        assert!(verifier.verify(&bytes, &signature).is_err());
+    }
+
+    #[test]
+    fn android_native_client_data_names_the_actual_app() {
+        let context = ClientContext { origin: "android:apk-key-hash:certificate", android_package: Some("com.example.app"), hash: None };
+        let (key, made) = create_with_context("example.com", "Example", &user(), &b64(b"register"), &context, true, 1).unwrap();
+        let signed = sign_in_with_context(&key, &b64(b"login"), &context, true).unwrap();
+        for response in [&made, &signed] {
+            let client: Value = serde_json::from_slice(&field(response, "/response/clientDataJSON")).unwrap();
+            assert_eq!(client["androidPackageName"], "com.example.app");
+            assert_eq!(client["origin"], context.origin);
+        }
+        let mut bytes = field(&signed, "/response/authenticatorData");
+        bytes.extend(Sha256::digest(field(&signed, "/response/clientDataJSON")));
+        let verifier = VerifyingKey::from_public_key_der(&field(&made, "/response/publicKey")).unwrap();
+        verifier.verify(&bytes, &DerSignature::from_bytes(&field(&signed, "/response/signature")).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn malformed_client_hash_is_rejected_before_making_a_key() {
+        let context = ClientContext { origin: "https://example.com", android_package: None, hash: Some(&[0; 31]) };
+        assert!(create_with_context("example.com", "Example", &user(), &b64(b"register"), &context, true, 1).is_err());
+        let (key, _) = create("example.com", "Example", &user(), &b64(b"register"), "https://example.com", true, 1).unwrap();
+        assert!(sign_in_with_context(&key, &b64(b"login"), &context, true).is_err());
     }
 
     fn field(value: &Value, path: &str) -> Vec<u8> {

@@ -8,6 +8,26 @@ import vm from "node:vm";
 // A Windows checkout may have CRLF line endings: read it as LF.
 const source = (await readFile(new URL("../../extension/content.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
+test("an RP mismatch leaves related-origin validation to the browser without asking MYLE to sign", async () => {
+  const start = source.indexOf("  async function passkeysHere(");
+  const end = source.indexOf("\n  }\n", start);
+  const answers = [];
+  const calls = [];
+  const scope = vm.createContext({
+    prompted: "request", siteName: "example.com", debug() {},
+    send: async (message) => { calls.push(message); return { ok: false, error: "rpMismatch" }; },
+    answerPage: (id, answer) => answers.push({ id, ...answer }),
+    refuse: (id, error) => answers.push({ id, result: "error", error }),
+  });
+  const passkeysHere = vm.runInContext(`(${source.slice(start, end + 4).trim()})`, scope);
+  assert.equal(await passkeysHere("request", { rpId: "related.example", allow: [] }, () => assert.fail("must not retry")), null);
+  assert.deepEqual(answers, [{ id: "request", result: "native" }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].type, "passkeyList");
+  assert.equal(calls[0].rpId, "related.example");
+  assert.equal(scope.prompted, null);
+});
+
 /** One function of content.js, by name, run on its own. */
 function pick(name) {
   const start = source.indexOf(`  function ${name}(`);

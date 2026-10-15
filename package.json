@@ -1,7 +1,7 @@
 {
   "name": "make-your-life-easier",
   "private": true,
-  "version": "10.0.4",
+  "version": "10.0.5",
   "type": "module",
   "myle": {
     "extensionUrl": "https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca"
@@ -25,6 +25,7 @@
     "@tauri-apps/plugin-opener": "^2.5.5"
   },
   "devDependencies": {
+    "@simplewebauthn/server": "13.3.2",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tauri-apps/cli": "^2.11.5",
     "@tsconfig/svelte": "^5.0.8",

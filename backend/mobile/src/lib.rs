@@ -1,11 +1,16 @@
 //! MYLE Passwords: the Password Manager on phones (Android and iOS), over
 //! the same vault and account as the Windows app (`myle-vault`). It shows
-//! and edits the logins and keeps them in sync with the PC; it does not fill
-//! them into other apps.
+//! and edits the logins and keeps them in sync with the PC. On Android it
+//! also provides protected credentials and Autofill through native services.
 
 mod account;
+#[cfg(target_os = "android")]
+mod android;
 mod clipboard;
 mod passwords;
+#[cfg(any(target_os = "android", test))]
+mod provider;
+mod provider_setup;
 mod unlock;
 mod update;
 
@@ -33,7 +38,12 @@ pub fn run() {
     builder
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            #[cfg(target_os = "android")]
+            let passwords = passwords::PasswordsState::from_cell(android::shared_cell(&dir)?);
+            #[cfg(not(target_os = "android"))]
             let passwords = passwords::PasswordsState::new(dir.clone());
+            #[cfg(target_os = "android")]
+            android::listen(app.handle().clone(), &dir)?;
             app.manage(account::AccountState::new(dir));
             app.manage(passwords.clone());
             account::listen(app.handle());
@@ -79,6 +89,9 @@ pub fn run() {
             update::mobile_update_check,
             update::mobile_update_download,
             update::mobile_update_install,
+            provider_setup::mobile_provider_status,
+            provider_setup::mobile_provider_settings,
+            provider_setup::mobile_provider_biometry,
             mobile_leave,
         ])
         .run(tauri::generate_context!())

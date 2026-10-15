@@ -2753,7 +2753,7 @@ dependencies = [
 
 [[package]]
 name = "make-your-life-easier"
-version = "10.0.4"
+version = "10.0.5"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -2897,9 +2897,10 @@ dependencies = [
 
 [[package]]
 name = "myle-passwords"
-version = "10.0.4"
+version = "10.0.5"
 dependencies = [
  "futures-util",
+ "jni 0.21.1",
  "myle-vault",
  "reqwest",
  "semver",

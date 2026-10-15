@@ -22,6 +22,18 @@ pub const ALLOW_INSTALLS: &str = "allow-installs";
 /// What `sign_in` answers when the user closed the sign-in sheet.
 pub const CANCELLED: &str = "cancelled";
 
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProviderStatus {
+    pub sdk: u32,
+    pub passkeys_available: bool,
+    pub autofill_available: bool,
+    pub passkeys_enabled: bool,
+    pub autofill_enabled: bool,
+    pub biometry_available: bool,
+    pub biometry_enabled: bool,
+}
+
 #[cfg(mobile)]
 pub struct Mobile<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
@@ -138,6 +150,38 @@ impl<R: Runtime> Mobile<R> {
 
 pub trait MobileExt<R: Runtime> {
     fn myle_mobile(&self) -> &Mobile<R>;
+}
+
+impl<R: Runtime> Mobile<R> {
+    pub fn provider_status(&self) -> Result<ProviderStatus, String> {
+        #[cfg(target_os = "android")]
+        return self.0.run_mobile_plugin("providerStatus", ()).map_err(|e| e.to_string());
+        #[cfg(not(target_os = "android"))]
+        Ok(ProviderStatus::default())
+    }
+
+    pub fn provider_settings(&self, target: &str) -> Result<(), String> {
+        if !matches!(target, "passkeys" | "autofill") { return Err("Unknown provider setting.".into()); }
+        #[cfg(target_os = "android")]
+        {
+            #[derive(serde::Serialize)]
+            struct Args<'a> { target: &'a str }
+            self.0.run_mobile_plugin::<serde::de::IgnoredAny>("providerSettings", Args { target }).map(|_| ()).map_err(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "android"))]
+        Err("Provider settings are for Android.".into())
+    }
+
+    pub fn provider_biometry(&self, enabled: bool) -> Result<(), String> {
+        #[cfg(target_os = "android")]
+        {
+            #[derive(serde::Serialize)]
+            struct Args { enabled: bool }
+            self.0.run_mobile_plugin::<serde::de::IgnoredAny>("providerBiometry", Args { enabled }).map(|_| ()).map_err(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "android"))]
+        { let _ = enabled; Err("Fingerprint filling is for Android.".into()) }
+    }
 }
 
 impl<R: Runtime, T: Manager<R>> MobileExt<R> for T {

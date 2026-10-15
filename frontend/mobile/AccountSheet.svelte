@@ -8,6 +8,7 @@
   import { account } from "./account.svelte";
   import { shell } from "./shell.svelte";
   import SignIn from "./SignIn.svelte";
+  import ProviderSetup from "./ProviderSetup.svelte";
 
   let failedAvatar = $state<string | null>(null);
   const profile = $derived(account.profile);
@@ -52,13 +53,14 @@
       <p>Sign in with the account you use in MYLE on your PC: your vault comes here and stays the same on both.</p>
       <SignIn />
     {/if}
+    <ProviderSetup />
   </div>
 {/if}
 
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.5); }
 
-  .sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 61; display: grid; gap: 16px; padding: 10px 20px calc(env(safe-area-inset-bottom) + 22px); border-top: 1px solid rgb(255 255 255 / 0.1); border-radius: 20px 20px 0 0; background: var(--bg-1); }
+  .sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 61; display: grid; gap: 16px; max-height: 90dvh; overflow-y: auto; padding: 10px 20px calc(env(safe-area-inset-bottom) + 22px); border-top: 1px solid rgb(255 255 255 / 0.1); border-radius: 20px 20px 0 0; background: var(--bg-1); }
 
   .grip { justify-self: center; width: 40px; height: 4px; border-radius: 2px; background: rgb(255 255 255 / 0.2); }
 

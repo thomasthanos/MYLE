@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Installing the app's own updates (the APK it downloaded); Android
-         still asks the user once, and shows the installer each time. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <application>
+        <service android:name="uk.thomast.myle.mobile.MyleCredentialProviderService"
+            android:label="MYLE Passwords" android:enabled="@bool/myle_passkeys_available"
+            android:exported="true" android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter><action android:name="android.service.credentials.CredentialProviderService" /></intent-filter>
+            <meta-data android:name="android.credentials.provider" android:resource="@xml/myle_credential_provider" />
+        </service>
+        <service android:name="uk.thomast.myle.mobile.MyleAutofillService"
+            android:label="MYLE Passwords" android:enabled="@bool/myle_autofill_available"
+            android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter><action android:name="android.service.autofill.AutofillService" /></intent-filter>
+            <meta-data android:name="android.autofill" android:resource="@xml/myle_autofill_service" />
+        </service>
+        <activity android:name="uk.thomast.myle.mobile.MyleCredentialActivity" android:exported="false"
+            android:excludeFromRecents="true" android:theme="@style/MyleCredentialTheme" />
+    </application>
 </manifest>

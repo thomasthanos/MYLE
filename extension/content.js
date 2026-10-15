@@ -1486,8 +1486,9 @@
     } else {
       prompted = null;
       debug(`leaving it to the browser: ${listed?.error ?? "no answer"}`);
-      if (listed?.error === "rpMismatch") refuse(id, "rpMismatch");
-      else answerPage(id, { result: "native" });
+      // MYLE keeps its strict RP scope. The browser may also validate related
+      // origins, so a scope MYLE cannot serve is left to its original API.
+      answerPage(id, { result: "native" });
     }
     return null;
   }

@@ -42,8 +42,12 @@ impl PasswordsState {
     /// `dir`: the app's own folder, where the vault lives.
     pub fn new(dir: PathBuf) -> Self {
         let path = dir.join("passwords.vault");
+        Self::from_cell(VaultCell::new(move || Ok(path.clone())))
+    }
+
+    pub(crate) fn from_cell(cell: VaultCell) -> Self {
         Self {
-            cell: VaultCell::new(move || Ok(path.clone())),
+            cell,
             hidden_at: Arc::default(),
         }
     }

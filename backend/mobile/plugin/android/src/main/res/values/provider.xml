@@ -1,0 +1,12 @@
+<resources>
+    <bool name="myle_passkeys_available">false</bool>
+    <bool name="myle_autofill_available">false</bool>
+    <style name="MyleCredentialTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0a0c12</item>
+        <item name="android:colorAccent">#60a5fa</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#0a0c12</item>
+        <item name="android:navigationBarColor">#0a0c12</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

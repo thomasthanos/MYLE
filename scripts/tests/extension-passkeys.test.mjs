@@ -215,6 +215,9 @@ test("an empty helper frame of the page's own origin asks MYLE through the page"
     }
     const window = new EventTarget();
     window.top = { origin: "https://example.com", navigator: parent.context.navigator };
+    window.parent = window.top;
+    window.origin = origin;
+    window.document = { permissionsPolicy: { allowsFeature: () => true } };
     window.postMessage = () => {};
     const context = vm.createContext({
       window,
