@@ -60,27 +60,36 @@ internal object CallerVerifier {
     }
     fun ownApp(context: Context): CredentialScope = identity(context.packageName, signatures(context, context.packageName))
 
+    /** Null when Android 11+ package visibility hides the package from MYLE. */
+    private fun installedSignatures(context: Context, pkg: String): List<Signature>? =
+        try { signatures(context, pkg) } catch (_: PackageManager.NameNotFoundException) { null }
+
     /** Must run off the UI thread: native app website/RP claims require live HTTPS asset links. */
     fun credential(context: Context, caller: CallingAppInfo, rp: String?): CredentialScope {
-        val actual = signatures(context, caller.packageName)
+        // Android's credential selector, not the caller, starts MYLE, so the caller's package is
+        // usually hidden from MYLE. Its signers come from Android itself in CallingAppInfo.
         val supplied = caller.signingInfoCompat.apkContentsSigners
-        require(actual.map { encoded(digest(it)) }.toSet() == supplied.map { encoded(digest(it)) }.toSet()) { "Caller identity changed" }
-        val native = identity(caller.packageName, actual)
+        val installed = installedSignatures(context, caller.packageName)
+        require(CredentialPolicy.suppliedSignersAccepted(supplied.map { encoded(digest(it)) }.toSet(), installed?.map { encoded(digest(it)) }?.toSet())) {
+            "Caller identity changed or was not supplied"
+        }
+        val native = identity(caller.packageName, supplied)
         val browserOrigin = caller.getOrigin(allowlistJson(context))
         if (browserOrigin != null) {
-            val site = CredentialPolicy.credentialBrowserSite(browserOrigin, rp, trusted(context, caller.packageName, actual))
+            val site = CredentialPolicy.credentialBrowserSite(browserOrigin, rp, trusted(context, caller.packageName, supplied))
             return native.copy(origin = browserOrigin, site = site)
         }
         if (rp == null) return native
         val site = CredentialPolicy.host(rp)
-        require(assetLinked(site, native.packageName, fingerprint(digest(actual.single())))) { "Website has not authorized this app" }
+        require(assetLinked(site, native.packageName, fingerprint(digest(supplied.single())))) { "Website has not authorized this app" }
         return native.copy(site = site)
     }
 
     fun autofill(context: Context, pkg: String, claimedDomain: String?, scheme: String?): CredentialScope {
         // Recheck at the ticket boundary as well as parsing (including already issued requests).
         require(CredentialPolicy.autofillRequestPackage(pkg, context.packageName) != null) { "MYLE cannot autofill its own vault" }
-        val signers = signatures(context, pkg)
+        // Autofill supplies no signers: the manifest's <queries> make apps and browsers visible.
+        val signers = installedSignatures(context, pkg) ?: error("Android hides $pkg from MYLE, so its identity cannot be checked")
         val native = identity(pkg, signers)
         val domain = claimedDomain?.takeIf { it.isNotEmpty() }?.let { CredentialPolicy.host(it) }
         val browser = trusted(context, pkg, signers)

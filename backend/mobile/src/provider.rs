@@ -318,8 +318,12 @@ fn options(payload: &Value) -> Result<Value, String> {
 
 fn check_rp(scope: &Scope, request: &Value, create: bool) -> Result<(), String> {
     if scope.manual_app() { return Err("rpMismatch".into()); }
-    let asked = if create { request["rp"]["id"].as_str() } else { request["rpId"].as_str() }.ok_or("badRequest")?;
-    if !passkeys::same_rp(asked, &scope.site) { return Err("rpMismatch".into()); }
+    let asked = if create { request["rp"]["id"].as_str() } else { request["rpId"].as_str() };
+    // WebAuthn: a page that names no RP ID asks for its own host. An app has
+    // no page, so it must name its website.
+    let page = || if scope.native_app() { None } else { reqwest::Url::parse(&scope.origin).ok()?.host_str().map(str::to_string) };
+    let asked = match asked { Some(asked) => asked.to_string(), None => page().ok_or("badRequest")? };
+    if !passkeys::same_rp(&asked, &scope.site) { return Err("rpMismatch".into()); }
     Ok(())
 }
 
@@ -518,6 +522,40 @@ mod tests {
         let token = unlock(&provider, &scope);
         let disallowed = json!({"rpId":"example.com","challenge":passkeys::b64(b"login"),"allowCredentials":[{"type":"public-key","id":passkeys::b64(b"different credential")}]});
         assert_eq!(provider.call("get", json!({"session":token,"scope":scope,"request":disallowed,"credentialId":id,"clientDataHash":hash})).unwrap_err(), "noCredential");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_browser_request_without_an_rp_id_is_for_the_page_host() {
+        let (provider, dir, scope) = fixture();
+        let hash = passkeys::b64(&[8;32]);
+        let mut request = creation();
+        request["rp"].as_object_mut().unwrap().remove("id");
+        let token = unlock(&provider, &scope);
+        let made = provider.call("create", json!({"session":token,"scope":scope,"request":request,"clientDataHash":hash})).unwrap();
+        let id = made["id"].as_str().unwrap();
+        let login = json!({"challenge":passkeys::b64(b"login challenge")});
+        let token = unlock(&provider, &scope);
+        assert_eq!(provider.call("list", json!({"session":token,"scope":scope,"kind":"passkey","request":login})).unwrap().as_array().unwrap().len(), 1);
+        let signed = provider.call("get", json!({"session":token,"scope":scope,"request":login,"credentialId":id,"clientDataHash":hash})).unwrap();
+        assert_eq!(signed["id"], id);
+        // Present but empty is not omitted: WebAuthn rejects it.
+        let mut empty = creation();
+        empty["rp"]["id"] = json!("");
+        let token = unlock(&provider, &scope);
+        assert_eq!(provider.call("create", json!({"session":token,"scope":scope,"request":empty,"clientDataHash":hash})).unwrap_err(), "rpMismatch");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_app_must_name_its_relying_party() {
+        let (provider, dir, _) = fixture();
+        let certificate = passkeys::b64(&[3;32]);
+        let app = json!({"origin":format!("android:apk-key-hash:{certificate}"),"site":"example.com","packageName":"com.example.app","certificate":certificate});
+        let mut request = creation();
+        request["rp"].as_object_mut().unwrap().remove("id");
+        let token = unlock(&provider, &app);
+        assert_eq!(provider.call("create", json!({"session":token,"scope":app,"request":request})).unwrap_err(), "badRequest");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

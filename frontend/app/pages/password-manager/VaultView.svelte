@@ -19,6 +19,7 @@
   import Lock from "@lucide/svelte/icons/lock";
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
+  import SettingsIcon from "@lucide/svelte/icons/settings";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import UserKey from "@lucide/svelte/icons/user-key";
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
@@ -30,6 +31,7 @@
   import Popover from "../../../lib/components/Popover.svelte";
   import { DEVICE, IOS, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
   import { toast } from "../../../lib/toast.svelte";
+  import { shell } from "../../../mobile/shell.svelte";
   import { passwordsApi as api } from "./api";
   import EntryEditor from "./EntryEditor.svelte";
   import EntryView from "./EntryView.svelte";
@@ -196,25 +198,32 @@
           <button class="menu-item" onclick={() => (close(), p.setWebsiteIcons(!p.websiteIcons))}>
             <Image size={15} /> {p.websiteIcons ? "Hide website icons" : "Show website icons"}
           </button>
-          <button class="menu-item" onclick={() => (close(), (dialog = { kind: "master" }))}><KeyRound size={15} /> Change master password…</button>
-          {#if p.hello.available}
-            <button class="menu-item" onclick={() => (close(), p.setHello(!p.hello.enabled))}>
-              <Fingerprint size={15} />
-              {p.hello.enabled ? `Stop using ${QUICK_UNLOCK}` : `Open with ${QUICK_UNLOCK}…`}
-            </button>
+          {#if MOBILE}
+            <!-- A phone's master password, quick unlock and lock time are in Settings. -->
+            <button class="menu-item" onclick={() => (close(), (shell.settingsOpen = true))}><SettingsIcon size={15} /> Settings…</button>
+          {:else}
+            <button class="menu-item" onclick={() => (close(), (dialog = { kind: "master" }))}><KeyRound size={15} /> Change master password…</button>
+            {#if p.hello.available}
+              <button class="menu-item" onclick={() => (close(), p.setHello(!p.hello.enabled))}>
+                <Fingerprint size={15} />
+                {p.hello.enabled ? `Stop using ${QUICK_UNLOCK}` : `Open with ${QUICK_UNLOCK}…`}
+              </button>
+            {/if}
           {/if}
           {#if IOS}
             <button class="menu-item" onclick={() => (close(), (dialog = { kind: "apple" }))}><Upload size={15} /> Export for Apple Passwords…</button>
           {/if}
           <button class="menu-item danger" onclick={() => (close(), (dialog = { kind: "deleteAll" }))}><Trash2 size={15} /> Delete all passwords…</button>
-          <div class="menu-label"><Timer size={11} /> Lock after</div>
-          <div class="lock-times">
-            {#each lockTimes as minutes (minutes)}
-              <button class="chip" class:active={p.autoLockMinutes === minutes} onclick={() => p.setAutoLock(minutes)}>
-                {minutes === 0 ? "Never" : minutes === 60 ? "1 h" : `${minutes} min`}
-              </button>
-            {/each}
-          </div>
+          {#if !MOBILE}
+            <div class="menu-label"><Timer size={11} /> Lock after</div>
+            <div class="lock-times">
+              {#each lockTimes as minutes (minutes)}
+                <button class="chip" class:active={p.autoLockMinutes === minutes} onclick={() => p.setAutoLock(minutes)}>
+                  {minutes === 0 ? "Never" : minutes === 60 ? "1 h" : `${minutes} min`}
+                </button>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/snippet}
     </Popover>

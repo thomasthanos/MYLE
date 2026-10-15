@@ -14,7 +14,9 @@ class MyleCredentialProviderService : CredentialProviderService() {
     override fun onBeginGetCredentialRequest(request: BeginGetCredentialRequest, cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginGetCredentialResponse, GetCredentialException>) {
         if (cancellationSignal.isCanceled) { callback.onError(GetCredentialCancellationException()); return }
-        if (request.callingAppInfo == null || request.beginGetCredentialOptions.none { it is BeginGetPublicKeyCredentialOption || it is BeginGetPasswordOption }) {
+        // MYLE never offers its vault to itself, as with Autofill (MyleAutofillService).
+        if (request.callingAppInfo == null || request.callingAppInfo?.packageName == packageName ||
+            request.beginGetCredentialOptions.none { it is BeginGetPublicKeyCredentialOption || it is BeginGetPasswordOption }) {
             callback.onResult(BeginGetCredentialResponse()); return
         }
         val pending = ProviderTickets.pending(this, ProviderTicket.Query(request), true)
@@ -26,6 +28,7 @@ class MyleCredentialProviderService : CredentialProviderService() {
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>) {
         if (cancellationSignal.isCanceled) { callback.onError(CreateCredentialCancellationException()); return }
         val caller = request.callingAppInfo ?: run { callback.onError(CreateCredentialUnknownException("Missing caller")); return }
+        if (caller.packageName == packageName) { callback.onResult(BeginCreateCredentialResponse()); return }
         val json = when (request) {
             is BeginCreatePublicKeyCredentialRequest -> request.requestJson
             is BeginCreatePasswordCredentialRequest -> null

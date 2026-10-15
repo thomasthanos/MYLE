@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.util.Base64
+import android.util.Log
 import android.view.WindowManager
 import android.view.autofill.AutofillManager
 import android.view.autofill.AutofillValue
@@ -25,7 +26,11 @@ import java.util.concurrent.Executors
 
 /** Only explicit provider PendingIntents/internal setup can reach this non-exported activity. */
 class MyleCredentialActivity : FragmentActivity() {
-    companion object { const val ENROLL = "uk.thomast.myle.mobile.ENROLL_BIOMETRY" }
+    companion object {
+        const val ENROLL = "uk.thomast.myle.mobile.ENROLL_BIOMETRY"
+        /** `adb logcat -s MYLE`: why a request stopped. Identities and reasons only, never secrets. */
+        private const val TAG = "MYLE"
+    }
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var ended = false
     @Volatile private var session: String? = null
@@ -99,6 +104,7 @@ class MyleCredentialActivity : FragmentActivity() {
         }
     }
     private fun failResult(error: Exception) {
+        Log.w(TAG, "${ticket?.javaClass?.simpleName ?: "Request"} failed", error)
         cancelSession()
         if (Build.VERSION.SDK_INT >= 34 && (ticket is ProviderTicket.Create || ticket is ProviderTicket.Get || ticket is ProviderTicket.Query)) {
             val code = if (error is NativeVaultFailure) error.code else if (error is IllegalArgumentException) "rpMismatch" else "unknown"
@@ -113,6 +119,10 @@ class MyleCredentialActivity : FragmentActivity() {
         clear(text)
         if (retry != null) button("Retry request", retry)
         button("Return to app") { cancelResult() }
+    }
+    private fun reject(reason: String, error: Throwable? = null) {
+        Log.w(TAG, "${ticket?.javaClass?.simpleName ?: "Request"} rejected: $reason", error)
+        showError()
     }
     private fun cancelSession() {
         val token = session; session = null
@@ -168,9 +178,11 @@ class MyleCredentialActivity : FragmentActivity() {
         else require(hash == null) { "Native app cannot supply clientDataHash" }
         return hash?.let { encode(it) }
     }
-    private fun requestRp(json: String, creation: Boolean): String {
-        val request = JSONObject(json)
-        return if (creation) request.getJSONObject("rp").getString("id") else request.getString("rpId")
+    /** Off the UI thread. A website's passkey needs its RP: an app that names none gets none. */
+    private fun credentialScope(caller: CallingAppInfo, json: String?, creation: Boolean): CredentialScope {
+        val scope = CallerVerifier.credential(this, caller, json?.let { CredentialPolicy.requestedRp(it, creation) })
+        if (json != null && scope.manualApp) throw NativeVaultFailure("badRequest")
+        return scope
     }
     private fun passkeyPayload(token: String, scope: CredentialScope, json: String, hash: String?): JSONObject {
         val value = payload(token, scope).put("request", JSONObject(json))
@@ -181,18 +193,18 @@ class MyleCredentialActivity : FragmentActivity() {
     private fun query(operation: ProviderTicket.Query) {
         if (Build.VERSION.SDK_INT < 34) { cancelResult(); return }
         val original = operation.request
-        val caller = original.callingAppInfo ?: run { showError(); return }
+        val caller = original.callingAppInfo ?: run { reject("Android supplied no calling app"); return }
         val supplied = PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)
         if (supplied != null && (supplied.callingAppInfo != original.callingAppInfo ||
-            supplied.beginGetCredentialOptions.map { it.id } != original.beginGetCredentialOptions.map { it.id })) { showError(); return }
+            supplied.beginGetCredentialOptions.map { it.id } != original.beginGetCredentialOptions.map { it.id })) { reject("Calling app or options changed between Android's request phases"); return }
         val supported = original.beginGetCredentialOptions.filter { it is BeginGetPasswordOption || it is BeginGetPublicKeyCredentialOption }
         clear("Choose a credential type\nRequested by ${caller.packageName}")
         supported.forEach { option ->
             val json = (option as? BeginGetPublicKeyCredentialOption)?.requestJson
-            val title = if (json == null) "Passwords" else "Passkeys for ${runCatching { requestRp(json, false) }.getOrDefault("requested website")}" 
+            val title = if (json == null) "Passwords" else "Passkeys for ${runCatching { CredentialPolicy.requestedRp(json, false) }.getOrNull() ?: "requested website"}"
             button(title) {
-                work({ CallerVerifier.credential(this, caller, json?.let { requestRp(it, false) }) }, { scope ->
-                    val hash = runCatching { validateHash(scope, (option as? BeginGetPublicKeyCredentialOption)?.clientDataHash) }.getOrElse { showError(); return@work }
+                work({ credentialScope(caller, json, creation = false) }, { scope ->
+                    val hash = runCatching { validateHash(scope, (option as? BeginGetPublicKeyCredentialOption)?.clientDataHash) }.getOrElse { reject("Client data hash does not fit the caller", it); return@work }
                     verify(scope, { token ->
                         work({
                             val args = payload(token, scope).put("kind", if (json == null) "password" else "passkey")
@@ -231,14 +243,15 @@ class MyleCredentialActivity : FragmentActivity() {
 
     private fun create(operation: ProviderTicket.Create) {
         if (Build.VERSION.SDK_INT < 34) { cancelResult(); return }
-        val request = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent) ?: run { showError(); return }
+        val request = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent) ?: run { reject("Android supplied no create request"); return }
         val caller = request.callingAppInfo
         val options = request.callingRequest
-        if (caller != operation.caller || options.type != operation.type) { showError(); return }
+        // CallingAppInfo compares package, origin and signers (androidx.credentials 1.6.0 equals()).
+        if (caller != operation.caller || options.type != operation.type) { reject("Calling app or credential type changed between Android's request phases"); return }
         val json = (options as? CreatePublicKeyCredentialRequest)?.requestJson
-        if (json != operation.requestJson) { showError(); return }
-        work({ CallerVerifier.credential(this, caller, json?.let { requestRp(it, true) }) }, { scope ->
-            val hash = if (json != null) runCatching { validateHash(scope, options.clientDataHash) }.getOrElse { showError(); return@work } else null
+        if (json != operation.requestJson) { reject("Request changed between Android's request phases"); return }
+        work({ credentialScope(caller, json, creation = true) }, { scope ->
+            val hash = if (json != null) runCatching { validateHash(scope, options.clientDataHash) }.getOrElse { reject("Client data hash does not fit the caller", it); return@work } else null
             clear("${if (json == null) "Save password" else "Create passkey"}\n${destination(scope)}")
             if (options is CreatePasswordRequest) panel.addView(TextView(this).apply { text = "Username: ${options.id}"; setTextColor(Color.WHITE) })
             button("Confirm and verify") {
@@ -265,15 +278,15 @@ class MyleCredentialActivity : FragmentActivity() {
 
     private fun get(operation: ProviderTicket.Get) {
         if (Build.VERSION.SDK_INT < 34) { cancelResult(); return }
-        val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent) ?: run { showError(); return }
-        val options = request.credentialOptions.singleOrNull() ?: run { showError(); return }
-        if (options.type != operation.type) { showError(); return }
+        val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent) ?: run { reject("Android supplied no get request"); return }
+        val options = request.credentialOptions.singleOrNull() ?: run { reject("Expected exactly one credential option"); return }
+        if (options.type != operation.type) { reject("Credential type changed since the selection"); return }
         val json = (options as? GetPublicKeyCredentialOption)?.requestJson
-        if (json != operation.requestJson) { showError(); return }
-        work({ CallerVerifier.credential(this, request.callingAppInfo, json?.let { requestRp(it, false) }) }, { scope ->
-            if (scope != operation.scope) { showError(); return@work }
-            val hash = if (json != null) runCatching { validateHash(scope, options.clientDataHash) }.getOrElse { showError(); return@work } else null
-            if (hash != operation.hash) { showError(); return@work }
+        if (json != operation.requestJson) { reject("Request changed since the selection"); return }
+        work({ credentialScope(request.callingAppInfo, json, creation = false) }, { scope ->
+            if (scope != operation.scope) { reject("Calling app or website changed since the selection"); return@work }
+            val hash = if (json != null) runCatching { validateHash(scope, options.clientDataHash) }.getOrElse { reject("Client data hash does not fit the caller", it); return@work } else null
+            if (hash != operation.hash) { reject("Client data hash changed since the selection"); return@work }
             verify(scope, { token ->
                 work({
                     if (json != null) {
@@ -336,7 +349,7 @@ class MyleCredentialActivity : FragmentActivity() {
                                         count++
                                     }
                                 }
-                                if (count == 0) { showError(); return@filling }
+                                if (count == 0) { reject("Selected login has none of the requested fields"); return@filling }
                                 val response = android.service.autofill.FillResponse.Builder().addDataset(dataset.build()).build()
                                 setResult(RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, response))
                                 finish()
@@ -346,7 +359,10 @@ class MyleCredentialActivity : FragmentActivity() {
                     button("Cancel") { cancelResult() }
                 })
             })
-        }, { showError("MYLE could not verify this website or app. Retry the identity check or return to the requesting app.") { autofill(operation) } })
+        }, { error ->
+            Log.w(TAG, "Autofill identity check failed for ${operation.form.packageName}", error)
+            showError("MYLE could not verify this website or app. Retry the identity check or return to the requesting app.") { autofill(operation) }
+        })
     }
     private fun enrollment() {
         work({ CallerVerifier.ownApp(this) }, { scope ->

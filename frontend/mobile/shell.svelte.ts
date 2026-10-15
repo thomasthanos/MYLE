@@ -1,7 +1,7 @@
 // The phone shell's own state, for the page's parts that open it.
 class Shell {
-  /** The account sheet (sign in, sync, sign out). */
-  accountOpen = $state(false);
+  /** The Settings sheet (security, filling, sync and the account, about). */
+  settingsOpen = $state(false);
 }
 
 export const shell = new Shell();

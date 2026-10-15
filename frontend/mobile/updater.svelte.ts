@@ -26,21 +26,24 @@ class Updater {
 
   readonly visible = $derived(this.update !== null && !this.dismissed);
 
-  async check() {
-    if (this.step.kind === "downloading") return;
+  /** True once the feed answered, with a newer version or without one. */
+  async check(): Promise<boolean> {
+    if (this.step.kind === "downloading") return true;
     try {
       const found = await api.updateCheck();
       if (!found) {
         this.update = null;
-        return;
+        return true;
       }
       if (found.version !== this.update?.version) {
         this.#path = null;
         this.step = { kind: "available" };
       }
       this.update = found;
+      return true;
     } catch {
       // Offline: asked again when the app comes back.
+      return false;
     }
   }
 

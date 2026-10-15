@@ -3,7 +3,7 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { onBackButtonPress } from "@tauri-apps/api/app";
   import Lock from "@lucide/svelte/icons/lock";
-  import UserRound from "@lucide/svelte/icons/user-round";
+  import Settings from "@lucide/svelte/icons/settings";
   import ConfirmHost from "../lib/components/ConfirmHost.svelte";
   import Logo from "../lib/components/Logo.svelte";
   import Toaster from "../lib/components/Toaster.svelte";
@@ -11,10 +11,10 @@
   import { passwordsApi as api } from "../app/pages/password-manager/api";
   import PasswordManager from "../app/pages/password-manager/PasswordManager.svelte";
   import { passwords as p } from "../app/pages/password-manager/state.svelte";
-  import AccountSheet from "./AccountSheet.svelte";
   import { account } from "./account.svelte";
   import Scanner from "./Scanner.svelte";
   import { scanner } from "./camera.svelte";
+  import SettingsSheet from "./SettingsSheet.svelte";
   import { shell } from "./shell.svelte";
   import UpdateBanner from "./UpdateBanner.svelte";
   import { updater } from "./updater.svelte";
@@ -80,8 +80,11 @@
       scanner.stop();
     } else if (confirmState.current) {
       confirmState.answer(false);
-    } else if (shell.accountOpen) {
-      shell.accountOpen = false;
+    } else if (shell.settingsOpen && document.querySelector('.backdrop > [role="dialog"]')) {
+      // A dialog opened from Settings (Change master password) closes first.
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    } else if (shell.settingsOpen) {
+      shell.settingsOpen = false;
     } else if (document.querySelector('[role="dialog"], .popover > .panel')) {
       // Dialogs and menus close on Escape.
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -104,8 +107,8 @@
       <button class="icon-btn" title="Lock now" aria-label="Lock the vault" onclick={() => p.lock()}><Lock size={18} /></button>
     {/if}
     {#if !welcome}
-      <button class="icon-btn account" class:signed-in={!!account.profile} aria-label="Account" onclick={() => (shell.accountOpen = true)}>
-        <UserRound size={18} />
+      <button class="icon-btn account" class:signed-in={!!account.profile} aria-label="Settings" onclick={() => (shell.settingsOpen = true)}>
+        <Settings size={18} />
       </button>
     {/if}
   </header>
@@ -123,7 +126,7 @@
   </main>
 </div>
 
-<AccountSheet />
+<SettingsSheet />
 <Toaster />
 <ConfirmHost />
 <Scanner />

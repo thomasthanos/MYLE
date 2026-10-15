@@ -18,7 +18,7 @@ function harness({ accept = true, fail = false, signIn } = {}) {
   const calls = [], questions = [], errors = [];
   const context = vm.createContext({
     require: createRequire(import.meta.url), exports: {}, URLSearchParams, navigator: { userAgent: "Android" },
-    isTauri: () => true, shell: { accountOpen: true },
+    isTauri: () => true, shell: { settingsOpen: true },
     confirm: async (options) => { questions.push(options); return accept; },
     passwords: { lock: async () => calls.push("lock"), resetLocal: () => calls.push("reset") },
     accountApi: { signIn, cancelSignIn() {}, signOut: async () => { calls.push("native"); if (fail) throw new Error("file cannot be removed"); } },
@@ -37,7 +37,7 @@ test("confirmed sign out clears the phone and tells the shell to show welcome", 
   assert.equal(h.account.profile, null);
   assert.equal(h.account.resetVersion, 1);
   assert.equal(h.account.signingOut, false);
-  assert.equal(h.shell.accountOpen, false);
+  assert.equal(h.shell.settingsOpen, false);
   assert.match(h.questions[0].message, /have not synced will be lost/);
 });
 test("cancelling sign out preserves the vault and account", async () => {

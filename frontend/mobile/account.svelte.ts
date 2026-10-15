@@ -102,7 +102,7 @@ class MobileAccount {
       try { sessionStorage.clear(); } catch { /* Storage may be unavailable. */ }
       this.profile = null;
       this.signingIn = null;
-      shell.accountOpen = false;
+      shell.settingsOpen = false;
       this.resetVersion++;
       toast.info("Signed out. This phone's local data was cleared.");
     } catch (error) {

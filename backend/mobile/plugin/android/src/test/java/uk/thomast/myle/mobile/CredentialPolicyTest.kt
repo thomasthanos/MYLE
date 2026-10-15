@@ -14,6 +14,33 @@ class CredentialPolicyTest {
         assertEquals("uk.thomast.myle.other", CredentialPolicy.autofillRequestPackage("uk.thomast.myle.other", "uk.thomast.myle"))
         assertNull(CredentialPolicy.autofillRequestPackage(null, "uk.thomast.myle"))
     }
+    @Test fun credentialManagerCallerIsKnownFromAndroidsSuppliedSigners() {
+        // Android 11+ package visibility usually hides the caller's package from MYLE.
+        assertTrue(CredentialPolicy.suppliedSignersAccepted(setOf("AA:BB"), null))
+        assertTrue(CredentialPolicy.suppliedSignersAccepted(setOf("AA:BB"), setOf("AA:BB")))
+    }
+    @Test fun visibleInstalledCallerMustMatchAndroidsSuppliedSigners() {
+        assertFalse(CredentialPolicy.suppliedSignersAccepted(setOf("AA:BB"), setOf("CC:DD")))
+        assertFalse(CredentialPolicy.suppliedSignersAccepted(setOf("AA:BB"), setOf("AA:BB", "CC:DD")))
+        assertFalse(CredentialPolicy.suppliedSignersAccepted(emptySet(), null))
+        assertFalse(CredentialPolicy.suppliedSignersAccepted(emptySet(), emptySet()))
+    }
+    @Test fun webauthnRelyingPartyIdMayBeOmitted() {
+        assertEquals("example.com", CredentialPolicy.requestedRp("""{"rp":{"id":"example.com","name":"Example"}}""", true))
+        assertNull(CredentialPolicy.requestedRp("""{"rp":{"name":"Example"}}""", true))
+        assertNull(CredentialPolicy.requestedRp("""{"rp":{"id":null,"name":"Example"}}""", true))
+        assertNull(CredentialPolicy.requestedRp("""{"challenge":"AAAA"}""", true))
+        assertEquals("example.com", CredentialPolicy.requestedRp("""{"rpId":"example.com"}""", false))
+        assertNull(CredentialPolicy.requestedRp("""{"challenge":"AAAA"}""", false))
+        // A request for the creation field never reads the sign-in field, or the reverse.
+        assertNull(CredentialPolicy.requestedRp("""{"rpId":"example.com"}""", true))
+        assertNull(CredentialPolicy.requestedRp("""{"rp":{"id":"example.com"}}""", false))
+    }
+    @Test fun presentButEmptyRelyingPartyIdIsNotTheDefault() {
+        // WebAuthn rejects an empty RP ID instead of using the page host.
+        assertEquals("", CredentialPolicy.requestedRp("""{"rp":{"id":""}}""", true))
+        assertTrue(runCatching { CredentialPolicy.credentialBrowserSite("https://example.com", "", true) }.isFailure)
+    }
     @Test fun validHttpsOriginsMayUseNondefaultPorts() {
         assertEquals("example.com", CredentialPolicy.originHost("https://example.com:8443"))
         assertTrue(CredentialPolicy.rpMatches("https://login.example.com:8443", "example.com"))

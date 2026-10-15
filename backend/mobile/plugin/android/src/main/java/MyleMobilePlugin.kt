@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.View
 import android.view.ViewGroup
 import android.view.autofill.AutofillManager
 import android.webkit.WebView
@@ -109,6 +110,17 @@ class MyleMobilePlugin(private val activity: Activity) : Plugin(activity) {
     override fun load(webView: WebView) {
         super.load(webView)
         fitScreen(webView)
+        keepOutOfAutofill(webView)
+    }
+
+    /**
+     * MYLE's own pages (the master password, the vault's logins) reach no
+     * autofill service, MYLE's or another's: none offers to fill them or to
+     * save what is typed there. Signing in happens in the browser's tab.
+     */
+    private fun keepOutOfAutofill(webView: WebView) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        activity.runOnUiThread { webView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS }
     }
 
     /**

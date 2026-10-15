@@ -24,7 +24,7 @@
   <button
     class="sync off"
     title={MOBILE ? "Sign in to keep your passwords the same here and on your PC." : "Sign in on the Settings page to keep your passwords on all your PCs."}
-    onclick={() => (MOBILE ? (shell.accountOpen = true) : nav.go("settings"))}
+    onclick={() => (MOBILE ? (shell.settingsOpen = true) : nav.go("settings"))}
   >
     <CloudOff size={14} /> {MOBILE ? "Sign in to sync" : `Only on this ${DEVICE}`}
   </button>

@@ -185,6 +185,12 @@ jobs:
             echo "::error::The merged APK must explicitly disable Android backup"
             exit 1
           fi
+          # Autofill reads the requesting app's certificate; Android 11+ hides
+          # apps that the native plugin's <queries> do not name.
+          if ! echo "$manifest" | grep -q 'E: queries'; then
+            echo "::error::The merged APK has lost the native plugin's <queries>"
+            exit 1
+          fi
           if ! echo "$manifest" | grep -q ':scheme([^)]*)="uk.thomast.myle.passwords"'; then
             echo "::warning::The APK's manifest shows no uk.thomast.myle.passwords scheme"
           fi

@@ -4,6 +4,7 @@ import java.net.URI
 import java.util.Locale
 import java.util.UUID
 import com.google.common.net.InternetDomainName
+import org.json.JSONObject
 
 internal enum class Destination { WEBSITE, MANUAL_APP, REJECTED }
 
@@ -35,6 +36,18 @@ internal object CredentialPolicy {
     }
     fun trustedBrowser(pkg: String, certificates: Set<String>, allowlist: Map<String, Set<String>>): Boolean =
         certificates.isNotEmpty() && allowlist[pkg]?.containsAll(certificates) == true
+
+    /** Credential Manager supplies the caller's signers; Android 11+ package visibility usually
+     *  hides the caller from MYLE (null). When it is visible, it must match what Android supplied. */
+    fun suppliedSignersAccepted(supplied: Set<String>, installed: Set<String>?): Boolean =
+        supplied.isNotEmpty() && (installed == null || installed == supplied)
+
+    /** The request's RP ID, or null when it is omitted (WebAuthn's default: the page's own host). */
+    fun requestedRp(json: String, creation: Boolean): String? {
+        val request = JSONObject(json)
+        val value = if (creation) request.optJSONObject("rp")?.opt("id") else request.opt("rpId")
+        return value as? String
+    }
 
     fun destination(claim: String?, trustedBrowser: Boolean, assetLinked: Boolean): Destination =
         if (claim.isNullOrEmpty()) Destination.MANUAL_APP else if (trustedBrowser || assetLinked) Destination.WEBSITE else Destination.REJECTED
