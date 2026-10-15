@@ -72,7 +72,7 @@ Files: native `NativeVault.kt`, `CredentialScope.kt`, `MyleCredentialProviderSer
 - [x] Implement destination-scoped login selection and requested username/password/TOTP fields. Password save requires explicit user confirmation and fresh verification.
 - [x] Add fingerprint enrollment/unlock using per-use Keystore AES-GCM CryptoObjects, with invalidation and master-password fallback. No standalone biometric prompt followed by freely accessible decryption.
 - [x] Add `providerStatus`, `providerSettings`, `providerBiometry` commands to native plugin. Status reports SDK/API availability, enabled provider/autofill and fingerprint availability/enrollment. Setup activity obtains its own master-password session before enrolling.
-- [ ] Native unit tests plus Android build are required; static source checks alone are insufficient.
+- [x] Native unit tests plus Android build are required; static source checks alone are insufficient.
 
 ## Task 3: In-app setup and compatibility routing
 
@@ -85,10 +85,10 @@ Files: mobile frontend provider setup component/state, mobile Rust/plugin setup 
 
 ## Task 4: Build, review and release
 
-- [ ] Run all relevant native/Rust/Node tests and full checks; build Android on the existing GitHub workflow without publishing an unverified patch.
+- [x] Run all relevant native/Rust/Node tests and full checks; build Android on the existing GitHub workflow without publishing an unverified patch.
 - [x] Independently review caller binding, biometric key access, JNI lifecycle, pending-intent mutation and provider context integrity.
 - [x] Resolve material findings with reproducing tests. Record OEM/live-site tests as pending if phones/account access are unavailable.
-- [ ] Produce patch APK and extension ZIPs, bump patch version consistently, commit/push and publish after build checks pass, using the user's existing release authorization.
+- [x] Produce patch APK and extension ZIPs, bump patch version consistently, commit/push and publish after build checks pass, using the user's existing release authorization.
 
 ## Evidence ledger
 
@@ -103,3 +103,8 @@ Files: mobile frontend provider setup component/state, mobile Rust/plugin setup 
 - First Android dry run stopped before compilation: the added Gradle test step ran after init but before tauri-build generated tauri.settings.gradle. Pinned tauri-build source confirms generation during the Rust build. The native test step now follows APK compilation and still precedes signing/upload; no checks were removed.
 - Windows CI run 38771458805 passed all jobs, including installer install/update/uninstall. Mobile run 38771895510 passed Android/iOS compilation, native Gradle tests and signing. Downloaded APK exports the JNI function on ARM64 and ARMv7 and has the expected service bind permissions/private activity. A further artifact assertion found the old workflow's allowBackup replacement no longer enforces an explicit false when the current Tauri template omits that attribute (existing backup-rule resources are present; no data-exfiltration claim is made). The plugin manifest now explicitly disables backup and the signed-APK CI check requires it. Android must be rebuilt after this change before merging/releasing.
 - Run 38773966060 rebuilt both apps and passed native Gradle tests/signing. The signed APK dump confirms allowBackup=false. The additional shell assertion expected a legacy aapt2 representation and falsely failed against the current boolean text. Its corrected expression is checked against the actual log and legacy false, and rejects true/missing/malformed values. No app code changed after these tests; main/release can proceed with the corrected artifact guard.
+- Final integration: fast-forwarded and pushed main; annotated tag v10.0.5 points to 9494353627336aed05e409b191fb1ab57329fcc1. Deleted codex/android-credentials locally and remotely at the user's explicit request after checking it was merged.
+- Final main CI [38775460420](https://github.com/thomasthanos/MYLE/actions/runs/38775460420) passed both jobs, including 654 Rust tests (9 previously ignored), 310 Node tests, Clippy, frontend checks/builds and installer install/update/uninstall. Native compilation and 17 JUnit tests also passed; final mobile release [38775461543](https://github.com/thomasthanos/MYLE/actions/runs/38775461543) passed Android, iOS and publishing.
+- [Stable 10.0.5 release](https://github.com/thomasthanos/MYLE/releases/tag/v10.0.5) publishes MYLE.exe, the APK, IPA and both browser ZIPs. Windows release [38775461255](https://github.com/thomasthanos/MYLE/actions/runs/38775461255) published the installer/ZIPs. Downloaded browser ZIPs match all expected manifests, versions, source and icons; downloaded APK exports the JNI function on ARM64/ARMv7 and its merged manifest has the expected system-bound services, private credential activity, version/package and allowBackup=false.
+- Verified Windows/mobile update feeds are 10.0.5 and their SHA-256 values match GitHub asset digests. The served Windows installer was downloaded and hashed independently: d76c6bda56a15b2f8f4c0d6a0c3f4914f30e7b6167866a3b951c49cd7763cda8. Downloaded APK: 2169d8533b0724cf0b985fbf3ad65de0b03b70802299b975a2caef1ab79b8fde. Retained local verification tools/logs/downloads live under ignored backend/target/android-credentials-verification/ in the main checkout.
+- Physical Xiaomi/Samsung enrollment, prompt/selector interaction and real account ceremonies remain unverified; protocol acceptance does not establish universal website compatibility or force a site's provider/passkey display name. No external AAGUID registry submission was made.
