@@ -8,7 +8,7 @@ The bundled privileged-browser allowlist is a 2026-10-14 snapshot of https://www
 
 On API 26/27, browser Autofill cannot safely verify HTTPS because webScheme was introduced in API 28; those website claims are rejected. Native app Autofill is available. Protected Autofill save delegation requires SaveCallback.onSuccess(IntentSender), introduced in API 28. On earlier versions Android receives a clear save failure directing the user to MYLE. No SMS permission is requested; 2FA fills vault TOTP codes only.
 
-After Tauri generates the app project, run from backend/mobile/gen/android:
+After `npx tauri android build --apk --ci --target aarch64 --target armv7` generates the Gradle plugin settings during its Rust build, run from backend/mobile/gen/android (Android init alone is insufficient):
 
     ./gradlew :tauri-plugin-myle-mobile:testDebugUnitTest :tauri-plugin-myle-mobile:assembleDebug
 

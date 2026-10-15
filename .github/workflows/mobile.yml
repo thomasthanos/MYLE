@@ -144,12 +144,14 @@ jobs:
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
           grep -n 'allowBackup\|android:scheme' "$manifest" || true
 
+      - name: Build the APK
+        run: npx tauri android build --apk --ci --target aarch64 --target armv7
+
+      # tauri-build generates tauri.settings.gradle and the plugin projects
+      # during the Rust build; android init alone does not create them.
       - name: Test native credential provider
         working-directory: backend/mobile/gen/android
         run: ./gradlew :tauri-plugin-myle-mobile:testDebugUnitTest :tauri-plugin-myle-mobile:assembleDebug
-
-      - name: Build the APK
-        run: npx tauri android build --apk --ci --target aarch64 --target armv7
 
       - name: Sign it
         env:
