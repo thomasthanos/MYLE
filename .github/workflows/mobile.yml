@@ -181,7 +181,7 @@ jobs:
           # The sign-in comes back through this link.
           manifest=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml out/MYLE-Passwords.apk)
           echo "$manifest" | grep -E 'package=|versionCode|versionName|allowBackup|scheme' || true
-          if ! echo "$manifest" | grep -q ':allowBackup([^)]*)=(type 0x12)0x0'; then
+          if ! echo "$manifest" | grep -Eq ':allowBackup\([^)]*\)=(false|\(type 0x12\)0x0)([[:space:]]|$)'; then
             echo "::error::The merged APK must explicitly disable Android backup"
             exit 1
           fi
