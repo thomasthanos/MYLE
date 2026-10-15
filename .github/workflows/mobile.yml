@@ -55,6 +55,7 @@ jobs:
     outputs:
       version: ${{ steps.read.outputs.version }}
       build: ${{ steps.read.outputs.build }}
+      checks: ${{ steps.read.outputs.checks }}
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +97,11 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
+          checks=true
+          if [ "${{ github.ref_type }}" = "tag" ] && git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qx 'Checks: skip'; then
+            checks=false
+          fi
+          echo "checks=$checks" >> "$GITHUB_OUTPUT"
 
   android:
     needs: version
@@ -151,6 +157,7 @@ jobs:
       # tauri-build generates tauri.settings.gradle and the plugin projects
       # during the Rust build; android init alone does not create them.
       - name: Test native credential provider
+        if: needs.version.outputs.checks != 'false'
         working-directory: backend/mobile/gen/android
         run: ./gradlew :tauri-plugin-myle-mobile:testDebugUnitTest :tauri-plugin-myle-mobile:assembleDebug
 
