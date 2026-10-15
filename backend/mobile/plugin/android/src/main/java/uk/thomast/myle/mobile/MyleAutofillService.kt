@@ -17,8 +17,8 @@ internal data class AutofillForm(val packageName: String, val domain: String?, v
 
 @RequiresApi(26)
 internal object AutofillParser {
-    fun parse(structure: AssistStructure): AutofillForm? {
-        val pkg = structure.activityComponent?.packageName ?: return null
+    fun parse(structure: AssistStructure, providerPackage: String): AutofillForm? {
+        val pkg = CredentialPolicy.autofillRequestPackage(structure.activityComponent?.packageName, providerPackage) ?: return null
         val fields = mutableListOf<AutofillField>()
         val domains = mutableSetOf<Pair<String?, String?>>()
         val claims = mutableSetOf<String>()
@@ -48,7 +48,7 @@ internal object AutofillParser {
 class MyleAutofillService : AutofillService() {
     override fun onFillRequest(request: FillRequest, cancellationSignal: CancellationSignal, callback: FillCallback) {
         if (cancellationSignal.isCanceled) return
-        val form = runCatching { AutofillParser.parse(request.fillContexts.last().structure) }.getOrNull()
+        val form = runCatching { AutofillParser.parse(request.fillContexts.last().structure, packageName) }.getOrNull()
         if (form == null) { callback.onSuccess(null); return }
         val pending = ProviderTickets.pending(this, ProviderTicket.Autofill(form.copy(fields = form.fields.map { it.copy(node = null) })), false)
         cancellationSignal.setOnCancelListener { ProviderTickets.cancel(pending) }
@@ -64,7 +64,7 @@ class MyleAutofillService : AutofillService() {
     }
 
     override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) {
-        val form = runCatching { AutofillParser.parse(request.fillContexts.last().structure) }.getOrNull()
+        val form = runCatching { AutofillParser.parse(request.fillContexts.last().structure, packageName) }.getOrNull()
         if (form == null || !form.requested().contains("password")) { callback.onFailure("No password fields to save"); return }
         val pending = ProviderTickets.pending(this, ProviderTicket.Autofill(form, saving = true), false)
         // API 28+ lets Android launch the private verification/confirmation UI after its own save prompt.

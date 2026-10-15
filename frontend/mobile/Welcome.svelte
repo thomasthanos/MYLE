@@ -31,7 +31,7 @@
 </section>
 
 <style>
-  .welcome { display: flex; flex-direction: column; align-items: center; gap: 22px; width: 100%; max-width: 440px; margin: auto; padding: 24px 4px 14px; }
+  .welcome { display: flex; flex: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; max-width: 440px; margin: auto; padding: 18px 4px 14px; }
   .vault-art { position: relative; display: grid; place-items: center; flex: none; width: 200px; height: 156px; }
   .orbit { position: absolute; width: 178px; height: 120px; border: 1px solid rgb(var(--accent-rgb) / .18); border-radius: 50%; transform: rotate(-27deg); }
   .orbit-two { width: 146px; height: 146px; border-color: rgb(255 255 255 / .05); transform: rotate(20deg); }
@@ -43,18 +43,18 @@
   .intro { width: 100%; text-align: center; }
   h1 { margin: 0 0 12px; font-family: var(--font-handwritten); font-size: clamp(29px, 8vw, 36px); font-weight: 700; line-height: 1.15; letter-spacing: -.6px; }
   .intro p { max-width: 340px; margin: auto; color: var(--text-2); font-size: 15px; line-height: 1.5; }
-  .connect { width: 100%; padding: 24px 20px 20px; border-radius: 24px; background: linear-gradient(160deg, rgb(255 255 255 / .055), transparent 55%), var(--bg-solid-panel); box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), 0 18px 40px -24px #000; }
+  .connect { width: 100%; min-width: 0; padding: 20px 18px 18px; border-radius: 24px; background: linear-gradient(160deg, rgb(255 255 255 / .055), transparent 55%), var(--bg-solid-panel); box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), 0 18px 40px -24px #000; }
   .connect-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; text-align: left; }
   .device-icon { display: grid; place-items: center; flex: none; width: 42px; height: 42px; border: 1px solid rgb(var(--accent-rgb) / .22); border-radius: 13px; background: rgb(var(--accent-rgb) / .1); color: var(--accent); }
+  .connect-heading > div { min-width: 0; overflow-wrap: anywhere; }
   h2 { margin: 0 0 4px; font-family: var(--font-sans); font-size: 17px; font-weight: 650; line-height: 1.3; }
   .connect-heading p { color: var(--text-3); font-size: 13px; line-height: 1.4; }
   .account-note { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--glass-border); color: var(--text-3); font-size: 12.5px; text-align: center; line-height: 1.5; }
   .privacy { display: flex; align-items: flex-start; justify-content: center; gap: 9px; color: var(--text-3); font-size: 12px; line-height: 1.5; text-align: left; }
   .privacy :global(svg) { flex: none; margin-top: 2px; }
-  /* Always one screen: tighter, then smaller, on shorter phones. */
-  .welcome { max-height: 100%; }
+  /* Short screens stay compact; all content remains reachable by scrolling. */
   @media (max-height: 800px) { .welcome { gap: 18px; padding-top: 12px; } }
-  @media (max-height: 620px) { .welcome { gap: 10px; padding-top: 0; } .vault-art { height: 92px; transform: scale(.66); margin-block: -14px; } h1 { margin-bottom: 6px; font-size: 25px; } .intro p { font-size: 13.5px; } .connect { padding: 14px; } .connect-heading { margin-bottom: 10px; } .account-note { margin-top: 10px; padding-top: 10px; } .privacy { display: none; } }
   @media (max-height: 740px) { .welcome { gap: 16px; padding-top: 10px; } .vault-art { height: 120px; transform: scale(.85); margin-block: -6px; } h1 { font-size: 29px; } .connect { padding: 16px; } }
+  @media (max-height: 620px) { .welcome { gap: 12px; padding-top: 0; } .vault-art { height: 92px; transform: scale(.66); margin-block: -14px; } h1 { margin-bottom: 6px; font-size: 27px; } .connect { padding: 14px; } .connect-heading { margin-bottom: 10px; } .account-note { margin-top: 10px; padding-top: 10px; } }
   @media (min-width: 650px) { .welcome { padding-top: 40px; gap: 28px; } }
 </style>

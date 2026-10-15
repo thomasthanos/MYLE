@@ -1,6 +1,7 @@
 package uk.thomast.myle.mobile
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +33,7 @@ class MyleCredentialActivity : FragmentActivity() {
     private lateinit var panel: LinearLayout
     private lateinit var message: TextView
     private var ticket: ProviderTicket? = null
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,20 +42,24 @@ class MyleCredentialActivity : FragmentActivity() {
         if (savedInstanceState != null) { finish(); return }
         panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(28, 36, 28, 28)
+            setPadding(dp(24), dp(24), dp(24), dp(24))
             setBackgroundColor(Color.rgb(10, 12, 18))
             if (Build.VERSION.SDK_INT >= 26) importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
-        message = TextView(this).apply { setTextColor(Color.WHITE); textSize = 18f }
+        message = TextView(this).apply { setTextColor(Color.WHITE); textSize = 18f; setPadding(0, 0, 0, dp(12)) }
         panel.addView(message)
         ViewCompat.setOnApplyWindowInsetsListener(panel) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
-            val margin = (24 * resources.displayMetrics.density).toInt()
+            val margin = dp(24)
             view.setPadding(margin + bars.left, margin + bars.top, margin + bars.right, margin + maxOf(bars.bottom, keyboard.bottom))
             insets
         }
-        setContentView(ScrollView(this).apply { addView(panel) })
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(Color.rgb(10, 12, 18))
+            isFillViewport = true
+            addView(panel)
+        })
         if (intent.action == ENROLL) { enrollment(); return }
         ticket = ProviderTickets.take(intent) { if (!ended) cancelResult() }
         when (val operation = ticket) {
@@ -68,7 +74,15 @@ class MyleCredentialActivity : FragmentActivity() {
         panel.removeAllViews(); panel.addView(message); message.text = title
     }
     private fun button(label: String, action: () -> Unit) {
-        panel.addView(Button(this).apply { text = label; isAllCaps = false; filterTouchesWhenObscured = true; setOnClickListener { if (!ended) action() } })
+        panel.addView(Button(this).apply {
+            text = label; isAllCaps = false; filterTouchesWhenObscured = true
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(Color.rgb(27, 37, 58))
+            minHeight = dp(48)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) }
+            setOnClickListener { if (!ended) action() }
+        })
     }
     private fun destination(scope: CredentialScope): String =
         if (scope.manualApp) "${scope.packageName}\nApp certificate: ${scope.certificate}\nChoose a login explicitly for this app."
@@ -94,10 +108,11 @@ class MyleCredentialActivity : FragmentActivity() {
             setResult(RESULT_OK, result); finish()
         } else showError()
     }
-    private fun showError() {
+    private fun showError(text: String = "MYLE could not complete this request. Return to the requesting app and try again.", retry: (() -> Unit)? = null) {
         cancelSession()
-        clear("MYLE could not authorize this request. Check the website/app identity or retry with your master password.")
-        button("Cancel") { cancelResult() }
+        clear(text)
+        if (retry != null) button("Retry request", retry)
+        button("Return to app") { cancelResult() }
     }
     private fun cancelSession() {
         val token = session; session = null
@@ -287,6 +302,7 @@ class MyleCredentialActivity : FragmentActivity() {
 
     private fun autofill(operation: ProviderTicket.Autofill) {
         if (Build.VERSION.SDK_INT < 26) { cancelResult(); return }
+        if (CredentialPolicy.autofillRequestPackage(operation.form.packageName, packageName) == null) { cancelResult(); return }
         work({ operation.form.resolveScope(this) }, { scope ->
             if (operation.saving) {
                 clear("Save password in MYLE\n${destination(scope)}")
@@ -330,7 +346,7 @@ class MyleCredentialActivity : FragmentActivity() {
                     button("Cancel") { cancelResult() }
                 })
             })
-        })
+        }, { showError("MYLE could not verify this website or app. Retry the identity check or return to the requesting app.") { autofill(operation) } })
     }
     private fun enrollment() {
         work({ CallerVerifier.ownApp(this) }, { scope ->

@@ -8,6 +8,10 @@ import com.google.common.net.InternetDomainName
 internal enum class Destination { WEBSITE, MANUAL_APP, REJECTED }
 
 internal object CredentialPolicy {
+    /** MYLE's own master password and vault forms must never become fill or save requests. */
+    fun autofillRequestPackage(requesterPackage: String?, providerPackage: String): String? =
+        requesterPackage?.takeIf { it != providerPackage }
+
     fun passwordCredentialEligible(hasPassword: Boolean, username: String): Boolean =
         hasPassword && username.isNotEmpty()
 

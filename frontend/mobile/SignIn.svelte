@@ -37,12 +37,15 @@
     align-items: center;
     justify-content: flex-start;
     gap: 14px;
-    min-height: 58px;
+    min-width: 0;
+    min-height: 52px;
     padding: 9px 14px;
     border-radius: 16px;
     font-family: var(--font-sans);
     font-size: 14px;
     font-weight: 600;
+    text-align: left;
+    overflow-wrap: anywhere;
   }
 
   .provider:active:not(:disabled) {
@@ -71,7 +74,7 @@
 
   .waiting {
     display: grid;
-    grid-template-columns: 18px 1fr;
+    grid-template-columns: 18px minmax(0, 1fr);
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -82,6 +85,7 @@
 
   .waiting span {
     display: grid;
+    min-width: 0;
     flex: 1;
     gap: 2px;
   }

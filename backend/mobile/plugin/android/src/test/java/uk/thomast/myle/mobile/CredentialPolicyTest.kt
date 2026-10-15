@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CredentialPolicyTest {
+    @Test fun ownAppCannotStartAnAutofillOrSaveRequest() {
+        assertNull(CredentialPolicy.autofillRequestPackage("uk.thomast.myle", "uk.thomast.myle"))
+        // Use the installed application ID so development variants are excluded too.
+        assertNull(CredentialPolicy.autofillRequestPackage("uk.thomast.myle.debug", "uk.thomast.myle.debug"))
+    }
+    @Test fun excludingOwnAppPreservesExactExternalPackageIdentity() {
+        assertEquals("com.android.chrome", CredentialPolicy.autofillRequestPackage("com.android.chrome", "uk.thomast.myle"))
+        assertEquals("uk.thomast.myle.other", CredentialPolicy.autofillRequestPackage("uk.thomast.myle.other", "uk.thomast.myle"))
+        assertNull(CredentialPolicy.autofillRequestPackage(null, "uk.thomast.myle"))
+    }
     @Test fun validHttpsOriginsMayUseNondefaultPorts() {
         assertEquals("example.com", CredentialPolicy.originHost("https://example.com:8443"))
         assertTrue(CredentialPolicy.rpMatches("https://login.example.com:8443", "example.com"))

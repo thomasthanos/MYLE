@@ -18,7 +18,7 @@
 
   async function refresh() {
     if (!isTauri()) return;
-    try { status = await invoke<Status>("mobile_provider_status"); }
+    try { status = await invoke<Status>("mobile_provider_status"); error = ""; }
     catch { error = "Android filling settings could not be checked. Reopen Account to retry."; }
   }
   async function settings(target: "passkeys" | "autofill") {
@@ -52,7 +52,9 @@
     </div>
     <div class="setting">
       <span><b>Passkeys</b><small>{!status.passkeysAvailable ? "Passkey providers need Android 14 or later" : status.passkeysEnabled ? "MYLE is enabled as a credential provider" : "Enable MYLE in Android's credential providers"}</small></span>
-      <button class="btn small" disabled={busy || !status.passkeysAvailable} onclick={() => settings("passkeys")}>{status.passkeysEnabled ? "Settings" : "Set up"}</button>
+      {#if status.passkeysAvailable}
+        <button class="btn small" disabled={busy} onclick={() => settings("passkeys")}>{status.passkeysEnabled ? "Settings" : "Set up"}</button>
+      {:else}<span class="requirement">Android 14+</span>{/if}
     </div>
     <div class="setting">
       <span><b><Fingerprint size={14} /> Fingerprint for filling</b><small>{status.biometryEnabled ? "Verify each fill or passkey operation" : status.biometryAvailable ? "Protect filling with your fingerprint" : "Set up a strong fingerprint in Android settings"}</small></span>
@@ -69,11 +71,12 @@
 <style>
   section { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid rgb(255 255 255 / .1); }
   h3 { margin: 0; font-size: 15px; }
-  .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .setting span { display: grid; gap: 3px; }
+  .setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding-block: 5px; }
+  .setting > span { display: grid; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
   b { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
   small, p { color: var(--text-2); font-size: 12px; line-height: 1.4; }
   p { margin: 0; }
-  button { flex-shrink: 0; }
+  button { min-height: 44px; }
+  .setting > .requirement { display: block; color: var(--text-3); font-size: 11px; white-space: nowrap; padding: 6px 8px; border: 1px solid var(--glass-border); border-radius: 8px; }
   .error { color: var(--danger, #f87171); }
 </style>

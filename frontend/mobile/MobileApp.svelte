@@ -99,7 +99,7 @@
 
 <div class="shell" class:away>
   <header class="bar">
-    <span class="brand"><Logo size={26} /> MYLE Passwords</span>
+    <span class="brand"><Logo size={26} /><span>MYLE Passwords</span></span>
     {#if p.status === "unlocked"}
       <button class="icon-btn" title="Lock now" aria-label="Lock the vault" onclick={() => p.lock()}><Lock size={18} /></button>
     {/if}
@@ -112,7 +112,7 @@
 
   <UpdateBanner />
 
-  <main class:fixed={welcome}>
+  <main>
     {#if !account.loaded || hasVault === null}
       <!-- A moment: whether this phone has a vault and an account. -->
     {:else if welcome}
@@ -137,18 +137,15 @@
 
   .brand :global(svg) { filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.35)); }
 
-  .brand { display: inline-flex; flex: 1; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 17px; font-weight: 650; }
+  .brand { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 17px; font-weight: 650; }
+
+  .brand > span { min-width: 0; overflow-wrap: anywhere; }
+
+  .brand :global(svg) { flex: none; }
 
   .account.signed-in { color: #8fe3b6; }
 
   main { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 14px 14px calc(env(safe-area-inset-bottom) + 12px); overflow: auto; }
-
-  /* The welcome screen fits the screen: no scrolling, no bounce. */
-  main.fixed {
-    overflow: hidden;
-    overscroll-behavior: none;
-    touch-action: none;
-  }
 
   /* Out of sight: nothing readable in the app switcher. */
   .away main { filter: blur(18px); }

@@ -468,7 +468,7 @@
 
   .toolbar { display: flex; align-items: center; gap: 9px; min-width: 0; }
 
-  .search { display: flex; flex: 1; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.2); color: var(--text-3); }
+  .search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.2); color: var(--text-3); }
 
   .search:focus-within { border-color: rgb(var(--accent-rgb) / 0.55); }
 
@@ -716,6 +716,25 @@
   }
 
   /* A phone: rows and bars a finger can hit, whatever the screen's height. */
+  :global(html.mobile) .toolbar { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, 44px); gap: 6px; }
+
+  :global(html.mobile) .toolbar > :global(.btn),
+  :global(html.mobile) .toolbar > :global(.popover) > :global(button) { width: 44px; height: 44px; min-width: 0; padding: 0; }
+
+  :global(html.mobile) .toolbar > :global(.popover) { position: static; }
+
+  :global(html.mobile) .toolbar > :global(.popover > .panel) { left: 0; right: 0; max-height: calc(100dvh - env(safe-area-inset-top) - 150px); overflow: auto; }
+
+  :global(html.mobile) .toolbar .label { display: none; }
+
+  :global(html.mobile) .search { padding-inline: 10px; gap: 6px; }
+
+  :global(html.mobile) .search > :global(svg) { flex: none; }
+
+  :global(html.mobile) .search input { width: 100%; }
+
+  :global(html.mobile) .split { min-height: 0; }
+
   :global(html.mobile) .search,
   :global(html.mobile) .toolbar > :global(.btn) { height: 44px; }
 

@@ -206,6 +206,8 @@
 <style>
   .generator { display: grid; gap: 12px; width: 336px; padding: 14px; }
 
+  :global(html.mobile) .generator { width: 100%; min-width: 0; }
+
   .mode { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 10px; background: rgb(0 0 0 / 0.22); }
 
   .mode button { height: 28px; border-radius: 7px; color: var(--text-2); font-size: 12px; font-weight: 600; transition: background var(--dur-fast), color var(--dur-fast); }

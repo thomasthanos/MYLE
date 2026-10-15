@@ -78,6 +78,8 @@ internal object CallerVerifier {
     }
 
     fun autofill(context: Context, pkg: String, claimedDomain: String?, scheme: String?): CredentialScope {
+        // Recheck at the ticket boundary as well as parsing (including already issued requests).
+        require(CredentialPolicy.autofillRequestPackage(pkg, context.packageName) != null) { "MYLE cannot autofill its own vault" }
         val signers = signatures(context, pkg)
         val native = identity(pkg, signers)
         val domain = claimedDomain?.takeIf { it.isNotEmpty() }?.let { CredentialPolicy.host(it) }

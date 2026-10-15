@@ -3,6 +3,7 @@
   import { cubicOut } from "svelte/easing";
   import LogOut from "@lucide/svelte/icons/log-out";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import X from "@lucide/svelte/icons/x";
   import SyncStatus from "../app/pages/password-manager/SyncStatus.svelte";
   import { passwords as p } from "../app/pages/password-manager/state.svelte";
   import { account } from "./account.svelte";
@@ -23,12 +24,28 @@
   );
 
   const close = () => (shell.accountOpen = false);
+
+  function focusSheet(node: HTMLElement) {
+    const previous = document.activeElement as HTMLElement | null;
+    const controls = () => Array.from(node.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'));
+    controls()[0]?.focus({ preventScroll: true });
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); close(); }
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0], last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    node.addEventListener("keydown", keydown);
+    return { destroy() { node.removeEventListener("keydown", keydown); previous?.focus({ preventScroll: true }); } };
+  }
 </script>
 
 {#if shell.accountOpen}
   <div class="backdrop" role="presentation" onclick={close} transition:fade={{ duration: 140 }}></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Account" transition:fly={{ y: 40, duration: 200, easing: cubicOut }}>
-    <span class="grip" aria-hidden="true"></span>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Account" tabindex="-1" use:focusSheet transition:fly={{ y: 40, duration: 200, easing: cubicOut }}>
+    <div class="sheet-heading"><h2>Account</h2><button class="icon-btn" aria-label="Close account" onclick={close}><X size={20} /></button></div>
     {#if profile}
       <div class="profile">
         <span class="avatar">
@@ -60,9 +77,13 @@
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.5); }
 
-  .sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 61; display: grid; gap: 16px; max-height: 90dvh; overflow-y: auto; padding: 10px 20px calc(env(safe-area-inset-bottom) + 22px); border-top: 1px solid rgb(255 255 255 / 0.1); border-radius: 20px 20px 0 0; background: var(--bg-1); }
+  .sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 61; display: grid; gap: 16px; max-height: calc(100dvh - env(safe-area-inset-top) - 16px); overflow-y: auto; overscroll-behavior: contain; padding: 10px max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 20px) max(16px, env(safe-area-inset-left)); border-top: 1px solid rgb(255 255 255 / 0.1); border-radius: 20px 20px 0 0; background: var(--bg-1); }
 
-  .grip { justify-self: center; width: 40px; height: 4px; border-radius: 2px; background: rgb(255 255 255 / 0.2); }
+  .sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+  .sheet-heading h2 { margin: 0; font-size: 16px; }
+
+  .sheet-heading .icon-btn { width: 44px; height: 44px; flex: none; }
 
   h2 { font-size: 18px; }
 
@@ -79,13 +100,15 @@
 
   .initials { display: grid; place-items: center; background: var(--accent-grad); color: #fff; font-size: 18px; font-weight: 700; }
 
-  .who { display: grid; min-width: 0; gap: 2px; }
+  .who { display: grid; min-width: 0; gap: 2px; overflow-wrap: anywhere; }
 
   .who strong { font-size: 16px; }
 
-  .who small { overflow: hidden; color: var(--text-2); font-size: 13px; text-overflow: ellipsis; }
+  .who small { color: var(--text-2); font-size: 13px; }
 
-  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+  .actions .btn { height: auto; min-height: 44px; padding: 8px; white-space: normal; }
 
   .sync :global(.sync) { margin-left: -10px; font-size: 13px; }
 </style>
