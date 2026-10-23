@@ -1,4 +1,5 @@
-//! Filling in logins in Chrome, Edge, Brave, Vivaldi and Firefox.
+//! Filling in logins in Chromium browsers (Chrome, Edge, Brave, Vivaldi, Opera,
+//! Arc, Thorium) and Firefox browsers (Firefox, Zen, LibreWolf, Waterfox, Floorp).
 //!
 //! The browser extension (`extension/`) talks to a "native messaging host"
 //! the browser starts: this same program, run by the browser with the
@@ -67,19 +68,30 @@ const CHROME_FOLDER_ID: &str = "gaelkhdpkgnffkfmaaklknijinjmmopo";
 /// Its id in Firefox (`browser_specific_settings.gecko.id`).
 pub const FIREFOX_EXTENSION_ID: &str = "myle-passwords@thomast.uk";
 /// Browsers the host may be started by: program file name, and what to call it.
-const BROWSERS: [(&str, &str); 5] = [
+/// The Chromium ones take the Chrome Web Store's copy, the Firefox ones
+/// (Zen, LibreWolf, Waterfox, Floorp) the Firefox copy.
+const BROWSERS: [(&str, &str); 12] = [
     ("chrome.exe", "Chrome"),
     ("msedge.exe", "Edge"),
-    ("firefox.exe", "Firefox"),
     ("brave.exe", "Brave"),
     ("vivaldi.exe", "Vivaldi"),
+    ("opera.exe", "Opera"),
+    ("arc.exe", "Arc"),
+    ("thorium.exe", "Thorium"),
+    ("firefox.exe", "Firefox"),
+    ("zen.exe", "Zen"),
+    ("librewolf.exe", "LibreWolf"),
+    ("waterfox.exe", "Waterfox"),
+    ("floorp.exe", "Floorp"),
 ];
 /// Where each browser looks for native messaging hosts, the manifest it
-/// reads, and the browser. Vivaldi uses Chrome's registration.
-const HOST_KEYS: [(&str, &str, &str); 4] = [
+/// reads, and the browser. Vivaldi, Opera and Arc use Chrome's registration,
+/// Thorium and other Chromium builds Chromium's, the Firefox forks Firefox's.
+const HOST_KEYS: [(&str, &str, &str); 5] = [
     (r"Software\Google\Chrome\NativeMessagingHosts", "chrome.json", "Chrome"),
     (r"Software\Microsoft\Edge\NativeMessagingHosts", "chrome.json", "Edge"),
     (r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts", "chrome.json", "Brave"),
+    (r"Software\Chromium\NativeMessagingHosts", "chrome.json", "Chromium"),
     (r"Software\Mozilla\NativeMessagingHosts", "firefox.json", "Firefox"),
 ];
 /// Refused starts of the host kept in `host.log`, newest last.
@@ -211,7 +223,7 @@ impl Hosts {
     }
 }
 
-/// Tells Chrome, Edge, Brave, Vivaldi and Firefox where the host is, unless they
+/// Tells the Chromium and Firefox browsers where the host is, unless they
 /// already know: checked on every start, unlock and look at the setup, so a
 /// moved program or a deleted manifest mends itself.
 pub fn ensure_registered() -> Result<(), String> {
@@ -422,7 +434,7 @@ pub fn run_native_host() -> Option<i32> {
 
 /// What to call a browser, from its program file name; `None` for any
 /// other program.
-fn browser_name(program: &str) -> Option<&'static str> {
+pub(super) fn browser_name(program: &str) -> Option<&'static str> {
     BROWSERS
         .iter()
         .find(|(file, _)| program.eq_ignore_ascii_case(file))
@@ -2275,6 +2287,9 @@ mod tests {
         assert_eq!(browser_name("Chrome.exe"), Some("Chrome"));
         assert_eq!(browser_name("vivaldi.exe"), Some("Vivaldi"));
         assert_eq!(browser_name("VIVALDI.EXE"), Some("Vivaldi"));
+        assert_eq!(browser_name("zen.exe"), Some("Zen"));
+        assert_eq!(browser_name("LibreWolf.exe"), Some("LibreWolf"));
+        assert_eq!(browser_name("opera.exe"), Some("Opera"));
         assert_eq!(browser_name("powershell.exe"), None);
         assert_eq!(
             parse_refusal("1700000000\tvivaldi.exe\tnot a supported browser"),

@@ -36,7 +36,6 @@ const HOTKEY_ID: i32 = 0x4d59;
 /// Long enough to unlock the vault first.
 const TARGET_LIFETIME: Duration = Duration::from_secs(180);
 pub const TARGET_EVENT: &str = "passwords-windows-target";
-const BROWSERS: [&str; 5] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "vivaldi.exe"];
 /// The window Store apps run in belongs to this program, not to the app.
 const STORE_APP_HOST: &str = "applicationframehost.exe";
 /// The hotkeys tried, in order.
@@ -240,7 +239,7 @@ pub fn start(app: AppHandle, target: WindowsFillState) {
             }
             let Some((pid, thread, path)) = program_of(window) else { continue };
             let Some(exe) = path.file_name().and_then(|name| name.to_str()).map(str::to_lowercase) else { continue };
-            if pid == std::process::id() || BROWSERS.contains(&exe.as_str()) {
+            if pid == std::process::id() || browser::browser_name(&exe).is_some() {
                 continue;
             }
             let elevated = runs_above_us(pid);
@@ -537,8 +536,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vivaldi_uses_browser_filling_instead_of_windows_typing() {
-        assert!(BROWSERS.contains(&"vivaldi.exe"));
+    fn browsers_use_browser_filling_instead_of_windows_typing() {
+        for exe in ["vivaldi.exe", "opera.exe", "zen.exe", "librewolf.exe"] {
+            assert!(browser::browser_name(exe).is_some(), "{exe}");
+        }
     }
 
     #[test]

@@ -8,9 +8,12 @@ const read = async (path) => (await readFile(new URL(`../../frontend/app/pages/$
 const filling = await read("password-manager/BrowserFilling.svelte");
 const settings = await read("settings/Settings.svelte");
 
-test("Vivaldi is listed in browser setup and has its own extensions-page shortcut", () => {
-  assert.match(filling, /Chrome, Edge, Brave, Vivaldi and Firefox know where MYLE is/);
-  assert.match(filling, /MYLE Passwords for Chrome, Edge, Brave and Vivaldi/);
+test("Vivaldi, Opera and the Firefox forks are listed in browser setup", () => {
+  assert.match(filling, /Your Chromium and Firefox browsers know where MYLE is/);
+  assert.match(filling, /MYLE Passwords for Chrome, Edge, Brave, Vivaldi, Opera and other Chromium browsers/);
+  assert.match(filling, /Firefox, Zen, LibreWolf, Waterfox, Floorp/);
+  assert.match(filling, /Opera: "opera:\/\/extensions"/);
+  assert.match(filling, /copy\("opera:\/\/extensions"\)/);
   assert.match(filling, /Vivaldi: "vivaldi:\/\/extensions"/);
   assert.match(filling, /copy\("vivaldi:\/\/extensions"\)/);
 });

@@ -464,7 +464,7 @@
                   class="extension"
                   class:on={getExtension}
                   aria-pressed={getExtension}
-                  title="MYLE Passwords fills your saved logins in Chrome, Edge, Brave, Vivaldi and Firefox. Its page opens in your browser when setup finishes."
+                  title="MYLE Passwords fills your saved logins in Chrome, Edge, Brave, Vivaldi, Opera, Firefox, Zen, LibreWolf and other Chromium or Firefox browsers. Its page opens in your browser when setup finishes."
                   onclick={() => (getExtension = !getExtension)}
                 >
                   <Puzzle size={14} strokeWidth={1.9} />

@@ -153,10 +153,11 @@ pub fn remove_legacy_autostart() {
 /// install folder too (a full clean-up); otherwise a reinstall reuses it.
 /// Where the app registers the password extension's native messaging host
 /// (`backend/src/passwords/browser.rs`): the browsers forget it on uninstall.
-const NATIVE_HOSTS: [&str; 4] = [
+const NATIVE_HOSTS: [&str; 5] = [
     r"Software\Google\Chrome\NativeMessagingHosts\com.thomasthanos.myle",
     r"Software\Microsoft\Edge\NativeMessagingHosts\com.thomasthanos.myle",
     r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.thomasthanos.myle",
+    r"Software\Chromium\NativeMessagingHosts\com.thomasthanos.myle",
     r"Software\Mozilla\NativeMessagingHosts\com.thomasthanos.myle",
 ];
 
