@@ -156,10 +156,10 @@ jobs:
 
       # tauri-build generates tauri.settings.gradle and the plugin projects
       # during the Rust build; android init alone does not create them.
-      - name: Test native credential provider
+      - name: Build native mobile plugin
         if: needs.version.outputs.checks != 'false'
         working-directory: backend/mobile/gen/android
-        run: ./gradlew :tauri-plugin-myle-mobile:testDebugUnitTest :tauri-plugin-myle-mobile:assembleDebug
+        run: ./gradlew :tauri-plugin-myle-mobile:assembleDebug
 
       - name: Sign it
         env:
@@ -192,10 +192,8 @@ jobs:
             echo "::error::The merged APK must explicitly disable Android backup"
             exit 1
           fi
-          # Autofill reads the requesting app's certificate; Android 11+ hides
-          # apps that the native plugin's <queries> do not name.
-          if ! echo "$manifest" | grep -q 'E: queries'; then
-            echo "::error::The merged APK has lost the native plugin's <queries>"
+          if echo "$manifest" | grep -Eq 'BIND_AUTOFILL_SERVICE|BIND_CREDENTIAL_PROVIDER_SERVICE|MyleCredential|MyleAutofill'; then
+            echo "::error::The APK must not register autofill or passkey providers"
             exit 1
           fi
           if ! echo "$manifest" | grep -q ':scheme([^)]*)="uk.thomast.myle.passwords"'; then

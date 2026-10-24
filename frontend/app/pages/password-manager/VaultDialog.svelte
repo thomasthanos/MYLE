@@ -17,7 +17,7 @@
   import { portal } from "../../../lib/portal";
   import { toast } from "../../../lib/toast.svelte";
   import { passwordsApi as api } from "./api";
-  import { DEVICE, IOS, MOBILE } from "../../../lib/platform";
+  import { ANDROID, DEVICE, IOS, MOBILE } from "../../../lib/platform";
   import { afterImport, passwords as p } from "./state.svelte";
 
   let { dialog, onclose }: { dialog: DialogKind; onclose: () => void } = $props();
@@ -141,6 +141,7 @@
       {:else if IOS}
         <div class="row"><button type="button" class="btn secondary" onclick={() => (dialog = { kind: "apple" })}>Export for Apple Passwords first</button></div>
       {/if}
+      {#if !ANDROID}
       <div class="option">
         <label class="opt-line">
           <input type="checkbox" class="check" bind:checked={withPasskeys} />
@@ -148,6 +149,7 @@
         </label>
         <small class="warn">Not recommended{#if withPasskeys}: passkeys cannot be exported or imported again, so sites where you sign in with one may lock you out until you set up a new one there{/if}.</small>
       </div>
+      {/if}
       <input class="input" type="password" autocomplete="current-password" bind:value={master} placeholder="Your master password" />
       <input class="input" bind:value={typed} placeholder="Type DELETE to confirm" autocapitalize="characters" autocomplete="off" />
     {:else if dialog.kind === "apple"}

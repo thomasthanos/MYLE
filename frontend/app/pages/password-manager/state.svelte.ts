@@ -1,7 +1,7 @@
 // The Password Manager page's state. It lives outside the page component so
 // switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
-import { DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
+import { ANDROID, DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
 import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
@@ -628,6 +628,10 @@ class PasswordsState {
   async remove(id: string) {
     const e = this.entry(id);
     if (!e) return;
+    if (ANDROID && e.passkeys.length) {
+      toast.info("This login includes a passkey managed on your PC. Delete the login from MYLE on your PC.");
+      return;
+    }
     const ok = await confirm({
       title: `Delete “${e.title}”?`,
       message: `It is removed from this ${DEVICE} and from every device your account syncs with.`,

@@ -5,6 +5,7 @@
 
 pub mod browser;
 mod clipboard;
+mod extension_folder;
 mod hello;
 pub mod icons;
 mod qr;
@@ -391,34 +392,23 @@ fn sync_local_extension(app: &AppHandle) -> Result<PathBuf, String> {
     if from == to {
         return Ok(to);
     }
-    fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(to)?;
-        for entry in std::fs::read_dir(from)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            // Firefox has its own copy: not part of the Chromium one.
-            if name == "firefox" {
-                continue;
-            }
-            let kind = entry.file_type()?;
-            if kind.is_dir() {
-                copy_tree(&entry.path(), &to.join(&name))?;
-            } else if kind.is_file() {
-                std::fs::copy(entry.path(), to.join(&name))?;
-            }
-        }
-        Ok(())
-    }
-    copy_tree(&from, &to).map_err(|e| format!("Could not update the extension folder: {e}"))?;
+    extension_folder::copy_tree(&from, &to).map_err(|e| format!("Could not update the extension folder: {e}"))?;
     Ok(to)
+}
+
+/// Check both builds, including the Firefox folder missing from older installs.
+fn local_extension_outdated(local: &Path, bundled: &Path) -> bool {
+    ["", "firefox"].iter().any(|folder| {
+        let Some(ours) = manifest_version(&bundled.join(folder)) else { return false };
+        manifest_version(&local.join(folder)).is_none_or(|have| older(&have, &ours))
+    })
 }
 
 /// At start: a folder copy older than the bundled extension is brought up
 /// to date (the app was updated), so reloading the extension picks it up.
 pub fn refresh_local_extension(app: &AppHandle) {
     let (Some(local), Some(bundled)) = (local_extension_dir(), extension_dir(app)) else { return };
-    let (Some(have), Some(ours)) = (manifest_version(&local), manifest_version(&bundled)) else { return };
-    if older(&have, &ours) {
+    if local.is_dir() && local_extension_outdated(&local, &bundled) {
         let _ = sync_local_extension(app);
     }
 }
@@ -462,11 +452,11 @@ pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -
     let contact = browser::last_contact();
     let health = browser::server_health();
     let local_update = bundled_version.as_deref().is_some_and(|ours| {
-        let folder_old = local_version.as_deref().is_some_and(|have| older(have, ours));
+        let folder_old = local.as_ref().zip(extension_dir(&app)).is_some_and(|(local, bundled)| local_extension_outdated(local, &bundled));
         // The unpacked copy that asked last said an older version.
         let asked_old = contact
             .as_ref()
-            .is_some_and(|c| c.copy == "folder" && !c.version.is_empty() && older(&c.version, ours));
+            .is_some_and(|c| matches!(c.copy.as_str(), "folder" | "firefox") && !c.version.is_empty() && older(&c.version, ours));
         folder_old || asked_old
     });
     Ok(BrowserSetup {
@@ -587,6 +577,24 @@ fn take_verification(slot: &mut Option<Verifying>, id: u64) -> Option<Verifying>
 #[cfg(test)]
 mod verification_tests {
     use super::*;
+
+    #[test]
+    fn local_updates_repair_missing_and_older_firefox_builds() {
+        let root = std::env::temp_dir().join(format!("myle-extension-versions-{}", uuid::Uuid::new_v4()));
+        let bundled = root.join("bundled");
+        let local = root.join("local");
+        for dir in [&bundled, &local, &bundled.join("firefox")] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("manifest.json"), r#"{"version":"10.0.6"}"#).unwrap();
+        }
+        assert!(local_extension_outdated(&local, &bundled), "older installs omitted the Firefox folder");
+        std::fs::create_dir_all(local.join("firefox")).unwrap();
+        std::fs::write(local.join("firefox/manifest.json"), r#"{"version":"10.0.5"}"#).unwrap();
+        assert!(local_extension_outdated(&local, &bundled), "Chromium may be current while Firefox is old");
+        std::fs::write(local.join("firefox/manifest.json"), r#"{"version":"10.0.6"}"#).unwrap();
+        assert!(!local_extension_outdated(&local, &bundled));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn cancelling_master_verification_clears_only_its_own_waiter() {

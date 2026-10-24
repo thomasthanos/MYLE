@@ -21,7 +21,7 @@
   /** The extension's store page (package.json "myle.extensionUrl"). */
   const storeUrl = EXTENSION_URL;
 
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose, local = false }: { onclose: () => void; local?: boolean } = $props();
 
   let setup = $state<BrowserSetup | null>(null);
   let saving = $state(false);
@@ -33,6 +33,7 @@
   const extensionsPage = $derived(
     { Edge: "edge://extensions", Brave: "brave://extensions", Vivaldi: "vivaldi://extensions", Opera: "opera://extensions" }[setup?.lastContact?.browser ?? ""] ?? "chrome://extensions",
   );
+  const firefox = $derived(setup?.lastContact?.copy === "firefox");
   /** Ticks every half minute, so "2 minutes ago" stays true. */
   let clock = $state(Date.now());
   /** When `setup.now` was the app's time, on this page's clock. */
@@ -43,13 +44,14 @@
       setup = await api.browserGet();
       loadedAt = clock = Date.now();
       loadError = null;
-      showSteps ??= !setup.lastContact && !storeUrl.startsWith("https://");
+      showSteps ??= setup.lastContact?.copy === "firefox" || (!setup.lastContact && !storeUrl.startsWith("https://"));
     } catch (error) {
       loadError = error instanceof Error ? error.message : String(error);
     }
   }
 
   onMount(() => {
+    if (local) showSteps = true;
     void load();
     const tick = setInterval(() => (clock = Date.now()), 30_000);
     let stop: (() => void) | undefined;
@@ -74,6 +76,16 @@
       await openUrl(storeUrl);
     } catch (error) {
       toast.error(`Could not open the Chrome Web Store: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function openLocal() {
+    try {
+      await api.openExtensionDir();
+      showSteps = true;
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -221,7 +233,7 @@
         </ul>
       {/if}
 
-      {#if setup?.lastContact?.copy === "folder" && storeUrl.startsWith("https://")}
+      {#if !firefox && setup?.lastContact?.copy === "folder" && storeUrl.startsWith("https://")}
         <div class="folder-copy">
           <CircleAlert size={14} />
           <span>
@@ -239,7 +251,7 @@
         </p>
       {/if}
 
-      {#if storeUrl.startsWith("https://")}
+      {#if !firefox && storeUrl.startsWith("https://")}
         <div class="store-row">
           <button type="button" class="btn primary store" onclick={openStore}>
             <Download size={14} /> Install from Chrome Web Store
@@ -250,6 +262,12 @@
           </p>
         </div>
       {/if}
+      <div class="store-row">
+        <button type="button" class="btn secondary" onclick={openLocal}>
+          <FolderOpen size={14} /> Firefox: Open local extension
+        </button>
+        <p class="or">Firefox, Zen, LibreWolf, Waterfox and Floorp use the local copy bundled with MYLE. No Firefox store download is needed.</p>
+      </div>
       <LocalExtensionUpdate {setup} />
 
       <section>
@@ -262,7 +280,7 @@
             <code class="selectable" title={setup?.extensionDir ?? undefined}>{setup?.extensionDir ?? "The extension's folder was not found."}</code>
             {#if setup?.extensionDir}
               <button type="button" class="icon-btn" title="Copy the folder" aria-label="Copy the folder" onclick={() => copy(setup!.extensionDir!)}><Copy size={14} /></button>
-              <button type="button" class="btn small" onclick={() => api.openExtensionDir()}><FolderOpen size={13} /> Open</button>
+              <button type="button" class="btn small" onclick={openLocal}><FolderOpen size={13} /> Open</button>
             {/if}
           </div>
 
@@ -292,7 +310,7 @@
                 </li>
                 <li><b>Load Temporary Add-on</b>, and choose <code>firefox/manifest.json</code> in that folder.</li>
               </ol>
-              <p class="hint">The browser keeps it until it restarts; a signed version that stays comes later.</p>
+              <p class="hint">Local installation only: after restarting Firefox, load this file again. After a MYLE update, press Reload here to use the updated local files.</p>
             </div>
           </div>
         {/if}

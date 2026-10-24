@@ -70,8 +70,9 @@ pub const FIREFOX_EXTENSION_ID: &str = "myle-passwords@thomast.uk";
 /// Browsers the host may be started by: program file name, and what to call it.
 /// The Chromium ones take the Chrome Web Store's copy, the Firefox ones
 /// (Zen, LibreWolf, Waterfox, Floorp) the Firefox copy.
-const BROWSERS: [(&str, &str); 12] = [
+const BROWSERS: [(&str, &str); 13] = [
     ("chrome.exe", "Chrome"),
+    ("chromium.exe", "Chromium"),
     ("msedge.exe", "Edge"),
     ("brave.exe", "Brave"),
     ("vivaldi.exe", "Vivaldi"),
@@ -2285,6 +2286,7 @@ mod tests {
     fn the_host_names_the_browser_and_notes_whom_it_turned_away() {
         assert_eq!(browser_name("msedge.exe"), Some("Edge"));
         assert_eq!(browser_name("Chrome.exe"), Some("Chrome"));
+        assert_eq!(browser_name("Chromium.exe"), Some("Chromium"));
         assert_eq!(browser_name("vivaldi.exe"), Some("Vivaldi"));
         assert_eq!(browser_name("VIVALDI.EXE"), Some("Vivaldi"));
         assert_eq!(browser_name("zen.exe"), Some("Zen"));

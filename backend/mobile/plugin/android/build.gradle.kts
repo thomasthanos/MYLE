@@ -29,11 +29,5 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.browser:browser:1.8.0")
-    implementation("androidx.credentials:credentials:1.6.0")
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.9")
-    implementation("com.google.guava:guava:33.4.8-android")
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
     implementation(project(":tauri-android"))
 }

@@ -12,6 +12,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import UserKey from "@lucide/svelte/icons/user-key";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { ANDROID } from "../../../lib/platform";
   import { onDestroy } from "svelte";
   import { passwordsApi as api, type OldPassword } from "./api";
   import Favicon from "./Favicon.svelte";
@@ -145,7 +146,7 @@
       {/if}
     </dl>
 
-    {#if entry.passkeys.length}
+    {#if !ANDROID && entry.passkeys.length}
       <section class="passkeys" aria-label="Passkeys">
         <h3><UserKey size={13} /> Passkeys</h3>
         {#each entry.passkeys as key (key.credentialId)}

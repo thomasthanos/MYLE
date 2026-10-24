@@ -29,7 +29,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Upload from "@lucide/svelte/icons/upload";
   import Popover from "../../../lib/components/Popover.svelte";
-  import { DEVICE, IOS, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
+  import { ANDROID, DEVICE, IOS, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
   import { toast } from "../../../lib/toast.svelte";
   import { shell } from "../../../mobile/shell.svelte";
   import { passwordsApi as api } from "./api";
@@ -303,7 +303,7 @@
               <span class="marks">
                 {#if entry.apps.length}<span title="Linked to a Windows program"><AppWindow size={13} /></span>{/if}
                 {#if entry.hasTotp}<span title="Has 2FA codes"><ShieldCheck size={13} /></span>{/if}
-                {#if entry.passkeys.length}<span title="Has a passkey"><UserKey size={13} /></span>{/if}
+                {#if !ANDROID && entry.passkeys.length}<span title="Has a passkey"><UserKey size={13} /></span>{/if}
                 {#if entry.favorite}<span class="fav" title="Favorite"><Star size={13} /></span>{/if}
                 {#if entry.hasPassword}<StrengthMeter strength={entry.strength} compact />{/if}
               </span>

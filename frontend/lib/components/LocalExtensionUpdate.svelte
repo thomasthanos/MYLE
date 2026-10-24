@@ -14,6 +14,8 @@
   let busy = $state(false);
   let done = $state(false);
   const info = $derived(setup ?? own);
+  const firefox = $derived(info?.lastContact?.copy === "firefox");
+  const reload = $derived(firefox ? "Open about:debugging → This Firefox and press Reload on MYLE Passwords." : "Open the browser’s extensions page and press Reload on MYLE Passwords.");
 
   onMount(() => {
     if (!setup && isTauri()) void api.browserGet().then((s) => (own = s), () => {});
@@ -24,7 +26,7 @@
     try {
       const dir = await api.syncExtension();
       done = true;
-      toast.success(`Extension ${info?.bundledVersion ?? ""} copied to ${dir}. Reload it in the browser's extensions page.`);
+      toast.success(`Extension ${info?.bundledVersion ?? ""} copied to ${dir}. ${reload}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -46,7 +48,7 @@
     </button>
   </div>
 {:else if done}
-  <p class="local-done">Updated. Open the browser's extensions page and press Reload on MYLE Passwords.</p>
+  <p class="local-done">Updated. {reload}</p>
 {/if}
 
 <style>

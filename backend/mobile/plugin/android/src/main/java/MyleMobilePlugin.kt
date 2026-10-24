@@ -2,7 +2,6 @@ package uk.thomast.myle.mobile
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -10,7 +9,6 @@ import android.os.Build
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
-import android.view.autofill.AutofillManager
 import android.webkit.WebView
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
@@ -42,71 +40,8 @@ class InstallArgs {
     var path: String = ""
 }
 
-@InvokeArg
-class ProviderSettingsArgs { var target: String = "" }
-
-@InvokeArg
-class ProviderBiometryArgs { var enabled: Boolean = false }
-
 @TauriPlugin
 class MyleMobilePlugin(private val activity: Activity) : Plugin(activity) {
-    @Command
-    fun providerStatus(invoke: Invoke) {
-        val sdk = Build.VERSION.SDK_INT
-        val biometry = ProviderBiometry(activity)
-        val passkeysEnabled = if (sdk >= 34) runCatching {
-            activity.getSystemService(android.credentials.CredentialManager::class.java)
-                ?.isEnabledCredentialProviderService(ComponentName(activity, MyleCredentialProviderService::class.java)) == true
-        }.getOrDefault(false) else false
-        val autofillEnabled = if (sdk >= 26) runCatching {
-            activity.getSystemService(AutofillManager::class.java)?.hasEnabledAutofillServices() == true
-        }.getOrDefault(false) else false
-        invoke.resolve(JSObject().apply {
-            put("sdk", sdk)
-            put("passkeysAvailable", sdk >= 34)
-            put("autofillAvailable", sdk >= 26)
-            put("passkeysEnabled", passkeysEnabled)
-            put("autofillEnabled", autofillEnabled)
-            put("biometryAvailable", biometry.available())
-            put("biometryEnabled", biometry.enabled())
-        })
-    }
-
-    @Command
-    fun providerSettings(invoke: Invoke) {
-        val args = invoke.parseArgs(ProviderSettingsArgs::class.java)
-        activity.runOnUiThread {
-            try {
-                when (args.target) {
-                    "passkeys" -> {
-                        check(Build.VERSION.SDK_INT >= 34) { "Passkey providers require Android 14 or later" }
-                        androidx.credentials.CredentialManager.create(activity).createSettingsPendingIntent().send()
-                    }
-                    "autofill" -> {
-                        check(Build.VERSION.SDK_INT >= 26) { "Autofill requires Android 8 or later" }
-                        activity.startActivity(Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE, Uri.parse("package:${activity.packageName}")))
-                    }
-                    else -> error("Unknown provider setting")
-                }
-                invoke.resolve()
-            } catch (_: Exception) { invoke.reject("Android could not open these provider settings.") }
-        }
-    }
-
-    @Command
-    fun providerBiometry(invoke: Invoke) {
-        val args = invoke.parseArgs(ProviderBiometryArgs::class.java)
-        activity.runOnUiThread {
-            try {
-                if (args.enabled) {
-                    check(ProviderBiometry(activity).available()) { "Enroll a strong biometric in Android settings first" }
-                    activity.startActivity(Intent(activity, MyleCredentialActivity::class.java).setAction(MyleCredentialActivity.ENROLL))
-                } else ProviderBiometry(activity).disable()
-                invoke.resolve()
-            } catch (_: Exception) { invoke.reject("Fingerprint setup could not open. Master password is still available.") }
-        }
-    }
-
     override fun load(webView: WebView) {
         super.load(webView)
         fitScreen(webView)

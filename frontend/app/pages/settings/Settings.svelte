@@ -1,4 +1,5 @@
 <script lang="ts">
+  import BrowserFilling from "../password-manager/BrowserFilling.svelte";
   import LocalExtensionUpdate from "../../../lib/components/LocalExtensionUpdate.svelte";
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
@@ -36,6 +37,7 @@
   /** How the browsers reach MYLE, for the extension's line; null until known. */
   let browser = $state<BrowserSetup | null>(null);
   let browserError = $state("");
+  let showBrowserSetup = $state(false);
   let version = $state("");
   const update = $derived(settingsUpdater.view);
 
@@ -425,7 +427,8 @@
               <strong>{extensionState.title}</strong>
               {#if extensionState.detail}<small>{extensionState.detail}</small>{/if}
             </span>
-            {#if EXTENSION_URL.startsWith("https://")}
+            <button class="btn small" onclick={() => (showBrowserSetup = true)}>Firefox / Local setup</button>
+            {#if browser?.lastContact?.copy !== "firefox" && EXTENSION_URL.startsWith("https://")}
               <button class="btn small primary" onclick={() => open(EXTENSION_URL)}>
                 <Download size={12} /> Install from Chrome Web Store
               </button>
@@ -488,6 +491,8 @@
     </div>
   </div>
 </div>
+
+{#if showBrowserSetup}<BrowserFilling local onclose={() => (showBrowserSetup = false)} />{/if}
 
 <style>
   /* --- Layout Frame & Scroller Tuning --- */

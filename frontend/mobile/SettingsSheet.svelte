@@ -5,7 +5,6 @@
   import { passwords as p } from "../app/pages/password-manager/state.svelte";
   import { shell } from "./shell.svelte";
   import AboutCard from "./settings/AboutCard.svelte";
-  import FillingCard from "./settings/FillingCard.svelte";
   import SecurityCard from "./settings/SecurityCard.svelte";
   import SyncCard from "./settings/SyncCard.svelte";
 
@@ -36,7 +35,6 @@
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusSheet transition:fly={{ y: 40, duration: 200, easing: cubicOut }}>
     <div class="sheet-heading"><h2 id="settings-title">Settings</h2><button class="icon-btn" aria-label="Close settings" onclick={close}><X size={20} /></button></div>
     {#if p.status === "locked" || p.status === "unlocked"}<SecurityCard />{/if}
-    <FillingCard />
     <SyncCard />
     <AboutCard />
   </div>

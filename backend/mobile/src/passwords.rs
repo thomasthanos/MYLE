@@ -319,6 +319,7 @@ pub fn passwords_totp_check(text: String) -> Result<totp::Info, String> {
     Ok(totp::Totp::parse(&Zeroizing::new(text))?.info())
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command(async)]
 pub fn passwords_passkey_delete(
     app: AppHandle,
@@ -349,14 +350,61 @@ pub async fn passwords_delete_all(
     state
         .with_blocking(move |vault| {
             vault.verify_master(&master)?;
-            vault.delete_all(with_passkeys)
+            vault.delete_all(with_passkeys && !cfg!(target_os = "android"))
         })
         .await
 }
 
 #[tauri::command(async)]
 pub fn passwords_delete(state: State<'_, PasswordsState>, id: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    return state.with(|vault| delete_android_entry(vault, &id));
+    #[cfg(not(target_os = "android"))]
     state.with(|vault| vault.delete(&id))
+}
+
+#[cfg(any(target_os = "android", test))]
+fn delete_android_entry(vault: &mut Vault, id: &str) -> Result<(), String> {
+    if vault.summaries()?.iter().any(|entry| entry.id == id && !entry.passkeys.is_empty()) {
+        return Err("This login includes a passkey managed on your PC. Delete the login from MYLE on your PC.".into());
+    }
+    vault.delete(id)
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+
+    #[test]
+    fn android_deletion_preserves_hidden_synced_passkeys() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("myle-android-delete-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut vault = Vault::open(dir.join("passwords.vault")).unwrap();
+        let mut kdf = KdfParams::new();
+        kdf.memory = 256;
+        kdf.iterations = 1;
+        vault.create("fixture master", kdf).unwrap();
+        let input: EntryInput = serde_json::from_value(serde_json::json!({
+            "title": "Google", "username": "fixture@example.com", "password": "fixture password",
+            "urls": ["https://accounts.google.com"], "totp": "JBSWY3DPEHPK3PXP"
+        })).unwrap();
+        let protected = vault.save(&input).unwrap();
+        let plain = vault.save(&input).unwrap();
+        vault.add_passkey(Some(&protected), myle_vault::passkeys::Passkey {
+            credential_id: "fixture-credential".into(), rp_id: "google.com".into(),
+            user_name: "fixture@example.com".into(), ..Default::default()
+        }, "Google", "https://accounts.google.com").unwrap();
+        assert!(delete_android_entry(&mut vault, &protected).is_err(), "Android cannot delete the passkey it does not display");
+        assert_eq!(vault.password(&protected).unwrap().as_str(), "fixture password");
+        assert_eq!(vault.totp(&protected).unwrap().now().code.len(), 6);
+        delete_android_entry(&mut vault, &plain).unwrap();
+        let entries = vault.summaries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].passkeys[0].credential_id, "fixture-credential");
+        drop(vault);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[tauri::command(async)]
