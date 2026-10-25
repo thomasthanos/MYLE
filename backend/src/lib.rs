@@ -4,6 +4,7 @@ pub mod cleaner;
 mod cloud;
 mod console;
 mod debloat;
+mod disk_analyzer;
 mod download;
 mod elevated_pipe;
 pub mod game_saves;
@@ -225,6 +226,7 @@ pub fn run() {
     let windows_optimization_state = windows_optimization::WindowsOptimizationState::default();
     let passwords_state = passwords::PasswordsState::default();
     let passwords_windows_state = passwords::WindowsFillState::default();
+    let disk_analyzer_state = disk_analyzer::DiskAnalyzerState::default();
     let app = tauri::Builder::default()
         // Must be registered first. A second launch focuses the running app.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -261,6 +263,7 @@ pub fn run() {
         .manage(windows_optimization_state.clone())
         .manage(passwords_state.clone())
         .manage(passwords_windows_state.clone())
+        .manage(disk_analyzer_state.clone())
         .setup({
             let cleanup = cleanup.clone();
             move |app| {
@@ -425,6 +428,20 @@ pub fn run() {
             cleaner::health::cleaner_health_apply_batch,
             cleaner::health::cleaner_health_restore_list,
             cleaner::health::cleaner_health_restore,
+            disk_analyzer::disk_analyzer_drives,
+            disk_analyzer::disk_analyzer_pick_folder,
+            disk_analyzer::disk_analyzer_scan,
+            disk_analyzer::disk_analyzer_cancel,
+            disk_analyzer::disk_analyzer_clear,
+            disk_analyzer::disk_analyzer_children,
+            disk_analyzer::disk_analyzer_nodes,
+            disk_analyzer::disk_analyzer_trail,
+            disk_analyzer::disk_analyzer_treemap,
+            disk_analyzer::disk_analyzer_top_files,
+            disk_analyzer::disk_analyzer_extensions,
+            disk_analyzer::disk_analyzer_path,
+            disk_analyzer::disk_analyzer_reveal,
+            disk_analyzer::disk_analyzer_delete,
             debloat::debloat_status,
             debloat::debloat_restore_point,
             debloat::debloat_run,
@@ -557,6 +574,7 @@ pub fn run() {
             game_saves_state.cancel();
             spotify_hub_state.cancel_all();
             github_releases_state.cancel_all();
+            disk_analyzer_state.cancel();
             jobs.cancel_all();
             cleanup.run();
         }

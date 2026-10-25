@@ -2782,6 +2782,7 @@ dependencies = [
  "unicode-width",
  "uuid",
  "windows",
+ "windows-core 0.61.2",
  "windows-future",
  "windows-sys 0.61.2",
  "winreg 0.56.0",

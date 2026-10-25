@@ -76,6 +76,10 @@ zeroize = { version = "1", features = ["derive"] }
 windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "UI_Shell", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
 psl = "2"
 windows-future = "0.2"
+# Disk Analyzer: the Recycle Bin guard implements a COM interface with
+# `windows::core::implement`, whose code names this crate. It is already in
+# the build (the `windows` crate is made of it), so nothing new is compiled.
+windows-core = "0.61"
 # Project Backups: CRC-32 of every zipped file, Unicode file names compared
 # alike however they were written (NFC), and the side-by-side text diff.
 crc32fast = "1"
