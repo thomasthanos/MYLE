@@ -7,12 +7,20 @@
   import { toast } from "../../../lib/toast.svelte";
   import type { MaintenanceCard } from "./api";
   import { maintenanceState as s } from "./state.svelte";
+  import { outputText, scanProgress } from "./output";
 
   let { card }: { card: MaintenanceCard } = $props();
 
   const buffer = $derived(s.consoles[card.id]);
   const lines = $derived(buffer?.lines ?? []);
-  const text = $derived(lines.join("\n"));
+  const text = $derived(outputText(lines));
+  const progress = $derived.by(() => {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const value = scanProgress(lines[i]);
+      if (value) return value;
+    }
+    return null;
+  });
   const open = $derived(buffer?.open ?? false);
   const active = $derived(card.actions.find((a) => s.isRunning(a.id)));
   const status = $derived(s.statusOf(card));
@@ -28,7 +36,7 @@
 
   // Runs after the new lines are in the DOM.
   $effect(() => {
-    void lines.length;
+    void text;
     if (box && pinned) box.scrollTop = box.scrollHeight;
   });
 
@@ -77,6 +85,15 @@
 
   <div class="wrap" class:open>
     <div>
+      {#if progress}
+        <div class="scan-progress">
+          <div class="progress-label">
+            <span>{active ? "Scan progress" : "Last reported progress"}</span>
+            <strong>{progress.percent}%</strong>
+          </div>
+          <progress max="100" value={progress.percent} aria-label="Scan progress"></progress>
+        </div>
+      {/if}
       <div class="scroll" bind:this={box} onscroll={onScroll}>
         {#if buffer?.dropped}
           <p class="trimmed">…{buffer.dropped.toLocaleString()} earlier lines hidden</p>
@@ -127,6 +144,18 @@
   .wrap > div { position: relative; min-height: 0; overflow: hidden; }
 
   .scroll { max-height: 260px; padding: 12px 14px; overflow: auto; background: rgb(5 8 14 / 0.48); box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.22); }
+
+  .scan-progress { padding: 11px 14px; border-bottom: 1px solid rgb(255 255 255 / 0.055); }
+
+  .progress-label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 7px; color: var(--text-3); font-size: 11.5px; }
+
+  .progress-label strong { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  progress { display: block; width: 100%; height: 5px; overflow: hidden; border: 0; border-radius: 999px; accent-color: var(--accent); }
+
+  progress::-webkit-progress-bar { background: rgb(255 255 255 / 0.07); border-radius: 999px; }
+
+  progress::-webkit-progress-value { background: var(--tone, var(--accent)); border-radius: 999px; }
 
   pre { margin: 0; color: var(--text-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 

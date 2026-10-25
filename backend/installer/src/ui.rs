@@ -44,6 +44,8 @@ struct Shortcuts {
     desktop: bool,
     start_menu: bool,
     startup: bool,
+    #[serde(default)]
+    taskbar: bool,
     /// Started by Windows at sign-in: minimized to the taskbar, or on screen.
     #[serde(default = "minimized_by_default")]
     start_minimized: bool,
@@ -59,6 +61,7 @@ impl From<ShortcutChoice> for Shortcuts {
             desktop: choice.desktop,
             start_menu: choice.start_menu,
             startup: choice.startup,
+            taskbar: registry::taskbar_preference().enabled,
             start_minimized: registry::start_minimized(),
         }
     }
@@ -109,7 +112,7 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
             let dir = install_dir(&context);
             // The user's last choices; a fresh install offers the Desktop and
             // Start menu shortcuts, and leaves starting with Windows off.
-            let shortcuts = engine::default_shortcuts(existing.as_deref()).into();
+            let shortcuts: Shortcuts = engine::default_shortcuts(existing.as_deref()).into();
             SetupState {
                 mode: "install",
                 product: product::NAME,
@@ -231,12 +234,13 @@ async fn setup_install(
         Duration::ZERO
     };
     let start_minimized = request.start_minimized;
+    let offer_taskbar = request.taskbar && request.start_menu;
     let options = InstallOptions {
         dir: install_dir(&context),
         shortcuts: ShortcutMode::Choose(request.into()),
         live: false,
     };
-    let installed = tauri::async_runtime::spawn_blocking(move || {
+    let mut installed = tauri::async_runtime::spawn_blocking(move || {
         let mut report = |event: Progress| {
             let _ = on_event.send(event);
         };
@@ -249,6 +253,12 @@ async fn setup_install(
     .await
     .map_err(|e| e.to_string())??;
     registry::set_start_minimized(start_minimized);
+    // Passive updates never reset a suggestion the user already dismissed.
+    if (!context.cli.update || !context.cli.passive)
+        && let Err(error) = registry::remember_taskbar_choice(offer_taskbar)
+    {
+        installed.warnings.push(format!("The taskbar choice could not be saved: {error}"));
+    }
     let dir = installed
         .exe
         .parent()
@@ -312,7 +322,9 @@ async fn setup_launch(context: State<'_, Context>) -> Result<(), String> {
         .unwrap_or_else(|p| p.into_inner())
         .clone()
         .ok_or("Nothing was installed yet.")?;
-    let pid = shell::launch(&exe, context.cli.update)?;
+    let preference = registry::taskbar_preference();
+    let request_pin = !context.cli.passive && preference.pending;
+    let pid = shell::launch_with_pin_request(&exe, context.cli.update, request_pin)?;
     let _ = tauri::async_runtime::spawn_blocking(move || {
         processes::wait_for_window(pid, Duration::from_secs(12))
     })
@@ -366,7 +378,7 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
             };
             let window = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("installer.html".into()))
                 .title(title)
-                .inner_size(720.0, 480.0)
+                .inner_size(720.0, 540.0)
                 .resizable(false)
                 .maximizable(false)
                 .decorations(false)

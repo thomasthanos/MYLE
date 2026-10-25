@@ -156,7 +156,8 @@ fn managed_link(link: &ShortcutDetails, exe: &Path) -> bool {
             && exe
                 .parent()
                 .is_some_and(|folder| same_file(&link.working_directory, folder))
-            && same_file(&link.icon, exe))
+            && (same_file(&link.icon, exe)
+                || same_file(&link.icon, &crate::shell_identity::icon_path(exe))))
 }
 
 fn legacy_managed_link(link: &ShortcutDetails, exe: &Path) -> bool {
@@ -168,7 +169,10 @@ fn legacy_managed_link(link: &ShortcutDetails, exe: &Path) -> bool {
 }
 
 fn valid_link(link: &ShortcutDetails, kind: Shortcut, exe: &Path) -> bool {
-    same_file(&link.target, exe) && link.arguments == kind.arguments()
+    same_file(&link.target, exe)
+        && link.arguments == kind.arguments()
+        && exe.parent().is_some_and(|folder| same_file(&link.working_directory, folder))
+        && same_file(&link.icon, &crate::shell_identity::icon_path(exe))
 }
 
 /// A shortcut with our name that is not ours but may be taken over: one an
@@ -268,6 +272,10 @@ fn details_patiently(link_path: &Path) -> Option<ShortcutDetails> {
 
 /// One `IShellLinkW` write.
 fn write_link(kind: Shortcut, exe: &Path, link_path: &Path) -> Result<(), String> {
+    write_link_to(exe, link_path, kind.arguments())
+}
+
+fn write_link_to(exe: &Path, link_path: &Path, arguments: &str) -> Result<(), String> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile};
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
     use windows::core::{HSTRING, Interface};
@@ -277,9 +285,10 @@ fn write_link(kind: Shortcut, exe: &Path, link_path: &Path) -> Result<(), String
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
         link.SetPath(&HSTRING::from(exe.as_os_str()))?;
         link.SetWorkingDirectory(&HSTRING::from(folder.as_os_str()))?;
-        link.SetArguments(&HSTRING::from(kind.arguments()))?;
-        link.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
+        link.SetArguments(&HSTRING::from(arguments))?;
+        link.SetIconLocation(&HSTRING::from(crate::shell_identity::icon_path(exe).as_os_str()), 0)?;
         link.SetDescription(&HSTRING::from(product::NAME))?;
+        crate::shell_identity::set_link_identity(&link)?;
         link.cast::<IPersistFile>()?
             .Save(&HSTRING::from(link_path.as_os_str()), true)
     })
@@ -290,6 +299,34 @@ fn write_link(kind: Shortcut, exe: &Path, link_path: &Path) -> Result<(), String
 /// the read-back fail for a short while.
 const SHORTCUT_ATTEMPTS: u64 = 4;
 const SHORTCUT_RETRY_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+
+fn refresh_pinned_link(exe: &Path, link_path: &Path) -> Result<bool, String> {
+    let Some(details) = details_at(link_path) else { return Ok(false) };
+    if !managed_link(&details, exe) && !legacy_managed_link(&details, exe) {
+        return Ok(false);
+    }
+    write_link_to(exe, link_path, &details.arguments)?;
+    crate::shell_identity::notify_update(link_path);
+    Ok(true)
+}
+
+/// Refresh only existing pins that belong to this installation. New pinning
+/// goes through the running app and Windows' confirmation, never Taskband edits.
+pub fn refresh_taskbar_shortcuts(exe: &Path) -> Vec<String> {
+    let Some(roaming) = roaming_app_data() else { return Vec::new() };
+    let folder = roaming.join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    let mut warnings = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+            && let Err(error) = refresh_pinned_link(exe, &path)
+        {
+            warnings.push(format!("The existing taskbar shortcut could not be refreshed: {error}"));
+        }
+    }
+    warnings
+}
 
 /// Writes (or rewrites) a shortcut and checks what Windows persisted.
 pub fn create_shortcut(kind: Shortcut, exe: &Path) -> Result<(), String> {
@@ -306,6 +343,7 @@ pub fn create_shortcut(kind: Shortcut, exe: &Path) -> Result<(), String> {
         }
         match write_link(kind, exe, &link_path) {
             Ok(()) if details_at(&link_path).is_some_and(|link| valid_link(&link, kind, exe)) => {
+                crate::shell_identity::notify_update(&link_path);
                 // Written under the usual name: an older copy of ours under
                 // the fallback name would now be a second entry.
                 if let Some(fallback) = kind.fallback_path()
@@ -484,12 +522,21 @@ pub fn open_url(url: &str) -> Result<(), String> {
 /// then skips asking the network for a newer version, and opens sooner
 /// (`JUST_UPDATED_ARG` in the app's `updater.rs`).
 pub const JUST_UPDATED_ARG: &str = "--just-updated";
+pub const PIN_TASKBAR_ARG: &str = "--pin-taskbar";
 
 /// Starts the installed app, detached from this process, and returns its
 /// process ID. `updated`: this run was an update (`/UPDATE`).
 pub fn launch(exe: &Path, updated: bool) -> Result<u32, String> {
+    launch_with_pin_request(exe, updated, false)
+}
+
+fn launch_args(updated: bool, pin: bool) -> Vec<&'static str> {
+    updated.then_some(JUST_UPDATED_ARG).into_iter().chain(pin.then_some(PIN_TASKBAR_ARG)).collect()
+}
+
+pub fn launch_with_pin_request(exe: &Path, updated: bool, pin: bool) -> Result<u32, String> {
     std::process::Command::new(exe)
-        .args(updated.then_some(JUST_UPDATED_ARG))
+        .args(launch_args(updated, pin))
         .current_dir(exe.parent().unwrap_or(exe))
         .spawn()
         .map(|child| child.id())
@@ -519,6 +566,14 @@ pub fn system32(program: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_explicit_setup_pin_choice_requests_the_windows_pin_flow() {
+        assert!(launch_args(false, false).is_empty());
+        assert_eq!(launch_args(true, false), [JUST_UPDATED_ARG]);
+        assert_eq!(launch_args(false, true), [PIN_TASKBAR_ARG]);
+        assert_eq!(launch_args(true, true), [JUST_UPDATED_ARG, PIN_TASKBAR_ARG]);
+    }
 
     fn link(
         target: &str,
@@ -614,6 +669,51 @@ mod tests {
     }
 
     #[test]
+    fn a_shortcut_with_a_stale_icon_or_working_folder_needs_repair() {
+        let exe = Path::new(r"C:\Apps\MYLE.exe");
+        let mut shortcut = link(
+            exe.to_str().unwrap(), r"C:\Apps", product::NAME,
+            r"C:\Old\MakeYourLifeEasier.exe,0", "",
+        );
+        assert!(!valid_link(&shortcut, Shortcut::Desktop, exe));
+        shortcut.icon = exe.to_path_buf();
+        shortcut.working_directory = PathBuf::from(r"C:\Old");
+        assert!(!valid_link(&shortcut, Shortcut::StartMenu, exe));
+    }
+
+    #[test]
+    fn shortcuts_use_the_installed_icon_independently_of_exe_replacement() {
+        let dir = std::env::temp_dir().join(format!("myle-shortcut-Θωμάς-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("MYLE.exe");
+        std::fs::copy(system32("whoami.exe"), &exe).unwrap();
+        let icon = dir.join("MYLE.ico");
+        std::fs::write(&icon, include_bytes!("../../icons/icon.ico")).unwrap();
+        let link_path = dir.join("MYLE.lnk");
+        write_link(Shortcut::Desktop, &exe, &link_path).unwrap();
+        let details = details_at(&link_path).expect("Windows can read the written shortcut");
+        assert!(same_file(&details.target, &exe));
+        assert!(same_file(&details.icon, &icon), "shortcut uses the stable .ico file");
+        assert!(valid_link(&details, Shortcut::Desktop, &exe));
+        with_com(|| unsafe {
+            use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ};
+            use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+            use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+            use windows::core::{HSTRING, Interface};
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            link.cast::<IPersistFile>()?.Load(&HSTRING::from(link_path.as_os_str()), STGM_READ)?;
+            let properties: IPropertyStore = link.cast()?;
+            let value = properties.GetValue(&crate::shell_identity::APP_ID_KEY)?;
+            assert_eq!(value.to_string(), crate::shell_identity::APP_ID);
+            Ok(())
+        }).unwrap();
+        std::fs::remove_file(link_path).unwrap();
+        std::fs::remove_file(icon).unwrap();
+        std::fs::remove_file(exe).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
     fn takes_over_old_or_dead_links_but_not_a_working_other_app() {
         let exe = Path::new(
             r"C:\Users\Thomas\AppData\Local\ThomasThanos\MakeYourLifeEasier\MakeYourLifeEasier.exe",
@@ -664,5 +764,26 @@ mod tests {
             Path::new(r"C:\Apps\MYLE2\x.exe"),
             Path::new(r"C:\Apps\MYLE")
         ));
+    }
+
+    #[test]
+    fn existing_taskbar_links_migrate_the_old_exe_and_preserve_their_arguments() {
+        let dir = std::env::temp_dir().join(format!("myle-pin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let exe = dir.join("MYLE.exe");
+        let old = dir.join(product::legacy_exe_name());
+        let pin = dir.join("Existing pin.lnk");
+        write_link_to(&old, &pin, "--open-passwords").unwrap();
+        assert!(refresh_pinned_link(&exe, &pin).unwrap());
+        let details = details_at(&pin).unwrap();
+        assert!(same_file(&details.target, &exe));
+        assert_eq!(details.arguments, "--open-passwords");
+        assert!(same_file(&details.icon, &exe));
+        let unrelated = system32("cmd.exe");
+        write_link_to(&unrelated, &pin, "/d").unwrap();
+        assert!(!refresh_pinned_link(&exe, &pin).unwrap());
+        assert!(same_file(&details_at(&pin).unwrap().target, &unrelated));
+        std::fs::remove_file(pin).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 }

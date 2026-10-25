@@ -16,6 +16,10 @@ mod product;
 mod registry;
 mod relocate;
 mod shell;
+#[path = "../../src/shell_identity.rs"]
+mod shell_identity;
+#[path = "../../src/shortcut_preferences.rs"]
+mod shortcut_preferences;
 #[path = "../../src/shown_window.rs"]
 mod shown_window;
 mod ui;
@@ -78,6 +82,7 @@ pub fn setup_main(payload: &'static [u8]) -> i32 {
 /// `/S`: no window. The updater waits for nothing and reads no output, so
 /// the exit code is the only report.
 fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
+    let fresh_install = registry::install_dir().is_none();
     let dir = cli
         .dir
         .clone()
@@ -99,7 +104,7 @@ fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
     }
     let shortcuts = if cli.no_shortcuts {
         engine::ShortcutMode::RefreshOnly
-    } else if cli.update {
+    } else if cli.update || !fresh_install {
         engine::ShortcutMode::Keep
     } else {
         engine::ShortcutMode::Choose(engine::ShortcutChoice::NEW_INSTALL)
@@ -113,6 +118,9 @@ fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
     // in place, and the updater could do nothing about it anyway.
     match engine::install(payload, &options, &mut |_| {}) {
         Ok(installed) => {
+            if fresh_install && !cli.update && !cli.no_shortcuts {
+                let _ = registry::remember_taskbar_choice(true);
+            }
             if cli.relaunch && !live {
                 let _ = shell::launch(&installed.exe, cli.update);
             }

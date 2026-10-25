@@ -65,6 +65,9 @@ impl LineSplitter {
             match c {
                 '\r' => self.overwrite = true,
                 '\n' => lines.push(self.commit()),
+                '\u{8}' => {
+                    self.current.pop();
+                }
                 // Control and padding characters a terminal would not show.
                 '\u{0}' | '\u{feff}' => {}
                 _ => {
@@ -98,6 +101,10 @@ impl LineSplitter {
             text += &self.take_decodable();
         }
         for c in text.chars() {
+            if c == '\u{8}' {
+                self.current.pop();
+                continue;
+            }
             if !matches!(c, '\r' | '\n' | '\u{0}' | '\u{feff}') {
                 if self.overwrite {
                     self.current.clear();
@@ -375,6 +382,14 @@ mod tests {
         let mut splitter = LineSplitter::default();
         let lines = splitter.feed(b"first line here\r\nsecond line here\r\n");
         assert_eq!(drawn(&lines), ["first line here", "second line here"]);
+    }
+
+    #[test]
+    fn backspaces_repaint_progress_instead_of_reaching_the_page() {
+        let mut splitter = LineSplitter::default();
+        let mut lines = splitter.feed(b"Verification 20%\x08\x08\x0860% complete.\r\n");
+        lines.extend(splitter.finish());
+        assert_eq!(drawn(&lines), ["Verification 60% complete."]);
     }
 
     #[test]

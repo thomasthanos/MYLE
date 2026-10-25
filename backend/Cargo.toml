@@ -1,6 +1,6 @@
 [package]
 name = "make-your-life-easier"
-version = "10.0.7"
+version = "10.1.0"
 description = "MYLE — Make Your Life Easier"
 authors = ["ThomasThanos"]
 edition = "2024"
@@ -73,7 +73,7 @@ uuid = { version = "1", features = ["v4"] }
 chacha20poly1305 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 # Windows Hello (KeyCredentialManager) for opening the password vault.
-windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell"] }
+windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "UI_Shell", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_UI_Accessibility", "Win32_System_TaskScheduler", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
 psl = "2"
 windows-future = "0.2"
 # Project Backups: CRC-32 of every zipped file, Unicode file names compared

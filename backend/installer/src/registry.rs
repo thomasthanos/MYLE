@@ -54,7 +54,7 @@ pub fn register(dir: &Path, version: &str, size_kb: u32) -> Result<(), String> {
     let quoted = |path: &Path| format!("\"{}\"", path.display());
     let text: [(&str, String); 10] = [
         ("DisplayName", product::NAME.to_string()),
-        ("DisplayIcon", quoted(&exe)),
+        ("DisplayIcon", quoted(&crate::shell_identity::icon_path(&exe))),
         ("DisplayVersion", version.to_string()),
         ("Publisher", product::PUBLISHER.to_string()),
         ("InstallLocation", dir.display().to_string()),
@@ -110,6 +110,22 @@ pub fn remember_shortcut_states(states: [u32; 3]) {
     for (state, name) in states.into_iter().zip(STATE_VALUES) {
         let _ = key.set_value(name, &state);
     }
+}
+
+pub fn taskbar_preference() -> crate::shortcut_preferences::TaskbarPreference {
+    use crate::shortcut_preferences::{TASKBAR_CHOICE, TASKBAR_PENDING, taskbar_preference};
+    let key = hkcu().open_subkey(product::product_key()).ok();
+    let read = |name: &str| key.as_ref().and_then(|key| key.get_value::<u32, _>(name).ok()).map(|value| value != 0);
+    taskbar_preference(read(TASKBAR_CHOICE), read(TASKBAR_PENDING))
+}
+
+pub fn remember_taskbar_choice(enabled: bool) -> Result<(), String> {
+    use crate::shortcut_preferences::{TASKBAR_CHOICE, TASKBAR_PENDING};
+    let (key, _) = hkcu().create_subkey(product::product_key()).map_err(|error| error.to_string())?;
+    for name in [TASKBAR_CHOICE, TASKBAR_PENDING] {
+        key.set_value(name, &u32::from(enabled)).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Whether the app, when Windows starts it at sign-in, waits minimized in

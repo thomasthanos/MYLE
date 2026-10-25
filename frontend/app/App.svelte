@@ -4,6 +4,7 @@
   import TooltipHost from "../lib/components/TooltipHost.svelte";
   import ContextMenuHost from "../lib/components/ContextMenuHost.svelte";
   import WhatsNewHost from "../lib/components/WhatsNewHost.svelte";
+  import TaskbarPin from "../lib/components/TaskbarPin.svelte";
   import { whatsNew } from "../lib/whats-new.svelte";
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -94,6 +95,7 @@
 </div>
 
 <Toaster />
+<TaskbarPin />
 <WhatsNewHost />
 <ConfirmHost />
 <TooltipHost />

@@ -12,8 +12,11 @@ pub mod project_backups;
 mod maintenance;
 mod passwords;
 mod shown_window;
+mod shell_identity;
+mod shortcut_preferences;
 mod spotify_hub;
 mod startup;
+mod taskbar;
 mod storage;
 mod tray;
 mod updater;
@@ -196,6 +199,13 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // SAFETY: a valid string, copied by Windows. The process and installed
+    // shortcuts share the same identity for taskbar grouping and pinning.
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+            &windows::core::HSTRING::from(shell_identity::APP_ID),
+        );
+    }
     // Started at sign-in although starting with Windows is switched off.
     if startup::respect_choice() {
         return;
@@ -319,6 +329,9 @@ pub fn run() {
         })
         .invoke_handler(owner_gate(tauri::generate_handler![
             finish_startup,
+            taskbar::taskbar_pin_offer,
+            taskbar::taskbar_pin,
+            taskbar::taskbar_pin_dismiss,
             start_page,
             passwords::passwords_browser_get,
             passwords::passwords_browser_set,

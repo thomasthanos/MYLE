@@ -23,6 +23,7 @@ const POLL: Duration = Duration::from_millis(180);
 /// How long to keep draining the log after the program exited, in case the
 /// last write lands just after the process does.
 const FINAL_DRAINS: usize = 6;
+const DISK_SCAN: &str = include_str!("disk_scan.ps1");
 
 /// Where a run is told about a program starting, as opposed to UAC still being
 /// on screen with nothing running yet.
@@ -114,6 +115,21 @@ pub async fn run_stream_elevated(
     stream(step, workspace, true, on_phase, on_line).await
 }
 
+pub async fn run_disk_scan(
+    workspace: &Workspace,
+    on_phase: &mut (dyn FnMut(Phase) + Send),
+    on_line: &mut (dyn FnMut(Line) + Send),
+) -> Result<i32, String> {
+    watch(
+        disk_script(&workspace.log, &workspace.stop),
+        workspace,
+        true,
+        on_phase,
+        on_line,
+    )
+    .await
+}
+
 /// The same watch loop with or without the UAC prompt. Only the tests run it
 /// unelevated, which is how the redirect and the tailing are exercised without
 /// asking for rights or touching the system.
@@ -125,7 +141,16 @@ async fn stream(
     on_line: &mut (dyn FnMut(Line) + Send),
 ) -> Result<i32, String> {
     let script = stream_script(step, &workspace.log, &workspace.stop);
+    watch(script, workspace, with_uac, on_phase, on_line).await
+}
 
+async fn watch(
+    script: String,
+    workspace: &Workspace,
+    with_uac: bool,
+    on_phase: &mut (dyn FnMut(Phase) + Send),
+    on_line: &mut (dyn FnMut(Line) + Send),
+) -> Result<i32, String> {
     let mut tail = Tail::new(&workspace.log);
     on_phase(Phase::Waiting);
     let mut started = false;
@@ -306,11 +331,27 @@ fn batch_script(steps: &[Step], log: &Path) -> String {
 /// elevated child itself, so it drops a sentinel file and the elevated script
 /// does the killing. Cancelling that way needs no second UAC prompt.
 fn stream_script(step: &Step, log: &Path, stop: &Path) -> String {
+    watched_script(&system32(step.exe), step.args, log, stop)
+}
+
+fn disk_script(log: &Path, stop: &Path) -> String {
+    watched_script(
+        &crate::apps::process::powershell(),
+        &powershell_args(DISK_SCAN).join(" "),
+        log,
+        stop,
+    )
+}
+
+fn watched_script(exe: &Path, args: &str, log: &Path, stop: &Path) -> String {
     let mut script = script_start(log);
     script.push_str(&start_process(
-        &cmd_tail(&system32(step.exe), step.args, log),
+        &cmd_tail(exe, args, log),
         "",
     ));
+    // Windows PowerShell 5.1 otherwise releases the process handle while
+    // polling HasExited, leaving ExitCode null (and `exit $null` reports 0).
+    script.push_str("$null = $p.Handle\n");
     script.push_str(&format!(
         "while (-not $p.HasExited) {{\n  \
            if (Test-Path -LiteralPath {}) {{ & {} /PID $p.Id /T /F | Out-Null; break }}\n  \
@@ -403,7 +444,7 @@ mod tests {
             .flat_map(|action| match &action.run {
                 tasks::Run::Batch(steps) => steps.iter().collect::<Vec<_>>(),
                 tasks::Run::Stream(step) => vec![step],
-                tasks::Run::WingetUpgradeAll => Vec::new(),
+                tasks::Run::DiskScan | tasks::Run::WingetUpgradeAll => Vec::new(),
             })
             .map(|step| system32(step.exe).to_string_lossy().to_ascii_lowercase())
             .chain([
@@ -411,6 +452,7 @@ mod tests {
                 system32("taskkill.exe")
                     .to_string_lossy()
                     .to_ascii_lowercase(),
+                crate::apps::process::powershell().to_string_lossy().to_ascii_lowercase(),
             ])
             .collect();
 
@@ -420,6 +462,10 @@ mod tests {
                     tasks::Run::Batch(steps) => batch_script(steps, Path::new(r"C:\Temp\o.log")),
                     tasks::Run::Stream(step) => stream_script(
                         step,
+                        Path::new(r"C:\Temp\o.log"),
+                        Path::new(r"C:\Temp\o.stop"),
+                    ),
+                    tasks::Run::DiskScan => disk_script(
                         Path::new(r"C:\Temp\o.log"),
                         Path::new(r"C:\Temp\o.stop"),
                     ),
@@ -441,6 +487,55 @@ mod tests {
     #[test]
     fn quotes_are_escaped() {
         assert_eq!(ps_quote(r"C:\Users\it's\t.log"), r"'C:\Users\it''s\t.log'");
+    }
+
+    /// Execute the real worker and redirect with a stubbed Storage provider:
+    /// these tests never scan a volume or ask for elevation.
+    #[tokio::test]
+    async fn disk_scan_reports_provider_results_and_failures_through_the_live_log() {
+        for (result, expected_code, expected_text) in [
+            ("0", 0, "No file-system errors were found."),
+            ("4", 0, "No file-system errors were found."),
+            ("5", 2, "Windows reported online corrections."),
+            ("7", 2, "An offline repair may be needed."),
+            ("9", 1, "Windows could not complete the disk scan (status 9)."),
+            ("$null", 1, "Windows returned no usable disk scan result."),
+            ("throw 'Access is denied.'", 1, "Access is denied."),
+            ("throw 'Δεν επιτρέπεται η πρόσβαση.'", 1, "Δεν επιτρέπεται η πρόσβαση."),
+        ] {
+            let worker = format!(
+                "function Repair-Volume {{\n\
+                    param([char]$DriveLetter, [switch]$Scan)\n\
+                    $systemDrive = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)[0]\n\
+                    if (-not $Scan -or $DriveLetter -ne $systemDrive) {{ throw 'Unsafe scan arguments.' }}\n\
+                    {result}\n\
+                }}\n{DISK_SCAN}"
+            );
+            let workspace = Workspace::new("selftest-disk").unwrap();
+            let script = watched_script(
+                &crate::apps::process::powershell(),
+                &powershell_args(&worker).join(" "),
+                &workspace.log,
+                &workspace.stop,
+            );
+            let mut lines = Vec::new();
+            let code = watch(script, &workspace, false, &mut |_| {}, &mut |line| {
+                lines.push(line.text);
+            })
+            .await
+            .unwrap();
+            assert_eq!(code, expected_code, "provider result {result}");
+            assert!(lines.join("\n").contains(expected_text), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn disk_scan_requests_only_the_online_check() {
+        assert!(DISK_SCAN.contains("Repair-Volume -DriveLetter $drive -Scan -ErrorAction Stop"));
+        assert!(DISK_SCAN.contains("[Environment]::SystemDirectory"));
+        for forbidden in ["-SpotFix", "-OfflineScanAndFix", "-ForceDismount", "shutdown", "chkdsk.exe"] {
+            assert!(!DISK_SCAN.contains(forbidden), "unexpected request: {forbidden}");
+        }
     }
 
     /// The end-to-end proof that the redirect works. `sfc` talks UTF-16LE and

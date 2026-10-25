@@ -109,6 +109,8 @@ function Assert-Shortcuts([string]$ExpectedTarget, [string[]]$Names) {
     Assert ($link.TargetPath -ieq $ExpectedTarget) "$name shortcut opens the installed app (found '$($link.TargetPath)')"
     $expectedArguments = if ($name -eq "Startup") { "--autostart" } else { "" }
     Assert ($link.Arguments -eq $expectedArguments) "$name shortcut has the expected arguments"
+    $expectedIcon = Join-Path (Split-Path -Parent $ExpectedTarget) "MYLE.ico"
+    Assert ($link.IconLocation -ieq "$expectedIcon,0") "$name shortcut uses the stable installed icon"
   }
 }
 # A new install: Desktop and Start menu; starting with Windows is opt-in.
@@ -121,6 +123,10 @@ foreach ($name in @("DesktopShortcut", "StartMenuShortcut")) {
   Assert ($choices.$name -eq 2) "shortcut $name remembered as wanted and made"
 }
 Assert ($choices.StartupShortcut -eq 0) "starting with Windows remembered as off"
+Assert ($choices.TaskbarShortcut -eq 1) "the default taskbar choice is remembered separately"
+Assert ($choices.TaskbarPinPending -eq 1) "the taskbar request waits for the app and Windows confirmation"
+# A completed/dismissed request must not clear the selected setup checkbox.
+Set-ItemProperty -LiteralPath $productKey -Name TaskbarPinPending -Value 0 -Type DWord
 
 # The user switches "Start with Windows" on in Settings, which writes the
 # same shortcut the setup does and records it as made (backend/src/startup.rs).
@@ -140,8 +146,7 @@ foreach ($name in @("StartMenu", "Startup")) {
   $link.TargetPath = ""
   $link.Save()
 }
-# And the user deletes the Desktop shortcut the setup made: the update must
-# respect that and remember it, not bring it back.
+# A missing Desktop shortcut is repaired during the update.
 Remove-Item -LiteralPath $shortcutPaths.Desktop
 
 # Simulate an existing installation with the old executable name. The new
@@ -154,9 +159,22 @@ Assert ((Invoke-Silently $Setup @("/S", "/UPDATE")) -eq 0) "silent update exits 
 Assert ((Get-FileHash $legacyExe).Hash -eq (Get-FileHash $expectedExe).Hash) "old executable launches the new build"
 Assert ((Get-Content (Join-Path $dir "install.json") -Raw) -match '"MakeYourLifeEasier.exe"') "legacy executable is tracked for uninstall"
 Assert (-not (Get-ChildItem $dir -Recurse -Filter "*.myle-*")) "no leftovers from the update"
-Assert-Shortcuts $expectedExe @("StartMenu", "Startup")
-Assert (-not (Test-Path -LiteralPath $shortcutPaths.Desktop)) "the Desktop shortcut the user deleted stays deleted"
-Assert ((Get-ItemProperty -LiteralPath $productKey).DesktopShortcut -eq 0) "the deletion is remembered as unticked"
+Assert-Shortcuts $expectedExe @("Desktop", "StartMenu", "Startup")
+Assert ((Get-ItemProperty -LiteralPath $productKey).DesktopShortcut -eq 2) "the missing Desktop shortcut is repaired and remembered"
+Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarShortcut -eq 1) "the update keeps the selected taskbar checkbox"
+Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarPinPending -eq 0) "the update does not repeat a handled taskbar request"
+
+# Explicitly disabled access/startup choices stay disabled after another update.
+foreach ($name in @("DesktopShortcut", "StartMenuShortcut", "StartupShortcut", "TaskbarShortcut", "TaskbarPinPending")) {
+  Set-ItemProperty -LiteralPath $productKey -Name $name -Value 0 -Type DWord
+}
+foreach ($path in $shortcutPaths.Values) { Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue }
+Assert ((Invoke-Silently $Setup @("/S", "/UPDATE")) -eq 0) "an update with opted-out shortcuts exits 0"
+foreach ($path in $shortcutPaths.Values) {
+  Assert (-not (Test-Path -LiteralPath $path)) "an unchecked shortcut is not recreated on update"
+}
+Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarShortcut -eq 0) "the update keeps taskbar disabled"
+Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarPinPending -eq 0) "the update does not queue a declined taskbar choice"
 
 # Uninstall
 Assert ((Invoke-Silently (Join-Path $dir "uninstall.exe") @("/S")) -eq 0) "silent uninstall exits 0"

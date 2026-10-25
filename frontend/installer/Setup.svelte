@@ -9,6 +9,7 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Monitor from "@lucide/svelte/icons/monitor";
+  import Pin from "@lucide/svelte/icons/pin";
   import Power from "@lucide/svelte/icons/power";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -61,6 +62,8 @@
   let dir = $state("");
   let desktop = $state(true);
   let startMenu = $state(true);
+  let taskbar = $state(true);
+  $effect(() => { if (!startMenu) taskbar = false; });
   let startup = $state(false);
   let startMinimized = $state(true);
   let launchAfter = $state(true);
@@ -217,6 +220,7 @@
     dir = state.dir;
     desktop = state.shortcuts.desktop;
     startMenu = state.shortcuts.startMenu;
+    taskbar = state.shortcuts.taskbar;
     startup = state.shortcuts.startup;
     startMinimized = state.shortcuts.startMinimized;
     getExtension = !!state.extensionUrl && !state.installed;
@@ -278,7 +282,7 @@
     try {
       if (uninstalling) await api.uninstall(removeData, onEvent);
       else {
-        const done = await api.install({ desktop, startMenu, startup, startMinimized }, onEvent);
+        const done = await api.install({ desktop, startMenu, startup, taskbar, startMinimized }, onEvent);
         installedDir = done.dir;
         shortcutWarnings = done.warnings;
       }
@@ -435,7 +439,8 @@
               </div>
               <div class="toggles">
                 <Toggle bind:checked={desktop} icon={Monitor} label="Desktop shortcut" />
-                <Toggle bind:checked={startMenu} icon={LayoutGrid} label="Start menu" />
+                <Toggle bind:checked={startMenu} icon={LayoutGrid} label="Start menu (All apps)" />
+                <Toggle bind:checked={taskbar} disabled={!startMenu} icon={Pin} label="Pin to taskbar" hint="Windows will ask you to confirm" />
                 <Toggle bind:checked={startup} icon={Power} label="Start with Windows">
                   {#snippet extra()}
                     <button

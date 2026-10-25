@@ -198,6 +198,9 @@ pub fn maintenance_running(running: State<'_, Running>) -> Option<String> {
 
 #[tauri::command(async)]
 pub fn maintenance_cancel(running: State<'_, Running>, jobs: State<'_, Jobs>, id: String) {
+    if !tasks::find(&id).is_some_and(|(_, action)| action.cancellable) {
+        return;
+    }
     running.cancel(&id);
     // winget runs unelevated, so it can simply be killed.
     jobs.cancel(&id);
@@ -286,6 +289,20 @@ pub async fn maintenance_run(
             )
             .await?
         }
+        Run::DiskScan => {
+            let workspace = workspace.as_ref().expect("disk scans get a workspace");
+            runner::run_disk_scan(
+                workspace,
+                &mut |phase| {
+                    let _ = on_event.send(match phase {
+                        runner::Phase::Waiting => TaskEvent::Waiting,
+                        runner::Phase::Started => TaskEvent::Started,
+                    });
+                },
+                &mut |line| sink.line(line),
+            )
+            .await?
+        }
         Run::WingetUpgradeAll => {
             let job = jobs.start(&id)?;
             let _ = on_event.send(TaskEvent::Started);
@@ -324,8 +341,9 @@ fn classify(action: &tasks::Action, code: i32, last_line: &str) -> Result<TaskOu
             }),
         });
     }
-    if action.tolerates_failure() {
-        // Read-only Check Disk reports what it found through its exit code.
+    if matches!(action.run, Run::DiskScan) && code == 2 {
+        // Our disk worker reserves 2 for a completed scan with findings.
+        // Launch errors, incomplete scans and provider failures remain errors.
         return Ok(TaskOutcome::Done {
             note: Some("Problems were reported — see the output.".into()),
         });
@@ -460,6 +478,18 @@ mod tests {
     fn check_disk_finding_problems_is_a_result_not_a_failure() {
         let outcome = classify(action("chkdsk"), 2, "Errors found").unwrap();
         assert!(matches!(outcome, TaskOutcome::Done { note: Some(_) }));
+    }
+
+    #[test]
+    fn check_disk_cannot_claim_success_when_the_scan_did_not_run() {
+        assert_eq!(
+            classify(action("chkdsk"), 1, "Access is denied."),
+            Err("Access is denied.".into())
+        );
+        assert_eq!(
+            classify(action("chkdsk"), 3, "The disk could not be checked."),
+            Err("The disk could not be checked.".into())
+        );
     }
 
     #[test]

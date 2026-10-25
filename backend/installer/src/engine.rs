@@ -51,8 +51,8 @@ pub enum ShortcutMode {
     /// ours left unticked is removed. Remembered for the next install.
     Choose(ShortcutChoice),
     /// An update: follows what the user wants now (`current_choice`). A
-    /// chosen shortcut that never got made is tried again; one the user
-    /// deleted is not brought back, and is saved as unticked. Nothing is
+    /// Desktop and Start Menu shortcuts are repaired if missing. Explicit
+    /// setup opt-outs and the Startup preference from Settings are kept. Nothing is
     /// removed. An install from before shortcuts were remembered gets the
     /// ones `migrate_shortcuts` picks.
     Keep,
@@ -513,9 +513,9 @@ fn apply_shortcuts(exe: &Path, mode: ShortcutMode) -> Vec<String> {
         ShortcutMode::Keep => {
             // What the user wants now (or, over an install from before that
             // was remembered, what `migrate_shortcuts` repairs): a wanted
-            // shortcut that never got made is tried again, one the user
-            // removed stays removed.
-            let choice = current_choice(exe).unwrap_or_else(|| migrate_shortcuts(exe));
+            // access shortcut that went missing is recreated. Explicit
+            // setup opt-outs and the Startup preference in Settings are retained.
+            let choice = current_choice().unwrap_or_else(|| migrate_shortcuts(exe));
             let present = Shortcut::ALL.map(|kind| shell::shortcut_present(kind, exe));
             for (kind, make) in Shortcut::ALL.into_iter().zip(update_plan(choice, present)) {
                 if make {
@@ -534,6 +534,9 @@ fn apply_shortcuts(exe: &Path, mode: ShortcutMode) -> Vec<String> {
             }
         }
     }
+    warnings.extend(shell::refresh_taskbar_shortcuts(exe));
+    crate::shell_identity::notify_update(exe);
+    crate::shell_identity::notify_update(&crate::shell_identity::icon_path(exe));
     warnings
 }
 
@@ -545,26 +548,21 @@ mod state {
     /// Wanted, but not made yet (Windows refused it, or it was uninstalled):
     /// the next update or install tries again.
     pub const WANTED: u32 = 1;
-    /// Wanted and made. Missing later means the user removed it.
+    /// Wanted and made. Desktop/Start Menu are restored if missing on update.
     pub const MADE: u32 = 2;
 }
 
 /// What the user wants now, in `Shortcut::ALL` order: the remembered states,
-/// where a shortcut the setup made and that is gone since was removed by the
-/// user, and stays so.
-fn wanted_now(states: [u32; 3], present: [bool; 3]) -> [bool; 3] {
-    std::array::from_fn(|i| match states[i] {
-        state::OFF => false,
-        state::MADE => present[i],
-        _ => true,
-    })
+/// Missing files never undo a saved checkbox. Settings explicitly writes OFF
+/// when the user disables starting with Windows.
+fn wanted_now(states: [u32; 3]) -> [bool; 3] {
+    states.map(|saved| saved != state::OFF)
 }
 
 /// `None` before any install has remembered the shortcuts.
-fn current_choice(exe: &Path) -> Option<ShortcutChoice> {
+fn current_choice() -> Option<ShortcutChoice> {
     let states = registry::shortcut_states()?;
-    let present = Shortcut::ALL.map(|kind| shell::shortcut_present(kind, exe));
-    Some(ShortcutChoice::from_array(wanted_now(states, present)))
+    Some(ShortcutChoice::from_array(wanted_now(states)))
 }
 
 fn states_after(choice: ShortcutChoice, present: [bool; 3]) -> [u32; 3] {
@@ -602,11 +600,10 @@ fn retire_legacy_autostart(choice: ShortcutChoice, exe: &Path) {
 /// remembered. Those setups only ever refreshed what they found, so an
 /// install could be left with the desktop shortcut alone for good. This
 /// once: the Start menu entry every installed app has, and a Startup
-/// shortcut in place of the old app's `Run` value; the desktop shortcut
-/// stays as the user left it.
+/// shortcut in place of the old app's `Run` value, with Desktop enabled by default.
 fn migrate_shortcuts(exe: &Path) -> ShortcutChoice {
     ShortcutChoice {
-        desktop: shell::shortcut_present(Shortcut::Desktop, exe),
+        desktop: true,
         start_menu: true,
         startup: shell::shortcut_present(Shortcut::Startup, exe) || registry::legacy_autostart(),
     }
@@ -619,7 +616,7 @@ pub fn default_shortcuts(existing: Option<&Path>) -> ShortcutChoice {
     let exe = existing
         .map_or_else(default_dir, Path::to_path_buf)
         .join(product::exe_name());
-    if let Some(choice) = current_choice(&exe) {
+    if let Some(choice) = current_choice() {
         return choice;
     }
     match existing {
@@ -974,19 +971,19 @@ mod tests {
     }
 
     #[test]
-    fn a_shortcut_the_user_removed_stays_removed_but_a_failed_one_is_retried() {
+    fn updates_restore_default_shortcuts_but_respect_explicit_choices() {
         use state::{MADE, OFF, WANTED};
-        // Desktop made and still there; Start menu made, then deleted by
-        // the user; Startup wanted but never made (Windows refused it).
-        let wanted = wanted_now([MADE, MADE, WANTED], [true, false, false]);
-        assert_eq!(wanted, [true, false, true]);
+        // Missing access shortcuts get repaired. Startup remains optional.
+        let wanted = wanted_now([MADE, MADE, WANTED]);
+        assert_eq!(wanted, [true, true, true]);
         // An unticked one stays off, even if a copy of ours is still there.
-        assert_eq!(wanted_now([OFF, OFF, OFF], [true, false, false]), [false; 3]);
+        assert_eq!(wanted_now([OFF, OFF, OFF]), [false; 3]);
 
-        // What is saved after the update: the removal is now a choice.
+        // A missing access shortcut stays wanted for the next repair attempt.
         let choice = ShortcutChoice::from_array(wanted);
-        assert_eq!(states_after(choice, [true, false, true]), [MADE, OFF, MADE]);
-        assert_eq!(states_after(choice, [true, false, false]), [MADE, OFF, WANTED]);
+        assert_eq!(states_after(choice, [true, false, true]), [MADE, WANTED, MADE]);
+        assert_eq!(states_after(choice, [true, false, false]), [MADE, WANTED, WANTED]);
+        assert_eq!(wanted_now([MADE; 3]), [true; 3]);
     }
 
     #[test]

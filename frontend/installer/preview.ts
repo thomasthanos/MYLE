@@ -19,7 +19,7 @@ export function previewApi(mode: string): SetupApi {
     installed,
     dir: DIR,
     size: 44_310_528,
-    shortcuts: { desktop: true, startMenu: true, startup: mode !== "update", startMinimized: true },
+    shortcuts: { desktop: true, startMenu: true, startup: mode === "reinstall", taskbar: mode !== "uninstall", startMinimized: true },
     passive: mode === "passive",
     ready: true,
     extensionUrl: uninstall ? null : "https://example.com/myle-passwords",

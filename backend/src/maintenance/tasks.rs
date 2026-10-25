@@ -38,6 +38,8 @@ pub enum Run {
     Batch(&'static [Step]),
     /// One long-running program whose output is streamed while it runs.
     Stream(Step),
+    /// Windows Storage's online check, independent of the chkdsk executable.
+    DiskScan,
     /// `winget upgrade --all`, which runs without elevation.
     WingetUpgradeAll,
 }
@@ -71,14 +73,6 @@ pub struct Card {
 impl Card {
     pub fn needs_admin(&self) -> bool {
         self.elevation == Elevation::Yes
-    }
-}
-
-impl Action {
-    /// A non-zero exit is something to report, not a failure: read-only Check
-    /// Disk tells you it found problems that way.
-    pub fn tolerates_failure(&self) -> bool {
-        matches!(&self.run, Run::Stream(step) if step.allow_failure)
     }
 }
 
@@ -254,7 +248,7 @@ pub const CARDS: &[Card] = &[
         id: "chkdsk",
         section: Section::Health,
         title: "Check Disk",
-        description: "Scans the system drive for file-system errors. Read-only: it reports what it finds and changes nothing.",
+        description: "Checks the Windows system drive online and reports file-system problems. No offline repair or restart is requested. Let the scan finish once started.",
         icon: "disk",
         elevation: Elevation::Yes,
         caution: None,
@@ -262,13 +256,9 @@ pub const CARDS: &[Card] = &[
         actions: &[Action {
             id: "chkdsk",
             label: "Check",
-            // A non-zero exit means "found something", which is the point.
-            run: Run::Stream(Step {
-                exe: "chkdsk.exe",
-                args: "C:",
-                allow_failure: true,
-            }),
-            cancellable: true,
+            run: Run::DiskScan,
+            // The Storage service owns the scan: killing its PowerShell
+            // client does not reliably cancel it, so retain the task lock.
             ..NO_ACTION_EXTRAS
         }],
     },
@@ -353,7 +343,7 @@ mod tests {
         match &action.run {
             Run::Batch(list) => list.iter().collect(),
             Run::Stream(step) => vec![step],
-            Run::WingetUpgradeAll => Vec::new(),
+            Run::DiskScan | Run::WingetUpgradeAll => Vec::new(),
         }
     }
 
@@ -431,16 +421,13 @@ mod tests {
         }
     }
 
-    /// "Check Disk (read-only)" must stay read-only: no repair switch.
+    /// The Storage scan must keep its lane until the service has returned.
     #[test]
-    fn check_disk_never_writes() {
+    fn check_disk_uses_the_online_scan_and_does_not_offer_false_cancellation() {
         let (_, action) = find("chkdsk").unwrap();
-        for step in steps(action) {
-            let args = step.args.to_ascii_lowercase();
-            for switch in ["/f", "/r", "/x", "/b", "/spotfix"] {
-                assert!(!args.contains(switch), "chkdsk must not be given {switch}");
-            }
-        }
+        assert!(matches!(action.run, Run::DiskScan));
+        assert!(!action.cancellable);
+        assert!(!action.reboot);
     }
 
     #[test]
@@ -448,7 +435,7 @@ mod tests {
         for card in CARDS.iter().filter(|c| c.console) {
             for action in card.actions {
                 assert!(
-                    matches!(action.run, Run::Stream(_) | Run::WingetUpgradeAll),
+                    matches!(action.run, Run::Stream(_) | Run::DiskScan | Run::WingetUpgradeAll),
                     "{} has a console but produces no live output",
                     action.id
                 );

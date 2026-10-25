@@ -170,8 +170,9 @@ fn write_link(exe: &Path, link_path: &Path) -> Result<(), String> {
         link.SetPath(&HSTRING::from(exe.as_os_str()))?;
         link.SetWorkingDirectory(&HSTRING::from(folder.as_os_str()))?;
         link.SetArguments(&HSTRING::from("--autostart"))?;
-        link.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
+        link.SetIconLocation(&HSTRING::from(crate::shell_identity::icon_path(exe).as_os_str()), 0)?;
         link.SetDescription(&HSTRING::from(NAME))?;
+        crate::shell_identity::set_link_identity(&link)?;
         link.cast::<IPersistFile>()?
             .Save(&HSTRING::from(link_path.as_os_str()), true)
     })()
@@ -179,6 +180,9 @@ fn write_link(exe: &Path, link_path: &Path) -> Result<(), String> {
     .map_err(|error| error.message());
     if initialized {
         unsafe { CoUninitialize() };
+    }
+    if saved.is_ok() {
+        crate::shell_identity::notify_update(link_path);
     }
     saved
 }

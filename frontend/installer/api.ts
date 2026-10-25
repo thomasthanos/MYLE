@@ -10,7 +10,7 @@ export interface SetupState {
   dir: string;
   /** Bytes on disk once installed. */
   size: number;
-  shortcuts: { desktop: boolean; startMenu: boolean; startup: boolean; startMinimized: boolean };
+  shortcuts: { desktop: boolean; startMenu: boolean; startup: boolean; taskbar: boolean; startMinimized: boolean };
   /** `/P`: installs at once and closes by itself. */
   passive: boolean;
   /** False for a setup built without the app inside. */
@@ -37,6 +37,7 @@ export interface InstallRequest {
   desktop: boolean;
   startMenu: boolean;
   startup: boolean;
+  taskbar: boolean;
   /** Started by Windows at sign-in: minimized to the taskbar, or on screen. */
   startMinimized: boolean;
 }

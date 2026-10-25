@@ -7,6 +7,7 @@ import { confirm } from "../../../lib/confirm.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { maintenanceApi, type MaintenanceAction, type MaintenanceCard, type TaskOutcome } from "./api";
+import { appendOutput } from "./output";
 const KEY = { view: "myle.maintenance.view" };
 /** Kept per console; older lines are dropped so a long run stays responsive. */
 const MAX_LINES = 1200;
@@ -241,9 +242,7 @@ class MaintenanceState {
       const buffer = this.consoles[cardId];
       if (!buffer) continue;
       for (const line of incoming) {
-        // A bare carriage return repaints the line instead of adding one.
-        if (line.replace && buffer.lines.length) buffer.lines[buffer.lines.length - 1] = line.text;
-        else buffer.lines.push(line.text);
+        appendOutput(buffer.lines, line);
       }
       if (buffer.lines.length > MAX_LINES) {
         buffer.dropped += buffer.lines.length - TRIM_TO;
