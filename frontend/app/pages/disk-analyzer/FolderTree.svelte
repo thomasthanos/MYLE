@@ -35,12 +35,15 @@
     { key: "modified", label: "Modified" },
   ];
 
-  // Brings a row asked for (from the treemap, say) into view.
+  // Brings a row asked for (from the treemap, say) into view once it is
+  // listed, then lets the request go, so later changes don't scroll back.
   $effect(() => {
     const wanted = d.scrollTo;
     if (!wanted || !viewport) return;
     const index = rows.findIndex((row) => row.type === "node" && row.node.id === wanted.id);
-    if (index >= 0) bringIntoView(index);
+    if (index < 0) return;
+    bringIntoView(index);
+    d.scrollTo = null;
   });
 
   function bringIntoView(index: number) {
