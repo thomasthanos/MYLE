@@ -160,7 +160,10 @@ export function layoutTreemap(data: TreeData, width: number, height: number, opt
     if (i === 0) {
       inner = { x, y, w, h };
     } else {
-      const strip = w >= options.labelW && h >= options.labelH ? options.header : 0;
+      // Don't draw a header strip if this folder has only 1 child and that child is also a folder.
+      // That prevents cascades of 8 stacked headers for deep single-directory corridors.
+      const isPassThrough = kids.length === 1 && data.kind[kids[0]] === FOLDER;
+      const strip = w >= options.labelW && h >= options.labelH && !isPassThrough ? options.header : 0;
       header[i] = strip;
       inner = { x: x + options.frame, y: y + options.frame + strip, w: w - options.frame * 2, h: h - options.frame * 2 - strip };
       if (inner.w < options.minSide || inner.h < options.minSide) continue;

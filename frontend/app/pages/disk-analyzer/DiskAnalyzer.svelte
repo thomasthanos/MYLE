@@ -4,11 +4,15 @@
   import ChartPie from "@lucide/svelte/icons/chart-pie";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Columns2 from "@lucide/svelte/icons/columns-2";
   import Files from "@lucide/svelte/icons/files";
+  import Folder from "@lucide/svelte/icons/folder";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Info from "@lucide/svelte/icons/info";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import List from "@lucide/svelte/icons/list";
   import Network from "@lucide/svelte/icons/network";
   import RadarIcon from "@lucide/svelte/icons/radar";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -24,6 +28,8 @@
   import Treemap from "./Treemap.svelte";
 
   onMount(() => void d.load());
+
+  let layoutMode = $state<"split" | "treemap" | "list">("split");
 
   const tabs: { id: View; label: string; icon: typeof Files }[] = [
     { id: "folders", label: "Folders", icon: FolderTreeIcon },
@@ -89,7 +95,7 @@
         onclick={() => d.choose(drive.root)}
         ondblclick={() => d.scan()}
       >
-        <span class="drive-icon"><Icon size={16} /></span>
+        <span class="drive-icon"><Icon size={18} /></span>
         <span class="drive-text">
           <span class="drive-name"><strong>{drive.letter}:</strong> {drive.label || "Local Disk"}</span>
           <span class="meter" aria-hidden="true"><span class:full={used > 0.9} style:width="{used * 100}%"></span></span>
@@ -110,7 +116,7 @@
     {#if scanning}
       <button type="button" class="btn primary" onclick={() => d.cancel()}><X size={15} /> Cancel</button>
     {:else}
-      <button type="button" class="btn primary" disabled={!d.target || d.busy} onclick={() => d.scan()}><RadarIcon size={15} /> Scan</button>
+      <button type="button" class="btn primary glow" disabled={!d.target || d.busy} onclick={() => d.scan()}><RadarIcon size={15} /> Scan</button>
     {/if}
   </div>
 </section>
@@ -152,60 +158,121 @@
     </section>
   {/if}
   <div class="results">
-  <div class="split">
-    <section class="pane list surface">
-      <div class="tabs-row">
-        <div class="tabs" role="tablist" aria-label="Results">
-          {#each tabs as tab, index (tab.id)}
-            <button
-              type="button"
-              id="da-tab-{tab.id}"
-              role="tab"
-              aria-selected={d.view === tab.id}
-              aria-controls="da-panel"
-              tabindex={d.view === tab.id ? 0 : -1}
-              class:active={d.view === tab.id}
-              onclick={() => d.setView(tab.id)}
-              onkeydown={(e) => onTabKey(e, index)}><tab.icon size={15} /> {tab.label}</button>
-          {/each}
-        </div>
+    <!-- Clean Unified Navigation & View Switcher Bar -->
+    <div class="crumbs-bar surface">
+      <nav class="crumbs" aria-label="Treemap folder">
         <button
           type="button"
-          class="btn danger small recycle"
-          disabled={!d.selection.size || d.busy}
-          title="Move the selected items to the Recycle Bin (Del)"
-          onclick={() => d.recycle()}
+          class="icon-btn back-btn"
+          disabled={d.trail.length < 2}
+          title="One folder up (Backspace)"
+          aria-label="One folder up"
+          onclick={() => d.zoomOut()}
         >
-          <Trash2 size={14} />
-          {d.selection.size > 1 ? `Move ${d.selection.size} to Recycle Bin` : "Move to Recycle Bin"}
+          <ArrowUp size={15} />
         </button>
-      </div>
-      <div id="da-panel" class="panel" role="tabpanel" aria-labelledby="da-tab-{d.view}">
-        {#if d.view === "folders"}
-          <FolderTree />
-        {:else if d.view === "files"}
-          <LargestFiles />
-        {:else}
-          <FileTypes />
-        {/if}
-      </div>
-    </section>
-    <section class="pane treemap surface" aria-label="Treemap">
-      <nav class="crumbs" aria-label="Treemap folder">
-        <button type="button" class="icon-btn" disabled={d.trail.length < 2} title="One folder up (Backspace)" aria-label="One folder up" onclick={() => d.zoomOut()}><ArrowUp size={15} /></button>
-        <ol>
+        <ol class="crumb-list">
           {#each d.trail as crumb, index (crumb.id)}
             <li>
-              {#if index > 0}<ChevronRight size={12} />{/if}
-              <button type="button" aria-current={index === d.trail.length - 1 ? "location" : undefined} onclick={() => d.zoomTo(crumb.id)}>{crumb.name}</button>
+              {#if index > 0}<ChevronRight size={12} class="crumb-sep" />{/if}
+              <button
+                type="button"
+                class="crumb-pill"
+                aria-current={index === d.trail.length - 1 ? "location" : undefined}
+                onclick={() => d.zoomTo(crumb.id)}
+              >
+                {#if index === 0}
+                  <HardDrive size={13} class="crumb-icon" />
+                {:else}
+                  <Folder size={13} class="crumb-icon" />
+                {/if}
+                <span>{crumb.name}</span>
+              </button>
             </li>
           {/each}
         </ol>
-        <span class="crumb-size">{formatSize(d.currentSize)}</span>
+        <div class="crumb-tail">
+          <span class="crumb-size-pill">{formatSize(d.currentSize)}</span>
+          <div class="layout-switch" role="group" aria-label="View mode">
+            <button
+              type="button"
+              class="layout-toggle-btn"
+              class:active={layoutMode === "split"}
+              onclick={() => layoutMode = "split"}
+              title="Split view (Folder list + Treemap)"
+            >
+              <Columns2 size={14} />
+            </button>
+            <button
+              type="button"
+              class="layout-toggle-btn"
+              class:active={layoutMode === "treemap"}
+              onclick={() => layoutMode = "treemap"}
+              title="Full Treemap view"
+            >
+              <LayoutGrid size={14} />
+            </button>
+            <button
+              type="button"
+              class="layout-toggle-btn"
+              class:active={layoutMode === "list"}
+              onclick={() => layoutMode = "list"}
+              title="Full List view"
+            >
+              <List size={14} />
+            </button>
+          </div>
+        </div>
       </nav>
-      <Treemap />
-    </section>
-  </div>
+    </div>
+
+    <div class="split mode-{layoutMode}">
+      {#if layoutMode !== "treemap"}
+        <section class="pane list surface">
+          <div class="tabs-row">
+            <div class="tabs" role="tablist" aria-label="Results">
+              {#each tabs as tab, index (tab.id)}
+                <button
+                  type="button"
+                  id="da-tab-{tab.id}"
+                  role="tab"
+                  aria-selected={d.view === tab.id}
+                  aria-controls="da-panel"
+                  tabindex={d.view === tab.id ? 0 : -1}
+                  class:active={d.view === tab.id}
+                  onclick={() => d.setView(tab.id)}
+                  onkeydown={(e) => onTabKey(e, index)}><tab.icon size={15} /> {tab.label}</button>
+              {/each}
+            </div>
+            <button
+              type="button"
+              class="btn danger small recycle"
+              disabled={!d.selection.size || d.busy}
+              title="Move the selected items to the Recycle Bin (Del)"
+              onclick={() => d.recycle()}
+            >
+              <Trash2 size={14} />
+              {d.selection.size > 1 ? `Move ${d.selection.size} to Recycle Bin` : "Move to Recycle Bin"}
+            </button>
+          </div>
+          <div id="da-panel" class="panel" role="tabpanel" aria-labelledby="da-tab-{d.view}">
+            {#if d.view === "folders"}
+              <FolderTree />
+            {:else if d.view === "files"}
+              <LargestFiles />
+            {:else}
+              <FileTypes />
+            {/if}
+          </div>
+        </section>
+      {/if}
+
+      {#if layoutMode !== "list"}
+        <section class="pane treemap surface" aria-label="Treemap">
+          <Treemap />
+        </section>
+      {/if}
+    </div>
   </div>
   <footer class="status">
     {#if d.root}
@@ -215,7 +282,7 @@
     {#if d.done.inaccessible}
       <span class="warn" title={[...d.done.inaccessiblePaths, d.done.inaccessible > d.done.inaccessiblePaths.length ? "…" : ""].filter(Boolean).join("\n")}>
         <CircleAlert size={13} />
-        {d.done.inaccessible.toLocaleString()} folder{d.done.inaccessible === 1 ? "" : "s"} could not be read (Windows keeps them for administrators or other users)
+        {d.done.inaccessible.toLocaleString()} folder{d.done.inaccessible === 1 ? "" : "s"} could not be read
       </span>
     {/if}
     {#if d.done.windowsDrive}
@@ -227,50 +294,180 @@
   </footer>
 {:else if !scanning}
   <section class="empty surface">
-    <HardDrive size={28} />
+    <HardDrive size={36} />
     <h2>Pick a drive or a folder, then Scan</h2>
     <p>The scan reads folder listings only, so even a whole drive takes well under a minute. Nothing is changed until you choose to move something to the Recycle Bin.</p>
   </section>
 {/if}
 
 <style>
-  .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-2) var(--fluid-gap-3); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-2) var(--fluid-gap-3); }
-  .drives { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
-  .drive { display: flex; align-items: center; gap: 9px; min-width: 150px; padding: 7px 11px; border: 1px solid var(--btn-border); border-radius: 10px; background: var(--chip-fill); color: var(--text-2); text-align: left; box-shadow: var(--btn-sheen); transition: background var(--dur-fast), border-color var(--dur-fast); }
-  .drive:hover:not(:disabled) { background: var(--chip-fill-hover); color: var(--text-1); }
-  .drive.active { border-color: rgb(var(--accent-rgb) / 0.55); background: var(--selected); color: var(--text-1); }
+  .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-2) var(--fluid-gap-3); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-2) var(--fluid-gap-3); border-radius: 12px; }
+  .drives { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; }
+  .drive { display: flex; align-items: center; gap: 10px; min-width: 170px; padding: 8px 12px; border: 1px solid var(--btn-border); border-radius: 10px; background: var(--chip-fill); color: var(--text-2); text-align: left; box-shadow: var(--btn-sheen); transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
+  .drive:hover:not(:disabled) { background: var(--chip-fill-hover); color: var(--text-1); transform: translateY(-1px); }
+  .drive.active { border-color: rgb(var(--accent-rgb) / 0.7); background: var(--selected); color: var(--text-1); box-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.25); }
   .drive:disabled { opacity: 0.55; cursor: not-allowed; }
   .drive-icon { display: grid; color: rgb(var(--accent-soft-rgb)); }
   .drive-text { display: grid; gap: 3px; min-width: 0; }
-  .drive-name { overflow: hidden; font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
+  .drive-name { overflow: hidden; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
   .drive-free { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .meter { display: block; height: 4px; border-radius: 999px; background: rgb(0 0 0 / 0.3); overflow: hidden; }
-  .meter span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+  .meter { display: block; height: 5px; border-radius: 999px; background: rgb(0 0 0 / 0.35); overflow: hidden; }
+  .meter span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #38bdf8); }
   .meter span.full { background: var(--danger); }
-  .picked { display: inline-flex; align-items: center; gap: 7px; max-width: 360px; padding: 0 11px; border: 1px solid rgb(var(--accent-rgb) / 0.55); border-radius: 10px; background: var(--selected); color: var(--text-1); font-size: 12.5px; }
+  .picked { display: inline-flex; align-items: center; gap: 7px; max-width: 360px; padding: 0 12px; border: 1px solid rgb(var(--accent-rgb) / 0.55); border-radius: 10px; background: var(--selected); color: var(--text-1); font-size: 12.5px; }
   .picked span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: ltr; }
   .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
   .mode { display: inline-flex; padding: 2px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--input-fill); }
   .mode button { height: 26px; padding: 0 10px; border-radius: 7px; color: var(--text-2); font-size: 12px; font-weight: 600; }
   .mode button:hover:not(:disabled) { color: var(--text-1); }
   .mode button.active { background: var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
-  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: var(--fluid-sm); }
-  .scanning { display: grid; gap: 8px; margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3); animation: fade-in var(--dur-med) var(--ease-out) both; }
+  .btn.glow { box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.35); }
+  .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: var(--fluid-sm); border-radius: 10px; }
+  .scanning { display: grid; gap: 8px; margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3); border-radius: 12px; animation: fade-in var(--dur-med) var(--ease-out) both; }
   .counts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; color: var(--text-2); font-size: var(--fluid-sm); font-variant-numeric: tabular-nums; }
   .counts strong { color: var(--text-1); font-size: var(--fluid-md); }
   .counts em { overflow: hidden; color: rgb(var(--accent-soft-rgb)); font-style: normal; white-space: nowrap; text-overflow: ellipsis; }
   .current { overflow: hidden; color: var(--text-3); font-size: var(--fluid-xs); white-space: nowrap; text-overflow: ellipsis; }
   .note { color: var(--text-3); font-size: var(--fluid-xs); }
-  .skipped { margin-bottom: var(--fluid-gap-2); padding: 8px 12px; font-size: var(--fluid-xs); }
+  .skipped { margin-bottom: var(--fluid-gap-2); padding: 8px 12px; font-size: var(--fluid-xs); border-radius: 10px; }
   .skipped-head { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
   .skipped-head .btn { margin-left: auto; }
   .skipped ul { display: grid; gap: 3px; max-height: 120px; margin: 6px 0 0; padding: 0; overflow: auto; list-style: none; }
   .skipped li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
   .skipped .path { overflow: hidden; color: var(--text-1); white-space: nowrap; text-overflow: ellipsis; }
   .skipped .why { color: var(--text-3); }
-  .results { display: flex; flex-direction: column; flex: 1; min-height: 0; container-type: inline-size; }
-  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: var(--fluid-gap-3); flex: 1; min-height: 0; }
-  .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+  .results { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+
+  /* Sleek Breadcrumb Bar */
+  .crumbs-bar {
+    padding: 6px 10px;
+    border-radius: 10px;
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .crumbs .back-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .crumb-list {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 3px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    list-style: none;
+  }
+  .crumb-list li {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+  }
+  :global(.crumb-sep) {
+    color: var(--text-3);
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+  .crumb-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    overflow: hidden;
+    max-width: 180px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .crumb-pill:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-1);
+  }
+  .crumb-pill[aria-current="location"] {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .crumb-pill span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  :global(.crumb-icon) {
+    color: rgb(var(--accent-soft-rgb));
+    flex-shrink: 0;
+  }
+
+  .crumb-tail {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  .crumb-size-pill {
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--chip-fill);
+    color: var(--text-1);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .layout-switch {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 2px;
+  }
+  .layout-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .layout-toggle-btn:hover {
+    color: var(--text-1);
+  }
+  .layout-toggle-btn.active {
+    background: var(--selected);
+    color: var(--text-1);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Flexible Split & Single-Pane Modes */
+  .split { display: grid; gap: var(--fluid-gap-3); flex: 1; min-height: 0; }
+  .split.mode-split { grid-template-columns: minmax(320px, 1fr) minmax(400px, 1.4fr); }
+  .split.mode-treemap { grid-template-columns: minmax(0, 1fr); }
+  .split.mode-list { grid-template-columns: minmax(0, 1fr); }
+
+  .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-radius: 12px; overflow: hidden; }
   .tabs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 8px 10px 6px; border-bottom: 1px solid var(--glass-border); }
   .tabs { display: flex; gap: 4px; }
   .tabs button { display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 8px; color: var(--text-2); font-size: 12.5px; }
@@ -279,26 +476,21 @@
   .tabs button :global(svg) { color: rgb(var(--accent-soft-rgb)); }
   .recycle:disabled { opacity: 0.4; }
   .panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .treemap { gap: 8px; padding: 8px; }
-  .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .crumbs .icon-btn { width: 26px; height: 26px; }
-  .crumbs ol { display: flex; align-items: center; flex: 1; gap: 2px; min-width: 0; margin: 0; padding: 0; overflow: hidden; list-style: none; }
-  .crumbs li { display: flex; align-items: center; gap: 2px; min-width: 0; color: var(--text-3); }
-  .crumbs li:last-child { flex-shrink: 0; }
-  .crumbs li button { overflow: hidden; max-width: 220px; padding: 3px 6px; border-radius: 6px; color: var(--text-2); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
-  .crumbs li button:hover { background: var(--hover); color: var(--text-1); }
-  .crumbs li button[aria-current] { color: var(--text-1); font-weight: 600; }
-  .crumb-size { flex: none; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  /* Treemap Pane */
+  .treemap { gap: 8px; padding: 10px; }
+
   .status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: var(--fluid-gap-2); color: var(--text-3); font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
   .status span { display: inline-flex; align-items: center; gap: 5px; }
   .status .warn { color: #e6b477; }
   .status .selected { margin-left: auto; color: var(--text-2); }
-  .empty { display: grid; justify-items: center; gap: 8px; margin-top: var(--fluid-gap-4); padding: 36px 24px; color: var(--text-3); text-align: center; }
+  .empty { display: grid; justify-items: center; gap: 10px; margin-top: var(--fluid-gap-4); padding: 48px 24px; color: var(--text-3); text-align: center; border-radius: 16px; }
   .empty :global(svg) { color: rgb(var(--accent-soft-rgb)); }
   .empty h2 { color: var(--text-1); font-size: var(--fluid-md); }
   .empty p { max-width: 60ch; font-size: var(--fluid-sm); line-height: 1.5; }
-  @container (max-width: 900px) {
-    .split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr); }
+
+  @media (max-width: 900px) {
+    .split.mode-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(280px, 1fr) minmax(280px, 1fr); }
   }
   @keyframes fade-in { from { opacity: 0; } }
 </style>
