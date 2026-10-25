@@ -8,6 +8,7 @@ import { nav } from "../../lib/nav.svelte";
 import { settings } from "../../lib/settings.svelte";
 import { gameSavesState } from "../pages/game-saves/state.svelte";
 import type { GameSavesSettings } from "../pages/game-saves/api";
+import { diskState } from "../pages/disk-analyzer/state.svelte";
 import { appsState } from "../pages/install-apps/state.svelte";
 import { cleanerState } from "../pages/system-cleaner/state.svelte";
 import { maintenanceState } from "../pages/system-maintenance/state.svelte";
@@ -24,6 +25,9 @@ export const SYNCED_KEYS = [
   "myle.gameSaves.filter",
   "myle.maintenance.view",
   "cleaner.selected",
+  // View choices only: scan results and paths never leave this PC.
+  "myle.diskAnalyzer.sizeMode",
+  "myle.diskAnalyzer.view",
 ] as const;
 
 /** Announced by the Game Saves page (see `notifyChange`), not a storage key. */
@@ -88,6 +92,7 @@ export async function apply(snapshot: Snapshot): Promise<string | null> {
   appsState.reloadChoices();
   maintenanceState.reloadView();
   cleanerState.reloadSelection();
+  diskState.reloadChoices();
   gameSavesState.reloadChoices();
 
   if (!snapshot.gameSaves) return null;

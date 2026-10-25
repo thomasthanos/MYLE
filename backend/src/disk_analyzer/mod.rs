@@ -488,6 +488,8 @@ pub async fn disk_analyzer_nodes(
 pub struct Crumb {
     id: u32,
     name: String,
+    size: u64,
+    alloc: u64,
 }
 
 /// The scanned folder down to `node_id`, for the breadcrumbs.
@@ -500,7 +502,12 @@ pub async fn disk_analyzer_trail(state: State<'_, DiskAnalyzerState>, scan_id: u
             Ok(tree
                 .trail(node_id)
                 .into_iter()
-                .map(|id| Crumb { id, name: tree.name(id).to_string_lossy().into_owned() })
+                .map(|id| Crumb {
+                    id,
+                    name: tree.name(id).to_string_lossy().into_owned(),
+                    size: tree.size(id, SizeMode::Size),
+                    alloc: tree.size(id, SizeMode::Alloc),
+                })
                 .collect())
         })
     })
@@ -533,6 +540,8 @@ pub struct FileView {
     node: NodeView,
     path: String,
     parent: u32,
+    /// Its extension's colour, as in the treemap.
+    rank: u8,
 }
 
 #[tauri::command]
@@ -548,12 +557,14 @@ pub async fn disk_analyzer_top_files(
         state.with(scan_id, |tree, guard| {
             let limit = (limit as usize).clamp(1, MAX_TOP_FILES);
             let ids = tree.top_files(size_mode, limit, filter.as_deref());
+            let ranks = tree.ranks(size_mode).to_vec();
             Ok(ids
                 .into_iter()
                 .map(|id| FileView {
                     node: view(tree, guard, id),
                     path: tree.path(id).display().to_string(),
                     parent: tree.node(id).parent,
+                    rank: ranks[tree.node(id).ext as usize],
                 })
                 .collect())
         })
@@ -633,6 +644,8 @@ pub struct Skipped {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteOutcome {
     recycled: u32,
+    /// The ids that went.
+    ids: Vec<u32>,
     /// Size on disk given back.
     freed_bytes: u64,
     /// The same items by their size.
@@ -725,7 +738,7 @@ pub async fn disk_analyzer_delete(
             }
             Ok(())
         });
-        Ok(DeleteOutcome { recycled: recycled.len() as u32, freed_bytes, freed_size, skipped })
+        Ok(DeleteOutcome { recycled: recycled.len() as u32, ids: recycled, freed_bytes, freed_size, skipped })
     })
     .await
 }

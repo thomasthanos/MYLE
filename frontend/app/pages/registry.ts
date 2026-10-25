@@ -8,11 +8,13 @@ import IconGithubReleases from "../../lib/icons/IconGithubReleases.svelte";
 import IconCreativeHub from "../../lib/icons/IconCreativeHub.svelte";
 import IconWindowsOpt from "../../lib/icons/IconWindowsOpt.svelte";
 import IconSystemCleaner from "../../lib/icons/IconSystemCleaner.svelte";
+import IconDiskAnalyzer from "../../lib/icons/IconDiskAnalyzer.svelte";
 import IconSystemMaint from "../../lib/icons/IconSystemMaint.svelte";
 import IconPasswords from "../../lib/icons/IconPasswords.svelte";
 import IconSettings from "../../lib/icons/IconSettings.svelte";
 import type { NavGroup } from "../../lib/sidebar";
 import CreativeHub from "./creative-hub/CreativeHub.svelte";
+import DiskAnalyzer from "./disk-analyzer/DiskAnalyzer.svelte";
 import GameSaves from "./game-saves/GameSaves.svelte";
 import InstallApps from "./install-apps/InstallApps.svelte";
 import PasswordManager from "./password-manager/PasswordManager.svelte";
@@ -61,6 +63,8 @@ const defs = [
     description: "Remove bloat, tune settings and tidy the Start menu." },
   { id: "system-cleaner",       label: "System Cleaner",        group: "system", icon: IconSystemCleaner,  component: SystemCleaner,
     description: "Find and remove the files Windows leaves behind." },
+  { id: "disk-analyzer",        label: "Disk Analyzer",         group: "system", icon: IconDiskAnalyzer,   component: DiskAnalyzer, fill: true,
+    description: "See what is filling your drives, and free up space." },
   { id: "system-maintenance",   label: "System Maintenance",    group: "system", icon: IconSystemMaint,    component: SystemMaintenance,
     description: "Repair connections, check system files, keep everything up to date." },
   { id: "project-backups",      label: "Project Backups",       group: "owner",  icon: IconProjectBackups, ownerOnly: true,

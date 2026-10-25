@@ -14,7 +14,7 @@ for (const page of all) {
 const everyone = all.filter((page) => !page.ownerOnly);
 const keys = (key, extra = {}) => ({ key, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, ...extra });
 test("the registry lists every page once, grouped", () => {
-  assert.equal(all.length, 11);
+  assert.equal(all.length, 12);
   assert.equal(new Set(all.map((page) => page.id)).size, all.length);
   assert.equal(all[0].id, "install-apps", "the page the app opens on comes first");
   assert.deepEqual(
@@ -44,8 +44,11 @@ test("numbered shortcuts follow the sidebar order and Ctrl+comma stays available
   for (const page of everyone) {
     if (page.group !== "bottom") assert.equal(shortcutOf(all, page.id), shortcutOf(everyone, page.id));
   }
-  assert.equal(pageForShortcut(everyone, keys("9")), undefined, "only eight pages for everyone");
-  assert.equal(pageForShortcut(all, keys("9")).id, "project-backups");
+  // Nine pages for everyone since Disk Analyzer: Ctrl+9 is the last of them.
+  assert.equal(pageForShortcut(everyone, keys("9")).id, "system-maintenance");
+  assert.equal(shortcutOf(everyone, "disk-analyzer"), "Ctrl+8");
+  assert.equal(pageForShortcut(everyone, keys("0")), undefined, "only nine pages for everyone");
+  assert.equal(pageForShortcut(all, keys("9")).id, "system-maintenance");
   // Not a shortcut.
   assert.equal(pageForShortcut(all, keys("1", { shiftKey: true })), undefined);
   assert.equal(pageForShortcut(all, keys("1", { ctrlKey: false })), undefined);
@@ -57,11 +60,13 @@ test("Ctrl+period opens Settings, including when matching its physical key", () 
   assert.equal(pageForShortcut(everyone, keys(",", { code: "Comma" }))?.id, "settings");
   assert.equal(shortcutOf(everyone, "settings"), "Ctrl+.");
 });
-test("Ctrl+0 opens GitHub Releases only when the owner page is available", () => {
-  assert.equal(pageForShortcut(all, keys("0", { code: "Digit0" }))?.id, "github-releases");
-  assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
+test("Ctrl+0 opens Project Backups only when the owner page is available, and GitHub Releases has no number", () => {
+  assert.equal(pageForShortcut(all, keys("0", { code: "Digit0" }))?.id, "project-backups");
+  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+0");
   assert.equal(pageForShortcut(everyone, keys("0", { code: "Digit0" })), undefined);
-  assert.equal(shortcutOf(everyone, "github-releases"), null);
+  assert.equal(shortcutOf(everyone, "project-backups"), null);
+  // Ten numbers, eleven pages before Settings: the last one goes without.
+  assert.equal(shortcutOf(all, "github-releases"), null);
 });
 test("sidebar toggle accepts the B key in Latin and Greek keyboard layouts", () => {
   for (const [key, code] of [["b", "KeyB"], ["B", "KeyB"], ["β", "KeyB"], ["Β", "KeyB"]]) {

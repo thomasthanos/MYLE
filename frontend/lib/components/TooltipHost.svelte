@@ -5,6 +5,7 @@
   // nothing), and stays readable to screen readers as its label or
   // description. Lines in a title ("\n") are kept, and long paths wrap.
   import { onMount, untrack } from "svelte";
+  import { pointerTip } from "../tooltip.svelte";
 
   const SHOW_AFTER_MS = 450;
   /** Moving from one tooltip to the next shows the next at once. */
@@ -114,6 +115,23 @@
     }
   }
 
+  // The pointer's own tooltip (lib/tooltip.svelte.ts): beside the pointer,
+  // flipped to the other side near the window's edges.
+  let pointerBox = $state<HTMLDivElement>();
+  let pointerSize = $state({ width: 0, height: 0 });
+  const pointerLeft = $derived(
+    pointerTip.x + 14 + pointerSize.width > window.innerWidth - EDGE ? Math.max(EDGE, pointerTip.x - 14 - pointerSize.width) : pointerTip.x + 14,
+  );
+  const pointerTop = $derived(
+    pointerTip.y + 18 + pointerSize.height > window.innerHeight - EDGE ? Math.max(EDGE, pointerTip.y - 10 - pointerSize.height) : pointerTip.y + 18,
+  );
+  $effect(() => {
+    void pointerTip.text;
+    if (!pointerBox) return;
+    const { width, height } = pointerBox.getBoundingClientRect();
+    pointerSize = { width, height };
+  });
+
   onMount(() => {
     const options = { capture: true, passive: true };
     const listeners: [EventTarget, string, EventListener][] = [
@@ -151,6 +169,10 @@
     bind:this={box}
     style:left="{left}px"
     style:top="{top}px">{text}</div>
+{/if}
+
+{#if pointerTip.visible && !visible}
+  <div class="tooltip placed" role="tooltip" bind:this={pointerBox} style:left="{pointerLeft}px" style:top="{pointerTop}px">{pointerTip.text}</div>
 {/if}
 
 <style>

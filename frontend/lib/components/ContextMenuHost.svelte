@@ -10,7 +10,7 @@
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import { nav } from "../nav.svelte";
   import { toast } from "../toast.svelte";
-  import { menuPosition, textActions } from "../context-menu";
+  import { actionsAt, menuPosition, textActions } from "../context-menu";
   import { portal } from "../portal";
 
   let { appActions = false }: { appActions?: boolean } = $props();
@@ -77,9 +77,11 @@
     const sensitive = !!target.closest("[data-sensitive], .secret") || field?.type === "password" || !!field?.autocomplete.includes("password") || sensitiveSelection;
     const permissions = textActions({ editable: !!field, disabled: !!field?.disabled, readOnly: !!field?.readOnly, sensitive, noCopy: !!target.closest("[data-no-copy]"), selectedText, hasText: !!value });
     const current: Context = { target: field ?? target, field, range, start, end, value, selectedText };
-    const next: Item[] = [];
+    // What the page offers here (a file's Open in Explorer, say) comes first.
+    const page = field ? [] : actionsAt(target, x, y);
+    const next: Item[] = page.map((action) => ({ ...action, id: `page-${action.id}`, group: -1 }));
     if (field) next.push({ id: "cut", label: "Cut", icon: Scissors, shortcut: "Ctrl+X", disabled: !permissions.cut, group: 0, run: async () => { await copy(current); replaceSelection(current, ""); } });
-    next.push({ id: "copy", label: "Copy", icon: Copy, shortcut: "Ctrl+C", disabled: !permissions.copy, group: 0, run: () => copy(current) });
+    if (permissions.copy || !page.length) next.push({ id: "copy", label: "Copy", icon: Copy, shortcut: "Ctrl+C", disabled: !permissions.copy, group: 0, run: () => copy(current) });
     if (field) {
       next.push({ id: "paste", label: "Paste", icon: ClipboardPaste, shortcut: "Ctrl+V", disabled: !permissions.paste, group: 0, run: async () => replaceSelection(current, await navigator.clipboard.readText()) });
       next.push({ id: "select", label: "Select all", icon: TextSelect, shortcut: "Ctrl+A", disabled: !permissions.selectAll, group: 0, run: () => { if (field.isConnected) { field.focus({ preventScroll: true }); field.select(); } } });
