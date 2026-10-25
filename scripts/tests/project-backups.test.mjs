@@ -80,6 +80,9 @@ function setup(projects, missing = []) {
     backupRoot: "G:\\My Drive\\Projects Backup",
   };
   state.clock = now;
+  // These age/group fixtures describe completed discovery. Reinstall cases
+  // below use a fresh state with no check results or local history at all.
+  state.changes = Object.fromEntries(projects.filter((one) => !one.lastBackup).map((one) => [one.id, answer(one.id, "noBackup", now)]));
   state.query = "";
   state.filter = "all";
 }
@@ -180,6 +183,68 @@ const deferred = () => {
   const promise = new Promise((yes) => (resolve = yes));
   return { promise, resolve };
 };
+
+test("reinstalled projects stay unknown until their surviving backup folder is checked", () => {
+  const reinstalled = new state.constructor();
+  reinstalled.page = {
+    ...state.page,
+    settings: { ...state.page.settings, projects: [project("recovered-from-cloud-mirror")] },
+    missingSources: [],
+  };
+  assert.equal(reinstalled.health(reinstalled.projects[0]), "unknown", "a missing local history record is not proof that the cloud has no backups");
+  assert.equal(reinstalled.summary.never, 0);
+});
+
+test("failed discovery after reinstall does not claim that projects were never backed up", () => {
+  const reinstalled = new state.constructor();
+  reinstalled.page = {
+    ...state.page,
+    settings: { ...state.page.settings, projects: [project("offline"), project("damaged"), project("empty")] },
+    missingSources: [],
+  };
+  reinstalled.applyChanges([
+    answer("offline", "unreachable", now, { message: "Google Drive is not running" }),
+    answer("damaged", "error", now, { message: "The newest archive cannot be read" }),
+    answer("empty", "noBackup", now),
+  ], false);
+  assert.deepEqual(reinstalled.projects.map((one) => reinstalled.health(one)), ["unknown", "unknown", "never"]);
+  assert.equal(reinstalled.summary.never, 1, "only a completed empty-history check establishes Never");
+  assert.deepEqual(reinstalled.changedIds, ["empty"], "unknown projects are never automatically selected for backup");
+});
+
+test("a surviving archive recognized by detection cannot coexist with Never backed up", () => {
+  const reinstalled = new state.constructor();
+  reinstalled.page = {
+    ...state.page,
+    settings: { ...state.page.settings, projects: [project("same"), project("edited")] },
+    missingSources: [],
+  };
+  reinstalled.applyChanges([
+    answer("same", "upToDate", now, { backupId: "2026-10 Οκτώβριος/Same_D23_V12.zip" }),
+    answer("edited", "changed", now, { backupId: "2026-10 Οκτώβριος/Edited_D23_V5.zip", modified: 1 }),
+  ], false);
+  assert.deepEqual(reinstalled.projects.map((one) => reinstalled.health(one)), ["backedUp", "backedUp"]);
+  assert.equal(reinstalled.summary.never, 0);
+  assert.deepEqual(reinstalled.changedIds, ["edited"], "existing content is compared, not marked clean merely because its local cache was lost");
+});
+
+test("a failed backup list after reinstall remains unknown until a successful retry", async () => {
+  const original = api.list;
+  const reinstalled = new state.constructor();
+  api.list = async () => { throw new Error("Google Drive is unavailable"); };
+  try {
+    await reinstalled.loadBackups("offline");
+    assert.equal(reinstalled.backupErrors?.offline, "Google Drive is unavailable", "a failed listing needs a persistent state distinct from an empty history");
+    assert.equal(reinstalled.backups.offline, undefined, "failed discovery must not cache an empty list");
+    api.list = async () => [];
+    await reinstalled.loadBackups("offline");
+    assert.equal(reinstalled.backupErrors.offline, undefined);
+    assert.deepEqual(reinstalled.backups.offline, [], "only a successful retry can establish an empty history");
+  } finally {
+    api.list = original;
+    while (toast.visible.length) toast.dismiss(toast.visible[0].id);
+  }
+});
 
 test("a check started before a backup never replaces the answer after it", async () => {
   const original = api.changes;

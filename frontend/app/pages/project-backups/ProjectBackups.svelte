@@ -177,6 +177,7 @@
   const inUse = (provider: BackupProvider) => pb.provider === provider && !!pb.page.settings.cloudFolder;
   const projectsOf = (group: Group) => group.projects.map((project) => project.id);
   const summary = $derived(pb.summary);
+  const unconfirmedDates = $derived(pb.projects.some((project) => !project.lastBackup && pb.health(project) !== "never"));
   /** The one next step for the whole page, said in a line. */
   const headline = $derived.by(() => {
     if (!pb.projects.length) return "Add your first project folder to start backing up.";
@@ -188,7 +189,7 @@
   });
 
   const filters: { id: "all" | Group["key"]; label: string }[] = [
-    { id: "all", label: "All" }, { id: "attention", label: "Did not finish" }, { id: "never", label: "Not backed up" },
+    { id: "all", label: "All" }, { id: "attention", label: "Did not finish" }, { id: "unknown", label: "Not checked" }, { id: "never", label: "Not backed up" },
     { id: "stale", label: "Getting old" }, { id: "ok", label: "Up to date" }, { id: "missing", label: "Folder missing" },
   ];
 
@@ -196,7 +197,7 @@
   const counts = $derived.by(() => {
     const map: Record<string, number> = { all: pb.projects.length };
     for (const group of pb.allGroups) map[group.key] = group.projects.length;
-    for (const id of ["never", "stale", "ok", "missing", "attention"] as const) map[id] ??= 0;
+    for (const id of ["never", "stale", "ok", "missing", "attention", "unknown"] as const) map[id] ??= 0;
     return map;
   });
 
@@ -235,9 +236,9 @@
         <StatTile label="in latest backups" value={summary.knownSizes ? formatBytes(summary.backupBytes) : "—"} icon={Database} title="Each project's latest zip, together (older backups are not counted)" />
         <StatTile
           label="last backup"
-          value={summary.newest === null ? "never" : pb.ago(summary.newest)}
+          value={summary.newest === null ? (unconfirmedDates ? "Not checked" : "never") : pb.ago(summary.newest)}
           icon={Archive}
-          title={summary.oldest === null ? "No backup yet" : `The project backed up longest ago: ${pb.ago(summary.oldest)}`}
+          title={summary.oldest === null ? (unconfirmedDates ? "The existing backup dates have not been confirmed" : "No backup yet") : `The project backed up longest ago: ${pb.ago(summary.oldest)}`}
         />
       </div>
       <p class="headline" class:good={summary.attention === 0 && !!pb.projects.length && hasDestination}>{headline}</p>

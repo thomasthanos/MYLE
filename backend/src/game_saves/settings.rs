@@ -66,18 +66,11 @@ fn load_from_path(path: &Path) -> Result<GameSavesSettings, String> {
 
 pub(crate) fn initialize(app: &AppHandle) -> Result<GameSavesSettings, String> {
     let mut settings = load(app)?;
-    let mut changed = false;
+    let mut changed = recover_backup_folder(app, &mut settings, None)?;
 
     if settings.backup_folder.is_none() {
-        let base = app
-            .path()
-            .document_dir()
-            .unwrap_or(crate::storage::roaming_dir()?);
         settings.backup_folder = Some(
-            base.join("Make Your Life Easier")
-                .join("Game Saves Backups")
-                .to_string_lossy()
-                .into_owned(),
+            default_backup_folder(app)?.to_string_lossy().into_owned(),
         );
         changed = true;
     }
@@ -91,6 +84,125 @@ pub(crate) fn initialize(app: &AppHandle) -> Result<GameSavesSettings, String> {
         save(app, &settings)?;
     }
     Ok(settings)
+}
+
+fn default_backup_folder(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().document_dir().unwrap_or(crate::storage::roaming_dir()?);
+    Ok(base.join("Make Your Life Easier").join("Game Saves Backups"))
+}
+
+/// Reconnect a clean install to history in the app's known cloud subfolders.
+/// This only reads mappings and snapshot metadata; the engine subsequently
+/// reads the complete inventory and compares the actual save contents.
+pub(crate) fn recover_backup_folder(
+    app: &AppHandle,
+    value: &mut GameSavesSettings,
+    preferred: Option<&str>,
+) -> Result<bool, String> {
+    let default = default_backup_folder(app)?;
+    if !may_recover_backup_folder(value, &default) {
+        return Ok(false);
+    }
+    let candidates: Vec<_> = detection::detect_cloud_folders().into_iter()
+        .map(|folder| PathBuf::from(folder.backup_path)).collect();
+    let Some(folder) = recovered_backup_folder(value, &default, &candidates, preferred) else {
+        return Ok(false);
+    };
+    // A synced path can name another PC's protected folder. It remains a
+    // hint until it passes the same validation as a local picker choice.
+    if validate_backup_folder(app, &folder, value).is_err() {
+        return Ok(false);
+    }
+    value.backup_folder_chosen = Some(preferred.is_some_and(|hint| same_location(Path::new(hint), &folder)));
+    value.backup_folder = Some(folder.to_string_lossy().into_owned());
+    Ok(true)
+}
+
+fn may_recover_backup_folder(value: &GameSavesSettings, default: &Path) -> bool {
+    value.backup_folder_chosen != Some(true)
+        && value.backup_folder.as_deref().is_none_or(|current| {
+            same_location(Path::new(current), default) || value.backup_folder_chosen == Some(false)
+        })
+}
+
+fn recovered_backup_folder(
+    value: &GameSavesSettings,
+    default: &Path,
+    candidates: &[PathBuf],
+    preferred: Option<&str>,
+) -> Option<PathBuf> {
+    if !may_recover_backup_folder(value, default) {
+        return None;
+    }
+    let current = value.backup_folder.as_deref().map(Path::new);
+    let current_has_history = current.is_some_and(has_backup_history);
+    if current_has_history && value.backup_folder_chosen != Some(false) {
+        return None;
+    }
+    if let Some(preferred) = preferred.filter(|path| !path.trim().is_empty()) {
+        let preferred = Path::new(preferred);
+        if preferred.is_absolute() && has_backup_history(preferred) {
+            return current.is_none_or(|current| !same_location(current, preferred))
+                .then(|| preferred.to_path_buf());
+        }
+    }
+    // Ordinary startup keeps its earlier discovery, even if that cloud drive
+    // is temporarily offline. Only a verified account hint can supersede it.
+    if current_has_history || current.is_some_and(|current| !same_location(current, default)) {
+        return None;
+    }
+    let mut found = Vec::<PathBuf>::new();
+    for candidate in candidates {
+        if !found.iter().any(|known| same_location(known, candidate) || paths_equal(known, candidate))
+            && has_backup_history(candidate)
+        {
+            found.push(candidate.clone());
+        }
+    }
+    (found.len() == 1).then(|| found.remove(0))
+}
+
+fn same_location(a: &Path, b: &Path) -> bool {
+    let normal = |path: &Path| path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+    normal(a) == normal(b)
+}
+
+/// MYLE writes full zip snapshots. Require their Ludusavi mapping and a
+/// mapped snapshot on disk: an empty folder or an orphan zip is no history.
+/// Only direct game folders are inspected, never a recursive cloud search.
+fn has_backup_history(folder: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(folder) else { return false; };
+    entries.flatten().take(4096).any(|entry| {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) { return false; }
+        let mapping = entry.path().join("mapping.yaml");
+        if !fs::metadata(&mapping).is_ok_and(|meta| meta.is_file() && meta.len() <= 16 * 1024 * 1024) {
+            return false;
+        }
+        let Ok(text) = fs::read_to_string(mapping) else { return false; };
+        let mut named = false;
+        let mut backups = false;
+        for line in text.lines() {
+            if let Some(name) = line.strip_prefix("name:") { named = !name.trim().is_empty(); }
+            if !line.starts_with(' ') && line != "---" && !line.is_empty() {
+                backups = line == "backups:";
+            }
+            if !named || !backups { continue; }
+            let Some(raw) = line.strip_prefix("  - name:") else { continue; };
+            let raw = raw.trim();
+            let name = if raw.starts_with('"') {
+                serde_json::from_str::<String>(raw).ok()
+            } else if raw.starts_with('\'') && raw.ends_with('\'') && raw.len() >= 2 {
+                Some(raw[1..raw.len() - 1].replace("''", "'"))
+            } else {
+                Some(raw.to_string())
+            };
+            if let Some(name) = name
+                && name.ends_with(".zip") && !name.contains(['/', '\\', ':'])
+                && fs::metadata(entry.path().join(name)).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+            { return true; }
+        }
+        false
+    })
 }
 
 pub(crate) fn save(app: &AppHandle, settings: &GameSavesSettings) -> Result<(), String> {
@@ -425,6 +537,109 @@ pub(crate) fn merge_detected_roots(settings: &mut GameSavesSettings) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recovery_fixture() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("myle-game-saves-recovery-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_history(root: &Path) {
+        use std::io::Write;
+        let game = root.join("Game");
+        fs::create_dir_all(&game).unwrap();
+        let file = fs::File::create(game.join("backup-20260927T193842Z.zip")).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("drive-C/Saves/save.dat", zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"hello").unwrap();
+        zip.finish().unwrap();
+        fs::write(game.join("mapping.yaml"), "---\nname: Game\ndrives:\n  drive-C: 'C:'\nbackups:\n  - name: backup-20260927T193842Z.zip\n    when: '2026-09-27T19:38:42Z'\n    files:\n      C:/Saves/save.dat:\n        hash: aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d\n        size: 5\n    registry:\n      hash: ~\n    children: []\n").unwrap();
+    }
+
+    #[test]
+    fn reinstall_recovers_cloud_history_after_the_default_settings_were_already_created() {
+        let root = recovery_fixture();
+        let default = root.join("Documents/Make Your Life Easier/Game Saves Backups");
+        let cloud = root.join("Google Drive/Make Your Life Easier/Game Saves Backups");
+        write_history(&cloud);
+        // Exactly the state left by the first launch after reinstall: there
+        // is a new settings file, no cache, and an empty/nonexistent default.
+        let config = root.join("config");
+        save_to_root(&config, &GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() }).unwrap();
+        let settings = load_from_root(&config).unwrap();
+        let before = fs::read(cloud.join("Game/mapping.yaml")).unwrap();
+        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud.clone(), cloud.clone()], None), Some(cloud.clone()));
+        assert_eq!(fs::read(cloud.join("Game/mapping.yaml")).unwrap(), before, "discovery only reads history");
+        assert!(!default.exists(), "discovery must not create an empty backup folder");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reinstall_recovery_preserves_local_choices_and_refuses_ambiguous_or_missing_history() {
+        let root = recovery_fixture();
+        let default = root.join("Documents/Backups");
+        let cloud_a = root.join("Cloud A/Backups");
+        let cloud_b = root.join("Cloud B/Backups");
+        write_history(&cloud_a);
+        write_history(&cloud_b);
+        let mut value = GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() };
+        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone(), cloud_b.clone()], None), None, "two real histories require a choice");
+        assert_eq!(recovered_backup_folder(&value, &default, &[root.join("gone")], None), None);
+        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone(), cloud_b.clone()], cloud_b.to_str()), Some(cloud_b.clone()), "an account destination resolves ambiguity");
+        value.backup_folder = Some(root.join("My chosen backup folder").to_string_lossy().into_owned());
+        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone()], None), None, "a temporarily missing explicit location stays selected");
+        value.backup_folder = Some(default.to_string_lossy().into_owned());
+        value.backup_folder_chosen = Some(true);
+        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone()], None), None, "even an empty default can be an explicit choice");
+        value.backup_folder_chosen = None;
+        write_history(&default);
+        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a], None), None, "healthy existing history wins");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reinstall_account_hint_overrides_persisted_auto_discovery_without_overwriting_legacy_choices() {
+        let root = recovery_fixture();
+        let default = root.join("Documents/Backups");
+        let discovered = root.join("Cloud/Backups");
+        let account = root.join("My custom account backups");
+        write_history(&discovered);
+        write_history(&account);
+        let mut value = GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() };
+        // Startup initialized before sign-in, saved its automatic discovery,
+        // and the next process loads it before importing the account hint.
+        let folder = recovered_backup_folder(&value, &default, &[discovered.clone()], None).unwrap();
+        value.backup_folder = Some(folder.to_string_lossy().into_owned());
+        value.backup_folder_chosen = Some(false);
+        let config = root.join("config");
+        save_to_root(&config, &value).unwrap();
+        let value = load_from_root(&config).unwrap();
+        assert_eq!(recovered_backup_folder(&value, &default, &[discovered.clone()], account.to_str()), Some(account.clone()), "the account hint has priority over an earlier automatic discovery");
+        assert_eq!(recovered_backup_folder(&value, &default, &[discovered.clone()], None), None, "ordinary startup preserves its discovered history");
+        for legacy in [discovered, root.join("Offline chosen folder")] {
+            let value: GameSavesSettings = serde_json::from_value(serde_json::json!({ "backupFolder": legacy })).unwrap();
+            assert_eq!(recovered_backup_folder(&value, &default, &[], account.to_str()), None, "a legacy nondefault choice has no automatic-discovery provenance");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reinstall_recovery_ignores_unmapped_archives_and_missing_or_unsafe_snapshot_names() {
+        let root = recovery_fixture();
+        let default = root.join("Documents/Backups");
+        let cloud = root.join("Cloud/Backups");
+        let game = cloud.join("Game");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("orphan.zip"), b"orphan").unwrap();
+        let settings = GameSavesSettings::default();
+        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud.clone()], None), None);
+        fs::write(game.join("mapping.yaml"), "name: Game\nbackups:\n  - name: missing.zip\n    when: '2026-09-27T19:38:42Z'\n").unwrap();
+        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud.clone()], None), None);
+        fs::write(cloud.join("outside.zip"), b"outside").unwrap();
+        fs::write(game.join("mapping.yaml"), "name: Game\nbackups:\n  - name: ../outside.zip\n    when: '2026-09-27T19:38:42Z'\n").unwrap();
+        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud], None), None);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn settings_saved_with_a_byte_order_mark_still_load() {

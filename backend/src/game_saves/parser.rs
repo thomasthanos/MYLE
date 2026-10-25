@@ -222,8 +222,11 @@ pub(crate) fn build_scan(
     metadata: &ManifestMetadata,
     settings: &GameSavesSettings,
 ) -> GameSavesScan {
-    let mut inventory_games = inventory.games;
-    let mut restore_games = restore.games;
+    let inventory_games = inventory.games;
+    let inventory_by_id: HashMap<_, _> = inventory_games.iter()
+        .map(|(title, game)| (stable_id("game", title), game)).collect();
+    let mut restore_games: HashMap<_, _> = restore.games.into_iter()
+        .map(|(title, game)| (stable_id("game", &title), game)).collect();
     let mut local_rows = Vec::new();
 
     for (title, game) in local.games {
@@ -232,20 +235,20 @@ pub(crate) fn build_scan(
         {
             continue;
         }
-        let history = inventory_games.get(&title);
+        let history = inventory_by_id.get(&stable_id("game", &title)).copied();
         local_rows.push(entry_from(
             &title, &game, history, true, true, metadata, settings,
         ));
     }
 
-    let local_titles: HashSet<String> = local_rows
+    let local_ids: HashSet<String> = local_rows
         .iter()
-        .map(|game| game.title.to_ascii_lowercase())
+        .map(|game| game.id.clone())
         .collect();
     let mut backup_rows = Vec::new();
-    for (title, history) in &mut inventory_games {
-        let preview = restore_games.remove(title).unwrap_or_default();
-        let local_present = local_titles.contains(&title.to_ascii_lowercase());
+    for (title, history) in &inventory_games {
+        let preview = restore_games.remove(&stable_id("game", title)).unwrap_or_default();
+        let local_present = local_ids.contains(&stable_id("game", title));
         backup_rows.push(entry_from(
             title,
             &preview,
@@ -738,5 +741,45 @@ Registry Game:
         );
         assert_eq!(scan.on_this_pc[0].status, GameSaveStatus::Error);
         assert_eq!(scan.on_this_pc[0].error.as_deref(), Some("locked"));
+    }
+
+    #[test]
+    fn reinstall_scan_pairs_existing_history_by_game_identity_without_hiding_changes() {
+        // A fresh scan has no app cache. Its inventory is the source of real
+        // snapshot ids and timestamps, including titles whose case differs
+        // from today's manifest. Equal sizes alone never prove equal saves.
+        for (change, expected) in [
+            ("Same", GameSaveStatus::BackedUp),
+            ("Different", GameSaveStatus::ChangedSinceBackup),
+            ("Unknown", GameSaveStatus::Unknown),
+        ] {
+            let local = parse_api(&serde_json::json!({"games": {"Game": {
+                "change": change, "decision": "Processed",
+                "files": {"C:/Users/Player/Saves/save.dat": {"bytes": 1265, "failed": false, "ignored": false}},
+                "registry": {}
+            }}}).to_string()).unwrap();
+            let restore = parse_api(r#"{"games":{"game":{"change":"Same","decision":"Processed","files":{"C:/Users/Player/Saves/save.dat":{"bytes":1265,"failed":false,"ignored":false,"change":"Same"}},"registry":{}}}}"#).unwrap();
+            let inventory = parse_api(r#"{"games":{"game":{"backupPath":"G:/My Drive/Make Your Life Easier/Game Saves Backups/Game","backups":[{"name":"backup-20260927T193842Z.zip","when":"2026-09-27T19:38:42.141925300Z","locked":false,"comment":"Before update"}]}}}"#).unwrap();
+            let scan = build_scan(local, restore, inventory, &ManifestMetadata::default(), &GameSavesSettings::default());
+            let game = &scan.on_this_pc[0];
+            assert!(game.has_backup, "{change}: persisted inventory must survive without the app cache");
+            assert_eq!(game.status, expected, "{change}: use the engine's actual comparison");
+            assert_eq!(game.last_backup_at.as_deref(), Some("2026-09-27T19:38:42.141925300Z"));
+            assert_eq!(game.snapshots[0].id, "backup-20260927T193842Z.zip");
+            assert_eq!(game.snapshots[0].label.as_deref(), Some("Before update"));
+            assert!(scan.in_backup[0].has_local_data);
+            assert_eq!(scan.in_backup[0].id, game.id);
+        }
+    }
+
+    #[test]
+    fn reinstall_unicode_titles_have_the_same_local_presence_as_their_history() {
+        let local = parse_api(r#"{"games":{" Ä Game ":{"change":"Same","decision":"Processed","files":{"C:/Saves/save.dat":{"bytes":5,"failed":false,"ignored":false}},"registry":{}}}}"#).unwrap();
+        let restore = parse_api(r#"{"games":{"ä game":{"change":"Same","decision":"Processed","files":{"C:/Saves/save.dat":{"bytes":5,"failed":false,"ignored":false,"change":"Same"}},"registry":{}}}}"#).unwrap();
+        let inventory = parse_api(r#"{"games":{"ä game":{"backupPath":"D:/Backup/Game","backups":[{"name":"backup.zip","when":"2026-09-27T19:38:42Z"}]}}}"#).unwrap();
+        let scan = build_scan(local, restore, inventory, &ManifestMetadata::default(), &GameSavesSettings::default());
+        assert!(scan.in_backup[0].has_local_data, "both tabs must use the canonical Unicode/trim identity");
+        assert_eq!(scan.in_backup[0].status, GameSaveStatus::BackedUp);
+        assert_eq!(scan.in_backup[0].id, scan.on_this_pc[0].id);
     }
 }

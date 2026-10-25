@@ -29,7 +29,7 @@ use zip::ZipArchive;
 
 use super::compare::{self, FileInfo, Recorded, Side};
 use super::rules::{BACKUP_INFO_FILE, Early, Rules, TreeListing, parent_of};
-use super::store::{Project, Settings};
+use super::store::{LastBackup, Project, Settings};
 use super::{archive, engine, incremental, store, walk};
 
 /// At most this many files are listed per project (the counts are whole).
@@ -193,7 +193,7 @@ pub(crate) fn check_with(
 }
 
 /// Where a project's backups are: `Ok(None)` when none can exist yet.
-fn backups_folder(settings: &Settings, project: &Project) -> Result<Option<PathBuf>, ChangeState> {
+pub(crate) fn backups_folder(settings: &Settings, project: &Project) -> Result<Option<PathBuf>, ChangeState> {
     let Some(root) = settings.backup_root() else {
         return Ok(None);
     };
@@ -209,6 +209,59 @@ fn backups_folder(settings: &Settings, project: &Project) -> Result<Option<PathB
         Ok(_) => Ok(Some(dir)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(ChangeState::Unreachable),
+    }
+}
+
+fn latest_full(dir: &Path, app_name: &str) -> Result<Option<(engine::BackupEntry, PathBuf)>, String> {
+    let Some(entry) = engine::list_backups_checked(dir, app_name)?.into_iter().next() else {
+        return Ok(None);
+    };
+    if entry.broken {
+        return Err(format!("The newest backup ({}) is incomplete and can't be checked.", entry.name));
+    }
+    let path = engine::resolve_backup(dir, app_name, &entry.id)?;
+    Ok(Some((entry, path)))
+}
+
+/// Rebuild the local history projection from the surviving backup metadata.
+/// The mirror imported on a clean install holds configuration only. Never
+/// derive this record from today's source or turn discovery into a backup
+/// attempt. An unavailable or unreadable history leaves any known record alone.
+pub(crate) fn recover_history(settings: &mut Settings) {
+    let Some(root) = settings.backup_root() else { return };
+    if !root.parent().is_some_and(Path::is_dir) {
+        return;
+    }
+    for project in &mut settings.projects {
+        let recovered = (|| -> Result<Option<LastBackup>, String> {
+            let dir = engine::app_dir(&root, &project.app_name).map_err(|failure| failure.text())?;
+            let Some((entry, path)) = latest_full(&dir, &project.app_name)? else {
+                return Ok(None);
+            };
+            if let Some(increment) = incremental::checked_chain(&dir, &entry)?.pop() {
+                return Ok(Some(LastBackup {
+                    name: increment.info.name.clone(),
+                    created_at: if increment.info.timestamp > 0 { increment.info.timestamp } else { increment.modified.unwrap_or(0) },
+                    file_count: increment.info.file_count as u64,
+                    zip_size: increment.size,
+                    kind: Some("incremental".into()),
+                    base: Some(increment.info.base.clone()),
+                }));
+            }
+            let side = compare::side_for(&path)?;
+            let (files, started) = listing(&project.id, &side, &path, &entry)?;
+            Ok(Some(LastBackup {
+                name: entry.name,
+                created_at: started.map(super::naming::unix_millis).or(entry.modified).unwrap_or(0),
+                file_count: files.keys().filter(|name| !is_info_name(name)).count() as u64,
+                zip_size: entry.size.unwrap_or(0),
+                kind: None,
+                base: None,
+            }))
+        })();
+        if let Ok(Some(backup)) = recovered {
+            project.last_backup = Some(backup);
+        }
     }
 }
 
@@ -235,19 +288,14 @@ fn examine(
     };
     let rules = Rules::compile(&settings.rule_input(Some(project)), Some(&source))?;
     let found = walk::walk(&source, &rules, skip_dirs, &|| false)?;
-    let latest = dir.as_ref().and_then(|dir| {
-        let entry = engine::list_backups(dir, &project.app_name)
-            .into_iter()
-            .find(|entry| !entry.broken)?;
-        let path = engine::resolve_backup(dir, &project.app_name, &entry.id).ok()?;
-        Some((entry, path))
-    });
+    let latest = dir.as_ref().map(|dir| latest_full(dir, &project.app_name)).transpose()?.flatten();
     // The newest increment on that backup, if any: the project as last
     // backed up is what it records.
     let increment = latest
         .as_ref()
         .zip(dir.as_ref())
-        .and_then(|((entry, _), dir)| incremental::chain(dir, entry).pop());
+        .map(|((entry, _), dir)| incremental::checked_chain(dir, entry))
+        .transpose()?.and_then(|mut chain| chain.pop());
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for file in &found.files {
@@ -927,6 +975,30 @@ mod tests {
         let result = scene.check();
         assert_eq!(result.state, ChangeState::Error, "{result:?}");
         assert!(result.message.is_some());
+    }
+
+    #[test]
+    fn an_incomplete_only_backup_is_unknown_not_an_authoritative_empty_history() {
+        let scene = Scene::new("incomplete-only");
+        scene.write("a.txt", b"one");
+        let month = scene.settings.backup_root().unwrap().join("App/2026-10 Οκτώβριος");
+        fs::create_dir_all(&month).unwrap();
+        fs::write(month.join("App_D23_V12.zip"), b"PK").unwrap();
+        let result = scene.check();
+        assert_eq!(result.state, ChangeState::Error, "a discovered but incomplete archive is not proof that this project was never backed up: {result:?}");
+        assert_eq!(result.added + result.modified + result.deleted, 0);
+    }
+
+    #[test]
+    fn an_incomplete_newest_backup_must_not_silently_certify_an_older_baseline() {
+        let scene = Scene::new("incomplete-newest");
+        scene.write("a.txt", b"one");
+        zip_backup(&scene, &[("a.txt", b"one")]);
+        let month = scene.settings.backup_root().unwrap().join("App/2026-10 Οκτώβριος");
+        fs::write(month.join("App_D24_V13.zip"), b"PK").unwrap();
+        let result = scene.check();
+        assert_eq!(result.state, ChangeState::Error, "the newest archive cannot be checked; an older matching archive cannot establish No changes: {result:?}");
+        assert_eq!(result.added + result.modified + result.deleted, 0);
     }
 
     #[test]

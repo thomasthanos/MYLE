@@ -97,11 +97,12 @@ fn clouds() -> Vec<CloudChoice> {
 
 fn page_state(
     state: &ProjectBackupsState,
-    settings: Settings,
+    mut settings: Settings,
     imported: Option<ImportReport>,
     clouds: Vec<CloudChoice>,
     missing_sources: Vec<String>,
 ) -> PageState {
+    super::changes::recover_history(&mut settings);
     PageState {
         backup_root: settings
             .backup_root()
@@ -140,7 +141,8 @@ async fn blocking<T: Send + 'static>(
 pub async fn project_backups_get_state(
     state: State<'_, ProjectBackupsState>,
 ) -> Result<PageState, String> {
-    let (settings, imported, clouds, missing) = blocking(|| -> Result<_, String> {
+    let state = state.inner().clone();
+    blocking(move || -> Result<_, String> {
         let clouds = clouds();
         let _edit = store::edit_lock();
         let mut settings = store::load()?;
@@ -166,10 +168,16 @@ pub async fn project_backups_get_state(
             imported = Some(report);
         }
         let missing = missing_sources(&settings);
-        Ok((settings, imported, clouds, missing))
+        let before = settings.clone();
+        // Archive metadata may be online-only: keep all discovery off the
+        // async/UI thread and persist only a successfully recovered record.
+        let page = page_state(&state, settings, imported, clouds, missing);
+        if page.settings != before {
+            store::save(&page.settings)?;
+        }
+        Ok(page)
     })
-    .await??;
-    Ok(page_state(&state, settings, imported, clouds, missing))
+    .await?
 }
 
 /// Brings in backup_projects' projects again (those not here yet).
@@ -935,8 +943,14 @@ pub async fn project_backups_watch(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn project_backups_list(project_id: String) -> Result<Vec<BackupEntry>, String> {
     blocking(move || {
-        let (_, project, dir) = project_and_dir(&project_id)?;
-        Ok(engine::list_backups(&dir, &project.app_name))
+        let settings = store::load()?;
+        let project = settings.project(&project_id)?;
+        match super::changes::backups_folder(&settings, project) {
+            Ok(Some(dir)) => engine::list_backups_checked(&dir, &project.app_name),
+            Ok(None) => Ok(Vec::new()),
+            Err(super::changes::ChangeState::Unreachable) => Err("The backups folder can't be reached now; is the cloud app running?".into()),
+            Err(_) => Err("The project's backups folder could not be checked.".into()),
+        }
     })
     .await?
 }
@@ -1097,5 +1111,126 @@ pub async fn project_backups_open(
         tauri_plugin_opener::reveal_item_in_dir(path).map_err(|error| error.to_string())
     } else {
         tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::project_backups::compare::tests::make_zip;
+    use crate::project_backups::naming::CONFIG_MIRROR_FILE;
+    use std::fs;
+
+    struct Reinstalled {
+        root: PathBuf,
+        settings: Settings,
+        zip: PathBuf,
+    }
+
+    impl Reinstalled {
+        fn new(label: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("myle-project-reinstall-{label}-{}", uuid::Uuid::new_v4()));
+            let source = root.join("source");
+            let cloud = root.join("My Drive");
+            let backups = cloud.join("Projects Backup");
+            let month = backups.join("App/2026-10 Οκτώβριος");
+            fs::create_dir_all(&source).unwrap();
+            fs::create_dir_all(&month).unwrap();
+            fs::write(source.join("a.txt"), b"one").unwrap();
+            // All MYLE local settings and caches are gone. Only the external
+            // project and cloud folder (including backup_projects' mirror)
+            // survive. This is the actual import route on a clean install.
+            fs::write(backups.join(CONFIG_MIRROR_FILE), serde_json::to_vec(&serde_json::json!({
+                "projects": [{"name":"App", "appName":"App", "sourcePath":source}]
+            })).unwrap()).unwrap();
+            let zip = month.join("App_D23_V12.zip");
+            make_zip(&zip, &[
+                ("a.txt", b"one"),
+                (".backup-info.json", br#"{"createdBy":"MYLE","timestamp":1792756800000,"fileCount":1,"name":"App_D23_V12"}"#),
+            ]);
+            let mut settings = Settings {
+                provider: Some(CloudProvider::GoogleDrive),
+                cloud_folder: Some(cloud.display().to_string()),
+                ..Settings::default()
+            };
+            let imported = store::import(&mut settings, None, Some(&backups));
+            assert_eq!(imported.added, ["App"]);
+            settings.imported = true;
+            Self { root, settings, zip }
+        }
+
+        fn page(&self) -> PageState {
+            page_state(&ProjectBackupsState::default(), self.settings.clone(), None, vec![], vec![])
+        }
+    }
+
+    impl Drop for Reinstalled {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn reinstall_recovers_history_from_existing_archives_without_a_local_backup_record() {
+        let scene = Reinstalled::new("history");
+        assert!(scene.settings.projects[0].last_backup.is_none(), "the mirror has project configuration, not MYLE history");
+        let before = fs::read(&scene.zip).unwrap();
+        let page = scene.page();
+        let recovered = page.settings.projects[0].last_backup.as_ref()
+            .expect("an existing archive must not be presented as Never backed up after reinstall");
+        assert_eq!(recovered.name, "App_D23_V12");
+        assert_eq!(recovered.created_at, 1_792_756_800_000);
+        assert_eq!(recovered.file_count, 1);
+        assert_eq!(recovered.zip_size, before.len() as u64);
+        assert_eq!(fs::read(&scene.zip).unwrap(), before, "history discovery is read-only");
+        assert!(page.settings.projects[0].last_result.is_none(), "discovery must not invent a successful backup attempt");
+    }
+
+    #[test]
+    fn reinstall_compares_surviving_sources_to_archives_instead_of_seeding_a_clean_baseline() {
+        let scene = Reinstalled::new("changes");
+        let project = &scene.settings.projects[0];
+        let skip = super::super::changes::skip_dirs(&scene.settings);
+        let unchanged = super::super::changes::check_with(&scene.settings, project, &skip, true);
+        assert_eq!(unchanged.state, super::super::changes::ChangeState::UpToDate);
+        assert_eq!(unchanged.backup_id.as_deref(), Some("2026-10 Οκτώβριος/App_D23_V12.zip"));
+        // Same-size edits expose code that simply captures today's source as
+        // the new baseline after its old local cache was removed.
+        fs::write(Path::new(&project.source_path).join("a.txt"), b"two").unwrap();
+        let changed = super::super::changes::check_with(&scene.settings, project, &skip, true);
+        assert_eq!(changed.state, super::super::changes::ChangeState::Changed);
+        assert_eq!((changed.added, changed.modified, changed.deleted), (0, 1, 0));
+        assert!(scene.page().settings.projects[0].last_backup.is_some(), "both clean and edited projects retain their recovered history");
+    }
+
+    #[test]
+    fn reinstall_recovers_the_newest_increment_and_preserves_a_failed_attempt() {
+        let mut scene = Reinstalled::new("increment");
+        let app_dir = scene.zip.parent().unwrap().parent().unwrap();
+        let increments = app_dir.join("Incremental");
+        fs::create_dir_all(&increments).unwrap();
+        let info = serde_json::to_vec(&serde_json::json!({
+            "format":"zip-incremental", "name":"increment-V12-1",
+            "base":"2026-10 Οκτώβριος/App_D23_V12.zip", "baseVersion":12,
+            "previous":null, "sequence":1, "deleted":[],
+            "state":{"a.txt":[3, crc32fast::hash(b"two"), 1792843200000_i64]},
+            "timestamp":1792843200000_i64, "createdBy":"MYLE", "fileCount":1
+        })).unwrap();
+        let increment = increments.join("increment-V12-1.zip");
+        make_zip(&increment, &[("a.txt", b"two"), (".backup-info.json", &info)]);
+        let failed = LastResult {
+            at: 1_792_929_600_000, ok: false, cancelled: false,
+            code: Some("CLOUD_NOT_READY".into()), error: Some("Drive unavailable".into()),
+        };
+        scene.settings.projects[0].last_result = Some(failed.clone());
+        let page = scene.page();
+        let project = &page.settings.projects[0];
+        let recovered = project.last_backup.as_ref().expect("the surviving increment is part of the project's backup history");
+        assert_eq!(recovered.name, "increment-V12-1");
+        assert_eq!(recovered.kind.as_deref(), Some("incremental"));
+        assert_eq!(recovered.base.as_deref(), Some("2026-10 Οκτώβριος/App_D23_V12.zip"));
+        assert_eq!(recovered.created_at, 1_792_843_200_000);
+        assert_eq!(recovered.zip_size, fs::metadata(increment).unwrap().len());
+        assert_eq!(project.last_result.as_ref(), Some(&failed), "recognizing history cannot turn a failed attempt into success");
     }
 }

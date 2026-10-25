@@ -38,6 +38,7 @@ export function isSynced(key: string): boolean {
 }
 
 export interface SyncedGameSaves {
+  backupFolder?: string | null;
   schedule: string;
   scheduleTime: string;
   scheduleWeekday: string;
@@ -98,7 +99,7 @@ export async function apply(snapshot: Snapshot): Promise<string | null> {
   if (!snapshot.gameSaves) return null;
   try {
     const updated = await invoke<GameSavesSettings>("game_saves_sync_import", { synced: snapshot.gameSaves });
-    gameSavesState.page.settings = updated;
+    await gameSavesState.applySyncedSettings(updated);
     return null;
   } catch (error) {
     return `Game Saves settings were not applied: ${error instanceof Error ? error.message : String(error)}`;

@@ -48,7 +48,7 @@ export interface EditorView {
 }
 export interface CompareView { projectId: string; firstId: string; secondId: string }
 /** How a project is doing, for the card's badge and for the groups. */
-export type Health = "missing" | "failed" | "never" | "stale" | "due" | "ok" | "cancelled";
+export type Health = "missing" | "failed" | "never" | "stale" | "due" | "ok" | "cancelled" | "unknown" | "backedUp";
 /** What the page summary counts. */
 export interface Summary {
   projects: number; ok: number; attention: number; never: number; stale: number; missing: number;
@@ -56,7 +56,7 @@ export interface Summary {
   backupBytes: number; knownSizes: number; newest: number | null; oldest: number | null;
 }
 /** A group of projects under one heading of the list. */
-export interface Group { key: "attention" | "never" | "stale" | "ok" | "missing"; title: string; note: string; projects: Project[] }
+export interface Group { key: "attention" | "never" | "stale" | "ok" | "missing" | "unknown"; title: string; note: string; projects: Project[] }
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const emptyPage: PageState = {
   settings: { version: 2, provider: null, cloudFolder: null, projects: [], exclusions: [], smartBuild: true, followGitignore: false, imported: true },
@@ -81,6 +81,8 @@ class ProjectBackupsState {
   /** The project whose backups are listed, and its list. */
   expanded = $state<string | null>(null);
   backups = $state<Record<string, BackupEntry[]>>({});
+  /** A failed listing is unknown, not a successful empty history. */
+  backupErrors = $state<Record<string, string>>({});
   backupsLoading = $state<string | null>(null);
   /** Backups ticked for a comparison (at most two). */
   picked = $state<string[]>([]);
@@ -282,14 +284,20 @@ class ProjectBackupsState {
     if (this.isMissing(project)) return "missing";
     const failure = this.lastFailure(project);
     if (failure) return failure.cancelled ? "cancelled" : "failed";
-    if (!project.lastBackup) return "never";
+    if (!project.lastBackup) {
+      const checked = this.changes[project.id];
+      if (checked?.backupId && (checked.state === "upToDate" || checked.state === "changed")) return "backedUp";
+      // Imported configuration has no local history. Only a completed
+      // discovery can establish that the backup folder really is empty.
+      return checked?.state === "noBackup" ? "never" : "unknown";
+    }
     const days = this.daysSinceBackup(project) ?? 0;
     return days >= STALE_DAYS ? "stale" : days >= FRESH_DAYS ? "due" : "ok";
   }
   /** True when the project wants the user to do something. */
   needsAttention(project: Project) {
     const health = this.health(project);
-    return health !== "ok" && health !== "due";
+    return health === "backedUp" ? this.changes[project.id]?.state !== "upToDate" : health !== "ok" && health !== "due";
   }
   /** Everything the page says about itself, in one pass. */
   get summary(): Summary {
@@ -297,7 +305,7 @@ class ProjectBackupsState {
     const summary: Summary = { projects: this.projects.length, ok: 0, attention: 0, never: 0, stale: 0, missing: 0, backupBytes: 0, knownSizes: 0, newest: null, oldest: null };
     for (const project of this.projects) {
       const health = this.health(project);
-      if (health === "ok" || health === "due") summary.ok++;
+      if (health === "ok" || health === "due" || (health === "backedUp" && this.changes[project.id]?.state === "upToDate")) summary.ok++;
       if (health === "never") summary.never++;
       if (health === "stale") summary.stale++;
       if (health === "missing") summary.missing++;
@@ -321,10 +329,11 @@ class ProjectBackupsState {
     const of = (...keys: Health[]) => this.filtered.filter((project) => keys.includes(this.health(project)));
     const groups: Group[] = [
       { key: "attention", title: "Did not finish", note: "The last backup failed; the reason and the fix are below.", projects: of("failed") },
+      { key: "unknown", title: "Backup status unknown", note: "Check the backups folder to confirm the existing history.", projects: of("unknown") },
       // A cancelled attempt that never produced a backup still has none.
       { key: "never", title: "Not backed up yet", note: "Add them to the cloud with one click.", projects: of("never", "cancelled") },
       { key: "stale", title: "Getting old", note: `The last backup is ${STALE_DAYS} days old or more.`, projects: of("stale") },
-      { key: "ok", title: "Up to date", note: "Backed up recently and checked.", projects: of("ok", "due") },
+      { key: "ok", title: "Up to date", note: "Backed up recently and checked.", projects: of("ok", "due", "backedUp") },
       { key: "missing", title: "Folder not found", note: "Point MYLE at the folder again, or remove the project.", projects: of("missing") },
     ];
     return groups.filter((group) => group.projects.length > 0);
@@ -562,7 +571,9 @@ class ProjectBackupsState {
     try {
       const list = await api.list(projectId);
       this.backups = { ...this.backups, [projectId]: list };
+      delete this.backupErrors[projectId];
     } catch (error) {
+      this.backupErrors[projectId] = message(error);
       toast.error(message(error));
     } finally {
       if (this.backupsLoading === projectId) this.backupsLoading = null;

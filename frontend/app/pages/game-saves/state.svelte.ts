@@ -55,8 +55,8 @@ const KEY = {
   steamCovers: "myle.gameSaves.steamCovers",
 };
 const oneOf = <T extends string>(...values: T[]) => (value: unknown) => values.includes(value as T);
-/** Settings that follow the account to other PCs (the rest name local folders). */
-const SYNCED_SETTINGS = new Set(["schedule", "customGame"]);
+/** The backup destination travels as a recovery hint; library/restore paths stay local. */
+const SYNCED_SETTINGS = new Set(["schedule", "customGame", "backupFolder"]);
 /** Background check for saves changed by playing, while the app is open. */
 const WATCH_EVERY_MS = 10 * 60 * 1000;
 const WATCH_FIRST_MS = 20 * 1000;
@@ -712,6 +712,12 @@ class GameSavesState {
     });
     if (changed) await this.refresh();
   }
+  /** Account import may reconnect this install to existing backups. The
+   * previous list describes another folder and must be checked again. */
+  async applySyncedSettings(settings: GameSavesSettings) {
+    this.#settingsRevision++;
+    if (this.applyBackupFolder(settings)) await this.refresh();
+  }
   private applyBackupFolder(settings: GameSavesSettings): boolean {
     const changed = !samePath(this.page.settings.backupFolder ?? "", settings.backupFolder ?? "");
     this.page.settings = settings;
@@ -723,7 +729,7 @@ class GameSavesState {
     this.scanResult.backupUnreachable = null;
     for (const game of this.scanResult.onThisPc) {
       game.hasBackup = false; game.lastBackupAt = null; game.snapshots = [];
-      if (game.status === "backedUp" || game.status === "changedSinceBackup") game.status = "notBackedUp";
+      if (game.status !== "error") game.status = "unknown";
     }
     this.snapshotChoices = {};
     if (this.tab === "backup") this.selected.clear();

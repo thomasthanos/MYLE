@@ -244,33 +244,42 @@ pub struct BackupEntry {
 
 /// Every backup of `app_name`, newest first.
 pub(crate) fn list_backups(app_dir: &Path, app_name: &str) -> Vec<BackupEntry> {
+    list_backups_checked(app_dir, app_name).unwrap_or_default()
+}
+
+/// A status check must distinguish an empty history from a listing it could
+/// not finish. In particular, a cloud folder's failed month listing must not
+/// silently hide its newest backup.
+pub(crate) fn list_backups_checked(app_dir: &Path, app_name: &str) -> Result<Vec<BackupEntry>, String> {
     let mut entries = Vec::new();
-    let Ok(months) = fs::read_dir(app_dir) else {
-        return entries;
+    let months = match fs::read_dir(app_dir) {
+        Ok(months) => months,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+        Err(error) => return Err(format!("Can't list the project's backups: {error}")),
     };
-    for month in months.flatten() {
+    for month in months {
+        let month = month.map_err(|error| format!("Can't list the project's backups: {error}"))?;
         let month_name = month.file_name().to_string_lossy().into_owned();
         let Some((year, month_number, _)) = naming::parse_month_folder(&month_name) else {
             continue;
         };
-        if !naming::is_month_folder(&month_name)
-            || !month.file_type().is_ok_and(|kind| kind.is_dir())
-        {
+        if !naming::is_month_folder(&month_name) {
             continue;
         }
-        let Ok(items) = fs::read_dir(month.path()) else {
+        if !month.file_type().map_err(|error| format!("Can't inspect backup folder \"{month_name}\": {error}"))?.is_dir() {
             continue;
-        };
+        }
+        let items = fs::read_dir(month.path())
+            .map_err(|error| format!("Can't list backup folder \"{month_name}\": {error}"))?;
         let mut zips = Vec::new();
         let mut folders = Vec::new();
-        for item in items.flatten() {
+        for item in items {
+            let item = item.map_err(|error| format!("Can't list backup folder \"{month_name}\": {error}"))?;
             let name = item.file_name().to_string_lossy().into_owned();
             if !naming::belongs_to(&name, app_name) {
                 continue;
             }
-            let Ok(meta) = item.metadata() else {
-                continue;
-            };
+            let meta = item.metadata().map_err(|error| format!("Can't inspect backup \"{name}\": {error}"))?;
             if meta.is_file() && name.to_lowercase().ends_with(".zip") {
                 zips.push((name, meta));
             } else if meta.is_dir() {
@@ -304,7 +313,7 @@ pub(crate) fn list_backups(app_dir: &Path, app_name: &str) -> Vec<BackupEntry> {
         }
     }
     entries.sort_by(|a, b| b.version.cmp(&a.version).then(b.modified.cmp(&a.modified)));
-    entries
+    Ok(entries)
 }
 
 /// The path of the backup `id` of `app_name`, refusing anything else.

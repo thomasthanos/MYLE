@@ -101,6 +101,11 @@ pub struct GameSavesSettings {
     pub version: u32,
     #[serde(default)]
     pub backup_folder: Option<String>,
+    /// None preserves a legacy nondefault choice. False records automatic
+    /// discovery, which a later verified account hint may replace. True is a
+    /// picker or account choice and must not be replaced by discovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_folder_chosen: Option<bool>,
     #[serde(default)]
     pub schedule: BackupSchedule,
     #[serde(default = "default_schedule_time")]
@@ -146,6 +151,7 @@ impl Default for GameSavesSettings {
         Self {
             version: settings_version(),
             backup_folder: None,
+            backup_folder_chosen: None,
             schedule: BackupSchedule::Off,
             schedule_time: default_schedule_time(),
             schedule_weekday: ScheduleWeekday::Sunday,
@@ -164,11 +170,14 @@ impl Default for GameSavesSettings {
 }
 
 /// The part of the Game Saves settings that follows the user's account to
-/// other PCs. Folders (backup, game libraries, restore locations) belong to
-/// one machine and stay out.
+/// other PCs. The backup folder is a recovery hint, used only when a local
+/// choice is absent and real history exists there. Library and restore paths
+/// remain local.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncedGameSaves {
+    #[serde(default)]
+    pub backup_folder: Option<String>,
     pub schedule: BackupSchedule,
     pub schedule_time: String,
     pub schedule_weekday: ScheduleWeekday,
@@ -429,6 +438,35 @@ pub struct UndoRestore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reinstall_account_settings_retain_the_existing_backup_destination() {
+        // A clean install has no settings.json or scan-cache.json. The account
+        // payload must retain the location that the next engine scan will read.
+        let synced: SyncedGameSaves = serde_json::from_value(serde_json::json!({
+            "schedule": "off",
+            "scheduleTime": "03:00",
+            "scheduleWeekday": "sunday",
+            "backupFolder": "G:\\My Drive\\Make Your Life Easier\\Game Saves Backups",
+            "autoBackupExcludedGameIds": [],
+            "customGames": []
+        })).unwrap();
+        let exported = serde_json::to_value(synced).unwrap();
+        assert_eq!(
+            exported.get("backupFolder").and_then(serde_json::Value::as_str),
+            Some(r"G:\My Drive\Make Your Life Easier\Game Saves Backups"),
+            "signing in after data deletion must retain where the real snapshots live"
+        );
+    }
+
+    #[test]
+    fn reinstall_old_account_settings_without_a_destination_still_load() {
+        let synced: SyncedGameSaves = serde_json::from_value(serde_json::json!({
+            "schedule": "off", "scheduleTime": "03:00", "scheduleWeekday": "sunday",
+            "autoBackupExcludedGameIds": [], "customGames": []
+        })).unwrap();
+        assert_eq!(synced.backup_folder, None);
+    }
 
     fn game(status: GameSaveStatus) -> GameSaveEntry {
         GameSaveEntry {

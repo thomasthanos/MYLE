@@ -335,6 +335,7 @@ pub fn run() {
             taskbar::taskbar_pin_offer,
             taskbar::taskbar_pin,
             taskbar::taskbar_pin_dismiss,
+            taskbar::taskbar_open_notification_settings,
             start_page,
             passwords::passwords_browser_get,
             passwords::passwords_browser_set,

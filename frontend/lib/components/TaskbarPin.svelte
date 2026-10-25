@@ -7,8 +7,11 @@
   import { toast } from "../toast.svelte";
 
   type Offer = { pending: boolean; supported: boolean; requestAfterSetup: boolean };
+  type PinResult = { status: "pinned" | "notPinned" } | { status: "notAllowed"; reason: "pinConsentNotificationsDisabled" | "unknown" };
   let offer = $state<Offer | null>(null);
   let busy = $state(false);
+  let manual = $state(false);
+  let notificationsDisabled = $state(false);
   let autoRequested = false;
 
   function afterFocus(focused: boolean) {
@@ -40,16 +43,27 @@
     if (busy) return;
     busy = true;
     try {
-      const pinned = await invoke<boolean>("taskbar_pin");
-      if (pinned) {
+      const result = await invoke<PinResult>("taskbar_pin");
+      if (result.status === "pinned") {
         offer = null;
         toast.success("MYLE is pinned to your taskbar.");
+      } else if (result.status === "notAllowed") {
+        manual = true;
+        notificationsDisabled = result.reason === "pinConsentNotificationsDisabled";
       } else {
+        manual = false;
+        notificationsDisabled = false;
         toast.info("Windows did not pin MYLE. You can retry or dismiss this suggestion.");
       }
     } catch (error) {
       toast.error(String(error));
     } finally { busy = false; }
+  }
+
+  async function openNotificationSettings() {
+    try {
+      await invoke("taskbar_open_notification_settings");
+    } catch (error) { toast.error(String(error)); }
   }
 
   async function dismiss() {
@@ -65,11 +79,22 @@
     <Pin size={18} />
     <div>
       <strong>Keep MYLE on your taskbar</strong>
-      {#if offer.supported}
+      {#if offer.supported && !manual}
         <p>Pin it for quick access. Windows will ask you to confirm.</p>
         <button class="btn small" disabled={busy} onclick={pin}>{busy ? "Waiting for Windows…" : "Pin to taskbar"}</button>
       {:else}
+        {#if manual}
+          {#if notificationsDisabled}
+            <p>Windows app pinning notifications are switched off. In System → Notifications, turn on “Apps” and try again.</p>
+            <button class="btn small" disabled={busy} onclick={openNotificationSettings}>Open notification settings</button>
+          {:else}
+            <p>Windows is not allowing its pin confirmation right now.</p>
+          {/if}
+        {/if}
         <p>Open the Windows Start menu, right-click MYLE and choose More → Pin to taskbar.</p>
+        {#if offer.supported}
+          <button class="btn small" disabled={busy} onclick={pin}>{busy ? "Waiting for Windows…" : "Try again"}</button>
+        {/if}
       {/if}
     </div>
     <button class="dismiss" aria-label="Dismiss taskbar suggestion" disabled={busy} onclick={dismiss}><X size={15} /></button>

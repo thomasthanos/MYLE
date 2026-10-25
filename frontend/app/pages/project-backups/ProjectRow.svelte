@@ -34,7 +34,7 @@
   const changeCount = $derived(change ? change.added + change.modified + change.deleted : 0);
   /** "Changes detected" says more than an age-based "Up to date": it wins. */
   const changed = $derived(change?.state === "changed");
-  const showHealth = $derived(!(changed && (health === "ok" || health === "due")));
+  const showHealth = $derived(!(changed && (health === "ok" || health === "due" || health === "backedUp")));
 
   /** The badge next to the name: what happened, not just a colour. */
   const badge = $derived.by(() => {
@@ -47,6 +47,10 @@
         return { tone: "quiet", label: `Cancelled ${pb.ago(failure?.at ?? Date.now())}`, title: "The last backup was cancelled", icon: Clock };
       case "never":
         return { tone: "warn", label: "Never backed up", title: "This project has no backup yet", icon: CircleAlert };
+      case "unknown":
+        return { tone: "quiet", label: "Backup status unknown", title: "The existing backup history has not been confirmed", icon: CircleAlert };
+      case "backedUp":
+        return { tone: "ok", label: "Backup found", title: "An existing backup was recognized; its date is not available yet", icon: Archive };
       case "stale":
         return { tone: "warn", label: `${age} days old`, title: "The last backup is a month old or more", icon: Clock };
       default:
@@ -89,8 +93,12 @@
         {:else if project.lastBackup}
           Last backup <span title={formatDate(project.lastBackup.createdAt)}>{pb.ago(project.lastBackup.createdAt)}</span> · {project.lastBackup.name} ·
           {formatBytes(project.lastBackup.zipSize)} · {project.lastBackup.fileCount.toLocaleString()} files
-        {:else}
+        {:else if health === "never"}
           No backup from MYLE yet
+        {:else if change?.backupId}
+          Backup found · {change.backupId}
+        {:else}
+          Backup history has not been confirmed yet
         {/if}
       </small>
     </div>
@@ -128,6 +136,9 @@
     <div class="backups" transition:slide={{ duration: 160 }}>
       {#if pb.backupsLoading === project.id && !pb.backups[project.id]}
         <p class="muted"><LoaderCircle size={13} class="spin" /> Reading the backups…</p>
+      {:else if pb.backupErrors[project.id]}
+        <p class="muted"><CircleAlert size={13} /> Couldn't list backups: {pb.backupErrors[project.id]}</p>
+        <button class="btn small" disabled={pb.backupsLoading === project.id} onclick={() => pb.loadBackups(project.id)}><RefreshCw size={13} /> Try again</button>
       {:else if !backups.length}
         <p class="muted">No backups yet in {`${pb.page.backupRoot ?? "the backups folder"}\\${project.appName}`}.</p>
       {:else}

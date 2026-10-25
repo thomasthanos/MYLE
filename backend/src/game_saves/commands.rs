@@ -1185,6 +1185,7 @@ pub async fn game_saves_undo_last_restore(
 pub fn game_saves_sync_export(app: AppHandle) -> Result<SyncedGameSaves, String> {
     let value = settings::initialize(&app)?;
     Ok(SyncedGameSaves {
+        backup_folder: value.backup_folder,
         schedule: value.schedule,
         schedule_time: value.schedule_time,
         schedule_weekday: value.schedule_weekday,
@@ -1217,6 +1218,7 @@ pub async fn game_saves_sync_import(
         .await?;
     }
     edit_settings(&app, |value| {
+        settings::recover_backup_folder(&app, value, synced.backup_folder.as_deref())?;
         value.auto_backup_excluded_game_ids = synced.auto_backup_excluded_game_ids;
         merge_synced_custom_games(&mut value.custom_games, synced.custom_games);
         if let Some(backup) = value.backup_folder.as_deref() {
@@ -1668,6 +1670,7 @@ fn set_backup_folder(app: &AppHandle, path: &Path) -> Result<GameSavesSettings, 
     edit_settings(app, |value| {
         settings::validate_backup_folder(app, path, value)?;
         value.backup_folder = Some(path.to_string_lossy().into_owned());
+        value.backup_folder_chosen = Some(true);
         Ok(())
     })
 }

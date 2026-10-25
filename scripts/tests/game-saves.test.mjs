@@ -133,6 +133,54 @@ test("changing backup folder drops old snapshots and refreshes the new folder", 
   assert.equal(state.busy, false);
 });
 
+test("an account recovered backup folder reloads real history before counting first backups", async () => {
+  state.selected.add("a"); state.snapshotChoices = { a: "stale" };
+  const wait = deferred(); const calls = [];
+  api.scan = async (mode) => { calls.push(mode); return wait.promise; };
+  api.backup = async () => { throw new Error("Recovery must not create backups"); };
+  const applying = state.applySyncedSettings({ ...state.page.settings, backupFolder: "G:\\My Drive\\Make Your Life Easier\\Game Saves Backups" });
+  await settle();
+  assert.equal(state.scanResult.inBackup.length, 0, "old restore choices are removed immediately");
+  assert.deepEqual(state.snapshotChoices, {});
+  assert.deepEqual(calls, ["quick"]);
+  wait.resolve(scan({ onThisPc: [
+    entry("a", { hasBackup: true, status: "backedUp" }),
+    entry("b", { hasBackup: true, status: "changedSinceBackup" }),
+    entry("c", { hasBackup: true, status: "unknown" }),
+  ] }));
+  await applying;
+  assert.deepEqual(state.newGames.map((game) => game.id), []);
+  assert.deepEqual(state.changedGames.map((game) => game.id), ["b"]);
+  assert.equal(state.protectedGames, 1, "unknown comparisons are never called clean");
+  assert.equal(state.scanResult.inBackup[0].snapshots[0].id, "latest");
+});
+
+for (const origin of ["account recovery", "folder picker"]) {
+  test(`a failed inventory after ${origin} leaves backup status unknown and reports the failure`, async () => {
+    state.scanResult.onThisPc = [
+      entry("a", { status: "backedUp", hasBackup: true, lastBackupAt: "2026-09-27", snapshots: [{ id: "old.zip", timestamp: "2026-09-27", bytes: 2048, label: null, isSafety: false }] }),
+      entry("b"),
+    ];
+    state.snapshotChoices = { a: "old.zip" };
+    const destination = { ...state.page.settings, backupFolder: "G:\\My Drive\\Recovered backups" };
+    api.scan = async () => { throw new Error("Inventory unavailable"); };
+    api.backup = async () => { throw new Error("A failed inventory must never start backup"); };
+    api.pickBackupFolder = async () => destination;
+    if (origin === "account recovery") await state.applySyncedSettings(destination);
+    else await state.chooseBackupFolder();
+    await settle();
+    assert.equal(state.scanResult.inBackup.length, 0);
+    assert.deepEqual(state.snapshotChoices, {});
+    assert.ok(state.scanResult.onThisPc.every((game) => game.status === "unknown" && !game.hasBackup && game.snapshots.length === 0));
+    assert.deepEqual(state.newGames.map((game) => game.id), []);
+    assert.deepEqual(state.pendingGames.map((game) => game.id), []);
+    assert.equal(state.protectedGames, 0, "an unverified destination is not called protected");
+    assert.match(state.error, /Refresh failed: Inventory unavailable/);
+    await state.backupPending("both");
+    assert.equal(confirmState.current, null, "no automatic first-backup selection follows a failed inventory");
+  });
+}
+
 test("selection skips missing snapshots and survives search and filters", () => {
   state.tab = "backup";
   state.scanResult.inBackup.push(entry("broken", { hasBackup: true, hasLocalData: false, status: "error" }));

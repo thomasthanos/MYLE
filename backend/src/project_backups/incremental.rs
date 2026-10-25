@@ -170,6 +170,44 @@ pub(crate) fn chain(app_dir: &Path, base: &BackupEntry) -> Vec<Increment> {
     chain
 }
 
+/// Discovery cannot treat an existing unreadable increment as if it never
+/// existed: the older state would not establish the latest backup's files.
+pub(crate) fn checked_chain(app_dir: &Path, base: &BackupEntry) -> Result<Vec<Increment>, String> {
+    let folder = app_dir.join(FOLDER);
+    let entries = match fs::read_dir(&folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Can't list incremental backups: {error}")),
+    };
+    let prefix = format!("increment-v{}-", base.version);
+    let mut sequences = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("Can't list incremental backups: {error}"))?;
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if let Some(sequence) = name.strip_prefix(&prefix).and_then(|name| name.strip_suffix(".zip")).and_then(|n| n.parse::<u32>().ok()) {
+            sequences.push(sequence);
+        }
+    }
+    let mut chain: Vec<Increment> = Vec::new();
+    for sequence in 1..=MAX_CHAIN {
+        if !sequences.contains(&sequence) {
+            if sequences.iter().any(|next| *next > sequence) {
+                return Err(format!("Incremental backup {} is missing; the newest backup state cannot be checked.", increment_name(base.version, sequence)));
+            }
+            break;
+        }
+        let name = increment_name(base.version, sequence);
+        let next = increment(&folder.join(format!("{name}.zip")))
+            .ok_or_else(|| format!("Incremental backup {name} can't be read."))?;
+        let previous = chain.last().map(|known| known.info.name.clone());
+        if next.info.base != base.id || next.info.base_version != base.version || next.info.sequence != sequence || next.info.previous != previous {
+            return Err(format!("Incremental backup {name} does not follow its base and previous increment."));
+        }
+        chain.push(next);
+    }
+    Ok(chain)
+}
+
 /// What the files of a project were at its last backup.
 struct Previous {
     files: BTreeMap<String, FileInfo>,

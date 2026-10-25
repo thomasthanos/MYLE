@@ -15,6 +15,42 @@ pub struct PinOffer {
     request_after_setup: bool,
 }
 
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum PinResult {
+    Pinned,
+    NotAllowed { reason: PinBlockReason },
+    NotPinned,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PinBlockReason {
+    PinConsentNotificationsDisabled,
+    Unknown,
+}
+
+enum PinRequest {
+    NotAllowed(PinBlockReason),
+    Pending(windows_future::IAsyncOperation<bool>),
+}
+
+fn pin_block_reason() -> PinBlockReason {
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+    // Windows uses its own notification sender for pin consent. Its setting
+    // can block the prompt even while general notifications are enabled. This
+    // is diagnostic only: IsPinningAllowed remains the authority, and an
+    // absent/new Windows setting never implies a particular reason.
+    let enabled = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.PinConsent")
+        .and_then(|key| key.get_value::<u32, _>("Enabled"));
+    if matches!(enabled, Ok(0)) {
+        PinBlockReason::PinConsentNotificationsDisabled
+    } else {
+        PinBlockReason::Unknown
+    }
+}
+
 fn preference() -> crate::shortcut_preferences::TaskbarPreference {
     use winreg::{RegKey, enums::HKEY_CURRENT_USER};
     let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Software\ThomasThanos\MakeYourLifeEasier").ok();
@@ -55,7 +91,13 @@ pub fn taskbar_pin_dismiss() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn taskbar_pin(app: AppHandle) -> Result<bool, String> {
+pub fn taskbar_open_notification_settings() -> Result<(), String> {
+    tauri_plugin_opener::open_url("ms-settings:notifications", None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn taskbar_pin(app: AppHandle) -> Result<PinResult, String> {
     if !preference().enabled {
         return Err("Taskbar pinning is switched off in the setup choices.".into());
     }
@@ -71,16 +113,23 @@ pub async fn taskbar_pin(app: AppHandle) -> Result<bool, String> {
             }
             let manager = TaskbarManager::GetDefault().map_err(|error| error.to_string())?;
             if !manager.IsPinningAllowed().map_err(|error| error.to_string())? {
-                return Err("Windows does not currently allow taskbar pinning.".into());
+                return Ok(PinRequest::NotAllowed(pin_block_reason()));
             }
-            manager.RequestPinCurrentAppAsync().map_err(|error| error.to_string())
+            manager.RequestPinCurrentAppAsync()
+                .map(PinRequest::Pending)
+                .map_err(|error| error.to_string())
         })();
         let _ = send.send(request);
     }).map_err(|error| error.to_string())?;
-    let pinned = receive.await.map_err(|error| error.to_string())??
-        .await.map_err(|error| error.to_string())?;
+    let request = receive.await.map_err(|error| error.to_string())??;
+    let pinned = match request {
+        PinRequest::NotAllowed(reason) => return Ok(PinResult::NotAllowed { reason }),
+        PinRequest::Pending(operation) => operation.await.map_err(|error| error.to_string())?,
+    };
     if pinned {
         crate::startup::set_flag(TASKBAR_PENDING, false)?;
+        Ok(PinResult::Pinned)
+    } else {
+        Ok(PinResult::NotPinned)
     }
-    Ok(pinned)
 }
