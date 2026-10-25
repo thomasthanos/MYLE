@@ -611,15 +611,17 @@ pub async fn disk_analyzer_reveal(state: State<'_, DiskAnalyzerState>, scan_id: 
             tree.check(scan_id, node_id)?;
             Ok(tree.path(node_id))
         })?;
-        use std::os::windows::process::CommandExt;
-        let mut explorer = std::process::Command::new(crate::apps::process::explorer());
-        // Explorer reads its own command line: `/select,"<path>"`.
+        // The scanned folder itself (`C:\` would end its quotes with `\"`).
         if node_id == 0 {
-            explorer.raw_arg(format!("\"{}\"", path.display()));
-        } else {
-            explorer.raw_arg(format!("/select,\"{}\"", path.display()));
+            return tauri_plugin_opener::open_path(path.display().to_string(), None::<&str>).map_err(|e| e.to_string());
         }
-        explorer.spawn().map(|_| ()).map_err(|e| format!("Explorer did not start: {e}"))
+        use std::os::windows::process::CommandExt;
+        // Explorer reads its own command line: `/select,"<path>"`.
+        std::process::Command::new(crate::apps::process::explorer())
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Explorer did not start: {e}"))
     })
     .await
 }
