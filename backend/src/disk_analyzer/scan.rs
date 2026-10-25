@@ -43,8 +43,8 @@ const CLOUD_TAG: u32 = 0x9000_001A;
 const CLOUD_TAG_MASK: u32 = 0xFFFF_0FFF;
 const RECALL: u32 = FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE;
 
-/// One listing call fills at most this much.
-const BUFFER_BYTES: usize = 128 * 1024;
+/// One listing call fills at most this much (256 KB allows large folders to be read in fewer syscalls).
+const BUFFER_BYTES: usize = 256 * 1024;
 /// At most this many progress events a second.
 pub const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
@@ -99,9 +99,9 @@ struct Work {
     stop: bool,
 }
 
-/// How many threads list folders: the logical CPUs, at most 8.
+/// How many threads list folders: scalable worker pool for fast SSD/NVMe I/O.
 fn workers() -> usize {
-    std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8)
+    std::thread::available_parallelism().map_or(8, |n| (n.get() * 2).clamp(4, 24))
 }
 
 /// Walks `root` (a `\\?\` path to a folder). `None` when cancelled; an error
@@ -129,8 +129,12 @@ fn scan_with(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs().min(u32::MAX as u64) as u32);
     let mut tree = Tree::new(scan_id, shown.clone(), modified);
+    let mut root_wide: Vec<u16> = root.as_os_str().encode_wide().collect();
+    if root_wide.last() != Some(&0) {
+        root_wide.push(0);
+    }
     let work = Mutex::new(Work {
-        stack: vec![Job { id: 0, path: root.as_os_str().encode_wide().collect() }],
+        stack: vec![Job { id: 0, path: root_wide }],
         stop: false,
     });
     let ready = Condvar::new();
@@ -144,19 +148,24 @@ fn scan_with(
             let (work, ready) = (&work, &ready);
             scope.spawn(move || {
                 let mut buffer = vec![0u64; BUFFER_BYTES / 8];
+                let mut local_jobs = Vec::with_capacity(4);
                 loop {
-                    let job = {
+                    if local_jobs.is_empty() {
                         let mut work = work.lock().unwrap_or_else(|p| p.into_inner());
                         loop {
                             if work.stop {
                                 return;
                             }
-                            if let Some(job) = work.stack.pop() {
-                                break job;
+                            let count = work.stack.len().min(4);
+                            if count > 0 {
+                                let start = work.stack.len() - count;
+                                local_jobs.extend(work.stack.drain(start..).rev());
+                                break;
                             }
                             work = ready.wait(work).unwrap_or_else(|p| p.into_inner());
                         }
-                    };
+                    }
+                    let job = local_jobs.pop().unwrap();
                     let listing = if cancel.load(Ordering::Relaxed) { Err(0) } else { read_dir(&job.path, &mut buffer) };
                     if sender.send(Read { id: job.id, path: job.path, listing }).is_err() {
                         return;
@@ -177,51 +186,74 @@ fn scan_with(
                 stop();
                 return Ok(false);
             }
-            let read = match results.recv_timeout(PROGRESS_EVERY) {
+            let first = match results.recv_timeout(PROGRESS_EVERY) {
                 Ok(read) => read,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            pending -= 1;
-            match read.listing {
-                Ok(listing) => {
-                    let ids = tree.add_children(read.id, &listing);
-                    let mut jobs = Vec::new();
-                    let mut name_at = 0usize;
-                    for (id, entry) in ids.zip(&listing.entries) {
-                        let name = &listing.names[name_at..name_at + entry.name_len as usize];
-                        name_at += entry.name_len as usize;
-                        match entry.kind {
-                            Kind::Dir => {
-                                progress.dirs += 1;
-                                jobs.push(Job { id, path: child_path(&read.path, name) });
-                            }
-                            Kind::File | Kind::Cloud => {
-                                progress.files += 1;
-                                progress.bytes += entry.size;
-                                progress.alloc += entry.alloc;
-                            }
-                            Kind::Link => {}
-                        }
-                    }
-                    if !jobs.is_empty() {
-                        pending += jobs.len();
-                        work.lock().unwrap_or_else(|p| p.into_inner()).stack.extend(jobs);
-                        ready.notify_all();
-                    }
+
+            let mut batch = vec![first];
+            while batch.len() < 32 {
+                match results.try_recv() {
+                    Ok(read) => batch.push(read),
+                    Err(_) => break,
                 }
-                Err(code) if read.id == 0 => {
-                    stop();
-                    return Err(format!(
-                        "Could not read {}: {}",
-                        shown.display(),
-                        std::io::Error::from_raw_os_error(code as i32)
-                    ));
-                }
-                Err(_) => tree.mark_inaccessible(read.id),
             }
+
+            let mut all_jobs = Vec::new();
+            let mut last_path = None;
+
+            for read in batch {
+                pending -= 1;
+                match read.listing {
+                    Ok(listing) => {
+                        let ids = tree.add_children(read.id, &listing);
+                        let mut name_at = 0usize;
+                        for (id, entry) in ids.zip(&listing.entries) {
+                            let name = &listing.names[name_at..name_at + entry.name_len as usize];
+                            name_at += entry.name_len as usize;
+                            match entry.kind {
+                                Kind::Dir => {
+                                    progress.dirs += 1;
+                                    all_jobs.push(Job { id, path: child_path(&read.path, name) });
+                                }
+                                Kind::File | Kind::Cloud => {
+                                    progress.files += 1;
+                                    progress.bytes += entry.size;
+                                    progress.alloc += entry.alloc;
+                                }
+                                Kind::Link => {}
+                            }
+                        }
+                        last_path = Some(read.path);
+                    }
+                    Err(code) if read.id == 0 => {
+                        stop();
+                        return Err(format!(
+                            "Could not read {}: {}",
+                            shown.display(),
+                            std::io::Error::from_raw_os_error(code as i32)
+                        ));
+                    }
+                    Err(_) => tree.mark_inaccessible(read.id),
+                }
+            }
+
+            if !all_jobs.is_empty() {
+                pending += all_jobs.len();
+                work.lock().unwrap_or_else(|p| p.into_inner()).stack.extend(all_jobs);
+                ready.notify_all();
+            }
+
             if throttle.ready() {
-                progress.current = display_path(Path::new(&OsString::from_wide(&read.path))).display().to_string();
+                if let Some(path) = last_path {
+                    let path_units = if path.last() == Some(&0) {
+                        &path[..path.len() - 1]
+                    } else {
+                        &path
+                    };
+                    progress.current = display_path(Path::new(&OsString::from_wide(path_units))).display().to_string();
+                }
                 on_progress(&progress);
             }
         }
@@ -239,13 +271,21 @@ fn scan_with(
 }
 
 fn child_path(parent: &[u16], name: &[u8]) -> Vec<u16> {
-    let mut path = parent.to_vec();
-    if path.last() != Some(&(b'\\' as u16)) {
-        path.push(b'\\' as u16);
-    }
+    let parent_units = if parent.last() == Some(&0) {
+        &parent[..parent.len() - 1]
+    } else {
+        parent
+    };
     // SAFETY: the name came from `OsStr::as_encoded_bytes` or valid UTF-8.
     let name = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(name) };
+    let needs_slash = parent_units.last() != Some(&(b'\\' as u16));
+    let mut path = Vec::with_capacity(parent_units.len() + 1 + name.len() + 1);
+    path.extend_from_slice(parent_units);
+    if needs_slash {
+        path.push(b'\\' as u16);
+    }
     path.extend(name.encode_wide());
+    path.push(0);
     path
 }
 
@@ -263,12 +303,10 @@ const CLASSES: [FILE_INFO_BY_HANDLE_CLASS; 3] = [FileIdExtdDirectoryInfo, FileId
 
 /// Reads a whole folder; a Win32 error code when it cannot be opened or read.
 fn read_dir(path: &[u16], buffer: &mut [u64]) -> Result<Listing, u32> {
-    let mut wide = path.to_vec();
-    wide.push(0);
-    // SAFETY: a NUL-terminated path; the handle is closed by `Handle`.
+    // SAFETY: path is already NUL-terminated; the handle is closed by `Handle`.
     let handle = unsafe {
         CreateFileW(
-            wide.as_ptr(),
+            path.as_ptr(),
             FILE_LIST_DIRECTORY,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             std::ptr::null(),
@@ -399,9 +437,15 @@ unsafe fn parse(buffer: *const u8, bytes: usize, class: FILE_INFO_BY_HANDLE_CLAS
     }
 }
 
-/// UTF-16 to the encoded bytes of an `OsStr`: plain UTF-8 when the name is
-/// valid Unicode (it nearly always is), WTF-8 otherwise.
+/// UTF-16 to the encoded bytes of an `OsStr`: fast ASCII path when all units <= 0x7F,
+/// plain UTF-8 when the name is valid Unicode (it nearly always is), WTF-8 otherwise.
 fn push_name(names: &mut Vec<u8>, units: &[u16]) {
+    // Fast path: if all UTF-16 code units are ASCII (<= 0x7F), copy directly!
+    if units.iter().all(|&u| u <= 0x7F) {
+        names.reserve(units.len());
+        names.extend(units.iter().map(|&u| u as u8));
+        return;
+    }
     let start = names.len();
     for decoded in char::decode_utf16(units.iter().copied()) {
         match decoded {

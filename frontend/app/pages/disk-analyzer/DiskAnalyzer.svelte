@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ChartPie from "@lucide/svelte/icons/chart-pie";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Columns2 from "@lucide/svelte/icons/columns-2";
@@ -18,6 +20,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Usb from "@lucide/svelte/icons/usb";
   import X from "@lucide/svelte/icons/x";
+  import Zap from "@lucide/svelte/icons/zap";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize, sizeOf, type Drive } from "./api";
@@ -80,43 +83,187 @@
 
 <PageHeader title="Disk Analyzer" subtitle="See what is filling a drive or a folder, then move what you no longer need to the Recycle Bin." />
 
-<section class="bar surface">
-  <div class="drives" role="group" aria-label="Drives">
-    {#each d.drives as drive (drive.root)}
-      {@const used = drive.total ? (drive.total - drive.free) / drive.total : 0}
-      {@const Icon = driveIcon(drive)}
+<!-- WizTree Primary Control Bar -->
+<section class="toolbar-box surface">
+  <div class="toolbar-left">
+    <label class="drive-selector-label" for="wiz-drive-select">
+      <HardDrive size={16} class="selector-icon" />
+      <span>Select:</span>
+    </label>
+    <div class="select-container">
+      <select
+        id="wiz-drive-select"
+        class="wiz-select"
+        value={d.target ?? ""}
+        disabled={d.busy}
+        onchange={(e) => {
+          const val = e.currentTarget.value;
+          if (val === "__custom__") {
+            void d.pickFolder();
+          } else if (val) {
+            d.choose(val);
+          }
+        }}
+      >
+        {#each d.drives as drive (drive.root)}
+          {@const free = formatSize(drive.free)}
+          {@const total = formatSize(drive.total)}
+          {@const pct = drive.total ? Math.round(((drive.total - drive.free) / drive.total) * 100) : 0}
+          <option value={drive.root}>
+            ({drive.letter}:) {drive.label || "Local Disk"} [{drive.filesystem}] — {free} free of {total} ({pct}% used)
+          </option>
+        {/each}
+        {#if folderPicked}
+          <option value={d.target}>
+            📁 Folder: {d.target}
+          </option>
+        {/if}
+        <option value="__custom__">📂 Select folder…</option>
+      </select>
+      <ChevronDown size={14} class="select-arrow" />
+    </div>
+
+    {#if scanning}
+      <button type="button" class="btn danger scan-action-btn" onclick={() => d.cancel()}>
+        <X size={15} />
+        <span>Cancel</span>
+      </button>
+    {:else}
       <button
         type="button"
-        class="drive"
-        class:active={d.target === drive.root}
-        aria-pressed={d.target === drive.root}
-        disabled={d.busy}
-        title={driveTitle(drive)}
-        onclick={() => d.choose(drive.root)}
-        ondblclick={() => d.scan()}
+        class="btn primary glow scan-action-btn"
+        disabled={!d.target || d.busy}
+        onclick={() => d.scan()}
+        title="Start high-speed drive scan"
       >
-        <span class="drive-icon"><Icon size={18} /></span>
-        <span class="drive-text">
-          <span class="drive-name"><strong>{drive.letter}:</strong> {drive.label || "Local Disk"}</span>
-          <span class="meter" aria-hidden="true"><span class:full={used > 0.9} style:width="{used * 100}%"></span></span>
-          <span class="drive-free">{formatSize(drive.free)} free of {formatSize(drive.total)}</span>
-        </span>
+        <Zap size={15} />
+        <span>Scan</span>
+      </button>
+    {/if}
+
+    <button
+      type="button"
+      class="btn folder-pick-btn"
+      disabled={d.busy}
+      onclick={() => d.pickFolder()}
+      title="Choose a specific directory to scan"
+    >
+      <FolderOpen size={15} />
+      <span>Folder…</span>
+    </button>
+  </div>
+
+  <div class="toolbar-right">
+    <div class="mode" role="radiogroup" aria-label="Sizes">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={d.sizeMode === "size"}
+        class:active={d.sizeMode === "size"}
+        disabled={d.phase === "deleting"}
+        title="What the files hold"
+        onclick={() => d.setSizeMode("size")}
+      >
+        Size
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={d.sizeMode === "alloc"}
+        class:active={d.sizeMode === "alloc"}
+        disabled={d.phase === "deleting"}
+        title="What the files take on the disk"
+        onclick={() => d.setSizeMode("alloc")}
+      >
+        Size on disk
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- Visual Quick Drive Cards Ribbon (WizTree Style) -->
+<section class="drive-ribbon surface" role="group" aria-label="Available storage drives">
+  <div class="ribbon-label">Drives:</div>
+  <div class="ribbon-drives">
+    {#each d.drives as drive (drive.root)}
+      {@const usedRatio = drive.total ? (drive.total - drive.free) / drive.total : 0}
+      {@const pct = Math.round(usedRatio * 100)}
+      {@const Icon = driveIcon(drive)}
+      {@const isSelected = d.target?.toLowerCase() === drive.root.toLowerCase()}
+      <button
+        type="button"
+        class="drive-card"
+        class:selected={isSelected}
+        class:scanning-this={isSelected && scanning}
+        aria-pressed={isSelected}
+        disabled={d.busy && !isSelected}
+        title={driveTitle(drive)}
+        onclick={() => {
+          if (!d.busy) d.choose(drive.root);
+        }}
+        ondblclick={() => {
+          if (!d.busy) {
+            d.choose(drive.root);
+            void d.scan();
+          }
+        }}
+      >
+        <div class="card-head">
+          <span class="drive-badge">
+            <Icon size={15} class="badge-icon" />
+            <strong>({drive.letter}:)</strong>
+          </span>
+          <span class="drive-vol-label" title={drive.label || "Local Disk"}>{drive.label || "Local Disk"}</span>
+          <span class="fs-pill">{drive.filesystem}</span>
+          {#if isSelected}
+            <span class="active-indicator" title="Selected drive">
+              {#if scanning}
+                <RadarIcon size={12} class="spin" />
+              {:else}
+                <Check size={12} />
+              {/if}
+            </span>
+          {/if}
+        </div>
+
+        <div class="meter-wrapper">
+          <div class="meter-bar" aria-hidden="true">
+            <div
+              class="meter-fill"
+              class:critical={usedRatio > 0.9}
+              class:warning={usedRatio > 0.75 && usedRatio <= 0.9}
+              style:width="{usedRatio * 100}%"
+            ></div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <span class="free-text"><strong>{formatSize(drive.free)}</strong> free of {formatSize(drive.total)}</span>
+          <span class="pct-pill" class:alert={pct > 90}>{pct}%</span>
+        </div>
       </button>
     {/each}
+
     {#if folderPicked}
-      <span class="picked" title={d.target}><FolderOpen size={15} /><span>{d.target}</span></span>
-    {/if}
-  </div>
-  <div class="actions">
-    <button type="button" class="btn" disabled={d.busy} onclick={() => d.pickFolder()}><FolderOpen size={15} /> Choose folder…</button>
-    <div class="mode" role="radiogroup" aria-label="Sizes">
-      <button type="button" role="radio" aria-checked={d.sizeMode === "size"} class:active={d.sizeMode === "size"} disabled={d.phase === "deleting"} title="What the files hold" onclick={() => d.setSizeMode("size")}>Size</button>
-      <button type="button" role="radio" aria-checked={d.sizeMode === "alloc"} class:active={d.sizeMode === "alloc"} disabled={d.phase === "deleting"} title="What the files take on the disk" onclick={() => d.setSizeMode("alloc")}>Size on disk</button>
-    </div>
-    {#if scanning}
-      <button type="button" class="btn primary" onclick={() => d.cancel()}><X size={15} /> Cancel</button>
-    {:else}
-      <button type="button" class="btn primary glow" disabled={!d.target || d.busy} onclick={() => d.scan()}><RadarIcon size={15} /> Scan</button>
+      <div class="folder-card selected">
+        <div class="folder-card-head">
+          <FolderOpen size={15} class="folder-icon" />
+          <span class="folder-title">Folder Selected</span>
+          <button
+            type="button"
+            class="folder-clear-btn"
+            disabled={d.busy}
+            title="Reset to system drive"
+            onclick={() => {
+              const sys = d.drives.find((drv) => drv.system) ?? d.drives[0];
+              if (sys) d.choose(sys.root);
+            }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <div class="folder-path" title={d.target}>{d.target}</div>
+      </div>
     {/if}
   </div>
 </section>
@@ -301,22 +448,316 @@
 {/if}
 
 <style>
-  .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-2) var(--fluid-gap-3); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-2) var(--fluid-gap-3); border-radius: 12px; }
-  .drives { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; }
-  .drive { display: flex; align-items: center; gap: 10px; min-width: 170px; padding: 8px 12px; border: 1px solid var(--btn-border); border-radius: 10px; background: var(--chip-fill); color: var(--text-2); text-align: left; box-shadow: var(--btn-sheen); transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
-  .drive:hover:not(:disabled) { background: var(--chip-fill-hover); color: var(--text-1); transform: translateY(-1px); }
-  .drive.active { border-color: rgb(var(--accent-rgb) / 0.7); background: var(--selected); color: var(--text-1); box-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.25); }
-  .drive:disabled { opacity: 0.55; cursor: not-allowed; }
-  .drive-icon { display: grid; color: rgb(var(--accent-soft-rgb)); }
-  .drive-text { display: grid; gap: 3px; min-width: 0; }
-  .drive-name { overflow: hidden; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
-  .drive-free { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .meter { display: block; height: 5px; border-radius: 999px; background: rgb(0 0 0 / 0.35); overflow: hidden; }
-  .meter span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #38bdf8); }
-  .meter span.full { background: var(--danger); }
-  .picked { display: inline-flex; align-items: center; gap: 7px; max-width: 360px; padding: 0 12px; border: 1px solid rgb(var(--accent-rgb) / 0.55); border-radius: 10px; background: var(--selected); color: var(--text-1); font-size: 12.5px; }
-  .picked span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: ltr; }
-  .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  /* WizTree Primary Control Bar */
+  .toolbar-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: var(--surface-bg, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+  }
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .drive-selector-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  :global(.selector-icon) {
+    color: rgb(var(--accent-soft-rgb));
+  }
+  .select-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 280px;
+    max-width: 460px;
+    flex: 1;
+  }
+  .wiz-select {
+    width: 100%;
+    height: 34px;
+    padding: 0 32px 0 12px;
+    border-radius: 8px;
+    background: var(--input-fill, rgba(0, 0, 0, 0.35));
+    border: 1px solid var(--btn-border, rgba(255, 255, 255, 0.12));
+    color: var(--text-1);
+    font-size: 13px;
+    font-weight: 500;
+    appearance: none;
+    cursor: pointer;
+    outline: none;
+    transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+  }
+  .wiz-select:focus {
+    border-color: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.25);
+  }
+  .wiz-select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .wiz-select option {
+    background: #18191e;
+    color: #e2e8f0;
+  }
+  :global(.select-arrow) {
+    position: absolute;
+    right: 10px;
+    pointer-events: none;
+    color: var(--text-3);
+  }
+  .scan-action-btn {
+    height: 34px;
+    padding: 0 16px;
+    font-weight: 600;
+    gap: 6px;
+  }
+  .scan-action-btn span {
+    font-weight: 700;
+  }
+  .folder-pick-btn {
+    height: 34px;
+    padding: 0 12px;
+    gap: 6px;
+  }
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+
+  /* Drive Cards Ribbon */
+  .drive-ribbon {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: var(--fluid-gap-3);
+    padding: 10px 14px;
+    border-radius: 12px;
+  }
+  .ribbon-label {
+    padding-top: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .ribbon-drives {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .drive-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 210px;
+    max-width: 280px;
+    flex: 1 1 210px;
+    padding: 9px 12px;
+    border: 1px solid var(--btn-border, rgba(255, 255, 255, 0.1));
+    border-radius: 10px;
+    background: var(--chip-fill, rgba(255, 255, 255, 0.04));
+    color: var(--text-1);
+    text-align: left;
+    box-shadow: var(--btn-sheen);
+    cursor: pointer;
+    transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast), box-shadow var(--dur-fast);
+  }
+  .drive-card:hover:not(:disabled) {
+    background: var(--chip-fill-hover, rgba(255, 255, 255, 0.07));
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+  .drive-card.selected {
+    border-color: rgb(var(--accent-rgb) / 0.85);
+    background: var(--selected, rgba(56, 189, 248, 0.12));
+    box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.22);
+  }
+  .drive-card.scanning-this {
+    border-color: #38bdf8;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+  }
+  .drive-card:disabled:not(.selected) {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .drive-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: rgb(var(--accent-soft-rgb));
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  :global(.badge-icon) {
+    color: rgb(var(--accent-soft-rgb));
+  }
+  .drive-vol-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    color: var(--text-2);
+    font-weight: 500;
+    flex: 1;
+  }
+  .fs-pill {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+  }
+  .active-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb));
+    color: #ffffff;
+    flex-shrink: 0;
+  }
+  :global(.spin) {
+    animation: da-spin 1.5s linear infinite;
+  }
+  @keyframes da-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .meter-wrapper {
+    width: 100%;
+  }
+  .meter-bar {
+    display: block;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+  }
+  .meter-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #38bdf8, #818cf8);
+    transition: width 0.3s ease;
+  }
+  .meter-fill.warning {
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  }
+  .meter-fill.critical {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .free-text strong {
+    color: var(--text-1);
+  }
+  .pct-pill {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .pct-pill.alert {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+  }
+
+  /* Folder card */
+  .folder-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-width: 210px;
+    max-width: 320px;
+    padding: 9px 12px;
+    border: 1px solid rgb(var(--accent-rgb) / 0.6);
+    border-radius: 10px;
+    background: var(--selected, rgba(56, 189, 248, 0.12));
+    box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.2);
+  }
+  .folder-card-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-1);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  :global(.folder-icon) {
+    color: rgb(var(--accent-soft-rgb));
+  }
+  .folder-title {
+    flex: 1;
+  }
+  .folder-clear-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .folder-clear-btn:hover {
+    background: rgba(239, 68, 68, 0.25);
+    color: #ffffff;
+  }
+  .folder-path {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    color: var(--text-3);
+    direction: ltr;
+  }
+
   .mode { display: inline-flex; padding: 2px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--input-fill); }
   .mode button { height: 26px; padding: 0 10px; border-radius: 7px; color: var(--text-2); font-size: 12px; font-weight: 600; }
   .mode button:hover:not(:disabled) { color: var(--text-1); }
