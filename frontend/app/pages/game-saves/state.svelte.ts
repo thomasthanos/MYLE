@@ -205,7 +205,7 @@ class GameSavesState {
         this.#adopt(this.page.activeOperation);
       } else if (this.page.engineAvailable) {
         // The saved list shows at once; only the games on it are re-checked (seconds). Without one, the full scan is the only way in.
-        if (!this.scanResult && this.page.cachedScan) this.#applyScan(this.page.cachedScan);
+        if (!this.scanResult && this.page.cachedScan) this.#applyScan(this.page.cachedScan, true);
         this.loading = false;
         if (this.scanResult) await this.refresh();
         else await this.scan(false);
@@ -259,7 +259,7 @@ class GameSavesState {
         this.operation = null;
         this.cancelling = false;
         if (!page.engineAvailable) return;
-        if (!this.scanResult && page.cachedScan) this.#applyScan(page.cachedScan);
+        if (!this.scanResult && page.cachedScan) this.#applyScan(page.cachedScan, true);
         if (this.scanResult) await this.refresh();
         else await this.scan(false);
         return;
@@ -283,7 +283,7 @@ class GameSavesState {
       // The page itself got there first: leave it to its own load.
       if (this.scanResult || this.#initialized) return;
       this.page = page;
-      if (page.cachedScan && !page.activeOperation) this.#applyScan(page.cachedScan);
+      if (page.cachedScan && !page.activeOperation) this.#applyScan(page.cachedScan, true);
     } catch {
       return;
     }
@@ -523,7 +523,7 @@ class GameSavesState {
         if (!page.cachedScan || page.activeOperation || !page.engineAvailable) return;
         if (!this.scanResult) {
           this.page = page;
-          this.#applyScan(page.cachedScan);
+          this.#applyScan(page.cachedScan, true);
           this.loading = false;
         }
       }
@@ -532,8 +532,9 @@ class GameSavesState {
       // A background check never interrupts; the next one retries.
     }
   }
-  #applyScan(result: GameSavesScan) {
+  #applyScan(result: GameSavesScan, cached = false) {
     this.scanResult = result;
+    if (cached && !this.scanMatchesBackupFolder()) this.invalidateBackupHistory();
     this.pruneSelection();
     this.#updateBadge(result);
   }
@@ -721,10 +722,21 @@ class GameSavesState {
   private applyBackupFolder(settings: GameSavesSettings): boolean {
     const changed = !samePath(this.page.settings.backupFolder ?? "", settings.backupFolder ?? "");
     this.page.settings = settings;
-    if (!changed || !this.scanResult) return false;
+    if (!this.scanResult || (!changed && this.scanMatchesBackupFolder())) return false;
+    this.invalidateBackupHistory();
+    return true;
+  }
+  private scanMatchesBackupFolder(): boolean {
+    const scanned = this.scanResult?.backupFolder;
+    const selected = this.page.settings.backupFolder;
+    return !!scanned && !!selected && samePath(scanned, selected);
+  }
+  private invalidateBackupHistory() {
+    if (!this.scanResult) return;
     // Old snapshots belong to the old folder. Never offer them for restore
     // while the new folder is being checked, including when that check fails.
     this.scanResult.inBackup = [];
+    this.scanResult.backupFolder = null;
     this.scanResult.stats.backupGames = 0;
     this.scanResult.backupUnreachable = null;
     for (const game of this.scanResult.onThisPc) {
@@ -733,7 +745,6 @@ class GameSavesState {
     }
     this.snapshotChoices = {};
     if (this.tab === "backup") this.selected.clear();
-    return true;
   }
   /** Backs up into a cloud folder: a detected one, or one the user points to. */
   async useCloudFolder(provider: CloudProvider, folder: DetectedFolder | null) {

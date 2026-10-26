@@ -335,6 +335,10 @@ pub struct GameSavesScan {
     pub stats: GameSavesStats,
     pub on_this_pc: Vec<GameSaveEntry>,
     pub in_backup: Vec<GameSaveEntry>,
+    /// The destination whose inventory and comparisons produced this scan.
+    /// Legacy caches have none and cannot establish backup status.
+    #[serde(default)]
+    pub backup_folder: Option<String>,
     /// When every game in the database was last looked for. A quick refresh
     /// only re-checks the games already known and keeps this time.
     #[serde(default)]

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use std::os::windows::fs::OpenOptionsExt;
 
-use super::models::{GameSaveEntry, GameSavesScan, OperationKind};
+use super::models::{GameSaveEntry, GameSavesScan, GameSavesSettings, OperationKind};
 
 #[derive(Clone, Default)]
 pub struct GameSavesState(Arc<Mutex<Inner>>);
@@ -155,6 +155,29 @@ impl GameSavesState {
 
     pub(crate) fn cached_scan(&self) -> Option<GameSavesScan> {
         self.lock().cached_scan.clone()
+    }
+
+    /// Settings may recover or select another destination while this process
+    /// already has a scan. Sanitize the stored copy as well as the UI copy.
+    pub(crate) fn cached_scan_for(&self, settings: &GameSavesSettings) -> Option<GameSavesScan> {
+        self.publish_cached_scan(settings, None)
+    }
+
+    /// A page load may have read disk before a fresh scan finished. Install
+    /// that fallback only if memory is still empty, under the same lock used
+    /// for destination validation and copying the published result.
+    pub(crate) fn publish_cached_scan(
+        &self,
+        settings: &GameSavesSettings,
+        fallback: Option<GameSavesScan>,
+    ) -> Option<GameSavesScan> {
+        let mut inner = self.lock();
+        if inner.cached_scan.is_none() {
+            inner.cached_scan = fallback;
+        }
+        let scan = inner.cached_scan.as_mut()?;
+        super::scan_cache::validate_destination(scan, settings);
+        Some(scan.clone())
     }
 
     pub(crate) fn find_game(&self, id: &str) -> Option<GameSaveEntry> {
@@ -321,6 +344,43 @@ fn operation_name(kind: OperationKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_fallback_cannot_replace_a_scan_that_completed_after_it_was_read() {
+        let state = GameSavesState::default();
+        let settings = GameSavesSettings { backup_folder: Some(r"G:\Backups".into()), ..Default::default() };
+        let stale = GameSavesScan { generated_at: 100, backup_folder: settings.backup_folder.clone(), ..Default::default() };
+        state.cache_scan(stale.clone());
+        let fallback = state.cached_scan().unwrap();
+        let fresh = GameSavesScan { generated_at: 200, ..stale };
+        state.cache_scan(fresh.clone());
+        assert_eq!(state.publish_cached_scan(&settings, Some(fallback)), Some(fresh.clone()));
+        assert_eq!(state.cached_scan(), Some(fresh));
+    }
+
+    #[test]
+    fn publishing_for_another_destination_also_removes_history_from_the_live_backend_cache() {
+        let game = serde_json::json!({
+            "id": "game-a", "title": "A", "status": "backedUp", "platformBadges": [],
+            "fileCount": 1, "totalBytes": 5, "lastSaveAt": null, "lastBackupAt": "2026-09-27",
+            "paths": ["C:/Saves"], "autoBackup": true, "hasLocalData": true, "hasBackup": true, "error": null,
+            "snapshots": [{"id": "old.zip", "timestamp": "2026-09-27", "bytes": 5, "label": null, "isSafety": false}]
+        });
+        let scan: GameSavesScan = serde_json::from_value(serde_json::json!({
+            "generatedAt": 42, "backupFolder": "E:/Previous backups",
+            "stats": {"localGames": 1, "backupGames": 1, "totalBytes": 5, "databaseGames": 100},
+            "onThisPc": [game.clone()], "inBackup": [game]
+        })).unwrap();
+        let state = GameSavesState::default();
+        state.cache_scan(scan);
+        let settings = GameSavesSettings { backup_folder: Some(r"G:\Recovered backups".into()), ..Default::default() };
+        let published = state.cached_scan_for(&settings).unwrap();
+        assert!(published.in_backup.is_empty());
+        let actionable = state.find_game("game-a").unwrap();
+        assert!(!actionable.has_backup);
+        assert!(actionable.snapshots.is_empty(), "backend actions must not retain the stale restore choice");
+        assert_eq!(state.cached_scan().unwrap(), published, "the stored cache, not just a returned clone, is sanitized");
+    }
 
     #[test]
     fn operation_lock_is_exclusive_and_released() {

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::atomic;
-use super::models::{GameSavesScan, GameSavesSettings};
+use super::models::{GameSaveStatus, GameSavesScan, GameSavesSettings};
 
 const FILE: &str = "scan-cache.json";
 
@@ -63,6 +63,28 @@ pub(crate) fn load(root: &Path) -> Option<CachedScan> {
     serde_json::from_str(&text).ok()
 }
 
+/// The raw disk cache still supplies titles for a quick refresh. Before its
+/// history is published or used for actions, require the scanned destination
+/// to match. A missing legacy destination proves neither backup nor absence.
+pub(crate) fn validate_destination(scan: &mut GameSavesScan, settings: &GameSavesSettings) {
+    let matches = scan.backup_folder.as_deref().zip(settings.backup_folder.as_deref())
+        .is_some_and(|(scanned, selected)| !scanned.is_empty() && !selected.is_empty()
+            && super::settings::same_location(Path::new(scanned), Path::new(selected)));
+    if matches { return; }
+    scan.backup_folder = None;
+    scan.in_backup.clear();
+    scan.stats.backup_games = 0;
+    scan.backup_unreachable = None;
+    for game in &mut scan.on_this_pc {
+        game.has_backup = false;
+        game.last_backup_at = None;
+        game.snapshots.clear();
+        if game.status != GameSaveStatus::Error {
+            game.status = GameSaveStatus::Unknown;
+        }
+    }
+}
+
 /// Best effort: a failed write only costs the next visit a full scan.
 pub(crate) fn save(root: &Path, cached: &CachedScan) {
     if let Ok(json) = serde_json::to_vec(cached) {
@@ -95,6 +117,64 @@ mod tests {
     use crate::game_saves::models::{
         CustomGame, GameRoot, GameSaveEntry, GameSaveStatus, RootSource, RootStore,
     };
+
+    #[test]
+    fn cached_scan_retains_which_backup_destination_was_actually_scanned() {
+        let root = std::env::temp_dir().join(format!("myle-scan-destination-{}", uuid::Uuid::new_v4()));
+        let value = serde_json::json!({
+            "fingerprint": "discovery-only",
+            "scan": {
+                "generatedAt": 42, "stats": { "localGames": 0, "backupGames": 0, "totalBytes": 0, "databaseGames": 0 },
+                "onThisPc": [], "inBackup": [], "backupFolder": "G:\\My Drive\\Game Saves Backups"
+            }
+        });
+        let cached: CachedScan = serde_json::from_value(value).unwrap();
+        save(&root, &cached);
+        let loaded = serde_json::to_value(load(&root).unwrap()).unwrap();
+        assert_eq!(loaded["scan"]["backupFolder"].as_str(), Some(r"G:\My Drive\Game Saves Backups"), "history provenance must survive process restart");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_or_other_destination_history_is_unknown_until_verified_without_losing_discovery_titles() {
+        use crate::game_saves::models::GameSaveSnapshot;
+        let settings = GameSavesSettings { backup_folder: Some(r"G:\My Drive\Backups".into()), ..Default::default() };
+        for destination in [None, Some(r"E:\Previous Backups".to_string())] {
+            let mut backed_up = entry("Game");
+            backed_up.last_backup_at = Some("2026-09-27T19:38:42Z".into());
+            backed_up.snapshots.push(GameSaveSnapshot { id: "old.zip".into(), timestamp: "2026-09-27T19:38:42Z".into(), bytes: 5, label: None, is_safety: false });
+            let mut first = entry("First");
+            first.status = GameSaveStatus::NotBackedUp;
+            let mut failed = entry("Problem");
+            failed.status = GameSaveStatus::Error;
+            let raw = GameSavesScan {
+                backup_folder: destination,
+                on_this_pc: vec![backed_up, first, failed],
+                in_backup: vec![entry("Old game")],
+                full_scan_at: 42,
+                ..Default::default()
+            };
+            let mut published = raw.clone();
+            validate_destination(&mut published, &settings);
+            assert_eq!(published.on_this_pc[0].status, GameSaveStatus::Unknown);
+            assert_eq!(published.on_this_pc[1].status, GameSaveStatus::Unknown, "an old first-backup result is also unverified");
+            assert_eq!(published.on_this_pc[2].status, GameSaveStatus::Error);
+            assert!(published.on_this_pc.iter().all(|game| !game.has_backup && game.last_backup_at.is_none() && game.snapshots.is_empty()));
+            assert!(published.in_backup.is_empty());
+            assert_eq!(published.backup_folder, None);
+            assert_eq!(published.full_scan_at, 42, "destination changes do not force database rediscovery");
+            assert_eq!(known_titles(&raw, &settings), vec!["Game", "First", "Problem", "Old game"], "the raw cache retains titles for quick refresh");
+        }
+    }
+
+    #[test]
+    fn matching_destination_keeps_verified_history_even_with_windows_path_spelling_changes() {
+        let settings = GameSavesSettings { backup_folder: Some(r"G:\My Drive\Backups".into()), ..Default::default() };
+        let mut scan = GameSavesScan { backup_folder: Some("g:/my drive/backups/".into()), on_this_pc: vec![entry("Game")], in_backup: vec![entry("Game")], ..Default::default() };
+        let original = scan.clone();
+        validate_destination(&mut scan, &settings);
+        assert_eq!(scan, original);
+    }
 
     fn entry(title: &str) -> GameSaveEntry {
         GameSaveEntry {

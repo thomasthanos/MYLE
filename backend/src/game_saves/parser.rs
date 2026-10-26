@@ -273,6 +273,7 @@ pub(crate) fn build_scan(
         },
         on_this_pc: local_rows,
         in_backup: backup_rows,
+        backup_folder: settings.backup_folder.clone(),
         ..Default::default()
     }
 }

@@ -45,7 +45,7 @@ const original = { ...api };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const settings = clone(state.page.settings);
 const entry = (id, extra = {}) => ({ id, title: id, status: "notBackedUp", platformBadges: ["Steam"], fileCount: 2, totalBytes: 2048, lastSaveAt: null, lastBackupAt: null, paths: ["C:\\Saves\\" + id], autoBackup: true, hasLocalData: true, hasBackup: false, error: null, snapshots: [], ...extra });
-const scan = (extra = {}) => ({ generatedAt: Date.now(), stats: { localGames: 2, backupGames: 1, totalBytes: 4096, databaseGames: 100 }, onThisPc: [entry("a"), entry("b")], inBackup: [entry("a", { hasBackup: true, status: "backedUp", snapshots: [{ id: "latest", timestamp: "2026-09-01", bytes: 2048, label: null, isSafety: false }] })], fullScanAt: Date.now(), quick: false, discoveryDue: false, ...extra });
+const scan = (extra = {}) => ({ generatedAt: Date.now(), backupFolder: state.page.settings.backupFolder, stats: { localGames: 2, backupGames: 1, totalBytes: 4096, databaseGames: 100 }, onThisPc: [entry("a"), entry("b")], inBackup: [entry("a", { hasBackup: true, status: "backedUp", snapshots: [{ id: "latest", timestamp: "2026-09-01", bytes: 2048, label: null, isSafety: false }] })], fullScanAt: Date.now(), quick: false, discoveryDue: false, ...extra });
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -153,6 +153,43 @@ test("an account recovered backup folder reloads real history before counting fi
   assert.deepEqual(state.changedGames.map((game) => game.id), ["b"]);
   assert.equal(state.protectedGames, 1, "unknown comparisons are never called clean");
   assert.equal(state.scanResult.inBackup[0].snapshots[0].id, "latest");
+});
+
+test("preload never trusts legacy history after startup recovered the same account folder", async () => {
+  state.scanResult = null;
+  const recovered = { ...state.page.settings, backupFolder: "G:\\My Drive\\Game Saves Backups" };
+  const legacy = scan({ backupFolder: undefined, onThisPc: [entry("a")], inBackup: [] });
+  api.getState = async () => clone({ ...state.page, settings: recovered, cachedScan: legacy });
+  const calls = [];
+  api.scan = async (mode) => { calls.push(mode); return scan({ backupFolder: recovered.backupFolder, onThisPc: [entry("a", { hasBackup: true, status: "backedUp" })] }); };
+  await state.preload();
+  assert.deepEqual(state.newGames.map((game) => game.id), [], "legacy absence of history is unverified after recovery");
+  assert.equal(state.games[0].status, "unknown");
+  await state.applySyncedSettings(recovered);
+  assert.deepEqual(calls, ["quick"], "the same settings folder does not prove a legacy cache was scanned there");
+  assert.equal(state.games[0].status, "backedUp");
+});
+
+test("preload strips restore choices cached for another backup folder", async () => {
+  state.scanResult = null;
+  state.snapshotChoices = { a: "old.zip" };
+  const stale = scan({ backupFolder: "E:\\Previous backups", onThisPc: [entry("a", { hasBackup: true, status: "backedUp", snapshots: [{ id: "old.zip", timestamp: "2026-09-27", bytes: 10, label: null, isSafety: false }] })] });
+  api.getState = async () => clone({ ...state.page, cachedScan: stale });
+  await state.preload();
+  assert.equal(state.scanResult.inBackup.length, 0);
+  assert.equal(state.games[0].hasBackup, false);
+  assert.equal(state.games[0].status, "unknown");
+  assert.deepEqual(state.games[0].snapshots, []);
+  assert.deepEqual(state.snapshotChoices, {});
+});
+
+test("a fresh engine result remains authoritative when startup recovery changed its destination", async () => {
+  const recovered = { ...state.page.settings, backupFolder: "G:\\Recovered backups" };
+  api.scan = async () => scan({ backupFolder: recovered.backupFolder, onThisPc: [entry("a", { status: "backedUp", hasBackup: true })] });
+  api.getState = async () => clone({ ...state.page, settings: recovered });
+  await state.refresh();
+  assert.equal(state.games[0].status, "backedUp", "a fresh engine comparison is not a stale cache");
+  assert.equal(state.scanResult.backupFolder, recovered.backupFolder);
 });
 
 for (const origin of ["account recovery", "folder picker"]) {

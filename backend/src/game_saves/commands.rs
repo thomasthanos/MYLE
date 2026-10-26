@@ -58,33 +58,43 @@ fn edit_settings(
     Ok(value)
 }
 
+async fn page_cache_after_engine(
+    state: &GameSavesState,
+    engine_version: impl std::future::Future<Output = Option<String>>,
+    read_settings: impl FnOnce() -> Result<GameSavesSettings, String>,
+    read_cache: impl FnOnce() -> Option<CachedScan>,
+) -> Result<(Option<String>, GameSavesSettings, Option<GameSavesScan>), String> {
+    let version = engine_version.await;
+    // No settings guard crosses the engine await. Read, validate and publish
+    // together so an older request cannot replay another destination's state.
+    let _edit = settings_edit();
+    let settings = read_settings()?;
+    let cached = read_cache();
+    let due = cached.as_ref().is_none_or(|cached| scan_cache::discovery_due(cached, &settings, parser::now()));
+    let cached_scan = state.publish_cached_scan(&settings, cached.map(|cached| cached.scan))
+        .map(|scan| GameSavesScan { discovery_due: due, ..scan });
+    Ok((version, settings, cached_scan))
+}
+
 #[tauri::command]
 pub async fn game_saves_get_state(
     app: AppHandle,
     state: State<'_, GameSavesState>,
 ) -> Result<GameSavesPageState, String> {
-    let settings = settings::initialize(&app)?;
+    let settings = {
+        let _edit = settings_edit();
+        settings::initialize(&app)?
+    };
     check_scheduled_task_once(&app, &settings);
     let engine = Engine::for_app(&app).ok();
-    let version = match &engine {
-        Some(engine) => engine.version().await,
-        None => None,
-    };
+    let cache_root = settings::config_root(&app)?;
+    let (version, settings, cached_scan) = page_cache_after_engine(
+        &state,
+        async { match &engine { Some(engine) => engine.version().await, None => None } },
+        || settings::initialize(&app),
+        || scan_cache::load(&cache_root),
+    ).await?;
     let undo_restore = undo::load_valid(&settings::safety_root(&app)?);
-    let cached_scan = scan_cache::load(&settings::config_root(&app)?).map(|cached| {
-        let due = scan_cache::discovery_due(&cached, &settings, parser::now());
-        GameSavesScan {
-            discovery_due: due,
-            ..cached.scan
-        }
-    });
-    // Actions address games by id: let them work from the saved list too,
-    // before this session's first scan finishes.
-    if state.cached_scan().is_none()
-        && let Some(scan) = &cached_scan
-    {
-        state.cache_scan(scan.clone());
-    }
     Ok(GameSavesPageState {
         database_games: settings.database_games,
         database_updated_at: settings.database_updated_at,
@@ -114,7 +124,7 @@ pub async fn game_saves_pick_backup_folder(
     else {
         return Ok(None);
     };
-    set_backup_folder(&app, &path).map(Some)
+    set_backup_folder(&app, &state, &path).map(Some)
 }
 
 /// Makes `<cloud folder>\Make Your Life Easier\Game Saves Backups` the
@@ -157,6 +167,7 @@ pub async fn game_saves_use_cloud_folder(
             }
         }
     };
+    let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let folder = detection::cloud_backup_folder(&root);
         let value = settings::initialize(&app)?;
@@ -164,7 +175,7 @@ pub async fn game_saves_use_cloud_folder(
         settings::validate_backup_folder(&app, &folder, &value)?;
         fs::create_dir_all(&folder)
             .map_err(|e| format!("{} could not be created: {e}", folder.display()))?;
-        set_backup_folder(&app, &folder).map(Some)
+        set_backup_folder(&app, &state, &folder).map(Some)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -863,8 +874,12 @@ pub async fn game_saves_restore(
     selections: Vec<RestoreSelection>,
     on_event: Channel<GameSavesEvent>,
 ) -> Result<GameSavesOperationResult, String> {
-    let value = settings::initialize(&app)?;
-    let games = selected_restore_games(&state, &selections, &value)?;
+    let (value, games) = {
+        let _edit = settings_edit();
+        let value = settings::initialize(&app)?;
+        let games = selected_restore_games(&state, &selections, &value)?;
+        (value, games)
+    };
     let root = settings::config_root(&app)?;
     let operation = state.begin(&root, OperationKind::Restore)?;
     let backup = backup_folder(&value)?;
@@ -1217,7 +1232,7 @@ pub async fn game_saves_sync_import(
         )
         .await?;
     }
-    edit_settings(&app, |value| {
+    let value = edit_settings(&app, |value| {
         settings::recover_backup_folder(&app, value, synced.backup_folder.as_deref())?;
         value.auto_backup_excluded_game_ids = synced.auto_backup_excluded_game_ids;
         merge_synced_custom_games(&mut value.custom_games, synced.custom_games);
@@ -1235,9 +1250,10 @@ pub async fn game_saves_sync_import(
             value.schedule_weekday = synced.schedule_weekday;
             value.schedule_started_at = Some(parser::now());
         }
+        state.cached_scan_for(value);
         Ok(())
     })?;
-    settings::initialize(&app)
+    Ok(value)
 }
 
 fn merge_synced_custom_games(local: &mut Vec<CustomGame>, synced: Vec<CustomGame>) {
@@ -1611,6 +1627,7 @@ fn selected_restore_games(
     selections: &[RestoreSelection],
     settings: &GameSavesSettings,
 ) -> Result<Vec<(GameSaveEntry, String)>, String> {
+    state.cached_scan_for(settings);
     let ids: Vec<_> = selections
         .iter()
         .map(|selection| selection.game_id.clone())
@@ -1663,7 +1680,7 @@ fn selected_restore_games(
     Ok(result)
 }
 
-fn set_backup_folder(app: &AppHandle, path: &Path) -> Result<GameSavesSettings, String> {
+fn set_backup_folder(app: &AppHandle, state: &GameSavesState, path: &Path) -> Result<GameSavesSettings, String> {
     if !path.is_dir() {
         return Err("Choose an existing backup folder.".into());
     }
@@ -1671,6 +1688,7 @@ fn set_backup_folder(app: &AppHandle, path: &Path) -> Result<GameSavesSettings, 
         settings::validate_backup_folder(app, path, value)?;
         value.backup_folder = Some(path.to_string_lossy().into_owned());
         value.backup_folder_chosen = Some(true);
+        state.cached_scan_for(value);
         Ok(())
     })
 }
@@ -1970,6 +1988,45 @@ fn ensure_not_cancelled(operation: &OperationHandle) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn a_delayed_page_request_uses_current_settings_and_preserves_a_newer_verified_scan() {
+        let state = GameSavesState::default();
+        let current = Mutex::new(GameSavesSettings { backup_folder: Some(r"D:\Previous backups".into()), ..Default::default() });
+        let (waiting, waited) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut request = Box::pin(page_cache_after_engine(
+            &state,
+            async { waiting.send(()).unwrap(); released.await.unwrap(); Some("0.31.0".into()) },
+            || Ok(current.lock().unwrap().clone()),
+            || None,
+        ));
+        tokio::select! {
+            _ = waited => {},
+            _ = &mut request => panic!("the engine version query must still be waiting"),
+        }
+        let fresh: GameSavesScan = serde_json::from_value(serde_json::json!({
+            "generatedAt": 200, "backupFolder": "G:\\Recovered backups",
+            "stats": {"localGames": 1, "backupGames": 0, "totalBytes": 5, "databaseGames": 100},
+            "onThisPc": [{"id": "a", "title": "A", "status": "backedUp", "platformBadges": [], "fileCount": 1, "totalBytes": 5,
+                "lastSaveAt": null, "lastBackupAt": "2026-09-27", "paths": ["C:/Saves"], "autoBackup": true, "hasLocalData": true,
+                "hasBackup": true, "error": null, "snapshots": [{"id": "new.zip", "timestamp": "2026-09-27", "bytes": 5, "label": null, "isSafety": false}]}],
+            "inBackup": []
+        })).unwrap();
+        {
+            let _edit = settings_edit();
+            current.lock().unwrap().backup_folder = Some(r"G:\Recovered backups".into());
+            state.cache_scan(fresh.clone());
+        }
+        release.send(()).unwrap();
+        let (_, settings, published) = request.await.unwrap();
+        assert_eq!(settings.backup_folder.as_deref(), Some(r"G:\Recovered backups"), "settings must be read after the await");
+        let published = published.unwrap();
+        assert_eq!(published.generated_at, 200);
+        assert_eq!(published.on_this_pc[0].status, GameSaveStatus::BackedUp);
+        assert_eq!(published.on_this_pc[0].snapshots[0].id, "new.zip");
+        assert_eq!(state.cached_scan().unwrap().on_this_pc, fresh.on_this_pc, "an old request must not erase the current backend history");
+    }
+
     #[test]
     fn partial_api_failures_are_exposed_to_the_ui() {
         let api = parser::parse_api(
@@ -2054,6 +2111,7 @@ mod tests {
         use super::super::models::GameSaveSnapshot;
         let state = GameSavesState::default();
         state.cache_scan(GameSavesScan {
+            backup_folder: Some(r"D:\Backups".into()),
             in_backup: vec![GameSaveEntry {
                 id: "game-1".into(),
                 title: "Old Game".into(),
@@ -2085,7 +2143,7 @@ mod tests {
             game_id: "game-1".into(),
             snapshot_id: "backup-1".into(),
         }];
-        let mut value = GameSavesSettings::default();
+        let mut value = GameSavesSettings { backup_folder: Some(r"D:\Backups".into()), ..Default::default() };
         assert!(selected_restore_games(&state, &selections, &value).is_err());
         value.path_mappings.push(RestorePathMapping {
             game_id: "game-1".into(),

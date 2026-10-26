@@ -162,7 +162,7 @@ fn recovered_backup_folder(
     (found.len() == 1).then(|| found.remove(0))
 }
 
-fn same_location(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_location(a: &Path, b: &Path) -> bool {
     let normal = |path: &Path| path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
     normal(a) == normal(b)
 }

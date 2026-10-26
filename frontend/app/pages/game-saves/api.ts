@@ -146,6 +146,8 @@ export interface GameSavesScan {
   stats: GameSavesStats;
   onThisPc: GameSaveEntry[];
   inBackup: GameSaveEntry[];
+  /** The destination whose inventory produced these statuses; absent in legacy caches. */
+  backupFolder?: string | null;
   /** Unix seconds of the last full scan; a quick refresh keeps it. */
   fullScanAt: number;
   quick: boolean;
