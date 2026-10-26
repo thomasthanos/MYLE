@@ -120,6 +120,18 @@ fn installed_list() -> Vec<Installed> {
         .collect()
 }
 
+/// Installed programs that say where they live: name and folder. The Disk
+/// Analyzer keeps these folders out of the Recycle Bin.
+pub(crate) fn install_locations() -> Vec<(String, PathBuf)> {
+    installed_list()
+        .into_iter()
+        .filter_map(|app| {
+            let location = app.install_location.as_deref()?.trim().trim_matches('"').trim();
+            (!location.is_empty()).then(|| (app.name, PathBuf::from(sys::expand(location))))
+        })
+        .collect()
+}
+
 fn installation_status(app: &Installed) -> (sys::Presence, sys::Presence, sys::Presence) {
     let location = app
         .install_location

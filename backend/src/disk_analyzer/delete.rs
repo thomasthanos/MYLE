@@ -180,8 +180,8 @@ pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
     match guard.check(path, meta.file_attributes() & FILE_ATTRIBUTE_SYSTEM != 0) {
-        Verdict::Protected(why) => Err(why.into()),
-        Verdict::Allowed | Verdict::Caution => Ok(()),
+        Verdict::Protected(why) => Err(why.into_owned()),
+        Verdict::Allowed | Verdict::Caution(_) => Ok(()),
     }
 }
 

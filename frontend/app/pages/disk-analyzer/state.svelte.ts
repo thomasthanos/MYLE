@@ -39,6 +39,8 @@ const DEPTH = 10;
 const MIN_PIXELS = 9;
 const TEN_GB = 10 * 1024 ** 3;
 const MANY_FILES = 1000;
+/** The most warnings the Recycle Bin question lists one by one. */
+const CAUTIONS_SHOWN = 4;
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const isSizeMode = (v: unknown) => v === "size" || v === "alloc";
@@ -56,8 +58,11 @@ export function recycleQuestion(items: readonly NodeView[], locked: number, mode
     lines.push("That is more than 10 GB. Anything too big for the Recycle Bin stays where it is: nothing is deleted for good.");
   }
   if (files > MANY_FILES) lines.push(`That is ${files.toLocaleString()} files.`);
-  if (items.some((item) => item.caution)) {
-    lines.push("Some of it is inside Program Files or ProgramData. A program may stop working without it; uninstalling the program is safer.");
+  const warned = items.filter((item) => item.caution);
+  if (warned.length) {
+    const shown = warned.slice(0, CAUTIONS_SHOWN).map((item) => `• ${item.name}: ${item.caution}`);
+    if (warned.length > CAUTIONS_SHOWN) shown.push(`• and ${plural(warned.length - CAUTIONS_SHOWN, "more item")} like these`);
+    lines.push(["Think twice:", ...shown].join("\n"));
   }
   if (items.some((item) => item.kind === "cloud")) lines.push("Cloud files are removed from your cloud storage too.");
   if (locked) lines.push(`${plural(locked, "protected item")} ${locked === 1 ? "stays where it is" : "stay where they are"}.`);

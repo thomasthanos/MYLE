@@ -208,7 +208,7 @@ const view = (id, name, kind, size, alloc, more = {}) => ({
   hasChildren: kind === "dir",
   protected: false,
   reason: null,
-  caution: false,
+  caution: null,
   inaccessible: false,
   ...more,
 });
@@ -435,7 +435,7 @@ test("declining keeps everything, and protected items are never offered", async 
 });
 
 test("the question says plainly when a lot would move", () => {
-  const big = view(9, "Videos", "dir", 12 * 1024 ** 3, 12 * 1024 ** 3, { files: 4321, caution: true });
+  const big = view(9, "Videos", "dir", 12 * 1024 ** 3, 12 * 1024 ** 3, { files: 4321, caution: "Save games of Skyrim. Back them up in Game Saves first." });
   const cloud = view(10, "doc.pdf", "cloud", 10, 0);
   const question = recycleQuestion([big, cloud], 2, "size");
   assert.equal(question.danger, true);
@@ -443,7 +443,7 @@ test("the question says plainly when a lot would move", () => {
   assert.equal(lines[0], "2 items, 12.0 GB. You can restore them from the Recycle Bin.");
   assert.ok(lines.some((l) => l.startsWith("That is more than 10 GB.")));
   assert.ok(lines.includes("That is 4,322 files."));
-  assert.ok(lines.some((l) => l.includes("Program Files or ProgramData")));
+  assert.ok(lines.includes(["Think twice:", "• Videos: Save games of Skyrim. Back them up in Game Saves first."].join("\n")));
   assert.ok(lines.includes("Cloud files are removed from your cloud storage too."));
   assert.ok(lines.includes("2 protected items stay where they are."));
   const one = recycleQuestion([view(3, "a.txt", "file", 50, 4096)], 0, "alloc");

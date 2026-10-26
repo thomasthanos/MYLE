@@ -12,6 +12,8 @@
 mod scans;
 mod sys;
 
+pub(crate) use scans::install_locations;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};

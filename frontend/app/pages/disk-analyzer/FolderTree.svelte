@@ -144,6 +144,7 @@
     if (node.kind === "cloud") lines.push("A cloud file: counted, never downloaded.");
     if (node.inaccessible) lines.push("This folder could not be read.");
     if (node.protected && node.reason) lines.push(`Stays where it is: ${node.reason}`);
+    if (node.caution) lines.push(`Think twice: ${node.caution}`);
     return lines.join("\n");
   }
 </script>

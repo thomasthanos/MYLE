@@ -67,8 +67,8 @@ export interface NodeView {
   /** Never moved to the Recycle Bin; `reason` says why. */
   protected: boolean;
   reason: string | null;
-  /** Inside Program Files or ProgramData. */
-  caution: boolean;
+  /** Allowed, with this warning: what it is and why to think twice. */
+  caution: string | null;
   inaccessible: boolean;
 }
 

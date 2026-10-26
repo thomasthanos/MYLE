@@ -381,15 +381,15 @@ pub struct NodeView {
     /// Never moved to the Recycle Bin; `reason` says why.
     protected: bool,
     reason: Option<String>,
-    /// Inside Program Files or ProgramData: allowed, with a warning.
-    caution: bool,
+    /// Allowed, with this warning: what it is and why to think twice.
+    caution: Option<String>,
     inaccessible: bool,
 }
 
 fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
     let node = tree.node(id);
     let verdict = if node.kind == Kind::Link {
-        Verdict::Protected(delete::LINK)
+        Verdict::Protected(delete::LINK.into())
     } else {
         guard.check(&tree.path(id), node.flags & flag::SYSTEM != 0)
     };
@@ -405,11 +405,14 @@ fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
         modified: node.modified,
         has_children: tree.has_children(id),
         protected: matches!(verdict, Verdict::Protected(_)),
-        reason: match verdict {
+        reason: match &verdict {
             Verdict::Protected(why) => Some(why.to_string()),
             _ => None,
         },
-        caution: verdict == Verdict::Caution,
+        caution: match verdict {
+            Verdict::Caution(why) => Some(why.into_owned()),
+            _ => None,
+        },
         inaccessible: node.flags & flag::INACCESSIBLE != 0,
     }
 }
@@ -473,10 +476,14 @@ pub async fn disk_analyzer_nodes(
     }
     let state = state.inner().clone();
     blocking(move || {
-        state.with(scan_id, |tree, guard| {
+        // What runs or is installed now, not when the scan ended: this
+        // answers the question asked before anything moves.
+        let root = state.with(scan_id, |tree, _| Ok(tree.root.clone()))?;
+        let guard = Guard::for_this_pc(&root);
+        state.with(scan_id, |tree, _| {
             node_ids
                 .iter()
-                .map(|&id| tree.check(scan_id, id).map(|()| view(tree, guard, id)))
+                .map(|&id| tree.check(scan_id, id).map(|()| view(tree, &guard, id)))
                 .collect()
         })
     })
