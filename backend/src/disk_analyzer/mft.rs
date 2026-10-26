@@ -19,9 +19,10 @@
 //! the root (System32 before WinSxS); its other names are listed with no size
 //! and marked. The file system's own files ($MFT, $LogFile…) are listed at
 //! the root like other system files, so the total is close to the space
-//! used. Size is the main data stream's; size on disk adds the clusters of
-//! every stream (compressed and sparse ones as allocated) and of a folder's
-//! index.
+//! used. Size is the main data stream's; size on disk adds the clusters every
+//! stream and a folder's index really have, from their data runs (a hole in
+//! a sparse or compressed stream takes nothing). A name that could not come
+//! from Windows (a path separator, `..`) is dropped, on both sides.
 
 use std::collections::VecDeque;
 use std::io;
@@ -54,8 +55,6 @@ const END: u32 = 0xFFFF_FFFF;
 
 const RECORD_IN_USE: u16 = 0x1;
 const RECORD_DIRECTORY: u16 = 0x2;
-/// A compressed or sparse stream: what it takes on the disk is its own field.
-const PACKED: u16 = 0x00FF | 0x8000;
 /// The short 8.3 names, kept beside the real ones.
 const DOS_NAMESPACE: u8 = 2;
 /// A file reference's record number; the top 16 bits are its sequence number.
@@ -225,10 +224,11 @@ impl Record {
     }
 }
 
-/// Reads one FILE record whose update sequence was put back. `whole`: keep
-/// the main stream's runs and attribute list too (for the table's own
-/// record). `false` when it is not a record.
-pub fn parse(bytes: &[u8], out: &mut Record, whole: bool) -> bool {
+/// Reads one FILE record whose update sequence was put back, on a volume of
+/// `cluster`-byte clusters. `whole`: keep the main stream's runs and
+/// attribute list too (for the table's own record). `false` when it is not a
+/// record.
+pub fn parse(bytes: &[u8], out: &mut Record, whole: bool, cluster: u64) -> bool {
     out.clear();
     if bytes.len() < 0x30 || &bytes[..4] != b"FILE" {
         return false;
@@ -286,34 +286,37 @@ pub fn parse(bytes: &[u8], out: &mut Record, whole: bool) -> bool {
             }
             let first_vcn = u64_at(attribute, 0x10);
             let runs_at = u16_at(attribute, 0x20) as usize;
-            // Sizes are only in a stream's first piece.
-            if first_vcn == 0 {
-                let packed = u16_at(attribute, 0x0C) & PACKED != 0 && runs_at >= 0x48;
-                let on_disk = u64_at(attribute, if packed { 0x40 } else { 0x28 });
-                match kind {
-                    DATA => {
-                        out.alloc += on_disk;
-                        if !named {
-                            out.size = Some(u64_at(attribute, 0x30));
-                        }
-                    }
-                    INDEX_ALLOCATION => out.alloc += on_disk,
-                    _ => {}
+            if matches!(kind, DATA | INDEX_ALLOCATION) {
+                // What a stream takes is the clusters it really has: the
+                // header's allocated size counts holes too, and the bad
+                // cluster file's stream "allocates" the whole volume that way.
+                let found = attribute.get(runs_at..).and_then(runs);
+                let clusters: u64 = found.iter().flatten().filter(|run| run.lcn.is_some()).map(|run| run.clusters).sum();
+                out.alloc += clusters * cluster;
+                // The size is only in a stream's first piece.
+                if kind == DATA && !named && first_vcn == 0 {
+                    out.size = Some(u64_at(attribute, 0x30));
                 }
-            }
-            match kind {
-                DATA if whole && !named => {
-                    if let Some(found) = attribute.get(runs_at..).and_then(runs) {
-                        out.pieces.push((first_vcn, found));
-                    }
+                if kind == DATA && whole && !named
+                    && let Some(found) = found
+                {
+                    out.pieces.push((first_vcn, found));
                 }
+            } else if kind == REPARSE_POINT {
                 // Reparse data too big for the record: what kind is not known.
-                REPARSE_POINT => out.tag = Some(0),
-                _ => {}
+                out.tag = Some(0);
             }
         }
     }
     true
+}
+
+/// A name Windows could have given: not empty, not `.` or `..`, and without
+/// a path separator, a stream's colon or another character Windows refuses.
+/// The table is read raw, so a damaged record must not name another path:
+/// a name joined to its folder's path is what goes to the Recycle Bin.
+pub fn plain(name: &[u8]) -> bool {
+    !name.is_empty() && name != b"." && name != b".." && !name.iter().any(|&b| b < 0x20 || br#"\/:*?"<>|"#.contains(&b))
 }
 
 /// The records an attribute list puts the main data stream's pieces in.
@@ -506,6 +509,10 @@ impl Table {
         for &(parent, start, end) in &record.names {
             let before = self.names.len();
             push_name(&mut self.names, &record.units[start..end]);
+            if !plain(&self.names[before..]) {
+                self.names.truncate(before);
+                continue;
+            }
             let name_len = u16::try_from(self.names.len() - before).unwrap_or(u16::MAX);
             self.links.push(RawLink { record: target, parent, name_len });
         }
@@ -632,7 +639,7 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
     // The table's own record says where its pieces are; a very fragmented
     // table lists the rest of them in extension records.
     let first = read_record(volume, &geometry, geometry.mft_lcn * geometry.cluster)?;
-    if !parse(&first, &mut record, true) || !record.in_use || record.base.is_some() {
+    if !parse(&first, &mut record, true, geometry.cluster) || !record.in_use || record.base.is_some() {
         return Err(BAD_TABLE.into());
     }
     let mut size = record.size;
@@ -643,7 +650,7 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
         }
         let offset = locate(&pieces, &geometry, number).ok_or(BAD_TABLE)?;
         let bytes = read_record(volume, &geometry, offset)?;
-        if parse(&bytes, &mut record, true) && record.in_use && record.base == Some(0) {
+        if parse(&bytes, &mut record, true, geometry.cluster) && record.in_use && record.base == Some(0) {
             pieces.append(&mut record.pieces);
             size = size.or(record.size);
         }
@@ -685,7 +692,7 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
             let mut used = 0;
             while pending.len() - used >= record_len && number < count {
                 let bytes = &mut pending[used..used + record_len];
-                if fixup(bytes) && parse(bytes, &mut record, false) && record.in_use {
+                if fixup(bytes) && parse(bytes, &mut record, false, geometry.cluster) && record.in_use {
                     table.add(number as u32, &record);
                 }
                 used += record_len;
@@ -774,8 +781,14 @@ pub fn into_tree(
         hard_links.clear();
         below.clear();
         let group = &grouped[start[folder as usize] as usize..start[folder as usize + 1] as usize];
-        for (n, &l) in group.iter().enumerate() {
+        for &l in group {
             let link = links[l as usize];
+            let name = &names[name_at[l as usize]..name_at[l as usize] + link.name_len as usize];
+            // The snapshot crossed from another process: checked again.
+            if !plain(name) {
+                continue;
+            }
+            let n = listing.entries.len();
             let file = &files[link.file as usize];
             let attributes = file.attributes
                 | if file.dir { FILE_ATTRIBUTE_DIRECTORY } else { 0 }
@@ -803,7 +816,6 @@ pub fn into_tree(
                 }
                 Kind::Link => {}
             }
-            let name = &names[name_at[l as usize]..name_at[l as usize] + link.name_len as usize];
             listing.names.extend_from_slice(name);
             listing.entries.push(Entry {
                 name_len: name.len() as u32,
@@ -1021,7 +1033,7 @@ mod tests {
         );
         assert!(fixup(&mut bytes));
         let mut r = Record::default();
-        assert!(parse(&bytes, &mut r, false));
+        assert!(parse(&bytes, &mut r, false, CLUSTER));
         assert!(r.in_use && !r.dir);
         assert_eq!(r.seq, 3);
         assert_eq!(r.attributes, Some(0x20));
@@ -1034,7 +1046,7 @@ mod tests {
         assert_eq!(unix_seconds(r.modified.unwrap()), 1_700_000_000);
 
         let mut packed = record(FILE, 1, 0, &[standard(0), non_resident(DATA, "", 1_000_000, 1_048_576, Some(0), &[0x01, 0x80])]);
-        assert!(fixup(&mut packed) && parse(&packed, &mut r, false));
+        assert!(fixup(&mut packed) && parse(&packed, &mut r, false, CLUSTER));
         assert_eq!((r.size, r.alloc), (Some(1_000_000), 0), "a cloud placeholder: sparse, nothing on the disk");
     }
 
@@ -1049,7 +1061,12 @@ mod tests {
         records.push((5, record(FOLDER, 5, 0, &[standard(0x6), name(refer(5, 5), ".", 3)])));
         // A file whose data is described in an extension record (23).
         records.push((12, record(FILE, 1, 0, &[standard(0x20), name(refer(16, 1), "movie.mkv", 1)])));
-        records.push((23, record(FILE, 1, 12, &[non_resident(DATA, "", 5_000_000, 5_005_312, None, &[0x11, 0x01, 0x01])])));
+        // 1222 clusters (0x04C6) from cluster 1: 5,005,312 bytes.
+        records.push((23, record(FILE, 1, 12, &[non_resident(DATA, "", 5_000_000, 5_005_312, None, &[0x12, 0xC6, 0x04, 0x01])])));
+        // A damaged name must not name another path.
+        records.push((11, record(FILE, 1, 0, &[standard(0x20), name(refer(16, 1), r"..\..\Windows\evil.dll", 1), resident(DATA, "", b"x")])));
+        // The bad cluster file: its stream "allocates" the whole volume as a hole.
+        records.push((8, record(FILE, 1, 0, &[standard(0x6), name(refer(5, 5), "$BadClus", 3), non_resident(DATA, "$Bad", 931 << 30, 931 << 30, None, &[0x04, 0x00, 0x00, 0x00, 0x0F])])));
         // A name left from a folder 16 that was deleted and reused since.
         records.push((13, record(FILE, 1, 0, &[standard(0x20), name(refer(16, 9), "stale.txt", 1), resident(DATA, "", b"x")])));
         // A junction.
@@ -1098,18 +1115,31 @@ mod tests {
     fn a_fragmented_table_is_read_record_by_record() {
         let s = snapshot();
         let indexes: Vec<u32> = s.files.iter().map(|f| f.index).collect();
-        assert_eq!(indexes, [0, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21], "the deleted record and the extension are not files");
+        assert_eq!(indexes, [0, 5, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21], "the deleted record and the extension are not files");
         let names: Vec<String> = (0..s.links.len()).map(|i| name_of(&s, i)).collect();
         assert!(names.contains(&"movie.mkv".to_string()));
         assert!(!names.contains(&"stale.txt".to_string()), "its folder was reused");
         assert!(!names.contains(&".".to_string()), "the root is not in itself");
         assert!(!names.iter().any(|n| n.contains('~')), "no 8.3 names");
+        assert!(!names.iter().any(|n| n.contains("evil")), "a name with a path in it is dropped");
+        let bad = s.files.iter().find(|f| f.index == 8).unwrap();
+        assert_eq!(bad.alloc, 0, "a hole takes nothing, whatever the header says");
         assert_eq!(names.iter().filter(|n| *n == "shared.dll").count(), 2);
         let movie = s.files.iter().find(|f| f.index == 12).unwrap();
         assert_eq!((movie.size, movie.alloc), (5_000_000, 5_005_312), "from its extension record");
         let wof = s.files.iter().find(|f| f.index == 15).unwrap();
         assert_eq!((wof.size, wof.alloc), (1_000_000, 401_408), "on the disk: the compressed stream");
         assert_eq!(Snapshot::decode(&s.encode()).unwrap(), s);
+    }
+
+    #[test]
+    fn only_names_windows_could_give_are_kept() {
+        for good in ["a.txt", "$MFT", "Ελληνικά 📦", ".gitignore", "a..b", "x y"] {
+            assert!(plain(good.as_bytes()), "{good}");
+        }
+        for bad in ["", ".", "..", r"..\x", "a/b", "c:d", "a\0b", "tab\there", "what?", "a|b", "\"q\""] {
+            assert!(!plain(bad.as_bytes()), "{bad:?}");
+        }
     }
 
     #[test]
@@ -1149,7 +1179,7 @@ mod tests {
         let users = find(&tree, "Users");
         assert_eq!(tree.size(users, SizeMode::Size), 11 + 10_000 + 5_000_000);
         assert_eq!(tree.size(users, SizeMode::Alloc), 4096 + 12_288 + 5_005_312, "the folder's index counts on the disk");
-        assert_eq!(tree.files(0), 7, "$MFT, three in Users, wof.exe and both names of shared.dll");
+        assert_eq!(tree.files(0), 8, "$MFT, $BadClus, three in Users, wof.exe and both names of shared.dll");
         assert_eq!(tree.size(0, SizeMode::Size), 24 * RECORD as u64 + 11 + 10_000 + 5_000_000 + 1_000_000 + 50_000);
     }
 
@@ -1177,6 +1207,12 @@ mod tests {
         let walk = super::super::scan::scan(&super::super::tree::long_path(&root), 2, &cancel, |_| {}).unwrap().unwrap();
         let walked = started.elapsed();
         let gb = |bytes: u64| bytes as f64 / 1e9;
+        let mut names = vec![0u64; snapshot.files.len()];
+        for link in &snapshot.links {
+            names[link.file as usize] += 1;
+        }
+        let once: u64 = snapshot.files.iter().zip(&names).filter(|(f, n)| !f.dir && **n > 1).map(|(f, n)| f.size * (n - 1)).sum();
+        println!("{letter}: hard links counted once: {:.2} GB the walk counts again", gb(once));
         println!(
             "{letter}: file table {:.1?} (+ tree {:.1?}): {} files, {:.2} GB, {:.2} GB on disk; walk {:.1?}: {} files, {:.2} GB, {:.2} GB on disk, {} folders unread",
             read,
