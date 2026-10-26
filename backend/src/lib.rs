@@ -43,6 +43,11 @@ pub fn run_debloat_helper() -> Option<i32> {
     debloat::run_elevated_helper_from_args()
 }
 
+/// Handles the Disk Analyzer's fast-scan helper before Tauri starts.
+pub fn run_disk_analyzer_helper() -> Option<i32> {
+    disk_analyzer::run_elevated_helper_from_args()
+}
+
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 fn create_windows(app: &mut tauri::App) -> tauri::Result<()> {

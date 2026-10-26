@@ -8,6 +8,8 @@
 //! worked out and checked here, again, just before anything moves.
 
 mod delete;
+mod elevated;
+mod mft;
 mod protect;
 mod scan;
 mod tree;
@@ -252,18 +254,36 @@ pub struct ScanDone {
     /// The first of them.
     inaccessible_paths: Vec<String>,
     elapsed_ms: u64,
-    /// On the Windows drive, where hard links count once per link.
+    /// Walked on the Windows drive, where hard links count once per link.
     windows_drive: bool,
     /// What the results hold in memory.
     memory: u64,
+    /// "mft": read from the file table; "walk": folder by folder.
+    method: &'static str,
+    /// Why a fast scan asked for became a walk.
+    fallback: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ScanEvent {
-    Progress { files: u64, dirs: u64, bytes: u64, alloc: u64, current: String },
+    Progress {
+        files: u64,
+        dirs: u64,
+        bytes: u64,
+        alloc: u64,
+        current: String,
+        /// A fast scan's step: "approval", "table" or "build"; none for a walk.
+        phase: Option<&'static str>,
+    },
     Done(ScanDone),
     Cancelled,
+}
+
+impl ScanEvent {
+    fn progress(p: &scan::Progress, phase: Option<&'static str>) -> Self {
+        ScanEvent::Progress { files: p.files, dirs: p.dirs, bytes: p.bytes, alloc: p.alloc, current: p.current.clone(), phase }
+    }
 }
 
 /// The folder to scan, in its `\\?\` form: a folder or drive that is there.
@@ -286,61 +306,125 @@ fn same_drive_as_windows(root: &Path) -> bool {
 }
 
 /// Scans `root` and keeps the result. `None` when it was cancelled.
+///
+/// `fast`, for a whole fixed NTFS drive: read its file table through the
+/// administrator helper (one UAC prompt while the helper runs). When the
+/// prompt is declined or the table cannot be read, the drive is walked, and
+/// the result says why.
 #[tauri::command]
 pub async fn disk_analyzer_scan(
     state: State<'_, DiskAnalyzerState>,
     root: String,
+    fast: Option<bool>,
     on_event: Channel<ScanEvent>,
 ) -> Result<Option<ScanDone>, String> {
     let root = scan_root(&root)?;
     let (scan_id, cancel) = state.begin();
     let state = state.inner().clone();
+    let mut fallback = None;
+    if fast.unwrap_or(false)
+        && let Some(letter) = fast_drive(&root)
+    {
+        let phase = |phase| {
+            let name = match phase {
+                elevated::Phase::Approval => "approval",
+                elevated::Phase::Table => "table",
+            };
+            let _ = on_event.send(ScanEvent::progress(&scan::Progress::default(), Some(name)));
+        };
+        match elevated::read(letter, phase).await {
+            Ok((bytes, read_ms)) => {
+                return blocking(move || {
+                    let started = Instant::now();
+                    let snapshot = mft::Snapshot::decode(&bytes)?;
+                    drop(bytes);
+                    let _ = on_event.send(ScanEvent::progress(&scan::Progress::default(), Some("build")));
+                    let built = mft::into_tree(&snapshot, scan_id, tree::display_path(&root), &cancel, |p| {
+                        let _ = on_event.send(ScanEvent::progress(p, Some("build")));
+                    });
+                    drop(snapshot);
+                    let elapsed_ms = read_ms + started.elapsed().as_millis() as u64;
+                    finish_scan(&state, &cancel, &on_event, built, "mft", None, elapsed_ms)
+                })
+                .await;
+            }
+            Err(error) => fallback = Some(error),
+        }
+    }
     blocking(move || {
         let started = Instant::now();
         let walked = scan::scan(&root, scan_id, &cancel, |p| {
-            let _ = on_event.send(ScanEvent::Progress {
-                files: p.files,
-                dirs: p.dirs,
-                bytes: p.bytes,
-                alloc: p.alloc,
-                current: p.current.clone(),
-            });
+            let _ = on_event.send(ScanEvent::progress(p, None));
         });
-        let tree = match walked {
-            Ok(Some(tree)) => tree,
-            Ok(None) => {
-                state.end(&cancel);
-                let _ = on_event.send(ScanEvent::Cancelled);
-                return Ok(None);
-            }
-            Err(error) => {
-                state.end(&cancel);
-                return Err(error);
-            }
-        };
-        let done = ScanDone {
-            scan_id,
-            root_id: 0,
-            root: tree.root.display().to_string(),
-            files: tree.files(0) as u64,
-            dirs: tree.dirs(0) as u64,
-            bytes: tree.size(0, SizeMode::Size),
-            alloc: tree.size(0, SizeMode::Alloc),
-            inaccessible: tree.inaccessible.len() as u32,
-            inaccessible_paths: tree.inaccessible.iter().take(20).map(|&id| tree.path(id).display().to_string()).collect(),
-            elapsed_ms: started.elapsed().as_millis() as u64,
-            windows_drive: same_drive_as_windows(&tree.root),
-            memory: tree.memory() as u64,
-        };
-        let guard = Guard::for_this_pc(&tree.root);
-        if !state.keep(&cancel, tree, guard) {
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        finish_scan(&state, &cancel, &on_event, walked, "walk", fallback, elapsed_ms)
+    })
+    .await
+}
+
+/// Keeps a finished scan's tree and tells the page, unless it was cancelled
+/// or a newer scan started.
+fn finish_scan(
+    state: &DiskAnalyzerState,
+    cancel: &Arc<AtomicBool>,
+    on_event: &Channel<ScanEvent>,
+    outcome: Result<Option<Tree>, String>,
+    method: &'static str,
+    fallback: Option<String>,
+    elapsed_ms: u64,
+) -> Result<Option<ScanDone>, String> {
+    let tree = match outcome {
+        Ok(Some(tree)) => tree,
+        Ok(None) => {
+            state.end(cancel);
             let _ = on_event.send(ScanEvent::Cancelled);
             return Ok(None);
         }
-        let _ = on_event.send(ScanEvent::Done(done.clone()));
-        Ok(Some(done))
-    })
-    .await
+        Err(error) => {
+            state.end(cancel);
+            return Err(error);
+        }
+    };
+    let done = ScanDone {
+        scan_id: tree.scan_id,
+        root_id: 0,
+        root: tree.root.display().to_string(),
+        files: tree.files(0) as u64,
+        dirs: tree.dirs(0) as u64,
+        bytes: tree.size(0, SizeMode::Size),
+        alloc: tree.size(0, SizeMode::Alloc),
+        inaccessible: tree.inaccessible.len() as u32,
+        inaccessible_paths: tree.inaccessible.iter().take(20).map(|&id| tree.path(id).display().to_string()).collect(),
+        elapsed_ms,
+        windows_drive: method == "walk" && same_drive_as_windows(&tree.root),
+        memory: tree.memory() as u64,
+        method,
+        fallback,
+    };
+    let guard = Guard::for_this_pc(&tree.root);
+    if !state.keep(cancel, tree, guard) {
+        let _ = on_event.send(ScanEvent::Cancelled);
+        return Ok(None);
+    }
+    let _ = on_event.send(ScanEvent::Done(done.clone()));
+    Ok(Some(done))
+}
+
+/// The drive's letter, when `root` is a whole fixed NTFS drive.
+fn fast_drive(root: &Path) -> Option<char> {
+    let parts = protect::parts(root);
+    let [only] = parts.as_slice() else { return None };
+    let mut chars = only.strip_suffix(':')?.chars();
+    let letter = chars.next()?.to_ascii_uppercase();
+    if chars.next().is_some() || !letter.is_ascii_uppercase() {
+        return None;
+    }
+    drive(letter).filter(|d| d.mft_possible).map(|_| letter)
+}
+
+/// Handles the fast scan's administrator helper before Tauri starts.
+pub fn run_elevated_helper_from_args() -> Option<i32> {
+    elevated::run_helper_from_args()
 }
 
 #[tauri::command]
@@ -384,6 +468,8 @@ pub struct NodeView {
     /// Allowed, with this warning: what it is and why to think twice.
     caution: Option<String>,
     inaccessible: bool,
+    /// Another name of a file counted under its first name (fast scan only).
+    hard_link: bool,
 }
 
 fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
@@ -414,6 +500,7 @@ fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
             _ => None,
         },
         inaccessible: node.flags & flag::INACCESSIBLE != 0,
+        hard_link: node.flags & flag::HARD_LINK != 0,
     }
 }
 
@@ -800,9 +887,13 @@ mod tests {
 
     #[test]
     fn events_and_views_serialize_for_the_page() {
-        let progress = serde_json::to_value(ScanEvent::Progress { files: 1, dirs: 2, bytes: 3, alloc: 4, current: "C:\\x".into() }).unwrap();
+        let walked = scan::Progress { files: 1, dirs: 2, bytes: 3, alloc: 4, current: "C:\\x".into() };
+        let progress = serde_json::to_value(ScanEvent::progress(&walked, None)).unwrap();
         assert_eq!(progress["event"], "progress");
         assert_eq!(progress["data"]["files"], 1);
+        assert_eq!(progress["data"]["phase"], serde_json::Value::Null);
+        let reading = serde_json::to_value(ScanEvent::progress(&scan::Progress::default(), Some("table"))).unwrap();
+        assert_eq!(reading["data"]["phase"], "table");
         assert_eq!(serde_json::to_value(ScanEvent::Cancelled).unwrap()["event"], "cancelled");
         let mut tree = tree::tests::sample();
         let guard = Guard::new(&tree.root, &protect::Places::default());

@@ -16,6 +16,9 @@ fn main() {
     if let Some(exit_code) = myle_lib::run_debloat_helper() {
         std::process::exit(exit_code);
     }
+    if let Some(exit_code) = myle_lib::run_disk_analyzer_helper() {
+        std::process::exit(exit_code);
+    }
     if std::env::args().any(|argument| argument == "--game-saves-auto-backup") {
         std::process::exit(myle_lib::game_saves::run_headless_auto_backup());
     }

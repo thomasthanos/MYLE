@@ -23,8 +23,12 @@ export interface Drive {
   kind: "fixed" | "removable" | "network" | "other";
   /** The drive Windows runs from. */
   system: boolean;
+  /** A fixed NTFS drive: the fast scan can read its file table. */
   mftPossible: boolean;
 }
+
+/** A fast scan's step: waiting for the UAC prompt, reading the file table, building the tree. */
+export type ScanPhase = "approval" | "table" | "build";
 
 export interface Progress {
   files: number;
@@ -32,6 +36,8 @@ export interface Progress {
   bytes: number;
   alloc: number;
   current: string;
+  /** None for a walk. */
+  phase?: ScanPhase | null;
 }
 
 export interface ScanDone {
@@ -45,9 +51,13 @@ export interface ScanDone {
   inaccessible: number;
   inaccessiblePaths: string[];
   elapsedMs: number;
-  /** Hard links count once per link there. */
+  /** Walked on the Windows drive: hard links count once per link there. */
   windowsDrive: boolean;
   memory: number;
+  /** Read from the file table, or walked folder by folder. */
+  method: "mft" | "walk";
+  /** Why a fast scan asked for became a walk. */
+  fallback: string | null;
 }
 
 export type ScanEvent = { event: "progress"; data: Progress } | { event: "done"; data: ScanDone } | { event: "cancelled" };
@@ -70,6 +80,8 @@ export interface NodeView {
   /** Allowed, with this warning: what it is and why to think twice. */
   caution: string | null;
   inaccessible: boolean;
+  /** Another name of a file counted under its first name (fast scan only). */
+  hardLink: boolean;
 }
 
 export interface Children {
@@ -142,7 +154,8 @@ function channel<T>(onEvent: (e: T) => void): Channel<T> {
 export const diskApi = {
   drives: () => invoke<Drive[]>("disk_analyzer_drives"),
   pickFolder: () => invoke<string | null>("disk_analyzer_pick_folder"),
-  scan: (root: string, onEvent: (e: ScanEvent) => void) => invoke<ScanDone | null>("disk_analyzer_scan", { root, onEvent: channel(onEvent) }),
+  scan: (root: string, fast: boolean, onEvent: (e: ScanEvent) => void) =>
+    invoke<ScanDone | null>("disk_analyzer_scan", { root, fast, onEvent: channel(onEvent) }),
   cancel: () => invoke<void>("disk_analyzer_cancel"),
   clear: () => invoke<void>("disk_analyzer_clear"),
   children: (scanId: number, nodeId: number, offset: number, limit: number, sort: SortKey, sizeMode: SizeMode) =>

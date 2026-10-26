@@ -27,7 +27,7 @@ import {
 } from "./api";
 import { flatten, type ChildPage, type Row } from "./rows";
 
-export const KEY = { sizeMode: "myle.diskAnalyzer.sizeMode", view: "myle.diskAnalyzer.view" };
+export const KEY = { sizeMode: "myle.diskAnalyzer.sizeMode", view: "myle.diskAnalyzer.view", fast: "myle.diskAnalyzer.fast" };
 export type Phase = "idle" | "scanning" | "ready" | "deleting";
 export type View = "folders" | "files" | "types";
 /** Children asked for at once. */
@@ -80,6 +80,8 @@ class DiskAnalyzerState {
   root = $state.raw<NodeView | null>(null);
   sizeMode = $state<SizeMode>(readJson<SizeMode>(KEY.sizeMode, "alloc", isSizeMode));
   view = $state<View>(readJson<View>(KEY.view, "folders", isView));
+  /** Read a whole NTFS drive's file table (one UAC prompt) instead of walking it. */
+  fast = $state(readJson<boolean>(KEY.fast, true, (v) => typeof v === "boolean"));
   sort = $state<SortKey>("size");
   /** The folder the treemap shows, and the way down to it. */
   current = $state(0);
@@ -119,6 +121,8 @@ class DiskAnalyzerState {
     const used = drive ? drive.total - drive.free : 0;
     return this.progress && used > 0 ? Math.min(0.99, this.progress.alloc / used) : null;
   });
+  /** Scan reads the file table: a whole fixed NTFS drive, with the fast scan on. */
+  readonly fastScan = $derived(this.fast && !!this.targetDrive?.mftPossible);
   readonly currentSize = $derived(this.trail.length ? sizeOf(this.trail[this.trail.length - 1], this.sizeMode) : 0);
 
   async load() {
@@ -165,7 +169,7 @@ class DiskAnalyzerState {
     this.phase = "scanning";
     this.progress = { files: 0, dirs: 0, bytes: 0, alloc: 0, current: root };
     try {
-      const done = await diskApi.scan(root, (e) => {
+      const done = await diskApi.scan(root, this.fastScan, (e) => {
         if (e.event === "progress") this.progress = e.data;
       });
       if (!done) {
@@ -174,6 +178,7 @@ class DiskAnalyzerState {
         return;
       }
       this.done = done;
+      if (done.fallback) toast.info(`The fast scan was not possible (${done.fallback.replace(/\.$/, "")}), so the drive was scanned folder by folder.`);
       this.current = done.rootId;
       this.expanded.add(done.rootId);
       this.phase = "ready";
@@ -189,6 +194,11 @@ class DiskAnalyzerState {
 
   cancel() {
     if (this.phase === "scanning") void diskApi.cancel().catch(() => {});
+  }
+
+  setFast(on: boolean) {
+    this.fast = on;
+    writeJson(KEY.fast, on);
   }
 
   #reset() {

@@ -54,6 +54,9 @@ pub mod flag {
     pub const SYSTEM: u8 = 2;
     /// Moved to the Recycle Bin (with everything inside it).
     pub const REMOVED: u8 = 4;
+    /// Another name of a file counted under its first name (a hard link,
+    /// known only to the fast scan).
+    pub const HARD_LINK: u8 = 8;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -292,6 +295,12 @@ impl Tree {
         if let Some(node) = self.nodes.get_mut(id as usize) {
             node.flags |= flag::INACCESSIBLE;
             self.inaccessible.push(id);
+        }
+    }
+
+    pub fn mark_hard_link(&mut self, id: u32) {
+        if let Some(node) = self.nodes.get_mut(id as usize) {
+            node.flags |= flag::HARD_LINK;
         }
     }
 

@@ -262,12 +262,12 @@ function backend() {
   };
 }
 
-const done = { scanId: 3, rootId: 0, root: "D:\\", files: 3, dirs: 1, bytes: 1000, alloc: 2000, inaccessible: 0, inaccessiblePaths: [], elapsedMs: 1200, windowsDrive: false, memory: 1000 };
+const done = { scanId: 3, rootId: 0, root: "D:\\", files: 3, dirs: 1, bytes: 1000, alloc: 2000, inaccessible: 0, inaccessiblePaths: [], elapsedMs: 1200, windowsDrive: false, memory: 1000, method: "mft", fallback: null };
 const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function scanned() {
   backend();
-  diskApi.scan = async (root, onEvent) => {
+  diskApi.scan = async (root, fast, onEvent) => {
     onEvent({ event: "progress", data: { files: 2, dirs: 1, bytes: 900, alloc: 1800, current: "D:\\Games" } });
     return done;
   };
@@ -288,6 +288,7 @@ test.beforeEach(() => {
   state.view = "folders";
   state.sort = "size";
   state.skipped = [];
+  state.fast = true;
 });
 test.afterEach(() => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
@@ -300,7 +301,7 @@ test("a scan shows its progress, then the results of the drive picked", async ()
   assert.equal(state.target, "C:\\", "the Windows drive is picked first");
   state.choose("D:\\");
   const seen = [];
-  diskApi.scan = async (root, onEvent) => {
+  diskApi.scan = async (root, fast, onEvent) => {
     assert.equal(root, "D:\\", "only the root path is sent");
     assert.equal(state.phase, "scanning");
     onEvent({ event: "progress", data: { files: 2, dirs: 1, bytes: 900, alloc: 1500, current: "D:\\Games" } });
@@ -319,6 +320,26 @@ test("a scan shows its progress, then the results of the drive picked", async ()
   assert.deepEqual(map.args.slice(0, 3), [3, 0, 10]);
   assert.equal(map.args[3], Math.max(1, Math.floor((2000 * 9) / (800 * 500))), "small blocks merge below about 9 pixels");
   assert.equal(map.args[4], "alloc", "size on disk is the default");
+});
+
+test("the fast scan is asked for on a whole NTFS drive only, and the choice is kept", async () => {
+  backend();
+  const asked = [];
+  diskApi.scan = async (root, fast) => {
+    asked.push([root, fast]);
+    return done;
+  };
+  await state.load();
+  state.setArea(800, 500);
+  state.choose("D:\\");
+  await state.scan();
+  state.choose("E:\\Photos");
+  await state.scan();
+  state.setFast(false);
+  state.choose("D:\\");
+  await state.scan();
+  assert.deepEqual(asked, [["D:\\", true], ["E:\\Photos", false], ["D:\\", false]]);
+  assert.equal(storage.get(KEY.fast), "false");
 });
 
 test("cancelling a scan stops it and leaves nothing half-shown", async () => {

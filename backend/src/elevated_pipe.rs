@@ -111,7 +111,27 @@ impl Session {
         }
         Ok(serde_json::from_str(answer.trim())?)
     }
+
+    /// As `ask`, for a helper that sends bytes after its answer
+    /// (`serve_with_payload`): the answer's line, then the bytes' length as
+    /// 8 bytes (little-endian), then the bytes.
+    pub async fn ask_with_payload<Q: Serialize, R: DeserializeOwned>(&mut self, request: &Q) -> std::io::Result<(R, Vec<u8>)> {
+        use tokio::io::AsyncReadExt;
+        let answer: R = self.ask(request).await?;
+        let mut length = [0u8; 8];
+        self.pipe.read_exact(&mut length).await?;
+        let length = u64::from_le_bytes(length);
+        if length > MAX_PAYLOAD {
+            return Err(std::io::ErrorKind::InvalidData.into());
+        }
+        let mut payload = vec![0u8; length as usize];
+        self.pipe.read_exact(&mut payload).await?;
+        Ok((answer, payload))
+    }
 }
+
+/// The most bytes a helper may send after an answer.
+const MAX_PAYLOAD: u64 = 4 << 30;
 
 /// Whether the pipe's client runs this same program.
 fn client_is_this_program(server: &NamedPipeServer) -> bool {
@@ -203,6 +223,48 @@ where
     Q: DeserializeOwned,
     R: Serialize,
 {
+    serve_with(helper, pipe, app_pid, move |request| (handle(request), None), move || (invalid(), None))
+}
+
+/// As `serve`, for answers that come with bytes (read with
+/// `Session::ask_with_payload`).
+pub fn serve_with_payload<Q, R>(
+    helper: &Helper,
+    pipe: &str,
+    app_pid: u32,
+    mut handle: impl FnMut(Q) -> (R, Vec<u8>),
+    invalid: impl Fn() -> (R, Vec<u8>),
+) -> Result<(), String>
+where
+    Q: DeserializeOwned,
+    R: Serialize,
+{
+    serve_with(
+        helper,
+        pipe,
+        app_pid,
+        move |request| {
+            let (response, payload) = handle(request);
+            (response, Some(payload))
+        },
+        move || {
+            let (response, payload) = invalid();
+            (response, Some(payload))
+        },
+    )
+}
+
+fn serve_with<Q, R>(
+    helper: &Helper,
+    pipe: &str,
+    app_pid: u32,
+    mut handle: impl FnMut(Q) -> (R, Option<Vec<u8>>),
+    invalid: impl Fn() -> (R, Option<Vec<u8>>),
+) -> Result<(), String>
+where
+    Q: DeserializeOwned,
+    R: Serialize,
+{
     use std::io::{BufRead, BufReader};
     use std::os::windows::io::AsRawHandle;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -242,13 +304,19 @@ where
         // A broken pipe: the app has closed it or exited.
         let Ok(line) = line else { break };
         busy.store(true, Ordering::SeqCst);
-        let response = match serde_json::from_str::<Q>(&line) {
+        let (response, payload) = match serde_json::from_str::<Q>(&line) {
             Ok(request) => handle(request),
             Err(_) => invalid(),
         };
         let mut out = serde_json::to_string(&response).map_err(err)?;
         out.push('\n');
-        let sent = writer.write_all(out.as_bytes()).and_then(|()| writer.flush());
+        let sent = writer
+            .write_all(out.as_bytes())
+            .and_then(|()| match &payload {
+                Some(bytes) => writer.write_all(&(bytes.len() as u64).to_le_bytes()).and_then(|()| writer.write_all(bytes)),
+                None => Ok(()),
+            })
+            .and_then(|()| writer.flush());
         if let Ok(mut at) = last.lock() {
             *at = Instant::now();
         }
@@ -303,6 +371,30 @@ pub mod tests {
         let bad: Vec<OsString> = vec!["run".into(), "pipe".into(), "42".into()];
         assert!(parse_serve_args(&TEST_HELPER, &bad).is_err());
         assert!(parse_serve_args(&TEST_HELPER, &good[..2]).is_err());
+    }
+
+    #[test]
+    fn bytes_follow_an_answer_when_the_helper_sends_them() {
+        runtime().block_on(async {
+            let name = format!("{}{}", TEST_HELPER.pipe_prefix, uuid::Uuid::new_v4().simple());
+            let server = ServerOptions::new().first_pipe_instance(true).create(&name).unwrap();
+            let helper = {
+                let name = name.clone();
+                std::thread::spawn(move || {
+                    serve_with_payload(&TEST_HELPER, &name, std::process::id(), |n: u32| (n * 2, vec![7u8; n as usize]), || (0u32, Vec::new()))
+                })
+            };
+            let mut session = connect_to(server).await;
+            // More than a pipe buffer holds, then nothing at all.
+            let (answer, bytes): (u32, Vec<u8>) = session.ask_with_payload(&300_000u32).await.unwrap();
+            assert_eq!(answer, 600_000);
+            assert_eq!(bytes, vec![7u8; 300_000]);
+            let (answer, bytes): (u32, Vec<u8>) = session.ask_with_payload(&0u32).await.unwrap();
+            assert_eq!((answer, bytes.len()), (0, 0));
+            drop(session);
+            let ended = tokio::task::spawn_blocking(move || helper.join().unwrap());
+            assert!(tokio::time::timeout(Duration::from_secs(20), ended).await.unwrap().unwrap().is_ok());
+        });
     }
 
     #[test]

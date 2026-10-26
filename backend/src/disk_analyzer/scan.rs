@@ -439,7 +439,7 @@ unsafe fn parse(buffer: *const u8, bytes: usize, class: FILE_INFO_BY_HANDLE_CLAS
 
 /// UTF-16 to the encoded bytes of an `OsStr`: fast ASCII path when all units <= 0x7F,
 /// plain UTF-8 when the name is valid Unicode (it nearly always is), WTF-8 otherwise.
-fn push_name(names: &mut Vec<u8>, units: &[u16]) {
+pub(super) fn push_name(names: &mut Vec<u8>, units: &[u16]) {
     // Fast path: if all UTF-16 code units are ASCII (<= 0x7F), copy directly!
     if units.iter().all(|&u| u <= 0x7F) {
         names.reserve(units.len());
@@ -463,7 +463,7 @@ fn push_name(names: &mut Vec<u8>, units: &[u16]) {
 }
 
 /// What an entry is, by its attributes and reparse tag.
-fn kind_of(attributes: u32, tag: u32) -> Kind {
+pub(super) fn kind_of(attributes: u32, tag: u32) -> Kind {
     let reparse = attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
     let cloud_tag = reparse && tag & CLOUD_TAG_MASK == CLOUD_TAG;
     if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
