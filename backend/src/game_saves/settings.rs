@@ -587,10 +587,10 @@ mod tests {
         assert_eq!(recovered_backup_folder(&value, &default, &[root.join("gone")], None), None);
         assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone(), cloud_b.clone()], cloud_b.to_str()), Some(cloud_b.clone()), "an account destination resolves ambiguity");
         value.backup_folder = Some(root.join("My chosen backup folder").to_string_lossy().into_owned());
-        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone()], None), None, "a temporarily missing explicit location stays selected");
+        assert_eq!(recovered_backup_folder(&value, &default, std::slice::from_ref(&cloud_a), None), None, "a temporarily missing explicit location stays selected");
         value.backup_folder = Some(default.to_string_lossy().into_owned());
         value.backup_folder_chosen = Some(true);
-        assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a.clone()], None), None, "even an empty default can be an explicit choice");
+        assert_eq!(recovered_backup_folder(&value, &default, std::slice::from_ref(&cloud_a), None), None, "even an empty default can be an explicit choice");
         value.backup_folder_chosen = None;
         write_history(&default);
         assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a], None), None, "healthy existing history wins");
@@ -608,14 +608,14 @@ mod tests {
         let mut value = GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() };
         // Startup initialized before sign-in, saved its automatic discovery,
         // and the next process loads it before importing the account hint.
-        let folder = recovered_backup_folder(&value, &default, &[discovered.clone()], None).unwrap();
+        let folder = recovered_backup_folder(&value, &default, std::slice::from_ref(&discovered), None).unwrap();
         value.backup_folder = Some(folder.to_string_lossy().into_owned());
         value.backup_folder_chosen = Some(false);
         let config = root.join("config");
         save_to_root(&config, &value).unwrap();
         let value = load_from_root(&config).unwrap();
-        assert_eq!(recovered_backup_folder(&value, &default, &[discovered.clone()], account.to_str()), Some(account.clone()), "the account hint has priority over an earlier automatic discovery");
-        assert_eq!(recovered_backup_folder(&value, &default, &[discovered.clone()], None), None, "ordinary startup preserves its discovered history");
+        assert_eq!(recovered_backup_folder(&value, &default, std::slice::from_ref(&discovered), account.to_str()), Some(account.clone()), "the account hint has priority over an earlier automatic discovery");
+        assert_eq!(recovered_backup_folder(&value, &default, std::slice::from_ref(&discovered), None), None, "ordinary startup preserves its discovered history");
         for legacy in [discovered, root.join("Offline chosen folder")] {
             let value: GameSavesSettings = serde_json::from_value(serde_json::json!({ "backupFolder": legacy })).unwrap();
             assert_eq!(recovered_backup_folder(&value, &default, &[], account.to_str()), None, "a legacy nondefault choice has no automatic-discovery provenance");
@@ -632,9 +632,9 @@ mod tests {
         fs::create_dir_all(&game).unwrap();
         fs::write(game.join("orphan.zip"), b"orphan").unwrap();
         let settings = GameSavesSettings::default();
-        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud.clone()], None), None);
+        assert_eq!(recovered_backup_folder(&settings, &default, std::slice::from_ref(&cloud), None), None);
         fs::write(game.join("mapping.yaml"), "name: Game\nbackups:\n  - name: missing.zip\n    when: '2026-09-27T19:38:42Z'\n").unwrap();
-        assert_eq!(recovered_backup_folder(&settings, &default, &[cloud.clone()], None), None);
+        assert_eq!(recovered_backup_folder(&settings, &default, std::slice::from_ref(&cloud), None), None);
         fs::write(cloud.join("outside.zip"), b"outside").unwrap();
         fs::write(game.join("mapping.yaml"), "name: Game\nbackups:\n  - name: ../outside.zip\n    when: '2026-09-27T19:38:42Z'\n").unwrap();
         assert_eq!(recovered_backup_folder(&settings, &default, &[cloud], None), None);
