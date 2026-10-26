@@ -1,22 +1,29 @@
 <script lang="ts">
   // The treemap, drawn on a canvas: thousands of rectangles are too many for
   // the DOM. The map itself is drawn on one canvas, only when the data or the
-  // size changes; hover and selection go on a second canvas above it, so
-  // moving the pointer never redraws the map. The tooltip and the right-click
-  // menu find the item under the pointer in the layout's flat arrays.
+  // size changes; hover, selection and the kind in focus go on a second
+  // canvas above it, so moving the pointer never redraws the map. The tooltip
+  // and the right-click menu find the item under the pointer in the layout's
+  // flat arrays.
+  //
+  // The look follows the rest of the app: flat rounded tiles in one calm
+  // colour per kind of file, folders as quiet panels with their name on top,
+  // and the accent colour for hover and selection.
   import { onMount } from "svelte";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
   import Type from "@lucide/svelte/icons/type";
   import { contextActions } from "../../../lib/context-menu";
+  import { settings } from "../../../lib/settings.svelte";
   import { pointerTip } from "../../../lib/tooltip.svelte";
-  import { formatSize, SMALLER_ID, type TreemapPayload } from "./api";
+  import { formatSize, sizeOf, SMALLER_ID, type TreemapPayload } from "./api";
   import { itemActions } from "./actions";
-  import { colorOf, FOLDER_FILL, FOLDER_FRAME, FOLDER_TEXT, LINK_FILL, SMALLER_FILL, textOn } from "./palette";
+  import { CATEGORIES, categoryColor, categoryLabel, categoryOf, type Category } from "./palette";
   import { diskState as d } from "./state.svelte";
   import { FOLDER, hitTest, layoutTreemap, SMALLER, type Layout } from "./treemap";
 
+  const FILE = 1;
   const LINK = 2;
+  const CLOUD = 3;
 
   let host = $state<HTMLDivElement>();
   let base = $state<HTMLCanvasElement>();
@@ -28,17 +35,26 @@
   let layout: Layout | null = null;
   /** Folders whose children were drawn (the rest are drawn as one block). */
   let opened = new Uint8Array(0);
+  /** The kind of each of the payload's extensions. */
+  let kinds: Category[] = [];
   let indexOf = new Map<number, number>();
   let hover = -1;
   let frame = 0;
   let wantMap = false;
   let wantMarks = false;
-  let colors = { background: "#080d14", accent: "#3b82f6", font: "sans-serif" };
+  let colors = {
+    background: "#121212",
+    accent: "107 133 255",
+    text1: "#f3f3f3",
+    text2: "#c8c8c8",
+    text3: "#969696",
+    font: "sans-serif",
+    navy: false,
+  };
 
-  // UI Visual Preferences
-  let cushion3D = $state(true);
   let showLabels = $state(true);
-  let highlightExt = $state<string | null>(null);
+  /** The kind of file in focus from the legend: the rest is dimmed. */
+  let focus = $state<Category | null>(null);
 
   const label = $derived.by(() => {
     const map = d.treemap;
@@ -52,18 +68,20 @@
     return `Treemap of ${where}, ${formatSize(map.size[0] ?? 0)}. Largest: ${largest.join(", ") || "nothing"}. The folder list has the same items.`;
   });
 
-  // Top 7 extensions for the interactive legend bar
-  const topExts = $derived.by(() => {
-    if (!d.extensions) return [];
-    return d.extensions.slice(0, 7).map((ext) => ({
-      name: ext.other ? "other" : ext.ext || "none",
-      size: formatSize(d.sizeMode === "alloc" ? ext.alloc : ext.size),
-      color: colorOf(ext.rank),
-    }));
+  /** What each kind of file takes in the folder shown, largest first. */
+  const legend = $derived.by(() => {
+    const totals = new Map<Category, number>();
+    for (const stat of d.extensions ?? []) {
+      const kind = stat.other ? "other" : categoryOf(stat.ext);
+      totals.set(kind, (totals.get(kind) ?? 0) + sizeOf(stat, d.sizeMode));
+    }
+    return CATEGORIES.filter((c) => (totals.get(c.id) ?? 0) > 0)
+      .map((c) => ({ ...c, size: totals.get(c.id) ?? 0, color: categoryColor(c.id, settings.dark) }))
+      .sort((a, b) => b.size - a.size);
   });
 
-  function toggleExt(extName: string) {
-    highlightExt = highlightExt === extName ? null : extName;
+  function toggleFocus(kind: Category) {
+    focus = focus === kind ? null : kind;
     schedule(false);
   }
 
@@ -89,10 +107,15 @@
   function readColors() {
     if (!host) return;
     const style = getComputedStyle(host);
+    const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
     colors = {
-      background: style.getPropertyValue("--input-fill").trim() || "#080d14",
-      accent: style.getPropertyValue("--accent").trim() || "#3b82f6",
+      background: read("--input-fill", "#121212"),
+      accent: read("--accent-rgb", "107 133 255"),
+      text1: read("--text-1", "#f3f3f3"),
+      text2: read("--text-2", "#c8c8c8"),
+      text3: read("--text-3", "#969696"),
       font: style.fontFamily || "sans-serif",
+      navy: document.documentElement.classList.contains("dark"),
     };
   }
 
@@ -113,6 +136,7 @@
   function relayout() {
     layout = payload && width > 0 && height > 0 ? layoutTreemap(payload, width, height) : null;
     opened = new Uint8Array(payload?.ids.length ?? 0);
+    kinds = payload?.exts.map(categoryOf) ?? [];
     indexOf = new Map();
     if (!layout || !payload) return;
     for (const i of layout.order) {
@@ -121,63 +145,57 @@
     }
   }
 
+  /** Rounder corners on bigger tiles; none on the smallest. */
+  function radiusOf(w: number, h: number): number {
+    const side = Math.min(w, h);
+    return side >= 40 ? 6 : side >= 16 ? 4 : side >= 8 ? 2 : 0;
+  }
+
+  function tile(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number) {
+    if (radius > 0) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.fill();
+    } else {
+      ctx.fillRect(x, y, w, h);
+    }
+  }
+
+  function ring(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number, lineWidth: number) {
+    const inset = lineWidth / 2;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.roundRect(x + inset, y + inset, Math.max(0, w - lineWidth), Math.max(0, h - lineWidth), Math.max(0, radius - inset));
+    ctx.stroke();
+  }
+
   /** Text that fits in `room` pixels, shortened with "…" when it does not. */
   function fitted(ctx: CanvasRenderingContext2D, text: string, room: number): string | null {
-    if (room < 12) return null;
+    if (room < 14) return null;
     const full = ctx.measureText(text).width;
     if (full <= room) return text;
-    for (let n = Math.floor((text.length * room) / full) - 1; n > 0; n--) {
+    for (let n = Math.floor((text.length * room) / full) - 1; n > 1; n--) {
       const short = `${text.slice(0, n)}…`;
       if (ctx.measureText(short).width <= room) return short;
     }
     return null;
   }
 
-  function write(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, room: number, color: string, bold = false) {
+  /** Writes `text` at (x, y), shortened to `room`; returns the width written. */
+  function write(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, room: number, color: string, weight = 700, size = 11.5): number {
+    ctx.font = `${weight} ${size}px ${colors.font}`;
     const shown = fitted(ctx, text, room);
-    if (!shown) return;
-    ctx.save();
-    ctx.font = `${bold ? "600" : "500"} 11px ${colors.font}`;
-    ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
-    ctx.shadowBlur = 3;
-    ctx.shadowOffsetY = 1;
+    if (!shown) return 0;
     ctx.fillStyle = color;
     ctx.fillText(shown, x, y);
-    ctx.restore();
+    return ctx.measureText(shown).width;
   }
 
-  // Pre-calculated gradient cache to keep 60 FPS performance
-  const shadeCache = new Map<string, { light: string; dark: string }>();
-  function getShades(hexOrRgb: string) {
-    let shades = shadeCache.get(hexOrRgb);
-    if (!shades) {
-      let r = 100, g = 100, b = 100;
-      if (hexOrRgb.startsWith("#")) {
-        const n = parseInt(hexOrRgb.slice(1), 16);
-        r = (n >> 16) & 255;
-        g = (n >> 8) & 255;
-        b = n & 255;
-      } else if (hexOrRgb.startsWith("rgb")) {
-        const m = hexOrRgb.match(/\d+/g);
-        if (m && m.length >= 3) {
-          r = parseInt(m[0]);
-          g = parseInt(m[1]);
-          b = parseInt(m[2]);
-        }
-      }
-      const lr = Math.min(255, Math.round(r + (255 - r) * 0.25));
-      const lg = Math.min(255, Math.round(g + (255 - g) * 0.25));
-      const lb = Math.min(255, Math.round(b + (255 - b) * 0.25));
-      const dr = Math.max(0, Math.round(r * 0.72));
-      const dg = Math.max(0, Math.round(g * 0.72));
-      const db = Math.max(0, Math.round(b * 0.72));
-      shades = {
-        light: `rgb(${lr},${lg},${lb})`,
-        dark: `rgb(${dr},${dg},${db})`,
-      };
-      shadeCache.set(hexOrRgb, shades);
-    }
-    return shades;
+  function fillOf(i: number): string {
+    if (!payload) return colors.text3;
+    const kind = payload.kind[i];
+    if (kind === FILE || kind === CLOUD) return categoryColor(kinds[payload.ext[i]] ?? "other", colors.navy);
+    return colors.text3;
   }
 
   function drawMap() {
@@ -196,100 +214,58 @@
       const w = rects[i * 4 + 2];
       const h = rects[i * 4 + 3];
       const kind = payload.kind[i];
+      const radius = radiusOf(w, h);
 
       if (kind === FOLDER && opened[i]) {
-        // A folder: clean modern container frame with rounded borders
-        const rw = Math.max(1, w - 1);
-        const rh = Math.max(1, h - 1);
-        ctx.fillStyle = FOLDER_FRAME;
-        if (rw >= 14 && rh >= 14) {
-          ctx.beginPath();
-          ctx.roundRect(x, y, rw, rh, 4);
-          ctx.fill();
-          ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        } else {
-          ctx.fillRect(x, y, rw, rh);
+        // A folder with its contents: a quiet panel, a shade lighter than
+        // what it sits on, so depth shows without frames everywhere.
+        ctx.fillStyle = colors.navy ? "rgb(194 208 255 / 0.045)" : "rgb(255 255 255 / 0.04)";
+        tile(ctx, x, y, w, h, radius);
+        if (radius) {
+          ctx.strokeStyle = colors.navy ? "rgb(194 208 255 / 0.08)" : "rgb(255 255 255 / 0.07)";
+          ring(ctx, x, y, w, h, radius, 1);
         }
-
         if (header[i]) {
-          // Sleek folder header strip
-          const hw = w - 8;
-          const hh = Math.min(18, header[i]);
-          ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
-          ctx.beginPath();
-          ctx.roundRect(x + 3, y + 2, hw, hh, 3);
-          ctx.fill();
-
-          write(ctx, `${payload.names[i]}  ${formatSize(payload.size[i])}`, x + 8, y + hh / 2 + 2, hw - 12, FOLDER_TEXT, true);
+          const mid = y + 3 + header[i] / 2;
+          const room = w - 16;
+          ctx.font = `600 10.5px ${colors.font}`;
+          const size = formatSize(payload.size[i]);
+          const sizeWidth = ctx.measureText(size).width;
+          const showSize = room > sizeWidth + 48;
+          write(ctx, payload.names[i], x + 8, mid, showSize ? room - sizeWidth - 10 : room, colors.text2);
+          if (showSize) {
+            ctx.textAlign = "right";
+            write(ctx, size, x + w - 8, mid, sizeWidth + 1, colors.text3, 600, 10.5);
+            ctx.textAlign = "left";
+          }
         }
         continue;
       }
 
-      const fill =
-        kind === FOLDER ? FOLDER_FILL : kind === SMALLER ? SMALLER_FILL : kind === LINK ? LINK_FILL : colorOf(payload.ranks[payload.ext[i]] ?? 255);
-
-      const rw = Math.max(1, w - 1);
-      const rh = Math.max(1, h - 1);
-
-      if (rw <= 3 || rh <= 3 || !cushion3D) {
-        ctx.fillStyle = fill;
-        ctx.fillRect(x, y, rw, rh);
-      } else {
-        const radius = rw >= 10 && rh >= 10 ? 3 : rw >= 6 && rh >= 6 ? 2 : 0;
-        const shades = getShades(fill);
-        const grad = ctx.createLinearGradient(x, y, x, y + rh);
-        grad.addColorStop(0, shades.light);
-        grad.addColorStop(0.5, fill);
-        grad.addColorStop(1, shades.dark);
-
-        ctx.fillStyle = grad;
-        if (radius > 0) {
-          ctx.beginPath();
-          ctx.roundRect(x, y, rw, rh, radius);
-          ctx.fill();
-
-          // Delicate specular highlight
-          ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        } else {
-          ctx.fillRect(x, y, rw, rh);
-        }
+      // A file, or a block standing for what is too small to draw one by one:
+      // a folder like an empty panel, its small items fainter still.
+      const neutral = kind === FOLDER || kind === SMALLER || kind === LINK;
+      ctx.globalAlpha = kind === SMALLER || kind === LINK ? 0.1 : kind === FOLDER ? 0.16 : kind === CLOUD ? 0.55 : 1;
+      ctx.fillStyle = fillOf(i);
+      tile(ctx, x, y, w, h, radius);
+      ctx.globalAlpha = 1;
+      if (kind === FOLDER && radius) {
+        ctx.strokeStyle = colors.navy ? "rgb(194 208 255 / 0.14)" : "rgb(255 255 255 / 0.12)";
+        ring(ctx, x, y, w, h, radius, 1);
+      }
+      if (!neutral && w >= 12 && h >= 12) {
+        // A faint light edge along the top.
+        ctx.fillStyle = "rgb(255 255 255 / 0.12)";
+        ctx.fillRect(x + radius, y, w - radius * 2, 1);
       }
 
-      // Draw label when requested and room allows
-      if (showLabels && rw > 46 && rh > 18) {
-        const ink = textOn(fill);
-        const twoLines = rh > 34;
-        write(ctx, payload.names[i], x + 6, twoLines ? y + 11 : y + rh / 2, rw - 12, ink, false);
-        if (twoLines) write(ctx, formatSize(payload.size[i]), x + 6, y + 25, rw - 12, "rgba(255, 255, 255, 0.85)", false);
+      if (showLabels && w > 50 && h > 22 && kind !== SMALLER) {
+        const twoLines = h > 38;
+        const ink = neutral ? colors.text2 : "rgb(255 255 255 / 0.95)";
+        write(ctx, payload.names[i], x + 7, twoLines ? y + 12 : y + h / 2, w - 14, ink, 700, 11.5);
+        if (twoLines) write(ctx, formatSize(payload.size[i]), x + 7, y + 27, w - 14, neutral ? colors.text3 : "rgb(255 255 255 / 0.72)", 600, 10.5);
       }
     }
-  }
-
-  function outline(ctx: CanvasRenderingContext2D, i: number, stroke: string, lineWidth: number, tint: string | null, glow = false) {
-    if (!layout) return;
-    const [x, y, w, h] = layout.rects.subarray(i * 4, i * 4 + 4);
-    if (w <= 0) return;
-    const rw = Math.max(0, w - 1);
-    const rh = Math.max(0, h - 1);
-
-    if (tint) {
-      ctx.fillStyle = tint;
-      ctx.fillRect(x, y, rw, rh);
-    }
-
-    ctx.save();
-    if (glow) {
-      ctx.shadowColor = stroke;
-      ctx.shadowBlur = 8;
-    }
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = lineWidth;
-    ctx.strokeRect(x + lineWidth / 2, y + lineWidth / 2, Math.max(0, rw - lineWidth), Math.max(0, rh - lineWidth));
-    ctx.restore();
   }
 
   function drawMarks() {
@@ -297,27 +273,49 @@
     if (!ctx) return;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    if (!layout || !payload) return;
+    const { rects } = layout;
+    const box = (i: number) => {
+      const [x, y, w, h] = rects.subarray(i * 4, i * 4 + 4);
+      return { x, y, w, h, radius: radiusOf(w, h) };
+    };
 
-    // If an extension is highlighted from the legend
-    if (highlightExt && payload && layout) {
-      const matchExt = highlightExt.toLowerCase();
+    // A kind in focus: everything else steps back.
+    if (focus && payload) {
+      ctx.fillStyle = colors.background;
+      ctx.globalAlpha = 0.72;
       for (const i of layout.order) {
-        if (payload.kind[i] === 1) {
-          const extName = (payload.exts[payload.ext[i]] || "").toLowerCase();
-          if (extName === matchExt || (highlightExt === "other" && payload.ranks[payload.ext[i]] >= 20)) {
-            outline(ctx, i, "#ffffff", 2, "rgba(255, 255, 255, 0.2)", true);
-          }
-        }
+        const kind = payload.kind[i];
+        if (kind === FOLDER && opened[i]) continue;
+        if ((kind === FILE || kind === CLOUD) && kinds[payload.ext[i]] === focus) continue;
+        const b = box(i);
+        tile(ctx, b.x, b.y, b.w, b.h, b.radius);
       }
+      ctx.globalAlpha = 1;
     }
 
     for (const id of d.selection) {
       const i = indexOf.get(id);
-      if (i !== undefined) outline(ctx, i, colors.accent, 2.5, "rgba(59, 130, 246, 0.25)", true);
+      if (i === undefined) continue;
+      const b = box(i);
+      if (b.w <= 0) continue;
+      ctx.fillStyle = `rgb(${colors.accent} / 0.2)`;
+      tile(ctx, b.x, b.y, b.w, b.h, b.radius);
+      ctx.strokeStyle = `rgb(${colors.accent})`;
+      ring(ctx, b.x, b.y, b.w, b.h, b.radius, 2);
     }
 
-    if (hover >= 0) {
-      outline(ctx, hover, "rgba(255, 255, 255, 0.95)", 2, "rgba(255, 255, 255, 0.12)", true);
+    if (hover > 0) {
+      const b = box(hover);
+      if (b.w > 0) {
+        const panel = payload.kind[hover] === FOLDER && opened[hover];
+        if (!panel) {
+          ctx.fillStyle = "rgb(255 255 255 / 0.1)";
+          tile(ctx, b.x, b.y, b.w, b.h, b.radius);
+        }
+        ctx.strokeStyle = `rgb(${colors.accent} / ${panel ? 0.7 : 1})`;
+        ring(ctx, b.x, b.y, b.w, b.h, b.radius, panel ? 1.5 : 2);
+      }
     }
   }
 
@@ -342,20 +340,13 @@
     const parent = payload.parent[i];
     const parentSize = parent >= 0 ? payload.size[parent] : size;
     const percent = parentSize ? (size / parentSize) * 100 : 100;
-    const shown = percent < 0.1 ? "<0.1%" : `${percent.toFixed(percent < 10 ? 1 : 0)}%`;
-    const isFolder = payload.kind[i] === FOLDER;
-    const kindLabel = isFolder ? "📁 Folder" : "📄 File";
-
-    const lines = [
-      `${kindLabel}: ${payload.names[i]}`,
-      `📦 Size: ${formatSize(size)} (${shown} of parent)`,
-    ];
-    if (payload.ids[i] !== SMALLER_ID) {
-      lines.push(`📂 Path: ${pathOf(i)}`);
-    }
-    if (isFolder) {
-      lines.push("💡 Double-click to zoom in");
-    }
+    const share = percent < 0.1 ? "<0.1%" : `${percent.toFixed(percent < 10 ? 1 : 0)}%`;
+    const kind = payload.kind[i];
+    const what =
+      kind === FOLDER ? "Folder" : kind === SMALLER ? "Smaller items" : kind === LINK ? "Link" : categoryLabel(kinds[payload.ext[i]] ?? "other");
+    const lines = [payload.names[i], `${what} · ${formatSize(size)} · ${share} of ${payload.names[parent] ?? "the folder"}`];
+    if (payload.ids[i] !== SMALLER_ID) lines.push(pathOf(i));
+    if (kind === FOLDER) lines.push("Double-click to open");
     return lines.join("\n");
   }
 
@@ -402,16 +393,16 @@
     schedule(true);
   }
 
-  function toggleCushion() {
-    cushion3D = !cushion3D;
-    schedule(true);
-  }
-
   // A new payload: lay it out again.
   $effect(() => {
     payload = d.treemap;
     hover = -1;
     schedule(true);
+  });
+
+  // The legend counts the kinds of files in the folder shown.
+  $effect(() => {
+    if (d.treemap && d.extensions === null) void d.loadExtensions();
   });
 
   // The selection changed: only the marks are drawn again.
@@ -465,139 +456,46 @@
     {/if}
   </div>
 
-  <!-- Interactive Extension Legend & Treemap Controls -->
-  <div class="map-controls-bar">
-    <div class="legend-list" role="toolbar" aria-label="File type highlight">
-      {#each topExts as ext}
+  <div class="legend">
+    <div class="kinds" role="toolbar" aria-label="Kinds of files">
+      {#each legend as kind (kind.id)}
         <button
           type="button"
-          class="ext-pill"
-          class:active={highlightExt === ext.name}
-          onclick={() => toggleExt(ext.name)}
-          title="Highlight {ext.name} files ({ext.size})"
+          class="chip"
+          class:active={focus === kind.id}
+          aria-pressed={focus === kind.id}
+          title="{kind.label}: {formatSize(kind.size)}. {focus === kind.id ? 'Click to show every kind again' : 'Click to bring them forward'}"
+          onclick={() => toggleFocus(kind.id)}
         >
-          <span class="dot" style:background={ext.color}></span>
-          <span class="ext-name">.{ext.name}</span>
-          <span class="ext-size">{ext.size}</span>
+          <span class="dot" style:background={kind.color} aria-hidden="true"></span>
+          {kind.label}
+          <span class="count">{formatSize(kind.size)}</span>
         </button>
       {/each}
     </div>
-    <div class="display-tools">
-      <button
-        type="button"
-        class="tool-btn"
-        class:active={showLabels}
-        onclick={toggleLabels}
-        title="Toggle file labels"
-      >
-        <Type size={13} />
-        <span>Labels</span>
-      </button>
-      <button
-        type="button"
-        class="tool-btn"
-        class:active={cushion3D}
-        onclick={toggleCushion}
-        title="Toggle 3D cushion shading"
-      >
-        <Sparkles size={13} />
-        <span>3D Cushion</span>
-      </button>
-    </div>
+    <button type="button" class="chip labels" class:active={showLabels} aria-pressed={showLabels} title="Names on the tiles" onclick={toggleLabels}>
+      <Type size={13} />
+      Labels
+    </button>
   </div>
 </div>
 
 <style>
   .treemap-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
-  .map { position: relative; flex: 1; min-height: 220px; overflow: hidden; border-radius: 12px; background: #080d14; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4); }
+  .map { position: relative; flex: 1; min-height: 220px; overflow: hidden; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--input-fill); }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .marks { cursor: crosshair; }
+  .marks { cursor: pointer; }
   .waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-3); font-size: var(--fluid-xs); pointer-events: none; }
 
-  /* Sleek Legend & Tools Bar */
-  .map-controls-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    padding: 6px 10px;
-    background: rgba(15, 23, 42, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    backdrop-filter: blur(8px);
-  }
-  .legend-list {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 6px;
-    min-width: 0;
-  }
-  .ext-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-2);
-    font-size: 11px;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, transform 0.15s;
-  }
-  .ext-pill:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-1);
-    transform: translateY(-1px);
-  }
-  .ext-pill.active {
-    border-color: #ffffff;
-    background: rgba(255, 255, 255, 0.16);
-    color: #ffffff;
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
-  }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    flex-shrink: 0;
-  }
-  .ext-name {
-    font-weight: 600;
-  }
-  .ext-size {
-    opacity: 0.75;
-    font-variant-numeric: tabular-nums;
-  }
-  .display-tools {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-  }
-  .tool-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-3);
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-  .tool-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-1);
-  }
-  .tool-btn.active {
-    background: var(--selected);
-    border-color: rgba(59, 130, 246, 0.5);
-    color: var(--text-1);
+  .treemap-wrapper { container-type: inline-size; }
+  .legend { display: flex; align-items: flex-start; gap: 8px; }
+  .kinds { display: flex; flex: 1; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  .chip { height: 26px; padding: 0 9px; gap: 6px; font-size: 11.5px; }
+  .dot { flex: none; width: 9px; height: 9px; border-radius: 3px; }
+  .labels { flex: none; }
+  .labels :global(svg) { color: rgb(var(--accent-soft-rgb)); }
+  /* A narrow pane: the sizes move to each chip's tooltip. */
+  @container (max-width: 620px) {
+    .kinds .count { display: none; }
   }
 </style>

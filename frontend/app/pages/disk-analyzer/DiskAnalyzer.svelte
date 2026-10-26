@@ -115,10 +115,10 @@
         {/each}
         {#if folderPicked}
           <option value={d.target}>
-            📁 Folder: {d.target}
+            Folder: {d.target}
           </option>
         {/if}
-        <option value="__custom__">📂 Select folder…</option>
+        <option value="__custom__">Choose a folder…</option>
       </select>
       <ChevronDown size={14} class="select-arrow" />
     </div>
@@ -458,8 +458,6 @@
     margin-bottom: 10px;
     padding: 10px 14px;
     border-radius: 12px;
-    background: var(--surface-bg, rgba(255, 255, 255, 0.03));
-    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
   }
   .toolbar-left {
     display: flex;
@@ -493,8 +491,8 @@
     height: 34px;
     padding: 0 32px 0 12px;
     border-radius: 8px;
-    background: var(--input-fill, rgba(0, 0, 0, 0.35));
-    border: 1px solid var(--btn-border, rgba(255, 255, 255, 0.12));
+    background: var(--input-fill);
+    border: 1px solid var(--btn-border);
     color: var(--text-1);
     font-size: 13px;
     font-weight: 500;
@@ -512,8 +510,8 @@
     cursor: not-allowed;
   }
   .wiz-select option {
-    background: #18191e;
-    color: #e2e8f0;
+    background: var(--float-bg);
+    color: var(--text-1);
   }
   :global(.select-arrow) {
     position: absolute;
@@ -575,9 +573,9 @@
     max-width: 280px;
     flex: 1 1 210px;
     padding: 9px 12px;
-    border: 1px solid var(--btn-border, rgba(255, 255, 255, 0.1));
+    border: 1px solid var(--btn-border);
     border-radius: 10px;
-    background: var(--chip-fill, rgba(255, 255, 255, 0.04));
+    background: var(--chip-fill);
     color: var(--text-1);
     text-align: left;
     box-shadow: var(--btn-sheen);
@@ -585,18 +583,18 @@
     transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast), box-shadow var(--dur-fast);
   }
   .drive-card:hover:not(:disabled) {
-    background: var(--chip-fill-hover, rgba(255, 255, 255, 0.07));
-    border-color: rgba(255, 255, 255, 0.2);
+    background: var(--chip-fill-hover);
+    border-color: rgb(var(--accent-rgb) / 0.35);
     transform: translateY(-1px);
   }
   .drive-card.selected {
     border-color: rgb(var(--accent-rgb) / 0.85);
-    background: var(--selected, rgba(56, 189, 248, 0.12));
+    background: var(--selected);
     box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.22);
   }
   .drive-card.scanning-this {
-    border-color: #38bdf8;
-    box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+    border-color: rgb(var(--accent-rgb));
+    box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.3);
   }
   .drive-card:disabled:not(.selected) {
     opacity: 0.7;
@@ -631,7 +629,7 @@
   .fs-pill {
     padding: 1px 5px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--hover);
     color: var(--text-3);
     font-size: 10px;
     font-weight: 700;
@@ -645,8 +643,8 @@
     width: 17px;
     height: 17px;
     border-radius: 999px;
-    background: rgb(var(--accent-rgb));
-    color: #ffffff;
+    background: var(--btn-primary);
+    color: var(--btn-primary-text);
     flex-shrink: 0;
   }
   :global(.spin) {
@@ -664,21 +662,21 @@
     display: block;
     height: 5px;
     border-radius: 999px;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--input-fill);
     overflow: hidden;
   }
   .meter-fill {
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #38bdf8, #818cf8);
+    background: rgb(var(--accent-rgb));
     transition: width 0.3s ease;
   }
   .meter-fill.warning {
-    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    background: #d29a4a;
   }
   .meter-fill.critical {
-    background: linear-gradient(90deg, #ef4444, #f87171);
+    background: var(--danger);
   }
 
   .card-footer {
@@ -696,13 +694,13 @@
   .pct-pill {
     padding: 1px 5px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--hover);
     font-size: 10.5px;
     font-weight: 600;
   }
   .pct-pill.alert {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    background: rgb(229 72 77 / 0.2);
+    color: #ffb4b0;
   }
 
   /* Folder card */
@@ -716,7 +714,7 @@
     padding: 9px 12px;
     border: 1px solid rgb(var(--accent-rgb) / 0.6);
     border-radius: 10px;
-    background: var(--selected, rgba(56, 189, 248, 0.12));
+    background: var(--selected);
     box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.2);
   }
   .folder-card-head {
@@ -741,13 +739,13 @@
     height: 20px;
     border-radius: 4px;
     border: none;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--hover);
     color: var(--text-2);
     cursor: pointer;
   }
   .folder-clear-btn:hover {
-    background: rgba(239, 68, 68, 0.25);
-    color: #ffffff;
+    background: rgb(229 72 77 / 0.25);
+    color: var(--text-1);
   }
   .folder-path {
     overflow: hidden;
@@ -795,8 +793,8 @@
     width: 28px;
     height: 28px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--chip-fill);
+    border: 1px solid var(--btn-border);
   }
   .crumb-list {
     display: flex;
@@ -836,13 +834,12 @@
     transition: background 0.15s, color 0.15s;
   }
   .crumb-pill:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--hover);
     color: var(--text-1);
   }
   .crumb-pill[aria-current="location"] {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
+    background: var(--selected);
+    color: var(--text-1);
     font-weight: 600;
   }
   .crumb-pill span {
@@ -876,8 +873,8 @@
     display: inline-flex;
     padding: 2px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--input-fill);
+    border: 1px solid var(--btn-border);
     gap: 2px;
   }
   .layout-toggle-btn {
@@ -899,7 +896,7 @@
   .layout-toggle-btn.active {
     background: var(--selected);
     color: var(--text-1);
-    box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--btn-sheen);
   }
 
   /* Flexible Split & Single-Pane Modes */

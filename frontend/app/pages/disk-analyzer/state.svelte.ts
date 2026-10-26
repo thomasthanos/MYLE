@@ -388,7 +388,7 @@ class DiskAnalyzerState {
       return;
     }
     await this.loadTreemap();
-    if (this.view === "types") void this.loadExtensions();
+    if (this.view === "types" || this.extensions) void this.loadExtensions();
   }
 
   /** One folder up. */

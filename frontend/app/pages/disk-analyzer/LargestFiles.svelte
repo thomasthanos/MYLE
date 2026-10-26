@@ -8,7 +8,8 @@
   import { contextActions } from "../../../lib/context-menu";
   import { formatSize, sizeOf, type FileView } from "./api";
   import { itemActions } from "./actions";
-  import { colorOf } from "./palette";
+  import { settings } from "../../../lib/settings.svelte";
+  import { categoryColor, categoryOf, extensionOf, type Category } from "./palette";
   import { visibleRange } from "./rows";
   import { diskState as d } from "./state.svelte";
 
@@ -49,76 +50,42 @@
 
   interface SmartFileInfo {
     tag: string;
-    tagColor: string;
+    /** Whose colour the badge takes. */
+    kind: Category;
     advice: string;
   }
 
+  /** What some well-known big files are, and whether they can go. */
   function classifyFile(name: string, path: string): SmartFileInfo | null {
     const lowerName = name.toLowerCase();
     const lowerPath = path.toLowerCase();
 
     if (lowerName === "pagefile.sys") {
-      return {
-        tag: "Windows Virtual RAM",
-        tagColor: "#3b82f6",
-        advice: "Αρχείο συστήματος (απαραίτητο)",
-      };
+      return { tag: "Windows virtual memory", kind: "system", advice: "Windows needs it" };
     }
     if (lowerName === "hiberfil.sys") {
-      return {
-        tag: "Windows Hibernation",
-        tagColor: "#f59e0b",
-        advice: "Αδρανοποίηση (powercfg -h off για διαγραφή)",
-      };
+      return { tag: "Windows hibernation", kind: "system", advice: "Goes away when hibernation is turned off (powercfg -h off)" };
     }
     if (lowerName === "swapfile.sys") {
-      return {
-        tag: "Windows App Swap",
-        tagColor: "#3b82f6",
-        advice: "Εικονική μνήμη εφαρμογών Windows",
-      };
+      return { tag: "Windows app swap", kind: "system", advice: "Windows needs it" };
     }
     if (lowerPath.includes("mobilesync\\backup")) {
-      return {
-        tag: "iPhone / iPad Backup",
-        tagColor: "#a855f7",
-        advice: "Τοπικό Apple Backup (ασφαλές για διαγραφή αν είναι παλιό)",
-      };
+      return { tag: "iPhone / iPad backup", kind: "archive", advice: "A local Apple backup: safe to remove if it is old" };
     }
     if (lowerPath.includes("bluestacks") || lowerName.endsWith(".vhdx") || lowerName.endsWith(".vmdk")) {
-      return {
-        tag: "Virtual Disk / Emulator",
-        tagColor: "#06b6d4",
-        advice: "Εικονικός δίσκος BlueStacks / VM",
-      };
+      return { tag: "Virtual disk", kind: "archive", advice: "The disk of an emulator or a virtual machine" };
     }
     if (lowerPath.includes("vortex\\downloads") || lowerPath.includes("modorganizer")) {
-      return {
-        tag: "Mod Installer Archive",
-        tagColor: "#10b981",
-        advice: "Αρχείο λήψης mod (διαγράφεται αν έχει ήδη εγκατασταθεί)",
-      };
+      return { tag: "Mod download", kind: "archive", advice: "Can go once the mod is installed" };
     }
     if (lowerPath.includes("riot games") || lowerPath.includes("steam") || lowerPath.includes("epic games")) {
-      return {
-        tag: "Game Asset",
-        tagColor: "#ec4899",
-        advice: "Αρχείο παιχνιδιού (απαραίτητο)",
-      };
+      return { tag: "Game file", kind: "app", advice: "The game needs it: uninstall the game instead" };
     }
     if (lowerPath.includes("content_cache") || lowerPath.includes("dxcache") || lowerPath.includes("\\temp\\")) {
-      return {
-        tag: "Cache / Temp",
-        tagColor: "#64748b",
-        advice: "Προσωρινό αρχείο cache (ασφαλές)",
-      };
+      return { tag: "Cache / temp", kind: "system", advice: "Temporary: safe to remove" };
     }
     if (lowerName.endsWith(".iso") || lowerName.endsWith(".img")) {
-      return {
-        tag: "Disk Image (ISO)",
-        tagColor: "#3b82f6",
-        advice: "Αρχείο εγκατάστασης ISO",
-      };
+      return { tag: "Disk image", kind: "archive", advice: "An installer or disk image" };
     }
     return null;
   }
@@ -180,15 +147,15 @@
         class="sort-btn"
         class:active={sortAsc}
         onclick={() => sortAsc = !sortAsc}
-        title={sortAsc ? "Εμφάνιση: Μικρά πρώτα (πάτησε για Μεγάλα πρώτα)" : "Εμφάνιση: Μεγάλα πρώτα (πάτησε για Μικρά πρώτα)"}
+        title={sortAsc ? "Smallest first (click for largest first)" : "Largest first (click for smallest first)"}
       >
         <ArrowUpDown size={13} />
-        <span>{sortAsc ? "Μικρά πρώτα" : "Μεγάλα πρώτα"}</span>
+        <span>{sortAsc ? "Smallest first" : "Largest first"}</span>
       </button>
 
       <!-- Quick Size Filters -->
       <div class="size-filters" role="group" aria-label="Size filter">
-        <button type="button" class="size-pill" class:active={sizeFilter === "all"} onclick={() => sizeFilter = "all"}>Όλα</button>
+        <button type="button" class="size-pill" class:active={sizeFilter === "all"} onclick={() => sizeFilter = "all"}>All</button>
         <button type="button" class="size-pill" class:active={sizeFilter === "huge"} onclick={() => sizeFilter = "huge"}>&gt; 5 GB</button>
         <button type="button" class="size-pill" class:active={sizeFilter === "large"} onclick={() => sizeFilter = "large"}>1–5 GB</button>
         <button type="button" class="size-pill" class:active={sizeFilter === "medium"} onclick={() => sizeFilter = "medium"}>&lt; 1 GB</button>
@@ -218,6 +185,7 @@
         {#each files.slice(range.first, range.last) as file, i (file.id)}
           {@const size = sizeOf(file, d.sizeMode)}
           {@const info = classifyFile(file.name, file.path)}
+          {@const color = categoryColor(categoryOf(extensionOf(file.name)), settings.dark)}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             class="row"
@@ -232,16 +200,14 @@
             onclick={(e) => d.select(file.id, e.ctrlKey || e.metaKey ? "toggle" : "only")}
             ondblclick={() => open(file)}
           >
-            <span class="swatch" style:background={colorOf(file.rank)}>
+            <span class="swatch" style:background={color}>
               {#if file.kind === "cloud"}<Cloud size={13} />{:else}<File size={13} />{/if}
             </span>
             <div class="text">
               <div class="name-line">
                 <span class="name">{file.name}</span>
                 {#if info}
-                  <span class="smart-badge" style:color={info.tagColor} style:border-color="{info.tagColor}40" style:background="{info.tagColor}18">
-                    {info.tag}
-                  </span>
+                  <span class="smart-badge" style:--tag={categoryColor(info.kind, settings.dark)}>{info.tag}</span>
                 {/if}
               </div>
               <span class="path">
@@ -309,7 +275,7 @@
   }
   .sort-btn.active {
     background: var(--selected);
-    border-color: rgba(59, 130, 246, 0.5);
+    border-color: rgb(var(--accent-rgb) / 0.4);
     color: var(--text-1);
   }
 
@@ -357,7 +323,7 @@
     padding: 0 12px;
     font-size: var(--fluid-xs);
     user-select: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgb(255 255 255 / 0.04);
     transition: background 0.1s;
   }
   .row:hover { background: var(--hover); }
@@ -370,7 +336,7 @@
     width: 24px;
     height: 24px;
     border-radius: 7px;
-    color: rgb(12 14 20 / 0.85);
+    color: rgb(255 255 255 / 0.9);
     flex-shrink: 0;
   }
 
@@ -396,11 +362,13 @@
     text-overflow: ellipsis;
   }
   .smart-badge {
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-    border: 1px solid;
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--tag) 45%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--tag) 16%, transparent);
+    color: color-mix(in srgb, var(--tag) 45%, var(--text-1));
+    font-size: 10.5px;
+    font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -413,12 +381,12 @@
     text-overflow: ellipsis;
   }
   .advice {
-    color: #e2e8f0;
+    color: var(--text-2);
     font-weight: 500;
   }
 
-  .bar { height: 6px; border-radius: 999px; background: rgb(255 255 255 / 0.05); overflow: hidden; }
-  .bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #38bdf8); }
+  .bar { height: 6px; border-radius: 999px; background: var(--hover); overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: inherit; background: rgb(var(--accent-rgb) / 0.75); }
   .size { justify-self: end; color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
 
   @container (max-width: 540px) {

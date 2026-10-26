@@ -44,7 +44,8 @@ const hooks = registerHooks({
   },
 });
 
-const { squarify, worstRatio, layoutTreemap, hitTest } = await import("../../frontend/app/pages/disk-analyzer/treemap.ts");
+const { squarify, worstRatio, layoutTreemap, hitTest, DEFAULT_LAYOUT } = await import("../../frontend/app/pages/disk-analyzer/treemap.ts");
+const { CATEGORIES, categoryOf, categoryColor, extensionOf } = await import("../../frontend/app/pages/disk-analyzer/palette.ts");
 const { flatten, visibleRange } = await import("../../frontend/app/pages/disk-analyzer/rows.ts");
 const { diskState: state, recycleQuestion, KEY } = await import("../../frontend/app/pages/disk-analyzer/state.svelte.ts");
 const { diskApi } = await import("../../frontend/app/pages/disk-analyzer/api.ts");
@@ -133,6 +134,51 @@ test("the nested layout keeps children inside their folder and the hit test find
   const tiny = layoutTreemap({ parent: [-1, 0, 0], size: [1000, 999, 1], kind: [0, 1, 1] }, 100, 100);
   assert.equal(tiny.rects[2 * 4 + 2], 0);
   assert.ok(!Array.from(tiny.order).includes(2));
+});
+
+test("tiles keep a gap between them and a frame from the edge", () => {
+  const sizes = [100, 30, 25, 20, 15, 10];
+  const data = { parent: [-1, 0, 0, 0, 0, 0], size: sizes, kind: [0, 1, 1, 1, 1, 1] };
+  const { gap, frame } = DEFAULT_LAYOUT;
+  const layout = layoutTreemap(data, 500, 300);
+  const rects = [1, 2, 3, 4, 5].map((i) => {
+    const [x, y, w, h] = layout.rects.subarray(i * 4, i * 4 + 4);
+    return { x, y, w, h };
+  });
+  for (const r of rects) {
+    assert.ok(r.w > 0, "drawn");
+    assert.ok(r.x >= frame + gap / 2 - EPS && r.y >= frame + gap / 2 - EPS, "clear of the top left edge");
+    assert.ok(r.x + r.w <= 500 - frame - gap / 2 + EPS && r.y + r.h <= 300 - frame - gap / 2 + EPS, "clear of the bottom right edge");
+  }
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i];
+      const b = rects[j];
+      const apart = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
+      assert.ok(apart >= gap - 1e-3, `${i + 1} and ${j + 1} are ${apart}px apart`);
+    }
+  }
+});
+
+test("each extension has one calm colour per kind, in both themes", () => {
+  assert.equal(categoryOf("MP4"), "video");
+  assert.equal(categoryOf("png"), "image");
+  assert.equal(categoryOf("flac"), "audio");
+  assert.equal(categoryOf("vhdx"), "archive");
+  assert.equal(categoryOf("pak"), "app");
+  assert.equal(categoryOf("pdf"), "document");
+  assert.equal(categoryOf("rs"), "code");
+  assert.equal(categoryOf("etl"), "system");
+  assert.equal(categoryOf("xyz123"), "other");
+  assert.equal(categoryOf(""), "other");
+  assert.equal(extensionOf("Movie.Part1.MKV"), "mkv");
+  assert.equal(extensionOf(".gitignore"), "", "a leading dot is not an extension");
+  assert.equal(extensionOf("README"), "");
+  for (const navy of [false, true]) {
+    const colors = CATEGORIES.map((c) => categoryColor(c.id, navy));
+    assert.ok(colors.every((c) => /^#[0-9a-f]{6}$/.test(c)), "hex colours");
+    assert.equal(new Set(colors).size, colors.length, "no two kinds share a colour");
+  }
 });
 
 test("rows follow what is open, with loading and 'smaller items' rows", () => {

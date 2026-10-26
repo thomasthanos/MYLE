@@ -5,7 +5,8 @@
 // space left, and a row is closed as soon as adding the next item would make
 // its worst aspect ratio worse. `layoutTreemap` nests it: each folder's
 // children share the folder's rectangle, less a thin frame and, when it is
-// big enough to label, a header strip.
+// big enough to label, a header strip, and every tile gives up a small gap so
+// the background shows between neighbours.
 
 export interface Rect {
   x: number;
@@ -111,8 +112,10 @@ export const FOLDER = 0;
 export const SMALLER = 4;
 
 export interface LayoutOptions {
-  /** The frame around a folder's children. */
+  /** The frame around a folder's children (and around the whole map). */
   frame: number;
+  /** The space between neighbouring tiles. */
+  gap: number;
   /** A folder's header strip, when the folder is at least `labelW` × `labelH`. */
   header: number;
   labelW: number;
@@ -121,7 +124,7 @@ export interface LayoutOptions {
   minSide: number;
 }
 
-export const DEFAULT_LAYOUT: LayoutOptions = { frame: 2, header: 17, labelW: 64, labelH: 40, minSide: 3 };
+export const DEFAULT_LAYOUT: LayoutOptions = { frame: 3, gap: 2, header: 20, labelW: 72, labelH: 44, minSide: 5 };
 
 export interface Layout {
   /** x, y, w, h for each payload index; w = 0 when it is not drawn. */
@@ -135,7 +138,7 @@ export interface Layout {
 }
 
 /** Nests the payload into `width` × `height`. Index 0, the folder shown,
- *  fills the whole area without a frame of its own. */
+ *  fills the whole area, with no header of its own. */
 export function layoutTreemap(data: TreeData, width: number, height: number, options: LayoutOptions = DEFAULT_LAYOUT): Layout {
   const count = data.parent.length;
   const rects = new Float32Array(count * 4);
@@ -158,7 +161,7 @@ export function layoutTreemap(data: TreeData, width: number, height: number, opt
     if (!kids.length) continue;
     let inner: Rect;
     if (i === 0) {
-      inner = { x, y, w, h };
+      inner = { x: x + options.frame, y: y + options.frame, w: w - options.frame * 2, h: h - options.frame * 2 };
     } else {
       // Don't draw a header strip if this folder has only 1 child and that child is also a folder.
       // That prevents cascades of 8 stacked headers for deep single-directory corridors.
@@ -172,10 +175,12 @@ export function layoutTreemap(data: TreeData, width: number, height: number, opt
       kids.map((k) => data.size[k]),
       inner,
     );
+    const half = options.gap / 2;
     kids.forEach((k, n) => {
       const r = placed[n];
-      if (r.w < options.minSide || r.h < options.minSide) return;
-      rects.set([r.x, r.y, r.w, r.h], k * 4);
+      const box = { x: r.x + half, y: r.y + half, w: r.w - options.gap, h: r.h - options.gap };
+      if (box.w < options.minSide || box.h < options.minSide) return;
+      rects.set([box.x, box.y, box.w, box.h], k * 4);
       depth[k] = depth[i] + 1;
       queue.push(k);
     });
