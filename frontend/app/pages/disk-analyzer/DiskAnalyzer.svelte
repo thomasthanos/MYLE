@@ -29,6 +29,7 @@
   import LargestFiles from "./LargestFiles.svelte";
   import { diskState as d, type View } from "./state.svelte";
   import Treemap from "./Treemap.svelte";
+  import CloudStorage from "./cloud-storage/CloudStorage.svelte";
 
   onMount(() => void d.load());
 
@@ -67,7 +68,7 @@
   function onKeydown(e: KeyboardEvent) {
     if (d.phase !== "ready" || e.defaultPrevented) return;
     const typing = e.target instanceof HTMLElement && e.target.closest("input, textarea, [contenteditable='true']");
-    if (typing || document.querySelector('[aria-modal="true"]')) return;
+    if (typing || document.querySelector('[aria-modal="true"]:not(dialog), dialog[open]')) return;
     if (e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) {
       e.preventDefault();
       d.zoomOut();
@@ -190,6 +191,8 @@
     </div>
   </footer>
 </section>
+
+<CloudStorage />
 
 {#if d.error && d.phase === "idle"}
   <div class="banner surface" role="alert"><CircleAlert size={18} /><span>{d.error}</span></div>

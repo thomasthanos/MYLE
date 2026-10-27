@@ -269,6 +269,7 @@ pub fn run() {
         .manage(passwords_state.clone())
         .manage(passwords_windows_state.clone())
         .manage(disk_analyzer_state.clone())
+        .manage(cloud::online_only::OnlineOnlyState::default())
         .setup({
             let cleanup = cleanup.clone();
             move |app| {
@@ -448,6 +449,11 @@ pub fn run() {
             disk_analyzer::disk_analyzer_path,
             disk_analyzer::disk_analyzer_reveal,
             disk_analyzer::disk_analyzer_delete,
+            cloud::online_only::cloud_storage_status,
+            cloud::online_only::cloud_storage_online_only,
+            cloud::online_only::cloud_storage_cancel,
+            cloud::online_only::cloud_storage_open_folder,
+            cloud::online_only::cloud_storage_open_help,
             debloat::debloat_status,
             debloat::debloat_restore_point,
             debloat::debloat_run,

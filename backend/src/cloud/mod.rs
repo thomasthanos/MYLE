@@ -5,6 +5,7 @@
 pub(crate) mod detection;
 pub(crate) mod launch;
 pub(crate) mod onedrive;
+pub(crate) mod online_only;
 
 use std::path::PathBuf;
 
