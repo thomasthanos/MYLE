@@ -273,9 +273,10 @@ class GameSavesState {
     this.tab = readJson(KEY.tab, this.tab, oneOf("pc", "backup"));
     this.filter = readJson(KEY.filter, this.filter, oneOf("all", "changed", "notBackedUp", "backedUp", "problems"));
   }
-  /** For the app's preload: the last saved list and its covers, without
-   *  running the engine, so the page opens on them (and the sidebar badge
-   *  counts changed saves from the start). Opening the page still checks. */
+  /** For the app's preload: the last saved list, without running the
+   *  engine, so the page opens on it (and the sidebar badge counts changed
+   *  saves from the start). Opening the page still checks. Its covers come
+   *  once the window is open (`loadCovers`). */
   async preload() {
     if (this.scanResult || this.#initialized) return;
     try {
@@ -287,7 +288,6 @@ class GameSavesState {
     } catch {
       return;
     }
-    await this.loadCovers();
   }
   /** Asks for the covers of the listed games not asked for yet. Quietly:
    *  a game without one keeps its monogram. */

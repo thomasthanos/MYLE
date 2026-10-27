@@ -21,6 +21,7 @@ mod taskbar;
 mod storage;
 mod tray;
 mod updater;
+mod webview_memory;
 mod webview_policy;
 mod whats_new;
 mod window_sizing;
@@ -48,9 +49,13 @@ pub fn run_disk_analyzer_helper() -> Option<i32> {
     disk_analyzer::run_elevated_helper_from_args()
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
-fn create_windows(app: &mut tauri::App) -> tauri::Result<()> {
+/// The splash alone: the main window follows once the splash is on screen
+/// (`splash_shown`), so the two web views don't compete for the first paint.
+fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     use tauri::window::Color;
 
     let data_dir = storage::webview_dir().map_err(std::io::Error::other)?;
@@ -69,9 +74,19 @@ fn create_windows(app: &mut tauri::App) -> tauri::Result<()> {
     .visible(false)
     .devtools(cfg!(debug_assertions))
     .background_color(Color(10, 12, 18, 255))
-    .data_directory(data_dir.clone())
+    .data_directory(data_dir)
     .build()?;
-    webview_policy::harden(&splash)?;
+    webview_policy::harden(&splash)
+}
+
+/// The main window, hidden until the hand-over. Once only.
+fn create_main(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::window::Color;
+
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+    let data_dir = storage::webview_dir().map_err(std::io::Error::other)?;
     let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("MYLE")
         .inner_size(1280.0, 720.0)
@@ -89,11 +104,38 @@ fn create_windows(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Called by the splash once the update check is done: sizes and shows the
-/// main window (preloaded while hidden), then removes the splash.
+/// The start hands over from the splash to the main window once both are
+/// ready: the splash's update check is done, and the main page has drawn.
+static SPLASH_DONE: AtomicBool = AtomicBool::new(false);
+static MAIN_READY: AtomicBool = AtomicBool::new(false);
+static HANDED_OVER: AtomicBool = AtomicBool::new(false);
+
+fn hand_over(app: &AppHandle) -> tauri::Result<()> {
+    if SPLASH_DONE.load(Ordering::SeqCst) && MAIN_READY.load(Ordering::SeqCst) && !HANDED_OVER.swap(true, Ordering::SeqCst) {
+        show_main(app)?;
+    }
+    Ok(())
+}
+
+/// Called by the splash once it is on screen: now the main window loads.
+/// Async: a window created from a sync command deadlocks on Windows.
+#[tauri::command]
+async fn splash_shown(app: AppHandle) -> Result<(), String> {
+    create_main(&app).map_err(|e| e.to_string())
+}
+
+/// Called by the splash once the update check is done.
 #[tauri::command]
 async fn finish_startup(app: AppHandle) -> Result<(), String> {
-    show_main(&app).map_err(|e| e.to_string())
+    SPLASH_DONE.store(true, Ordering::SeqCst);
+    hand_over(&app).map_err(|e| e.to_string())
+}
+
+/// Called by the main page once it has drawn.
+#[tauri::command]
+async fn main_ready(app: AppHandle) -> Result<(), String> {
+    MAIN_READY.store(true, Ordering::SeqCst);
+    hand_over(&app).map_err(|e| e.to_string())
 }
 
 /// The page to open on start: the Password Manager when the browser
@@ -188,6 +230,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
         let quietly = startup::launched_at_sign_in() && startup::start_minimized();
         if quietly && tray::keep_running() {
             let _ = tray::ensure(app);
+            webview_memory::set_low(&main, true);
         } else {
             main.show()?;
             if quietly {
@@ -201,6 +244,8 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
         // destroy() skips CloseRequested, which would otherwise quit the app.
         splash.destroy()?;
     }
+    // The page starts what waited for the window: winget, pictures, network.
+    let _ = app.emit("myle-shown", ());
     Ok(())
 }
 
@@ -273,7 +318,7 @@ pub fn run() {
         .setup({
             let cleanup = cleanup.clone();
             move |app| {
-                create_windows(app)?;
+                create_splash(app)?;
                 passwords::watch(app.handle().clone(), passwords_state.clone());
                 passwords::serve_browser(app.handle().clone(), passwords_state.clone());
                 passwords::start_windows_fill(app.handle().clone(), passwords_windows_state.clone());
@@ -306,10 +351,12 @@ pub fn run() {
                         if updater::is_checking() || updater::is_updating() {
                             continue;
                         }
+                        // The splash may not have got to splash_shown either.
+                        let _ = create_main(&handle);
                         let hidden = handle
                             .get_webview_window("main")
                             .is_some_and(|w| !w.is_visible().unwrap_or(false));
-                        if hidden {
+                        if hidden && !HANDED_OVER.swap(true, Ordering::SeqCst) {
                             let _ = show_main(&handle);
                         }
                         return;
@@ -319,6 +366,17 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // Out of sight (minimized), WebView2 keeps less in memory; back
+            // in use (restored, focused from the tray), as much as it needs.
+            if window.label() == "main"
+                && let Some(main) = window.app_handle().get_webview_window("main")
+            {
+                match event {
+                    WindowEvent::Resized(_) => webview_memory::set_low(&main, window.is_minimized().unwrap_or(false)),
+                    WindowEvent::Focused(true) => webview_memory::set_low(&main, false),
+                    _ => {}
+                }
+            }
             let WindowEvent::CloseRequested { api, .. } = event else {
                 return;
             };
@@ -332,12 +390,17 @@ pub fn run() {
                     api.prevent_close();
                     let _ = tray::ensure(window.app_handle());
                     let _ = window.hide();
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        webview_memory::set_low(&main, true);
+                    }
                 }
                 _ => {}
             }
         })
         .invoke_handler(owner_gate(tauri::generate_handler![
+            splash_shown,
             finish_startup,
+            main_ready,
             taskbar::taskbar_pin_offer,
             taskbar::taskbar_pin,
             taskbar::taskbar_pin_dismiss,

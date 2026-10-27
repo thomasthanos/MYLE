@@ -84,6 +84,9 @@ windows-future = "0.2"
 # `windows::core::implement`, whose code names this crate. It is already in
 # the build (the `windows` crate is made of it), so nothing new is compiled.
 windows-core = "0.61"
+# The main window's memory target while it is out of sight. Tauri's own
+# WebView2 bindings, already in the build: the version must stay Tauri's.
+webview2-com = "0.38"
 # Project Backups: CRC-32 of every zipped file, Unicode file names compared
 # alike however they were written (NFC), and the side-by-side text diff.
 crc32fast = "1"

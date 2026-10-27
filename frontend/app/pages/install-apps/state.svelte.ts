@@ -7,6 +7,7 @@ import { SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../lib/confirm.svelte";
 import { nav } from "../../../lib/nav.svelte";
 import { operationGate } from "../../../lib/operation-gate.svelte";
+import { whenShown } from "../../../lib/startup";
 import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { api, type JobEvent, type JobOutcome, type Mode, type PackageLinks, type Stage } from "./api";
@@ -243,6 +244,8 @@ class InstallAppsState {
       }
     }
     this.#watchFocus();
+    // winget is the heaviest part of the start: it waits for the window to open.
+    await whenShown();
     if (Date.now() - this.#lastCheck > RECHECK_AFTER_MS) await this.checkInstalled();
   }
   /** Re-reads installed apps when the user comes back to the window. */

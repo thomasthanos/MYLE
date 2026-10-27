@@ -84,8 +84,9 @@ class SpotifyHubState {
   progressOf(action: SpotifyHubAction): number | null {
     return this.activeAction === action ? (this.activeJob?.progress ?? null) : null;
   }
-  /** `force` after an action; a plain page visit reuses a fresh detection. */
-  async load(force = false) {
+  /** `force` after an action; a plain page visit reuses a fresh detection.
+   *  The app's preload leaves the online update check for later. */
+  async load(force = false, { checkUpdates = true } = {}) {
     if (!isTauri() || this.loading) return;
     if (!force && this.snapshot && !this.error && Date.now() - this.#loadedAt < FRESH_MS) return;
     this.loading = true;
@@ -99,7 +100,7 @@ class SpotifyHubState {
     } finally {
       this.loading = false;
     }
-    if (this.snapshot && !this.error && !this.ownBusy) await this.checkUpdates();
+    if (checkUpdates && this.snapshot && !this.error && !this.ownBusy) await this.checkUpdates();
   }
   async checkUpdates() {
     if (!isTauri() || this.locked || this.checkingUpdates || !this.snapshot?.spicetify.healthy) return;

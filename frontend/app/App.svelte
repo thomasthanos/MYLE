@@ -15,6 +15,7 @@
   import { account } from "./account/account.svelte";
   import { gameSavesState } from "./pages/game-saves/state.svelte";
   import { passwords, type WindowsTarget } from "./pages/password-manager/state.svelte";
+  import { mainReady } from "../lib/startup";
   import { preloadApp } from "./preload";
   import ContentArea from "./shell/ContentArea.svelte";
   import Sidebar from "./shell/Sidebar.svelte";
@@ -37,7 +38,9 @@
     // Restores the signed-in account and syncs settings with it.
     void account.init();
     if (!isTauri()) return;
-    // Every page's data and pictures, while the splash shows.
+    // Drawn: the window can open as soon as the splash is done.
+    mainReady();
+    // Every page's data while the splash shows; pictures and the rest once open.
     void preloadApp();
     // The notes of the versions an update brought, once per version.
     void whatsNew.checkAfterStart();

@@ -7,11 +7,15 @@
 //! date is not the one the backup recorded, or it was written after the
 //! backup started. A file that can't be read is counted apart, never as
 //! changed nor as the same. A false "No changes" is the one answer that must
-//! never be given, so anything unsure is read.
+//! never be given, so anything unsure is read. A CRC read earlier is used
+//! again only while the file keeps the size and date it had then (see
+//! `crc_remembered`), as git's index does.
 //!
 //! Detection runs in the background for the whole app, page open or not: a
-//! watcher on the project folders checks a project a few seconds after its
-//! last write, and every project is checked every few minutes (a missed
+//! watcher on the project folders checks a project once it has been quiet for
+//! a few seconds (a folder written to all the time: every minute and a half,
+//! as a check walks the whole folder), and every project is checked every
+//! few minutes (a missed
 //! event, a folder on a network or removable drive, which is never watched).
 //! The latest answers are kept here for the page and sent to it.
 
@@ -136,6 +140,41 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// CRCs read before, by file, while the file keeps its size and date. A
+/// project being edited is checked every few seconds: without these, every
+/// file whose date differs from the backup's was read again each time.
+static CRCS: LazyLock<Mutex<HashMap<PathBuf, KnownCrc>>> = LazyLock::new(Default::default);
+/// A file's size and date when its CRC was read, and the CRC.
+type KnownCrc = (u64, SystemTime, u32);
+/// At most this many are kept (about 100 bytes each); then they start over.
+const CRCS_KEPT: usize = 200_000;
+
+/// The CRC of a file of this size and date: remembered from an earlier read
+/// when neither changed since. A read is remembered only when the file kept
+/// its size and date through it, and its date is well before the read: a
+/// second write in the same moment could leave the date as it was.
+fn crc_remembered(path: &Path, size: u64, modified: Option<SystemTime>) -> Option<u32> {
+    let Some(modified) = modified else {
+        return crc_of(path);
+    };
+    if let Some(&(known_size, known_date, crc)) = lock(&CRCS).get(path)
+        && (known_size, known_date) == (size, modified)
+    {
+        return Some(crc);
+    }
+    let read_at = SystemTime::now();
+    let crc = crc_of(path)?;
+    let unchanged = std::fs::metadata(path).is_ok_and(|meta| meta.len() == size && meta.modified().ok() == Some(modified));
+    if unchanged && read_at.duration_since(modified).is_ok_and(|age| age > MARGIN) {
+        let mut crcs = lock(&CRCS);
+        if crcs.len() >= CRCS_KEPT {
+            crcs.clear();
+        }
+        crcs.insert(path.to_path_buf(), (size, modified, crc));
+    }
+    Some(crc)
+}
+
 pub(crate) fn crc_of(path: &Path) -> Option<u32> {
     let mut file = File::open(path).ok()?;
     let mut hasher = crc32fast::Hasher::new();
@@ -154,7 +193,11 @@ pub(crate) fn crc_of(path: &Path) -> Option<u32> {
 fn backup_crc(side: &Side, info: &FileInfo) -> Option<u32> {
     match side {
         Side::Zip(_) => info.crc,
-        Side::Folder(root) => crc_of(&root.join(&info.stored)),
+        Side::Folder(root) => {
+            let path = root.join(&info.stored);
+            let meta = std::fs::metadata(&path).ok()?;
+            crc_remembered(&path, meta.len(), meta.modified().ok())
+        }
     }
 }
 
@@ -467,7 +510,7 @@ fn compare_files(
                 if before.size != now.size {
                     Some(("modified", Some(now.size)))
                 } else if may_differ(before, now.modified, reference) {
-                    match crc_of(&now.abs) {
+                    match crc_remembered(&now.abs, now.size, now.modified) {
                         None => {
                             result.unreadable += 1;
                             None
@@ -527,9 +570,11 @@ pub const RESULTS_EVENT: &str = "project-backups-changes";
 /// Every project is checked this often, events or not.
 const CHECK_ALL_EVERY: Duration = Duration::from_secs(5 * 60);
 /// A project is checked this long after its last write…
-const QUIET_FOR: Duration = Duration::from_secs(3);
-/// …but no later than this after the first one (a log written every second).
-const AT_MOST: Duration = Duration::from_secs(30);
+const QUIET_FOR: Duration = Duration::from_secs(10);
+/// …but no later than this after the first one (a log written every few
+/// seconds). A check walks the whole folder and reads its ignore files: a
+/// large project costs seconds of CPU each time.
+const AT_MOST: Duration = Duration::from_secs(90);
 /// While a backup runs, checks wait (they would read what it writes).
 const BUSY_WAIT: Duration = Duration::from_secs(2);
 const STARTUP_DELAY: Duration = Duration::from_secs(5);
@@ -802,6 +847,33 @@ mod tests {
     use crate::project_backups::archive::tests::{Quiet, temp};
     use crate::project_backups::compare::tests::make_zip;
     use crate::project_backups::engine::{BackupRequest, backup_project};
+
+    #[test]
+    #[ignore = "reads this PC's projects and their backups; changes nothing"]
+    fn this_pc_s_projects_check_time() {
+        let settings = store::load().unwrap();
+        let skip = skip_dirs(&settings);
+        for project in &settings.projects {
+            let source = PathBuf::from(&project.source_path);
+            let Ok(rules) = Rules::compile(&settings.rule_input(Some(project)), Some(&source)) else { continue };
+            let at = Instant::now();
+            let files = walk::walk(&source, &rules, &skip, &|| false).map(|walk| walk.files.len()).unwrap_or(0);
+            let walked = at.elapsed();
+            let at = Instant::now();
+            let backups = backups_folder(&settings, project).ok().flatten().map(|dir| latest_full(&dir, &project.app_name).map(|latest| latest.map(|(entry, _)| entry.name)));
+            let listed = at.elapsed();
+            let at = Instant::now();
+            let first = check_with(&settings, project, &skip, true);
+            let checked = at.elapsed();
+            let at = Instant::now();
+            check_with(&settings, project, &skip, true);
+            let again = at.elapsed();
+            println!(
+                "{}: {files} files · walk {walked:?} · backups {listed:?} ({backups:?}) · check {checked:?} · again {again:?} · {:?} +{} ~{} -{}",
+                project.app_name, first.state, first.added, first.modified, first.deleted
+            );
+        }
+    }
     use std::fs;
 
     struct Scene {
@@ -870,6 +942,28 @@ mod tests {
 
     fn set_modified(path: &Path, at: SystemTime) {
         File::options().write(true).open(path).unwrap().set_modified(at).unwrap();
+    }
+
+    #[test]
+    fn a_crc_is_used_again_only_while_the_file_keeps_its_size_and_date() {
+        let dir = temp("crc-remembered");
+        let path = dir.join("a.txt");
+        std::fs::write(&path, b"first").unwrap();
+        let old = SystemTime::now() - Duration::from_secs(60);
+        set_modified(&path, old);
+        assert_eq!(crc_remembered(&path, 5, Some(old)), Some(crc32fast::hash(b"first")));
+        assert!(lock(&CRCS).contains_key(&path), "an old, settled file is remembered");
+        // Rewritten with the same size: its new date means a new read.
+        std::fs::write(&path, b"other").unwrap();
+        let newer = SystemTime::now() - Duration::from_secs(30);
+        set_modified(&path, newer);
+        assert_eq!(crc_remembered(&path, 5, Some(newer)), Some(crc32fast::hash(b"other")));
+        // Written just now: read every time, never remembered.
+        std::fs::write(&path, b"third").unwrap();
+        let now = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(crc_remembered(&path, 5, Some(now)), Some(crc32fast::hash(b"third")));
+        assert_ne!(lock(&CRCS)[&path].1, now);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1070,7 +1164,7 @@ mod tests {
         assert!(!debouncer.due(start + Duration::from_secs(2)));
         assert!(debouncer.due(start + QUIET_FOR));
         // Writes every second keep it waiting, up to the limit.
-        for second in 1..40 {
+        for second in 1..AT_MOST.as_secs() + 10 {
             debouncer.touch(start + Duration::from_secs(second), "a");
         }
         assert_eq!(debouncer.due_at(), Some(start + AT_MOST));

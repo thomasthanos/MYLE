@@ -10,19 +10,17 @@
     finishStartup,
     formatBytes,
     installUpdate,
+    splashShown,
     type DownloadEvent,
     type UpdateAsset,
   } from "../lib/updater";
   import SplashLogo from "./SplashLogo.svelte";
 
-  /** Keep the splash up long enough to read, even when the check is instant. */
-  const MIN_VISIBLE_MS = 1100;
-  /** After an update the previous version was on screen until now. */
+  /** After an update the previous version was on screen until now: long
+   *  enough to read "Updated to …". Otherwise the app opens as soon as it can. */
   const JUST_UPDATED_MS = 700;
   /** How long an error stays on screen before the app starts anyway. */
   const ERROR_HOLD_MS = 2200;
-  /** Time for the bar to fill and the logo to pop before the app opens. */
-  const DONE_MS = 380;
   /** How often the byte count and speed are redrawn; faster is unreadable. */
   const META_EVERY_MS = 250;
   /** Window over which the download speed is measured. */
@@ -66,8 +64,11 @@
       }
       return;
     }
-    // Show the window only after the first frame is painted (no blank flash).
-    requestAnimationFrame(() => requestAnimationFrame(() => void getCurrentWindow().show()));
+    // Show the window only after the first frame is painted (no blank flash),
+    // and only then let the main window load, so the two don't compete.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => void getCurrentWindow().show().finally(() => void splashShown())),
+    );
     void getVersion().then((v) => (version = v));
     void run();
   });
@@ -93,11 +94,9 @@
     percent = null;
     transfer = "";
     rate = "";
-    const elapsed = performance.now() - startedAt;
     // Just updated: the previous version was on screen until now, so only
     // long enough to read the line.
-    const minimum = justUpdated ? JUST_UPDATED_MS : MIN_VISIBLE_MS;
-    await sleep(Math.max(minimum - elapsed, DONE_MS));
+    if (justUpdated) await sleep(Math.max(JUST_UPDATED_MS - (performance.now() - startedAt), 0));
     await updater.finishStartup();
   }
 

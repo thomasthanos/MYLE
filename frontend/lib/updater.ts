@@ -38,7 +38,13 @@ export function installUpdate(asset: UpdateAsset, onEvent: (e: DownloadEvent) =>
   return invoke<void>("install_update", { asset, onEvent: channel });
 }
 
-/** Sizes and shows the main window, then closes the splash. */
+/** The splash is on screen: the main window starts loading behind it. */
+export function splashShown(): Promise<void> {
+  return invoke<void>("splash_shown");
+}
+
+/** The update check is done: the main window opens as soon as it has drawn,
+ *  then the splash closes. */
 export function finishStartup(): Promise<void> {
   return invoke<void>("finish_startup");
 }

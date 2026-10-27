@@ -4,7 +4,13 @@
 // Pages still load as before when opened (this only gets there first), and
 // nothing slow or with side effects runs here: no scans, no winget, no
 // sync, no measuring the System Cleaner's folders.
+//
+// Two rounds: what matters for a page's first look (its data, and the icons
+// of the page the app opens on) while the splash shows; the rest (other
+// pages' pictures, covers, Spotify's update check online) once the window
+// is open, so it never holds the opening up.
 import { isTauri } from "@tauri-apps/api/core";
+import { whenShown } from "../lib/startup";
 import { creativeState } from "./pages/creative-hub/state.svelte";
 import { gameSavesState } from "./pages/game-saves/state.svelte";
 import { iconSources } from "./pages/install-apps/icons";
@@ -54,15 +60,17 @@ async function step(name: string, work: () => Promise<unknown>) {
 export async function preloadApp() {
   if (started || !isTauri()) return;
   started = true;
-  // Install Apps: every curated app's icon (each a small file shipped with the app).
+  // While the splash shows: each page's data, and the first page's icons.
   await step("Install Apps icons", () => warmAll(appsState.curated.map((app) => iconSources(app)[0])));
   await step("Game Saves", () => gameSavesState.preload());
   await step("Windows Optimization", () => Promise.all([debloat.load(), windowsOptimizationState.load()]));
-  await step("Windows Optimization icons", () => warmAll(["/icons/Windows-AutoLogon.svg", "/icons/Restart-to-BIOS.svg"]));
-  await step("Creative Suite", async () => {
-    await creativeState.load();
-    await warmAll(creativeState.apps.map((app) => app.icon));
-  });
-  await step("Spotify Hub", () => spotifyHubState.load());
+  await step("Creative Suite", () => creativeState.load());
+  await step("Spotify Hub", () => spotifyHubState.load(false, { checkUpdates: false }));
   await step("System Maintenance", () => maintenanceState.load());
+  // Once the window is open: pictures of other pages and online checks.
+  await whenShown();
+  await step("Game Saves covers", () => gameSavesState.loadCovers());
+  await step("Windows Optimization icons", () => warmAll(["/icons/Windows-AutoLogon.svg", "/icons/Restart-to-BIOS.svg"]));
+  await step("Creative Suite icons", () => warmAll(creativeState.apps.map((app) => app.icon)));
+  await step("Spotify Hub updates", () => spotifyHubState.checkUpdates());
 }
