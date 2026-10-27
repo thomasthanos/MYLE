@@ -129,15 +129,34 @@ export interface ExtStat {
   rank: number;
 }
 
-export type DeleteEvent = { event: "progress"; data: { done: number; total: number; current: string } };
+export interface DeleteProgress {
+  done: number;
+  total: number;
+  current: string;
+  /** Windows work estimates, not file or byte counts. Absent while preparing. */
+  workDone?: number | null;
+  workTotal?: number | null;
+}
+
+export type DeleteEvent = { event: "progress"; data: DeleteProgress };
+
+/** Include work inside the current folder, rather than waiting for it to vanish. */
+export function deletionShare(progress: DeleteProgress | null): number | null {
+  if (!progress || progress.total <= 0 || !progress.workTotal || progress.workTotal <= 0 || progress.workDone == null) return null;
+  const within = Math.max(0, Math.min(1, progress.workDone / progress.workTotal));
+  return Math.max(0, Math.min(1, (progress.done + within) / progress.total));
+}
 
 export interface Skipped {
+  id: number;
   path: string;
   reason: string;
+  canDeletePermanently: boolean;
 }
 
 export interface DeleteOutcome {
   recycled: number;
+  deleted: number;
   ids: number[];
   /** Size on disk given back. */
   freedBytes: number;
@@ -172,6 +191,8 @@ export const diskApi = {
   reveal: (scanId: number, nodeId: number) => invoke<void>("disk_analyzer_reveal", { scanId, nodeId }),
   recycle: (scanId: number, nodeIds: number[], onEvent: (e: DeleteEvent) => void) =>
     invoke<DeleteOutcome>("disk_analyzer_delete", { scanId, nodeIds, onEvent: channel(onEvent) }),
+  deletePermanently: (scanId: number, nodeIds: number[], onEvent: (e: DeleteEvent) => void) =>
+    invoke<DeleteOutcome>("disk_analyzer_delete_permanently", { scanId, nodeIds, onEvent: channel(onEvent) }),
 };
 
 /** The size a view counts, by the size mode. */

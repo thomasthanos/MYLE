@@ -413,7 +413,9 @@ fn finish_scan(
 /// The drive's letter, when `root` is a whole fixed NTFS drive.
 fn fast_drive(root: &Path) -> Option<char> {
     let parts = protect::parts(root);
-    let [only] = parts.as_slice() else { return None };
+    let [only] = parts.as_slice() else {
+        return None;
+    };
     let mut chars = only.strip_suffix(':')?.chars();
     let letter = chars.next()?.to_ascii_uppercase();
     if chars.next().is_some() || !letter.is_ascii_uppercase() {
@@ -540,11 +542,7 @@ pub async fn disk_analyzer_children(
             Ok(Children {
                 items: page.ids.iter().map(|&id| view(tree, guard, id)).collect(),
                 total: page.total,
-                rest: (page.rest_count > 0).then_some(Rest {
-                    count: page.rest_count,
-                    size: page.rest_size,
-                    alloc: page.rest_alloc,
-                }),
+                rest: (page.rest_count > 0).then_some(Rest { count: page.rest_count, size: page.rest_size, alloc: page.rest_alloc }),
             })
         })
     })
@@ -553,11 +551,7 @@ pub async fn disk_analyzer_children(
 
 /// The current details of some items (for the Recycle Bin confirmation).
 #[tauri::command]
-pub async fn disk_analyzer_nodes(
-    state: State<'_, DiskAnalyzerState>,
-    scan_id: u64,
-    node_ids: Vec<u32>,
-) -> Result<Vec<NodeView>, String> {
+pub async fn disk_analyzer_nodes(state: State<'_, DiskAnalyzerState>, scan_id: u64, node_ids: Vec<u32>) -> Result<Vec<NodeView>, String> {
     if node_ids.len() > MAX_IDS {
         return Err("Too many items at once.".into());
     }
@@ -567,12 +561,7 @@ pub async fn disk_analyzer_nodes(
         // answers the question asked before anything moves.
         let root = state.with(scan_id, |tree, _| Ok(tree.root.clone()))?;
         let guard = Guard::for_this_pc(&root);
-        state.with(scan_id, |tree, _| {
-            node_ids
-                .iter()
-                .map(|&id| tree.check(scan_id, id).map(|()| view(tree, &guard, id)))
-                .collect()
-        })
+        state.with(scan_id, |tree, _| node_ids.iter().map(|&id| tree.check(scan_id, id).map(|()| view(tree, &guard, id))).collect())
     })
     .await
 }
@@ -721,25 +710,42 @@ pub async fn disk_analyzer_reveal(state: State<'_, DiskAnalyzerState>, scan_id: 
 }
 
 // ---------------------------------------------------------------------------
-// Recycle Bin
+// Deletion: Recycle Bin by default; permanent deletion is a separate command.
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum DeleteEvent {
-    Progress { done: usize, total: usize, current: String },
+    Progress {
+        done: usize,
+        total: usize,
+        current: String,
+        #[serde(rename = "workDone")]
+        work_done: Option<u32>,
+        #[serde(rename = "workTotal")]
+        work_total: Option<u32>,
+    },
+}
+
+impl DeleteEvent {
+    fn progress(done: usize, total: usize, current: String, work: Option<(u32, u32)>) -> Self {
+        Self::Progress { done, total, current, work_total: work.map(|(total, _)| total), work_done: work.map(|(_, done)| done) }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skipped {
+    id: u32,
     path: String,
     reason: String,
+    can_delete_permanently: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteOutcome {
     recycled: u32,
+    deleted: u32,
     /// The ids that went.
     ids: Vec<u32>,
     /// Size on disk given back.
@@ -765,6 +771,30 @@ pub async fn disk_analyzer_delete(
     scan_id: u64,
     node_ids: Vec<u32>,
     on_event: Channel<DeleteEvent>,
+) -> Result<DeleteOutcome, String> {
+    remove_items(state, jobs, scan_id, node_ids, on_event, delete::Mode::Recycle).await
+}
+
+/// A distinct action, offered only after the bin refuses an item and after a
+/// second confirmation. It keeps all of the usual protection and path checks.
+#[tauri::command]
+pub async fn disk_analyzer_delete_permanently(
+    state: State<'_, DiskAnalyzerState>,
+    jobs: State<'_, Jobs>,
+    scan_id: u64,
+    node_ids: Vec<u32>,
+    on_event: Channel<DeleteEvent>,
+) -> Result<DeleteOutcome, String> {
+    remove_items(state, jobs, scan_id, node_ids, on_event, delete::Mode::Permanent).await
+}
+
+async fn remove_items(
+    state: State<'_, DiskAnalyzerState>,
+    jobs: State<'_, Jobs>,
+    scan_id: u64,
+    node_ids: Vec<u32>,
+    on_event: Channel<DeleteEvent>,
+    mode: delete::Mode,
 ) -> Result<DeleteOutcome, String> {
     if node_ids.is_empty() {
         return Err("Nothing is selected.".into());
@@ -809,20 +839,40 @@ pub async fn disk_analyzer_delete(
         let mut recycled = Vec::new();
         let mut skipped = Vec::new();
         for (done, target) in targets.iter().enumerate() {
-            let _ = on_event.send(DeleteEvent::Progress {
-                done,
-                total,
-                current: target.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            let current = target.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let _ = on_event.send(DeleteEvent::progress(done, total, current.clone(), None));
+            let events = on_event.clone();
+            let working_on = current.clone();
+            let last_update = Mutex::new(Instant::now());
+            let progress: delete::OnProgress = Arc::new(move |work_total, work_done| {
+                // Large folders can emit thousands of updates. Keep the UI
+                // responsive without filling its channel with every callback.
+                let mut last = last_update.lock().unwrap_or_else(|e| e.into_inner());
+                if last.elapsed() < Duration::from_millis(100) {
+                    return;
+                }
+                *last = Instant::now();
+                drop(last);
+                let _ = events.send(DeleteEvent::progress(done, total, working_on.clone(), Some((work_total, work_done))));
             });
             let result = if target.link {
                 Err(delete::LINK.to_string())
             } else {
-                delete::recheck(&target.path, target.is_dir, &root, &guard).and_then(|()| delete::recycle(&target.path))
+                delete::recheck(&target.path, target.is_dir, &root, &guard).and_then(|()| match mode {
+                    delete::Mode::Recycle => delete::recycle(&target.path, Some(progress)),
+                    delete::Mode::Permanent => delete::permanently_delete(&target.path, Some(progress)),
+                })
             };
             match result {
                 Ok(()) => recycled.push(target.id),
-                Err(reason) => skipped.push(Skipped { path: target.path.display().to_string(), reason }),
+                Err(reason) => skipped.push(Skipped {
+                    id: target.id,
+                    path: target.path.display().to_string(),
+                    can_delete_permanently: mode == delete::Mode::Recycle && reason == delete::NO_BIN,
+                    reason,
+                }),
             }
+            let _ = on_event.send(DeleteEvent::progress(done, total, current, Some((1, 1))));
         }
         let (mut freed_size, mut freed_bytes) = (0u64, 0u64);
         // The results move on with what really went, if they are still this scan's.
@@ -834,7 +884,15 @@ pub async fn disk_analyzer_delete(
             }
             Ok(())
         });
-        Ok(DeleteOutcome { recycled: recycled.len() as u32, ids: recycled, freed_bytes, freed_size, skipped })
+        let count = recycled.len() as u32;
+        Ok(DeleteOutcome {
+            recycled: if mode == delete::Mode::Recycle { count } else { 0 },
+            deleted: if mode == delete::Mode::Permanent { count } else { 0 },
+            ids: recycled,
+            freed_bytes,
+            freed_size,
+            skipped,
+        })
     })
     .await
 }
@@ -892,6 +950,9 @@ mod tests {
         assert_eq!(progress["event"], "progress");
         assert_eq!(progress["data"]["files"], 1);
         assert_eq!(progress["data"]["phase"], serde_json::Value::Null);
+        let deleting = serde_json::to_value(DeleteEvent::progress(0, 1, "Backup".into(), Some((100, 37)))).unwrap();
+        assert_eq!(deleting["data"]["workTotal"], 100);
+        assert_eq!(deleting["data"]["workDone"], 37);
         let reading = serde_json::to_value(ScanEvent::progress(&scan::Progress::default(), Some("table"))).unwrap();
         assert_eq!(reading["data"]["phase"], "table");
         assert_eq!(serde_json::to_value(ScanEvent::Cancelled).unwrap()["event"], "cancelled");

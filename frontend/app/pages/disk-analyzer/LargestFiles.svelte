@@ -220,7 +220,7 @@
             <span class="bar" aria-hidden="true">
               <span style:width="{largest ? (size / largest) * 100 : 0}%"></span>
             </span>
-            <span class="size">{formatSize(size)}</span>
+            <span class="size" title="Size: {formatSize(file.size)} · On disk: {formatSize(file.alloc)}">{formatSize(size)}</span>
           </div>
         {/each}
       </div>

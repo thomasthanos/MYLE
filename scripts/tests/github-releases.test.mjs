@@ -34,8 +34,46 @@ const hooks = registerHooks({
     return { format: "module", source: compileModule(source, { filename: fileURLToPath(url), generate: "client" }).js.code, shortCircuit: true };
   },
 });
-const { ReleaseSession, failureKey } = await import("../../frontend/app/pages/github-releases/state.svelte.ts");
+const { ReleaseSession, failureKey, githubReleases } = await import("../../frontend/app/pages/github-releases/state.svelte.ts");
+const { githubReleasesApi } = await import("../../frontend/app/pages/github-releases/api.ts");
+const { onStorageChange } = await import("../../frontend/lib/storage.ts");
 hooks.deregister();
+
+test("adding and removing project paths notify account sync only after persistence succeeds", async () => {
+  const original = { addRepos: githubReleasesApi.addRepos, removeRepo: githubReleasesApi.removeRepo, refresh: githubReleases.refresh };
+  const changes = []; onStorageChange(key => changes.push(key));
+  githubReleases.refresh = async () => {};
+  githubReleases.page = { repos: [], account: null, git: null, gh: null, ai: { providers: [], order: [] }, gbrImport: null };
+  githubReleasesApi.addRepos = async () => ({ ...githubReleases.page, repos: [{ id: "repo", name: "One", path: "C:/Code/One", exists: true }] });
+  githubReleasesApi.removeRepo = async () => ({ ...githubReleases.page, repos: [] });
+  try {
+    await githubReleases.addRepos(["C:/Code/One"]);
+    await githubReleases.removeRepo("repo");
+    assert.equal(changes.filter(key => key === "githubReleases.projects").length, 2);
+    githubReleasesApi.addRepos = async () => { throw new Error("Not saved"); };
+    await assert.rejects(githubReleases.addRepos(["C:/Code/Two"]), /Not saved/);
+    assert.equal(changes.filter(key => key === "githubReleases.projects").length, 2);
+  } finally {
+    Object.assign(githubReleasesApi, { addRepos: original.addRepos, removeRepo: original.removeRepo });
+    githubReleases.refresh = original.refresh;
+    onStorageChange(() => {});
+  }
+});
+
+test("an older page-load reply cannot overwrite project paths restored while loading", async () => {
+  const original = githubReleasesApi.getState;
+  let reply;
+  githubReleasesApi.getState = () => new Promise(resolve => { reply = resolve; });
+  const page = { repos: [], account: null, git: "git", gh: "gh", ai: { providers: [], order: [] }, gbrImport: null };
+  try {
+    const initializing = githubReleases.init();
+    await githubReleases.applySyncedProjects(page);
+    reply({ ...page, repos: [{ id: "stale", path: "C:/Old", name: "Old", exists: true }] });
+    await initializing;
+    assert.deepEqual(githubReleases.repos, []);
+    assert.equal(githubReleases.page.git, "git");
+  } finally { githubReleasesApi.getState = original; }
+});
 
 test("a later failure report adds to the failures shown and never wipes them", () => {
   const session = new ReleaseSession();

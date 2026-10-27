@@ -13,6 +13,7 @@
 //!   Supabase about the signed-in user, never for anything the page says.
 
 mod oauth;
+mod settings_sync;
 pub(crate) mod owner;
 pub(crate) mod vault;
 
@@ -20,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Notify;
 
@@ -330,7 +331,7 @@ pub async fn account_pull(
 ) -> Result<Option<Value>, String> {
     let session = fresh_session(&app, &state).await?;
     let row = read_row(&session).await?;
-    Ok(row.and_then(|data| data.get(DATA_KEY).cloned()))
+    Ok(row.and_then(settings_sync::read))
 }
 
 /// Saves this app's settings to the cloud, keeping the rest of the row.
@@ -344,11 +345,7 @@ pub async fn account_push(
         return Err("Settings must be an object.".into());
     }
     let session = fresh_session(&app, &state).await?;
-    let mut data = match read_row(&session).await? {
-        Some(Value::Object(map)) => map,
-        _ => Map::new(),
-    };
-    data.insert(DATA_KEY.into(), settings);
+    let data = settings_sync::write(read_row(&session).await?, settings)?;
     let body = serde_json::json!({
         "user_id": session.profile.id,
         "data": data,

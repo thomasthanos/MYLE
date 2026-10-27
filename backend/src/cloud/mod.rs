@@ -3,9 +3,11 @@
 //! Project Backups; no cloud API or account is ever used.
 
 pub(crate) mod detection;
+mod google_drive;
 pub(crate) mod launch;
 pub(crate) mod onedrive;
 pub(crate) mod online_only;
+mod sync_roots;
 
 use std::path::PathBuf;
 

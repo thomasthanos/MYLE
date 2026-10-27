@@ -76,6 +76,14 @@ impl GithubReleasesState {
             cancel.store(true, Ordering::Relaxed);
         }
     }
+
+    pub(crate) fn with_idle<T>(&self, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let active = self.lock();
+        if !active.is_empty() { return Err("Wait for the running GitHub project operation to finish, then sync again.".into()); }
+        let result = action();
+        drop(active);
+        result
+    }
 }
 
 impl Running {
@@ -94,6 +102,18 @@ impl Drop for Running {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_sync_waits_for_active_work_without_cancelling_it() {
+        let state = GithubReleasesState::default();
+        let running = state.begin("repo", Job::Build).unwrap();
+        let mut edited = false;
+        assert!(state.with_idle(|| { edited = true; Ok(()) }).is_err());
+        assert!(!edited);
+        assert!(!running.cancelled());
+        drop(running);
+        assert_eq!(state.with_idle(|| Ok(7)).unwrap(), 7);
+    }
 
     #[test]
     fn one_job_per_repository() {

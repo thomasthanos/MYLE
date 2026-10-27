@@ -401,9 +401,11 @@
     {#if pb.projects.length > 1}
       <div class="filters" role="group" aria-label="Show projects by state">
         {#each filters as filter (filter.id)}
-          <button class="chip small" class:active={pb.filter === filter.id} onclick={() => pb.setFilter(filter.id)} disabled={filter.id !== "all" && !counts[filter.id]}>
-            {filter.label}<span class="count">{counts[filter.id] ?? 0}</span>
-          </button>
+          {#if filter.id === "all" || (counts[filter.id] ?? 0) > 0 || pb.filter === filter.id}
+            <button class="chip small" class:active={pb.filter === filter.id} onclick={() => pb.setFilter(filter.id)}>
+              {filter.label}<span class="count">{counts[filter.id] ?? 0}</span>
+            </button>
+          {/if}
         {/each}
       </div>
     {/if}
@@ -411,21 +413,23 @@
     {#if pb.operation}
       {@const operation = pb.operation}
       <div class="operation" aria-live="polite">
-        <LoaderCircle size={14} class="spin" />
-        <span class="operation-text">
-          <span class="operation-line">
-            <strong>{stageLabels[operation.stage]}</strong>
-            {#if operation.projectName}<small class="project-name">{operation.projectName}{operation.total > 1 ? ` · project ${operation.index + 1} of ${operation.total}` : ""}</small>{/if}
-            {#if step}<small>step {step.step} of {step.of}</small>{/if}
+        <div class="operation-main">
+          <LoaderCircle size={14} class="spin" />
+          <span class="operation-text">
+            <span class="operation-line">
+              <strong>{stageLabels[operation.stage]}</strong>
+              {#if operation.projectName}<small class="project-name">{operation.projectName}{operation.total > 1 ? ` · project ${operation.index + 1} of ${operation.total}` : ""}</small>{/if}
+              {#if step}<small>step {step.step} of {step.of}</small>{/if}
+            </span>
+            <small class="hint-line">{operation.note ?? stageHints[operation.stage]}</small>
           </span>
-          <small class="hint-line">{operation.note ?? stageHints[operation.stage]}</small>
-        </span>
-        {#if operation.totalFiles}<span class="numbers">{operation.doneFiles.toLocaleString()} / {operation.totalFiles.toLocaleString()} files</span>{/if}
-        {#if operation.totalBytes}
-          <span class="numbers">{formatBytes(operation.doneBytes)} / {formatBytes(operation.totalBytes)}{progress !== null ? ` · ${Math.floor(progress * 100)}%` : ""}</span>
-        {/if}
-        {#if elapsed >= 2}<span class="numbers">{formatElapsed(elapsed)}</span>{/if}
-        <button class="btn small" disabled={pb.cancelling} onclick={() => pb.cancel()}>{pb.cancelling ? "Cancelling…" : "Cancel"}</button>
+          {#if operation.totalFiles}<span class="numbers">{operation.doneFiles.toLocaleString()} / {operation.totalFiles.toLocaleString()} files</span>{/if}
+          {#if operation.totalBytes}
+            <span class="numbers">{formatBytes(operation.doneBytes)} / {formatBytes(operation.totalBytes)}{progress !== null ? ` · ${Math.floor(progress * 100)}%` : ""}</span>
+          {/if}
+          {#if elapsed >= 2}<span class="numbers">{formatElapsed(elapsed)}</span>{/if}
+          <button class="btn small" disabled={pb.cancelling} onclick={() => pb.cancel()}>{pb.cancelling ? "Cancelling…" : "Cancel"}</button>
+        </div>
         <div class="operation-bar"><ProgressBar value={progress} label="Backup progress" /></div>
       </div>
     {/if}
@@ -552,15 +556,16 @@
   .group-note { overflow: hidden; color: var(--text-3); font-size: 10.75px; white-space: nowrap; text-overflow: ellipsis; }
   .group-count { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
   .group-head + :global(article) { margin-top: 0; }
-  .operation { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 8px 10px; border-radius: 9px; background: rgb(var(--accent-rgb) / 0.045); color: var(--accent); }
-  .operation-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+  .operation { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 10px; padding: 10px 12px 12px; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.055); border: 1px solid rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
+  .operation-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .operation-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
   .operation-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; }
-  .operation-text strong { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .operation-text strong { font-size: 12px; font-weight: 600; white-space: nowrap; }
   .hint-line { color: var(--text-3); }
-  .operation-text small { overflow: hidden; color: var(--text-3); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
-  .numbers { margin-left: auto; color: var(--text-2); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .operation-text small { overflow: hidden; color: var(--text-3); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+  .numbers { margin-left: auto; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
   .numbers + .numbers { margin-left: 0; }
-  .operation-bar { position: absolute; right: 8px; bottom: 4px; left: 8px; }
+  .operation-bar { width: 100%; margin-top: 2px; }
   .loading { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 180px; color: var(--text-3); font-size: 12.5px; }
   .empty { display: grid; justify-items: center; gap: 7px; padding: 42px 20px; text-align: center; }
   .empty.small { padding: 26px 20px; }
@@ -573,7 +578,7 @@
   @container (max-width: 620px) {
     .cloud-list { grid-template-columns: minmax(0, 1fr); }
     .search input { width: 150px; }
-    .operation { flex-wrap: wrap; }
+    .operation-main { flex-wrap: wrap; }
     .group-note { display: none; }
   }
   @container (max-width: 400px) { .settings-button { width: 100%; } }

@@ -17,7 +17,7 @@
   import { pointerTip } from "../../../lib/tooltip.svelte";
   import { formatSize, sizeOf, SMALLER_ID, type TreemapPayload } from "./api";
   import { itemActions } from "./actions";
-  import { CATEGORIES, categoryColor, categoryLabel, categoryOf, type Category } from "./palette";
+  import { CATEGORIES, categoryColor, categoryLabel, categoryOf, folderColor, type Category } from "./palette";
   import { diskState as d } from "./state.svelte";
   import { FOLDER, hitTest, layoutTreemap, SMALLER, type Layout } from "./treemap";
 
@@ -37,6 +37,7 @@
   let opened = new Uint8Array(0);
   /** The kind of each of the payload's extensions. */
   let kinds: Category[] = [];
+  let folderColors: string[] = [];
   let indexOf = new Map<number, number>();
   let hover = -1;
   let frame = 0;
@@ -137,6 +138,7 @@
     layout = payload && width > 0 && height > 0 ? layoutTreemap(payload, width, height) : null;
     opened = new Uint8Array(payload?.ids.length ?? 0);
     kinds = payload?.exts.map(categoryOf) ?? [];
+    folderColors = payload?.names.map((name, i) => payload?.kind[i] === FOLDER ? folderColor(name, colors.navy) : "") ?? [];
     indexOf = new Map();
     if (!layout || !payload) return;
     for (const i of layout.order) {
@@ -195,7 +197,8 @@
     if (!payload) return colors.text3;
     const kind = payload.kind[i];
     if (kind === FILE || kind === CLOUD) return categoryColor(kinds[payload.ext[i]] ?? "other", colors.navy);
-    return colors.text3;
+    if (kind === FOLDER) return folderColors[i];
+    return folderColors[payload.parent[i]] || categoryColor("other", colors.navy);
   }
 
   function drawMap() {
@@ -217,12 +220,14 @@
       const radius = radiusOf(w, h);
 
       if (kind === FOLDER && opened[i]) {
-        // A folder with its contents: a quiet panel, a shade lighter than
-        // what it sits on, so depth shows without frames everywhere.
-        ctx.fillStyle = colors.navy ? "rgb(194 208 255 / 0.045)" : "rgb(255 255 255 / 0.04)";
+        // Start from an opaque base so deeply nested tints do not accumulate
+        // into a muddy colour. A restrained accent separates each group.
+        ctx.fillStyle = colors.background;
+        tile(ctx, x, y, w, h, radius);
+        ctx.fillStyle = `${folderColors[i]}29`;
         tile(ctx, x, y, w, h, radius);
         if (radius) {
-          ctx.strokeStyle = colors.navy ? "rgb(194 208 255 / 0.08)" : "rgb(255 255 255 / 0.07)";
+          ctx.strokeStyle = `${folderColors[i]}80`;
           ring(ctx, x, y, w, h, radius, 1);
         }
         if (header[i]) {
@@ -232,7 +237,7 @@
           const size = formatSize(payload.size[i]);
           const sizeWidth = ctx.measureText(size).width;
           const showSize = room > sizeWidth + 48;
-          write(ctx, payload.names[i], x + 8, mid, showSize ? room - sizeWidth - 10 : room, colors.text2);
+          write(ctx, payload.names[i], x + 8, mid, showSize ? room - sizeWidth - 10 : room, colors.text1, 600, 12);
           if (showSize) {
             ctx.textAlign = "right";
             write(ctx, size, x + w - 8, mid, sizeWidth + 1, colors.text3, 600, 10.5);
@@ -242,15 +247,19 @@
         continue;
       }
 
-      // A file, or a block standing for what is too small to draw one by one:
-      // a folder like an empty panel, its small items fainter still.
+      // Small groups keep a visible fill and outline too. Folder accents
+      // distinguish groups; actual files keep their category's colour.
       const neutral = kind === FOLDER || kind === SMALLER || kind === LINK;
-      ctx.globalAlpha = kind === SMALLER || kind === LINK ? 0.1 : kind === FOLDER ? 0.16 : kind === CLOUD ? 0.55 : 1;
+      if (neutral) {
+        ctx.fillStyle = colors.background;
+        tile(ctx, x, y, w, h, radius);
+      }
+      ctx.globalAlpha = kind === SMALLER || kind === LINK ? 0.24 : kind === FOLDER ? 0.34 : kind === CLOUD ? 0.65 : 0.9;
       ctx.fillStyle = fillOf(i);
       tile(ctx, x, y, w, h, radius);
       ctx.globalAlpha = 1;
-      if (kind === FOLDER && radius) {
-        ctx.strokeStyle = colors.navy ? "rgb(194 208 255 / 0.14)" : "rgb(255 255 255 / 0.12)";
+      if (neutral && w >= 4 && h >= 4) {
+        ctx.strokeStyle = `${fillOf(i)}80`;
         ring(ctx, x, y, w, h, radius, 1);
       }
       if (!neutral && w >= 12 && h >= 12) {
@@ -261,9 +270,9 @@
 
       if (showLabels && w > 50 && h > 22 && kind !== SMALLER) {
         const twoLines = h > 38;
-        const ink = neutral ? colors.text2 : "rgb(255 255 255 / 0.95)";
+        const ink = neutral ? colors.text1 : "rgb(255 255 255 / 0.98)";
         write(ctx, payload.names[i], x + 7, twoLines ? y + 12 : y + h / 2, w - 14, ink, 700, 11.5);
-        if (twoLines) write(ctx, formatSize(payload.size[i]), x + 7, y + 27, w - 14, neutral ? colors.text3 : "rgb(255 255 255 / 0.72)", 600, 10.5);
+        if (twoLines) write(ctx, formatSize(payload.size[i]), x + 7, y + 27, w - 14, neutral ? colors.text2 : "rgb(255 255 255 / 0.82)", 600, 10.5);
       }
     }
   }
@@ -481,14 +490,14 @@
 </div>
 
 <style>
-  .treemap-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+  .treemap-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 360px; gap: 8px; }
   .map { position: relative; flex: 1; min-height: 220px; overflow: hidden; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--input-fill); }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .marks { cursor: pointer; }
   .waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-3); font-size: var(--fluid-xs); pointer-events: none; }
 
   .treemap-wrapper { container-type: inline-size; }
-  .legend { display: flex; align-items: flex-start; gap: 8px; }
+  .legend { display: flex; align-items: flex-start; flex-shrink: 0; gap: 8px; padding: 2px 6px 6px; }
   .kinds { display: flex; flex: 1; flex-wrap: wrap; gap: 5px; min-width: 0; }
   .chip { height: 26px; padding: 0 9px; gap: 6px; font-size: 11.5px; }
   .dot { flex: none; width: 9px; height: 9px; border-radius: 3px; }

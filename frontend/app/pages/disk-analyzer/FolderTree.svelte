@@ -140,6 +140,8 @@
 
   function tip(node: NodeView): string {
     const lines = [node.name];
+    lines.push(`Size: ${formatSize(node.size)} (${node.size.toLocaleString()} bytes)`);
+    lines.push(`On disk: ${formatSize(node.alloc)} (${node.alloc.toLocaleString()} bytes)`);
     if (node.kind === "link") lines.push("A link to somewhere else: not followed, nothing counted.");
     if (node.kind === "cloud") lines.push("A cloud file: counted, never downloaded.");
     if (node.inaccessible) lines.push("This folder could not be read.");
@@ -221,7 +223,7 @@
               {#if node.inaccessible}<span class="unread">not readable</span>{/if}
             </span>
             <span class="share" aria-hidden="true"><span class="bar" style:width="{part * 100}%"></span><em>{Math.round(part * 100)}%</em></span>
-            <span class="size">{formatSize(sizeOf(node, d.sizeMode))}</span>
+            <span class="size" title="Size: {formatSize(node.size)} · On disk: {formatSize(node.alloc)}">{formatSize(sizeOf(node, d.sizeMode))}</span>
             <span class="files">{node.kind === "dir" ? node.files.toLocaleString() : ""}</span>
             <span class="modified">{node.modified ? date.format(node.modified * 1000) : ""}</span>
           </div>

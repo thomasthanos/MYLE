@@ -1,20 +1,22 @@
-import { cloudStorageApi as api, PROVIDERS, type CloudOutcome, type CloudProgress, type CloudProvider, type CloudStatus } from "./api";
+import { cloudStorageApi as api, PROVIDERS, type CloudOutcome, type CloudProgress, type CloudStatus } from "./api";
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-const initial = (): CloudProgress => ({ visited: 0, requested: 0, alreadyOnline: 0, pendingUploads: 0, skipped: 0, failed: 0, current: null });
+const initial = (): CloudProgress => ({ visited: 0, requested: 0, alreadyOnline: 0, pendingUploads: 0, skipped: 0, failed: 0, foldersRequested: 0, foldersAlreadyOnline: 0, current: null, waitingForDrive: false });
 
 class CloudStorageState {
   providers = $state.raw<CloudStatus[]>(PROVIDERS.map((provider) => ({ ...provider, folders: [], mode: "unavailable", detail: "Cloud folders have not been checked yet." })));
   loading = $state(false);
   loadError = $state<string | null>(null);
-  selected = $state<CloudProvider | null>(null);
   running = $state(false);
   cancelling = $state(false);
   requestId = $state<string | null>(null);
   progress = $state.raw<CloudProgress | null>(null);
   result = $state.raw<CloudOutcome | null>(null);
   error = $state<string | null>(null);
-  current = $derived(this.providers.find((provider) => provider.provider === this.selected) ?? null);
+  /** The apps whose files the button makes online-only. */
+  ready = $derived(this.providers.filter((provider) => provider.mode === "native" && provider.folders.length));
+  /** The apps on this PC that need their own controls. */
+  left = $derived(this.providers.filter((provider) => provider.mode === "guided"));
   #loadSequence = 0;
 
   async load() {
@@ -33,23 +35,14 @@ class CloudStorageState {
     }
   }
 
-  choose(provider: CloudProvider) {
-    if (this.running) return;
-    this.selected = provider;
-    this.result = null;
-    this.progress = null;
-    this.error = null;
-  }
-
-  close() {
-    if (!this.running) this.selected = null;
-  }
-
+  /** One request for every ready app, with the folders checked last: the
+   *  backend refuses it if they changed meanwhile. */
   async makeOnlineOnly() {
-    const provider = this.current;
-    if (this.running || this.loading || this.loadError || !provider || provider.mode !== "native" || !provider.folders.length) return;
+    const ready = this.ready;
+    if (this.running || this.loading || this.loadError || !ready.length) return;
+    const clouds = ready.map((provider) => provider.provider);
+    const folders = ready.flatMap((provider) => provider.folders.map((folder) => folder.path));
     const requestId = crypto.randomUUID();
-    const folders = provider.folders.map((folder) => folder.path);
     this.requestId = requestId;
     this.running = true;
     this.cancelling = false;
@@ -57,7 +50,7 @@ class CloudStorageState {
     this.error = null;
     this.progress = initial();
     try {
-      const result = await api.onlineOnly(provider.provider, folders, requestId, (progress) => {
+      const result = await api.onlineOnly(clouds, folders, requestId, (progress) => {
         if (this.requestId === requestId && this.running) this.progress = progress;
       });
       if (this.requestId === requestId) this.result = result;
@@ -85,19 +78,7 @@ class CloudStorageState {
       }
     }
   }
-
-  async openFolder(path: string) {
-    if (!this.current || this.running) return;
-    try { await api.openFolder(this.current.provider, path); }
-    catch (error) { this.error = message(error); }
-  }
-
-  async help() {
-    if (!this.current) return;
-    try { await api.openHelp(this.current.provider); }
-    catch (error) { this.error = message(error); }
-  }
 }
 
-// Keep an active request and its cancel control when the user changes pages.
+// Keep an active request and its Stop control when the user changes pages.
 export const cloudStorage = new CloudStorageState();

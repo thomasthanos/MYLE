@@ -2,7 +2,8 @@
 //
 // Preferences travel as the raw localStorage values of SYNCED_KEYS; each page
 // re-reads them with its own validation. Game Saves settings live in the
-// backend and travel through its export/import commands.
+// backend and travel through its export/import commands. Owner-only GitHub
+// project paths use their own export/import and change timestamp.
 import { invoke } from "@tauri-apps/api/core";
 import { nav } from "../../lib/nav.svelte";
 import { settings } from "../../lib/settings.svelte";
@@ -12,6 +13,8 @@ import { diskState } from "../pages/disk-analyzer/state.svelte";
 import { appsState } from "../pages/install-apps/state.svelte";
 import { cleanerState } from "../pages/system-cleaner/state.svelte";
 import { maintenanceState } from "../pages/system-maintenance/state.svelte";
+import { githubReleases as githubReleasesState } from "../pages/github-releases/state.svelte";
+import type { PageState, SyncedProjects } from "../pages/github-releases/api";
 
 export const SYNCED_KEYS = [
   "myle.dark",
@@ -32,9 +35,11 @@ export const SYNCED_KEYS = [
 
 /** Announced by the Game Saves page (see `notifyChange`), not a storage key. */
 export const GAME_SAVES_CHANGE = "gameSaves";
+export const GITHUB_PROJECTS_CHANGE = "githubReleases.projects";
+export const PROJECTS_UPDATED_AT_KEY = "myle.githubReleases.projectsUpdatedAt";
 
 export function isSynced(key: string): boolean {
-  return key === GAME_SAVES_CHANGE || (SYNCED_KEYS as readonly string[]).includes(key);
+  return key === GAME_SAVES_CHANGE || key === GITHUB_PROJECTS_CHANGE || (SYNCED_KEYS as readonly string[]).includes(key);
 }
 
 export interface SyncedGameSaves {
@@ -52,6 +57,9 @@ export interface Snapshot {
   updatedAt: string;
   storage: Record<string, string>;
   gameSaves: SyncedGameSaves | null;
+  /** Missing in older clients; an explicit empty list means no projects. */
+  githubReleases?: SyncedProjects;
+  githubReleasesUpdatedAt?: string;
 }
 
 export function isSnapshot(value: unknown): value is Snapshot {
@@ -60,7 +68,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
   return v.version === 1 && typeof v.updatedAt === "string" && !!v.storage && typeof v.storage === "object";
 }
 
-export async function collect(updatedAt: string): Promise<Snapshot> {
+export async function collect(updatedAt: string, includeGithubProjects = false): Promise<Snapshot> {
   const storage: Record<string, string> = {};
   for (const key of SYNCED_KEYS) {
     try {
@@ -71,14 +79,22 @@ export async function collect(updatedAt: string): Promise<Snapshot> {
     }
   }
   const gameSaves = await invoke<SyncedGameSaves>("game_saves_sync_export").catch(() => null);
-  return { version: 1, updatedAt, storage, gameSaves };
+  const githubReleases = includeGithubProjects ? await invoke<SyncedProjects>("github_releases_sync_export") : undefined;
+  let githubReleasesUpdatedAt: string | null = null;
+  try { githubReleasesUpdatedAt = localStorage.getItem(PROJECTS_UPDATED_AT_KEY); } catch { /* restored on the next successful sync */ }
+  return { version: 1, updatedAt, storage, gameSaves, ...(githubReleases ? { githubReleases, ...(githubReleasesUpdatedAt ? { githubReleasesUpdatedAt } : {}) } : {}) };
+}
+
+export async function applyGithubProjects(projects: SyncedProjects): Promise<void> {
+  const page = await invoke<PageState>("github_releases_sync_import", { synced: projects });
+  await githubReleasesState.applySyncedProjects(page);
 }
 
 /**
  * Writes a snapshot from another PC into this one and refreshes the pages.
  * Returns a note when part of it could not be applied yet.
  */
-export async function apply(snapshot: Snapshot): Promise<string | null> {
+export async function apply(snapshot: Snapshot, includeGithubProjects = false): Promise<string | null> {
   for (const key of SYNCED_KEYS) {
     const value = snapshot.storage[key];
     if (typeof value !== "string") continue;
@@ -95,6 +111,11 @@ export async function apply(snapshot: Snapshot): Promise<string | null> {
   cleanerState.reloadSelection();
   diskState.reloadChoices();
   gameSavesState.reloadChoices();
+
+  if (includeGithubProjects && snapshot.githubReleases != null) {
+    // A failed/deferred import must keep the account's timestamp retryable.
+    await applyGithubProjects(snapshot.githubReleases);
+  }
 
   if (!snapshot.gameSaves) return null;
   try {

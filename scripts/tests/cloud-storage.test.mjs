@@ -31,44 +31,48 @@ const original = { ...api };
 const tick = () => new Promise(setImmediate);
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const native = () => ({ provider: "oneDrive", name: "OneDrive", mode: "native", detail: "Ready", folders: [{ label: "Personal", path: "C:/OneDrive" }] });
-const outcome = (extra = {}) => ({ visited: 5, requested: 3, alreadyOnline: 0, pendingUploads: 2, skipped: 0, failed: 0, cancelled: false, errors: [], ...extra });
+const drive = () => ({ provider: "googleDrive", name: "Google Drive", mode: "native", detail: "Ready", folders: [{ label: "Google Drive", path: "G:/My Drive" }] });
+const guided = (provider, name) => ({ provider, name, mode: "guided", detail: "Own controls", folders: [{ label: name, path: `C:/${name}` }] });
+const outcome = (extra = {}) => ({ visited: 5, requested: 3, alreadyOnline: 0, pendingUploads: 2, skipped: 0, failed: 0, foldersRequested: 0, foldersAlreadyOnline: 0, cancelled: false, errors: [], driveCache: null, ...extra });
 
 test.beforeEach(() => {
   Object.assign(api, original);
-  Object.assign(cloudStorage, { providers: [native()], loading: false, loadError: null, selected: "oneDrive", running: false, cancelling: false, requestId: null, progress: null, result: null, error: null });
+  Object.assign(cloudStorage, { providers: [native()], loading: false, loadError: null, running: false, cancelling: false, requestId: null, progress: null, result: null, error: null });
   api.status = async () => ({ providers: [native()] });
 });
 
-test("choosing a provider opens its review without requesting any changes", () => {
-  let calls = 0; api.onlineOnly = async () => { calls++; return outcome(); };
-  cloudStorage.choose("oneDrive");
-  assert.equal(cloudStorage.selected, "oneDrive");
-  assert.equal(calls, 0);
+test("one request covers every ready app at once and leaves guided and missing apps out", async () => {
+  const calls = [];
+  cloudStorage.providers = [drive(), guided("mega", "MEGA"), { ...native(), provider: "dropbox", name: "Dropbox", mode: "unavailable", folders: [] }, native(), { ...native(), provider: "sync:iCloudDrive", name: "iCloud Drive", folders: [{ label: "iCloud Drive", path: "C:/iCloud" }] }];
+  api.onlineOnly = async (clouds, folders) => { calls.push({ clouds, folders }); return outcome({ foldersRequested: 1, driveCache: { state: "cleared", size: "94.4 GB" } }); };
+  assert.deepEqual(cloudStorage.left.map((provider) => provider.name), ["MEGA"]);
+  await cloudStorage.makeOnlineOnly();
+  assert.deepEqual(calls, [{ clouds: ["googleDrive", "oneDrive", "sync:iCloudDrive"], folders: ["G:/My Drive", "C:/OneDrive", "C:/iCloud"] }]);
+  assert.deepEqual(cloudStorage.result.driveCache, { state: "cleared", size: "94.4 GB" });
 });
 
-test("guided and unavailable providers never invoke the native online-only action", async () => {
+test("nothing is requested when no app allows online-only requests", async () => {
   let calls = 0; api.onlineOnly = async () => { calls++; return outcome(); };
-  for (const mode of ["guided", "unavailable"]) {
-    cloudStorage.providers = [{ ...native(), provider: "googleDrive", mode }];
-    cloudStorage.selected = "googleDrive";
+  for (const providers of [[guided("mega", "MEGA")], [{ ...native(), mode: "unavailable" }], [{ ...native(), folders: [] }]]) {
+    cloudStorage.providers = providers;
     await cloudStorage.makeOnlineOnly();
-    assert.equal(calls, 0);
-    assert.equal(cloudStorage.result, null);
-    assert.equal(cloudStorage.running, false);
   }
+  assert.equal(calls, 0);
+  assert.equal(cloudStorage.result, null);
+  assert.equal(cloudStorage.running, false);
 });
 
-test("a native request freezes the reviewed folders and preserves pending uploads in its result", async () => {
+test("a request freezes the checked folders and keeps pending uploads in its result", async () => {
   const wait = deferred(); const calls = [];
-  api.onlineOnly = (provider, folders, requestId, onProgress) => {
-    calls.push({ provider, folders, requestId });
-    onProgress({ ...outcome(), current: "C:/OneDrive/upload.zip" });
+  api.onlineOnly = (clouds, folders, requestId, onProgress) => {
+    calls.push({ clouds, folders, requestId });
+    onProgress({ ...outcome(), current: "C:/OneDrive/upload.zip", waitingForDrive: false });
     return wait.promise;
   };
   const requesting = cloudStorage.makeOnlineOnly(); await tick();
   assert.equal(cloudStorage.running, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].provider, "oneDrive");
+  assert.deepEqual(calls[0].clouds, ["oneDrive"]);
   assert.deepEqual(calls[0].folders, ["C:/OneDrive"]);
   assert.ok(calls[0].requestId);
   assert.equal(cloudStorage.progress.pendingUploads, 2);
@@ -80,9 +84,19 @@ test("a native request freezes the reviewed folders and preserves pending upload
   assert.equal(cloudStorage.running, false);
 });
 
-test("cancelling addresses only this request and waits for the backend to finish", async () => {
+test("waiting for Google Drive's storage window shows in the progress", async () => {
+  const wait = deferred();
+  api.onlineOnly = (_clouds, _folders, _id, onProgress) => { onProgress({ ...outcome(), current: null, waitingForDrive: true }); return wait.promise; };
+  cloudStorage.providers = [drive()];
+  const requesting = cloudStorage.makeOnlineOnly(); await tick();
+  assert.equal(cloudStorage.progress.waitingForDrive, true);
+  wait.resolve(outcome({ driveCache: { state: "notOpen" } })); await requesting;
+  assert.equal(cloudStorage.result.driveCache.state, "notOpen");
+});
+
+test("stopping addresses only this request and waits for the backend to finish", async () => {
   const wait = deferred(); let active; const cancelled = [];
-  api.onlineOnly = (_provider, _folders, id) => { active = id; return wait.promise; };
+  api.onlineOnly = (_clouds, _folders, id) => { active = id; return wait.promise; };
   api.cancel = async (id) => cancelled.push(id);
   const requesting = cloudStorage.makeOnlineOnly(); await tick();
   await cloudStorage.cancel();
@@ -100,43 +114,33 @@ test("a request failure is shown and never becomes a successful result", async (
   assert.equal(cloudStorage.running, false);
 });
 
-test("a running request keeps its provider and cancel control visible", async () => {
-  const wait = deferred(); api.onlineOnly = () => wait.promise;
-  const requesting = cloudStorage.makeOnlineOnly(); await tick();
-  cloudStorage.close(); cloudStorage.choose("mega");
-  assert.equal(cloudStorage.selected, "oneDrive");
-  wait.resolve(outcome()); await requesting;
-  cloudStorage.close();
-  assert.equal(cloudStorage.selected, null);
-});
-
-test("an older status response cannot overwrite a newer provider check", async () => {
+test("an older status response cannot overwrite a newer check", async () => {
   const first = deferred(); let calls = 0;
   api.status = () => ++calls === 1 ? first.promise : Promise.resolve({ providers: [{ ...native(), mode: "unavailable", folders: [] }] });
   const loading = cloudStorage.load(); await cloudStorage.load();
   first.resolve({ providers: [native()] }); await loading;
   assert.equal(cloudStorage.providers[0].mode, "unavailable");
+  let requests = 0; api.onlineOnly = async () => { requests++; return outcome(); };
   await cloudStorage.makeOnlineOnly();
-  assert.equal(cloudStorage.result, null);
+  assert.equal(requests, 0);
 });
 
 test("late progress from a completed request cannot replace a later result", async () => {
   let late;
-  api.onlineOnly = async (_provider, _folders, _id, onProgress) => { late = onProgress; return outcome(); };
+  api.onlineOnly = async (_clouds, _folders, _id, onProgress) => { late = onProgress; return outcome(); };
   await cloudStorage.makeOnlineOnly();
   const before = cloudStorage.progress;
-  late({ ...outcome({ requested: 99 }), current: "old" });
+  late({ ...outcome({ requested: 99 }), current: "old", waitingForDrive: false });
   assert.equal(cloudStorage.progress, before);
   assert.equal(cloudStorage.result.requested, 3);
 });
 
-test("failed refresh preserves visible folders but blocks native changes until a successful refresh", async () => {
+test("a failed check blocks requests until a check succeeds", async () => {
   let calls = 0;
   api.onlineOnly = async () => { calls++; return outcome(); };
   api.status = async () => { throw new Error("Cloud detection failed"); };
   await cloudStorage.load();
   assert.match(cloudStorage.loadError, /detection failed/);
-  assert.equal(cloudStorage.current.folders[0].path, "C:/OneDrive");
   await cloudStorage.makeOnlineOnly();
   assert.equal(calls, 0);
   api.status = async () => ({ providers: [native()] });
@@ -145,7 +149,7 @@ test("failed refresh preserves visible folders but blocks native changes until a
   assert.equal(calls, 1);
 });
 
-test("a failed cancellation keeps the request active and allows retrying Stop", async () => {
+test("a failed Stop keeps the request running and allows retrying it", async () => {
   const wait = deferred();
   api.onlineOnly = () => wait.promise;
   api.cancel = async () => { throw new Error("Stop failed"); };
@@ -160,15 +164,4 @@ test("a failed cancellation keeps the request active and allows retrying Stop", 
   assert.equal(retried, true);
   wait.resolve(outcome({ cancelled: true }));
   await running;
-});
-
-test("folder and official-help launch failures are visible without starting a native request", async () => {
-  api.openFolder = async () => { throw new Error("Folder unavailable"); };
-  api.openHelp = async () => { throw new Error("Browser unavailable"); };
-  await cloudStorage.openFolder("C:/OneDrive");
-  assert.match(cloudStorage.error, /Folder unavailable/);
-  await cloudStorage.help();
-  assert.match(cloudStorage.error, /Browser unavailable/);
-  assert.equal(cloudStorage.running, false);
-  assert.equal(cloudStorage.result, null);
 });

@@ -48,7 +48,7 @@ const { squarify, worstRatio, layoutTreemap, hitTest, DEFAULT_LAYOUT } = await i
 const { CATEGORIES, categoryOf, categoryColor, extensionOf } = await import("../../frontend/app/pages/disk-analyzer/palette.ts");
 const { flatten, visibleRange } = await import("../../frontend/app/pages/disk-analyzer/rows.ts");
 const { diskState: state, recycleQuestion, KEY } = await import("../../frontend/app/pages/disk-analyzer/state.svelte.ts");
-const { diskApi } = await import("../../frontend/app/pages/disk-analyzer/api.ts");
+const { diskApi, deletionShare } = await import("../../frontend/app/pages/disk-analyzer/api.ts");
 const { confirmState } = await import("../../frontend/lib/confirm.svelte.ts");
 const { toast } = await import("../../frontend/lib/toast.svelte.ts");
 hooks.deregister();
@@ -469,6 +469,82 @@ test("the question says plainly when a lot would move", () => {
   assert.ok(lines.includes("2 protected items stay where they are."));
   const one = recycleQuestion([view(3, "a.txt", "file", 50, 4096)], 0, "alloc");
   assert.equal(one.message, "1 item, 4.0 KB. You can restore it from the Recycle Bin.");
+});
+
+test("a failed recycle never falls back automatically; permanent deletion needs its own confirmation", async () => {
+  await scanned();
+  let deleted = 0;
+  diskApi.recycle = async () => ({ recycled: 0, ids: [], freedBytes: 0, freedSize: 0,
+    skipped: [{ id: 2, path: "D:\\big.iso", reason: "Too big for the Recycle Bin.", canDeletePermanently: true }] });
+  diskApi.deletePermanently = async (scanId, ids) => {
+    deleted++;
+    assert.equal(scanId, 3);
+    assert.deepEqual(ids, [2]);
+    delete nodes[2];
+    return { recycled: 0, deleted: 1, ids: [2], freedBytes: 200, freedSize: 100, skipped: [] };
+  };
+  const recycle = state.recycle([2]);
+  await settle(10);
+  confirmState.answer(true);
+  await recycle;
+  assert.equal(deleted, 0);
+  assert.equal(confirmState.current, null, "the retry is a separate user action");
+
+  const cancel = state.deletePermanently([2]);
+  await settle(10);
+  assert.equal(confirmState.current.title, "Delete permanently?");
+  assert.equal(confirmState.current.confirmLabel, "Delete permanently");
+  assert.equal(confirmState.current.danger, true);
+  assert.match(confirmState.current.message, /big\.iso/);
+  assert.match(confirmState.current.message, /cannot be restored/i);
+  assert.doesNotMatch(confirmState.current.message, /nothing is deleted for good/);
+  assert.equal(deleted, 0);
+  confirmState.answer(false);
+  await cancel;
+  assert.equal(deleted, 0);
+  assert.equal(state.skipped.length, 1);
+
+  state.skipped = [...state.skipped, { id: 3, path: "D:\\a.txt", reason: "Open in another program.", canDeletePermanently: false }];
+  const retry = state.deletePermanently([2]);
+  await settle(10);
+  confirmState.answer(true);
+  await retry;
+  assert.equal(deleted, 1);
+  assert.equal(state.phase, "ready");
+  assert.deepEqual(state.skipped.map((item) => item.id), [3], "other failed items remain visible");
+  assert.ok(!state.rows.some((row) => row.node?.id === 2));
+  assert.ok(toast.visible.some((item) => /permanently deleted/i.test(item.message)));
+});
+
+test("permanent deletion refuses protected items and a confirmation for an older scan", async () => {
+  await scanned();
+  let called = false;
+  diskApi.deletePermanently = async () => { called = true; throw new Error("must not be called"); };
+  await state.deletePermanently([0]);
+  assert.equal(confirmState.current, null);
+  const pending = state.deletePermanently([2]);
+  await settle(10);
+  state.done = { ...done, scanId: 4 };
+  confirmState.answer(true);
+  await pending;
+  assert.equal(called, false);
+});
+
+test("deletion progress follows work inside a folder and stays indeterminate until Windows provides an estimate", () => {
+  assert.equal(deletionShare(null), null);
+  assert.equal(deletionShare({ done: 0, total: 1, current: "Backup" }), null);
+  assert.equal(deletionShare({ done: 0, total: 1, current: "Backup", workTotal: 0, workDone: 0 }), null);
+  assert.equal(deletionShare({ done: 0, total: 1, current: "Backup", workTotal: 100, workDone: 37 }), 0.37);
+  assert.equal(deletionShare({ done: 1, total: 2, current: "Backup", workTotal: 100, workDone: 50 }), 0.75);
+  assert.equal(deletionShare({ done: 0, total: 1, current: "Backup", workTotal: 100, workDone: 120 }), 1);
+});
+
+test("permanent confirmation reports the data being lost even for online-only files", () => {
+  const cloud = view(10, "large-backup.zip", "cloud", 72 * 1024 ** 3, 0);
+  const question = recycleQuestion([cloud], 0, "alloc", true);
+  assert.match(question.message, /72\.0 GB/);
+  assert.match(question.message, /more than 10 GB/);
+  assert.match(question.message, /Cloud files are removed from your cloud storage too/);
 });
 
 test("tabs load their lists when first opened and the view is kept", async () => {

@@ -72,6 +72,8 @@ export interface RepoBrief {
   name: string;
   exists: boolean;
 }
+/** Account sync contains paths only; local IDs, commands and keys stay here. */
+export interface SyncedProjects { version: 1; paths: string[] }
 export interface PageState {
   repos: RepoBrief[];
   account: Account | null;

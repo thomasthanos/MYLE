@@ -25,6 +25,7 @@ pub mod project;
 pub mod release;
 pub mod secrets;
 mod state;
+pub(crate) mod sync;
 pub mod store;
 pub mod versions;
 

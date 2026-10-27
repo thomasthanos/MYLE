@@ -20,7 +20,7 @@
   {:else}
     <table>
       <thead>
-        <tr><th scope="col">Type</th><th scope="col" class="share-col"><span class="sr">Share</span></th><th scope="col">Size</th><th scope="col">Files</th></tr>
+        <tr><th scope="col">Type</th><th scope="col" class="share-col"><span class="sr">Share</span></th><th scope="col">{d.sizeMode === "alloc" ? "Size on disk" : "Size"}</th><th scope="col">Files</th></tr>
       </thead>
       <tbody>
         {#each stats as stat (stat.other ? "*other" : stat.ext)}
@@ -34,7 +34,7 @@
               {#if stat.other}Other types{:else if stat.ext}.{stat.ext}{:else}No extension{/if}
             </td>
             <td class="share" aria-label="{Math.round(part * 100)}%"><span class="bar"><span style:width="{part * 100}%" style:background={color}></span></span><em>{Math.round(part * 100)}%</em></td>
-            <td class="num">{formatSize(size)}</td>
+            <td class="num" title="Size: {formatSize(stat.size)} · On disk: {formatSize(stat.alloc)}">{formatSize(size)}</td>
             <td class="num dim">{stat.count.toLocaleString()}</td>
           </tr>
         {/each}

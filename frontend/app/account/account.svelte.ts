@@ -1,7 +1,8 @@
 // The signed-in account and the sync of this app's settings through it.
 //
-// Sync is last-writer-wins over the whole snapshot: the side with the newer
-// `updatedAt` (the time of the last change on that PC) is kept. A change here
+// Preferences use the newer snapshot's `updatedAt`. GitHub project paths
+// have their own timestamp, so unrelated preferences cannot replace them.
+// A change here
 // is pushed a couple of seconds after it happens; the cloud is read at start,
 // after signing in, and on "Sync now".
 import { isTauri } from "@tauri-apps/api/core";
@@ -10,7 +11,7 @@ import { confirm } from "../../lib/confirm.svelte";
 import { onStorageChange, readJson } from "../../lib/storage";
 import { toast } from "../../lib/toast.svelte";
 import { ACCESS_EVENT, accountApi, type Profile, type Provider } from "./api";
-import { apply, collect, isSnapshot, isSynced } from "./snapshot";
+import { apply, applyGithubProjects, collect, GITHUB_PROJECTS_CHANGE, isSnapshot, isSynced, PROJECTS_UPDATED_AT_KEY } from "./snapshot";
 const UPDATED_AT_KEY = "myle.sync.updatedAt";
 const SYNCED_AT_KEY = "myle.sync.lastSyncedAt";
 const PUSH_DELAY_MS = 2000;
@@ -33,7 +34,7 @@ function localUpdatedAt(): string | null {
     return null;
   }
 }
-class AccountState {
+export class AccountState {
   profile = $state<Profile | null>(null);
   /** The provider whose browser sign-in is being waited for. */
   signingIn = $state<Provider | null>(null);
@@ -63,7 +64,7 @@ class AccountState {
       this.profile = null;
     }
     if (this.profile) {
-      void this.refreshAccess();
+      await this.refreshAccess();
       void this.sync();
     } else {
       this.accessKnown = true;
@@ -89,7 +90,7 @@ class AccountState {
     this.error = null;
     try {
       this.profile = await accountApi.signIn(provider);
-      void this.refreshAccess();
+      await this.refreshAccess();
       toast.success(`Signed in with ${PROVIDER_NAMES[provider]} as ${this.profile.name ?? this.profile.email ?? "you"}.`);
       await this.sync();
     } catch (error) {
@@ -129,16 +130,31 @@ class AccountState {
   /** Reads the cloud copy and keeps whichever side changed last. */
   async sync(announce = false) {
     if (!this.profile || this.syncing) return;
+    const userId = this.profile.id;
     clearTimeout(this.#pushTimer);
     this.syncing = true;
     this.error = null;
     try {
       const cloud = await accountApi.pull();
+      if (this.profile?.id !== userId) return;
       const local = localUpdatedAt();
+      let pushed = false;
+      let pushProjects = false;
+      if (this.owner && isSnapshot(cloud) && cloud.githubReleases != null) {
+        let projectsChanged: string | null = null;
+        try { projectsChanged = localStorage.getItem(PROJECTS_UPDATED_AT_KEY); } catch { /* a fresh PC */ }
+        const remoteChanged = cloud.githubReleasesUpdatedAt ?? cloud.updatedAt;
+        if (!projectsChanged || remoteChanged > projectsChanged) {
+          await applyGithubProjects(cloud.githubReleases);
+          writeRaw(PROJECTS_UPDATED_AT_KEY, remoteChanged);
+        } else if (projectsChanged > remoteChanged) {
+          pushProjects = true;
+        }
+      }
       if (isSnapshot(cloud) && (!local || cloud.updatedAt > local)) {
         this.#applying = true;
         try {
-          const note = await apply(cloud);
+          const note = await apply(cloud, false);
           writeRaw(UPDATED_AT_KEY, cloud.updatedAt);
           if (note) toast.info(note);
           else if (announce || local) toast.success("Settings updated from your account.");
@@ -147,6 +163,20 @@ class AccountState {
         }
       } else if (!isSnapshot(cloud) || (local && local > cloud.updatedAt)) {
         await this.#push();
+        pushed = true;
+      }
+      // Upgrade an existing account once, even when its timestamp equals this
+      // PC's. Older snapshots never meant "delete all local project paths".
+      if (!pushed && this.owner && isSnapshot(cloud) && (cloud.githubReleases == null || pushProjects)) {
+        const snapshot = await collect(localUpdatedAt() ?? cloud.updatedAt, true);
+        if (snapshot.githubReleases && (snapshot.githubReleases.paths.length || snapshot.githubReleasesUpdatedAt || pushProjects)) {
+          snapshot.updatedAt = new Date().toISOString();
+          snapshot.githubReleasesUpdatedAt ??= snapshot.updatedAt;
+          if (this.profile?.id !== userId) return;
+          await accountApi.push(snapshot);
+          writeRaw(UPDATED_AT_KEY, snapshot.updatedAt);
+          writeRaw(PROJECTS_UPDATED_AT_KEY, snapshot.githubReleasesUpdatedAt);
+        }
       }
       this.#markSynced();
       if (announce) toast.success("Everything is in sync.");
@@ -157,8 +187,9 @@ class AccountState {
     }
   }
   #onLocalChange(key: string) {
-    if (this.#applying || !isSynced(key)) return;
+    if ((this.#applying && key !== GITHUB_PROJECTS_CHANGE) || !isSynced(key)) return;
     writeRaw(UPDATED_AT_KEY, new Date().toISOString());
+    if (key === GITHUB_PROJECTS_CHANGE) writeRaw(PROJECTS_UPDATED_AT_KEY, new Date().toISOString());
     if (!this.profile) return;
     this.#schedulePush();
   }
@@ -185,9 +216,15 @@ class AccountState {
     }
   }
   async #push() {
+    const userId = this.profile?.id;
+    if (!userId) return;
     const updatedAt = localUpdatedAt() ?? new Date().toISOString();
     writeRaw(UPDATED_AT_KEY, updatedAt);
-    await accountApi.push(await collect(updatedAt));
+    const snapshot = await collect(updatedAt, this.owner);
+    if (this.profile?.id !== userId) throw new Error("The account changed. Sync again with the current account.");
+    if (snapshot.githubReleases) snapshot.githubReleasesUpdatedAt ??= updatedAt;
+    await accountApi.push(snapshot);
+    if (snapshot.githubReleasesUpdatedAt) writeRaw(PROJECTS_UPDATED_AT_KEY, snapshot.githubReleasesUpdatedAt);
   }
   #markSynced() {
     this.lastSyncedAt = Date.now();

@@ -1,10 +1,11 @@
-//! Moving items to the Recycle Bin, and only there.
+//! Removing scan items, using the Recycle Bin by default.
 //!
 //! The shell's IFileOperation does the move, one item per operation. A
 //! progress sink watches each one: when the shell is about to delete an item
 //! without the "recycle if possible" flag (too big for the bin, or a drive
 //! without one), the sink aborts it, so it is skipped and reported instead
-//! of silently deleted for good. Every item is checked again right before it
+//! of silently deleted for good. A separate, explicitly confirmed command
+//! can request permanent deletion. Every item is checked again right before it
 //! goes: still there, still inside the scanned folder, not a link, not
 //! protected, and still what the scan saw.
 
@@ -14,14 +15,14 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use windows::Win32::Foundation::{E_ABORT, E_ACCESSDENIED};
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
-    CoUninitialize, IBindCtx,
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx, CoUninitialize, IBindCtx,
 };
 use windows::Win32::UI::Shell::{
-    COPYENGINE_E_ACCESS_DENIED_SRC, COPYENGINE_E_RECYCLE_BIN_NOT_FOUND, COPYENGINE_E_REQUIRES_ELEVATION,
-    COPYENGINE_E_SHARING_VIOLATION_SRC, FILEOPERATION_FLAGS, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
-    FOFX_RECYCLEONDELETE, FileOperation, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl,
-    IShellItem, SHCreateItemFromParsingName, TSF_DELETE_RECYCLE_IF_POSSIBLE,
+    COPYENGINE_E_ACCESS_DENIED_SRC, COPYENGINE_E_RECYCLE_BIN_NOT_FOUND, COPYENGINE_E_RECYCLE_FORCE_NUKE,
+    COPYENGINE_E_RECYCLE_PATH_TOO_LONG, COPYENGINE_E_RECYCLE_SIZE_TOO_BIG, COPYENGINE_E_REQUIRES_ELEVATION,
+    COPYENGINE_E_SHARING_VIOLATION_SRC, FILEOPERATION_FLAGS, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOFX_RECYCLEONDELETE,
+    FileOperation, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl, IShellItem, SHCreateItemFromParsingName,
+    TSF_DELETE_RECYCLE_IF_POSSIBLE,
 };
 use windows::core::{HRESULT, PCWSTR, Ref, implement};
 
@@ -32,9 +33,19 @@ pub const OUTSIDE: &str = "It is not inside the scanned folder.";
 pub const GONE: &str = "It is no longer there.";
 pub const LINK: &str = "A link: MYLE never removes links.";
 pub const CHANGED: &str = "It changed since the scan. Scan again.";
-pub const NO_BIN: &str = "Too big for the Recycle Bin, or its drive has none, so it was left alone.";
+pub const NO_BIN: &str =
+    "Windows cannot put this item in the Recycle Bin. It may exceed the bin's size limit, or this drive may not support recycling.";
 pub const ADMIN: &str = "Needs administrator.";
 pub const IN_USE: &str = "Open in another program.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Recycle,
+    Permanent,
+}
+
+/// The shell reports estimated work points: total first, completed second.
+pub type OnProgress = Arc<dyn Fn(u32, u32) + Send + Sync>;
 
 /// COM for this thread, apartment-threaded, as the shell wants.
 pub struct Com(bool);
@@ -64,17 +75,23 @@ struct Watch {
     failed: AtomicI32,
 }
 
-/// Lets an item be deleted only when the shell will recycle it.
+/// Normal deletion cannot fall back to permanent deletion. Only the separate
+/// permanently-delete command, after its own confirmation, selects that mode.
 #[implement(IFileOperationProgressSink)]
-struct BinOnly {
+struct RemovalSink {
     watch: Arc<Watch>,
+    mode: Mode,
+    progress: Option<OnProgress>,
 }
 
-impl IFileOperationProgressSink_Impl for BinOnly_Impl {
+impl IFileOperationProgressSink_Impl for RemovalSink_Impl {
     fn StartOperations(&self) -> windows::core::Result<()> {
         Ok(())
     }
-    fn FinishOperations(&self, _: HRESULT) -> windows::core::Result<()> {
+    fn FinishOperations(&self, result: HRESULT) -> windows::core::Result<()> {
+        if result.is_err() {
+            let _ = self.watch.failed.compare_exchange(0, result.0, Ordering::SeqCst, Ordering::SeqCst);
+        }
         Ok(())
     }
     fn PreRenameItem(&self, _: u32, _: Ref<'_, IShellItem>, _: &PCWSTR) -> windows::core::Result<()> {
@@ -112,7 +129,7 @@ impl IFileOperationProgressSink_Impl for BinOnly_Impl {
         Ok(())
     }
     fn PreDeleteItem(&self, flags: u32, _: Ref<'_, IShellItem>) -> windows::core::Result<()> {
-        if flags & TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32 == 0 {
+        if self.mode == Mode::Recycle && flags & TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32 == 0 {
             // It would be gone for good: stop it.
             self.watch.refused.store(true, Ordering::SeqCst);
             return Err(E_ABORT.into());
@@ -121,7 +138,7 @@ impl IFileOperationProgressSink_Impl for BinOnly_Impl {
     }
     fn PostDeleteItem(&self, _: u32, _: Ref<'_, IShellItem>, result: HRESULT, _: Ref<'_, IShellItem>) -> windows::core::Result<()> {
         if result.is_err() {
-            self.watch.failed.store(result.0, Ordering::SeqCst);
+            let _ = self.watch.failed.compare_exchange(0, result.0, Ordering::SeqCst, Ordering::SeqCst);
         }
         Ok(())
     }
@@ -140,7 +157,10 @@ impl IFileOperationProgressSink_Impl for BinOnly_Impl {
     ) -> windows::core::Result<()> {
         Ok(())
     }
-    fn UpdateProgress(&self, _: u32, _: u32) -> windows::core::Result<()> {
+    fn UpdateProgress(&self, total: u32, done: u32) -> windows::core::Result<()> {
+        if let Some(progress) = &self.progress {
+            progress(total, done);
+        }
         Ok(())
     }
     fn ResetTimer(&self) -> windows::core::Result<()> {
@@ -158,8 +178,14 @@ fn describe(hr: HRESULT) -> String {
     match hr {
         h if h == E_ACCESSDENIED || h == COPYENGINE_E_ACCESS_DENIED_SRC || h == COPYENGINE_E_REQUIRES_ELEVATION => ADMIN.into(),
         h if h == COPYENGINE_E_SHARING_VIOLATION_SRC || h.0 as u32 == 0x8007_0020 || h.0 as u32 == 0x8007_0021 => IN_USE.into(),
-        h if h == COPYENGINE_E_RECYCLE_BIN_NOT_FOUND => NO_BIN.into(),
-        h => format!("Windows could not move it (0x{:08X}).", h.0 as u32),
+        h if h == COPYENGINE_E_RECYCLE_BIN_NOT_FOUND
+            || h == COPYENGINE_E_RECYCLE_SIZE_TOO_BIG
+            || h == COPYENGINE_E_RECYCLE_FORCE_NUKE
+            || h == COPYENGINE_E_RECYCLE_PATH_TOO_LONG =>
+        {
+            NO_BIN.into()
+        }
+        h => format!("Windows could not remove this item (0x{:08X}).", h.0 as u32),
     }
 }
 
@@ -187,7 +213,17 @@ pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result
 
 /// Moves one item to the Recycle Bin. COM must be initialised on this thread
 /// (`Com::init`). An item the bin cannot take stays where it is.
-pub fn recycle(path: &Path) -> Result<(), String> {
+pub fn recycle(path: &Path, progress: Option<OnProgress>) -> Result<(), String> {
+    remove(path, Mode::Recycle, progress)
+}
+
+/// Only called by the distinct permanently-delete command. Its caller applies
+/// exactly the same scanned-path and protection checks as the Recycle Bin flow.
+pub fn permanently_delete(path: &Path, progress: Option<OnProgress>) -> Result<(), String> {
+    remove(path, Mode::Permanent, progress)
+}
+
+fn remove(path: &Path, mode: Mode, progress: Option<OnProgress>) -> Result<(), String> {
     let shown = display_path(path);
     // The shell takes the usual form; `\\?\` only past MAX_PATH.
     let parse = if shown.as_os_str().len() < 260 { shown } else { long_path(path) };
@@ -196,20 +232,21 @@ pub fn recycle(path: &Path) -> Result<(), String> {
     let watch = Arc::new(Watch::default());
     // SAFETY: COM calls on this thread's apartment; `wide` outlives them.
     let performed = unsafe {
-        let operation: IFileOperation =
-            CoCreateInstance(&FileOperation, None, CLSCTX_INPROC_SERVER).map_err(|e| e.message())?;
-        let flags = FOFX_RECYCLEONDELETE.0 | FOF_NOCONFIRMATION.0 | FOF_NOERRORUI.0 | FOF_SILENT.0;
-        operation.SetOperationFlags(FILEOPERATION_FLAGS(flags)).map_err(|e| e.message())?;
-        let sink: IFileOperationProgressSink = BinOnly { watch: Arc::clone(&watch) }.into();
-        let cookie = operation.Advise(&sink).map_err(|e| e.message())?;
-        let item: windows::core::Result<IShellItem> =
-            SHCreateItemFromParsingName(PCWSTR::from_raw(wide.as_ptr()), None::<&IBindCtx>);
+        let operation: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_INPROC_SERVER).map_err(|e| describe(e.code()))?;
+        let mut flags = FOF_NOCONFIRMATION.0 | FOF_NOERRORUI.0 | FOF_SILENT.0;
+        if mode == Mode::Recycle {
+            flags |= FOFX_RECYCLEONDELETE.0;
+        }
+        operation.SetOperationFlags(FILEOPERATION_FLAGS(flags)).map_err(|e| describe(e.code()))?;
+        let sink: IFileOperationProgressSink = RemovalSink { watch: Arc::clone(&watch), mode, progress }.into();
+        let cookie = operation.Advise(&sink).map_err(|e| describe(e.code()))?;
+        let item: windows::core::Result<IShellItem> = SHCreateItemFromParsingName(PCWSTR::from_raw(wide.as_ptr()), None::<&IBindCtx>);
         let result = match item {
             Ok(item) => operation
                 .DeleteItem(&item, None::<&IFileOperationProgressSink>)
                 .and_then(|()| operation.PerformOperations())
-                .map(|()| operation.GetAnyOperationsAborted().is_ok_and(|aborted| aborted.as_bool())),
-            Err(_) => Err(windows::core::Error::from(windows::Win32::Foundation::E_INVALIDARG)),
+                .and_then(|()| operation.GetAnyOperationsAborted().map(|aborted| aborted.as_bool())),
+            Err(err) => Err(err),
         };
         let _ = operation.Unadvise(cookie);
         result
@@ -226,7 +263,7 @@ pub fn recycle(path: &Path) -> Result<(), String> {
         Ok(true) => return Err("Windows stopped it.".into()),
         Err(e) if e.code() == windows::Win32::Foundation::E_INVALIDARG => {
             return Err(if std::fs::symlink_metadata(long_path(path)).is_ok() {
-                "The path is too long for the Recycle Bin.".into()
+                "Windows could not handle this path (0x80070057).".into()
             } else {
                 GONE.into()
             });
@@ -273,13 +310,21 @@ mod tests {
         let text = original.to_string_lossy().to_string();
         let wanted: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
         let bin = PathBuf::from(&text[..3]).join("$Recycle.Bin");
-        let Ok(users) = std::fs::read_dir(&bin) else { return };
+        let Ok(users) = std::fs::read_dir(&bin) else {
+            return;
+        };
         for user in users.flatten() {
-            let Ok(entries) = std::fs::read_dir(user.path()) else { continue };
+            let Ok(entries) = std::fs::read_dir(user.path()) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                let Some(suffix) = name.strip_prefix("$I") else { continue };
-                let Ok(info) = std::fs::read(entry.path()) else { continue };
+                let Some(suffix) = name.strip_prefix("$I") else {
+                    continue;
+                };
+                let Ok(info) = std::fs::read(entry.path()) else {
+                    continue;
+                };
                 if info.windows(wanted.len()).any(|w| w == wanted.as_slice()) {
                     let item = user.path().join(format!("$R{suffix}"));
                     let _ = std::fs::remove_dir_all(&item).or_else(|_| std::fs::remove_file(&item));
@@ -303,7 +348,7 @@ mod tests {
         let _com = Com::init();
         for (path, is_dir) in [(&file, false), (&folder, true)] {
             recheck(path, is_dir, &temp.0, &guard(&temp.0)).unwrap();
-            match recycle(path) {
+            match recycle(path, None) {
                 Ok(()) => {
                     assert!(!path.exists());
                     purge_from_bin(path);
@@ -338,7 +383,7 @@ mod tests {
             return;
         }
         let _com = Com::init();
-        let result = recycle(&PathBuf::from(format!(r"{drive}\keep.me")));
+        let result = recycle(&PathBuf::from(format!(r"{drive}\keep.me")), None);
         let _ = std::process::Command::new(&subst).arg(&drive).arg("/D").status();
         eprintln!("recycling from {drive}: {result:?}");
         assert_eq!(result.unwrap_err(), NO_BIN);
@@ -406,5 +451,48 @@ mod tests {
         assert_eq!(describe(COPYENGINE_E_SHARING_VIOLATION_SRC), IN_USE);
         assert_eq!(describe(COPYENGINE_E_RECYCLE_BIN_NOT_FOUND), NO_BIN);
         assert!(describe(HRESULT(0x8000_4005u32 as i32)).contains("0x80004005"));
+    }
+
+    #[test]
+    fn items_too_large_for_the_bin_have_an_actionable_reason() {
+        use windows::Win32::UI::Shell::{COPYENGINE_E_RECYCLE_FORCE_NUKE, COPYENGINE_E_RECYCLE_SIZE_TOO_BIG};
+        assert_eq!(describe(COPYENGINE_E_RECYCLE_SIZE_TOO_BIG), NO_BIN);
+        assert_eq!(describe(COPYENGINE_E_RECYCLE_FORCE_NUKE), NO_BIN);
+    }
+
+    #[test]
+    fn explicit_permanent_deletion_removes_its_test_file_and_folder() {
+        let temp = Temp::new("permanent");
+        let file = temp.0.join("test-only.txt");
+        let folder = temp.0.join("test-only-folder");
+        std::fs::write(&file, b"temporary test data").unwrap();
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("child.txt"), b"temporary test data").unwrap();
+        let _com = Com::init();
+        let guard = guard(&temp.0);
+        for (item, is_dir) in [(&file, false), (&folder, true)] {
+            recheck(item, is_dir, &temp.0, &guard).unwrap();
+            permanently_delete(item, None).unwrap();
+            assert!(!item.exists(), "the explicitly deleted test item must be removed");
+        }
+        assert!(temp.0.exists(), "the scanned root stays in place");
+    }
+
+    #[test]
+    fn progress_sink_forwards_windows_work_estimates_in_the_correct_order() {
+        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = Arc::clone(&updates);
+        let sink: IFileOperationProgressSink = RemovalSink {
+            watch: Arc::new(Watch::default()),
+            mode: Mode::Recycle,
+            progress: Some(Arc::new(move |total, done| received.lock().unwrap().push((total, done)))),
+        }
+        .into();
+        // SAFETY: a call to our own progress sink; no file operation is started.
+        unsafe {
+            sink.UpdateProgress(100, 37).unwrap();
+            sink.UpdateProgress(0, 0).unwrap();
+        }
+        assert_eq!(*updates.lock().unwrap(), [(100, 37), (0, 0)]);
     }
 }

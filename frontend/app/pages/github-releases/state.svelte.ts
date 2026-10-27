@@ -3,7 +3,7 @@
 // build goes on and its log is still there on the way back).
 import { SvelteMap } from "svelte/reactivity";
 import { badges } from "../../../lib/badges.svelte";
-import { readJson, writeJson } from "../../../lib/storage";
+import { notifyChange, readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import {
   githubReleasesApi as api,
@@ -285,6 +285,7 @@ class GithubReleasesState {
   builds = new SvelteMap<string, BuildSession>();
   releases = new SvelteMap<string, ReleaseSession>();
   #started = false;
+  #projectsRevision = 0;
   get repos(): RepoBrief[] {
     return this.page?.repos ?? [];
   }
@@ -332,8 +333,10 @@ class GithubReleasesState {
     }
     this.#started = true;
     this.loading = true;
+    const projectsRevision = this.#projectsRevision;
     try {
-      this.page = await api.getState();
+      const page = await api.getState();
+      this.page = projectsRevision === this.#projectsRevision || !this.page ? page : { ...page, repos: this.page.repos };
       this.error = null;
     } catch (error) {
       this.error = messageOf(error);
@@ -354,6 +357,19 @@ class GithubReleasesState {
   }
   setPage(page: PageState) {
     this.page = page;
+  }
+  async applySyncedProjects(page: PageState) {
+    this.#projectsRevision++;
+    const previous = new Map(this.repos.map((repo) => [repo.id, repo]));
+    // The native import returns paths without probing folders or credentials.
+    // Keep this PC's live tool/account metadata until its ordinary refresh.
+    this.page = this.page ? { ...this.page, repos: page.repos.map((repo) => ({ ...repo, exists: previous.get(repo.id)?.exists ?? false })) } : page;
+    const retained = new Set(this.repos.map((repo) => repo.id));
+    for (const id of Object.keys(this.statuses)) if (!retained.has(id)) delete this.statuses[id];
+    for (const id of Object.keys(this.remotes)) if (!retained.has(id)) delete this.remotes[id];
+    if (this.selectedId && !retained.has(this.selectedId.split("/")[0])) this.selectedId = null;
+    if (this.#started) await each(this.repos, 4, (repo) => this.refresh(repo.id));
+    this.updateBadge();
   }
   select(id: string) {
     this.selectedId = id;
@@ -455,11 +471,13 @@ class GithubReleasesState {
     badges.set("github-releases", behind);
   }
   async addFolder() {
+    const before = new Set(this.repos.map((repo) => repo.id));
     try {
       const result = await api.addFolder();
       if (!result) return;
       this.page = result.state;
       if (result.added) {
+        if (!before.has(result.added)) notifyChange("githubReleases.projects");
         await this.refresh(result.added);
         this.select(this.items.find((item) => item.repo.id === result.added)?.id ?? result.added);
         void this.fetchQuietly(result.added);
@@ -487,6 +505,7 @@ class GithubReleasesState {
     const before = new Set(this.repos.map((r) => r.id));
     this.page = await api.addRepos(paths);
     const added = this.repos.filter((r) => !before.has(r.id));
+    if (added.length) notifyChange("githubReleases.projects");
     await each(added, 4, (repo) => this.refresh(repo.id));
     if (added.length) {
       toast.success(added.length === 1 ? `Added ${added[0].name}.` : `Added ${added.length} repositories.`);
@@ -495,6 +514,7 @@ class GithubReleasesState {
   }
   async removeRepo(repoId: string) {
     this.page = await api.removeRepo(repoId);
+    notifyChange("githubReleases.projects");
     delete this.statuses[repoId];
     delete this.remotes[repoId];
     if (this.selected?.repo.id === repoId || this.selectedId?.split("/")[0] === repoId) {

@@ -30,6 +30,35 @@ use crate::project_backups::compare::{self, FileDiff};
 
 const SCAN_KEY: &str = "__scan__";
 
+#[tauri::command]
+pub async fn github_releases_sync_export() -> Result<super::sync::SyncedProjects, String> {
+    blocking(|| super::sync::export(&store::load()?)).await?
+}
+
+#[tauri::command]
+pub async fn github_releases_sync_import(
+    synced: super::sync::SyncedProjects,
+    state: State<'_, GithubReleasesState>,
+) -> Result<PageState, String> {
+    let state = state.inner().clone();
+    blocking(move || state.with_idle(|| {
+        let settings = store::edit(|settings| super::sync::reconcile(settings, &synced))?;
+        // A sync import never probes project folders, runs Git or reads keys.
+        // The page keeps its live metadata and refreshes normally if open.
+        Ok(PageState {
+            repos: settings.repos.iter().map(|repo| RepoBrief {
+                id: repo.id.clone(), path: repo.path.clone(),
+                name: Path::new(&repo.path).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| repo.path.clone()),
+                exists: false,
+            }).collect(),
+            account: settings.account,
+            git: None, gh: None,
+            ai: AiView { providers: Vec::new(), order: settings.ai.order, ollama_url: settings.ai.ollama_url, ollama_enabled: settings.ai.ollama_enabled },
+            gbr_import: settings.gbr_import,
+        })
+    })).await?
+}
+
 // ─── Page state ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]

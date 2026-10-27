@@ -1,190 +1,76 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Cloud from "@lucide/svelte/icons/cloud";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
-  import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import X from "@lucide/svelte/icons/x";
+  import Info from "@lucide/svelte/icons/info";
   import { cloudStorage as s } from "./state.svelte";
-  import type { CloudProvider } from "./api";
 
-  let dialog: HTMLDialogElement;
-  const instructions: Record<CloudProvider, string[]> = {
-    googleDrive: [
-      "In Google Drive Preferences, use Stream files for the folders you want to keep online.",
-      "Wait for Drive to finish uploading. Open the Drive folder, select the files or folders inside it, and use the client's offline availability controls to keep them online.",
-      "Google manages its cache automatically. Turning off offline availability does not necessarily release all cached space immediately.",
-    ],
-    mega: [
-      "MEGA Desktop sync does not convert existing local files into online-only placeholders. Deleting a synced local file can also delete its cloud copy.",
-      "The separate MEGAcmd app offers an on-demand FUSE mount on Windows (beta), with its own setup and managed cache.",
-      "A MEGAcmd mount does not convert or reclaim space from an existing MEGAsync sync folder. Follow MEGA's mounting guide before changing your sync setup.",
-    ],
-    dropbox: [
-      "Open the Dropbox folder and wait for Dropbox to show that syncing is up to date.",
-      "Right-click the files or folders you want to keep in the cloud and choose Make online-only.",
-      "If the option is missing, check Dropbox's online-only support and desktop app settings.",
-    ],
-    oneDrive: [
-      "Start OneDrive and enable Files On-Demand for this account.",
-      "Wait for your uploads to finish. In File Explorer, right-click the required files or folders and choose Free up space.",
-      "Your files stay in OneDrive and download again when you open them.",
-    ],
-  };
-  const logo: Partial<Record<CloudProvider, string>> = {
-    googleDrive: "/icons/installapps/Google-Drive.svg",
-    dropbox: "/icons/installapps/Dropbox.svg",
-  };
-  onMount(() => void s.load());
-  $effect(() => {
-    if (!dialog) return;
-    if (s.selected && !dialog.open) dialog.showModal();
-    else if (!s.selected && dialog.open) dialog.close();
+  const plural = (count: number, one: string, many = `${one}s`) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+  const names = (list: { name: string }[]) => list.map((provider) => provider.name).join(", ");
+  // The whole explanation lives in the info icon's tooltip.
+  const info = $derived([
+    s.ready.length ? `Makes uploaded files online-only in ${names(s.ready)}.` : "No cloud app on this PC allows online-only requests from here.",
+    "Files still uploading, or whose sync status can't be verified, stay on this PC. Opening an online-only file again needs an internet connection.",
+    ...(s.ready.some((provider) => provider.provider === "googleDrive")
+      ? ["Google Drive: Drive's own Offline access › Online only, then its Clear cache. Open Storage on your computer in Drive's settings when asked, and MYLE presses it."]
+      : []),
+    ...(s.left.length ? [`Not included: ${names(s.left)}, which ${s.left.length === 1 ? "needs its" : "need their"} own storage controls.`] : []),
+  ].join("\n\n"));
+  const summary = $derived.by(() => {
+    const result = s.result;
+    if (!result) return "";
+    const parts = [`${plural(result.requested, "file")} requested`];
+    if (result.foldersRequested) parts.push(`${plural(result.foldersRequested, "Google Drive folder")} set to online-only`);
+    if (result.driveCache?.state === "cleared") parts.push(`Google Drive cache cleared${result.driveCache.size ? ` (${result.driveCache.size} before)` : ""}`);
+    else if (result.driveCache?.state === "notOpen") parts.push("Google Drive cache not cleared: its storage window wasn't opened");
+    if (result.pendingUploads) parts.push(`${plural(result.pendingUploads, "file")} still uploading stay on this PC`);
+    if (result.failed) parts.push(`${plural(result.failed, "item")} couldn't be processed`);
+    return `${result.cancelled ? "Stopped" : "Done"} · ${parts.join(" · ")}`;
   });
+  onMount(() => void s.load());
 </script>
 
 <section class="cloud-storage surface" aria-label="Cloud storage">
-  <div class="cloud-heading"><CloudDownload size={19} /><div><h2>Online-only files</h2><p>Manage local copies after uploads finish.</p></div></div>
-  <div class="providers">
-    {#each s.providers as provider (provider.provider)}
-      <button
-        type="button"
-        class="provider-btn"
-        class:unavailable={provider.mode === "unavailable"}
-        disabled={s.loading || s.running}
-        title={`${provider.name}: ${provider.detail}`}
-        onclick={() => s.choose(provider.provider)}
-      >
-        {#if logo[provider.provider]}<img src={logo[provider.provider]} alt="" width="19" height="19" />{:else}<Cloud size={19} />{/if}
-        <span>{provider.name}</span>
-        <span class="status-dot" class:ready={provider.mode === "native"} aria-hidden="true"></span>
-      </button>
-    {/each}
-  </div>
-  <button type="button" class="refresh-btn" disabled={s.loading || s.running} aria-label="Refresh cloud apps" title="Refresh cloud apps" onclick={() => s.load()}><RefreshCw size={16} class={s.loading ? "refreshing" : ""} /></button>
-  {#if s.loadError}<p class="load-error" role="alert">Cloud apps couldn't be checked: {s.loadError} <button type="button" onclick={() => s.load()}>Retry</button></p>{/if}
-  {#if s.running}<p class="active-request" aria-live="polite">Checking {s.current?.name ?? "cloud"} files… <button type="button" onclick={() => { if (s.selected && !dialog.open) dialog.showModal(); }}>Show progress</button></p>{/if}
+  <div class="cloud-heading"><span class="cloud-symbol"><CloudDownload size={21} /></span><div><h2>Online-only files</h2><p>Free up space once uploads finish.</p></div></div>
+  <span class="info" title={info}><Info size={14} /></span>
+  {#if s.running}
+    <button type="button" class="btn danger stop-btn" disabled={s.cancelling} onclick={() => s.cancel()}>{s.cancelling ? "Stopping…" : "Stop"}</button>
+  {:else}
+    <button
+      type="button"
+      class="btn primary all-btn"
+      disabled={s.loading || !!s.loadError || !s.ready.length}
+      onclick={() => s.makeOnlineOnly()}
+    ><CloudDownload size={13} />Make all online-only</button>
+  {/if}
+  {#if s.loadError}
+    <p class="status error" role="alert">Cloud apps couldn't be checked: {s.loadError} <button type="button" onclick={() => s.load()}>Retry</button></p>
+  {:else if s.running && s.progress?.waitingForDrive}
+    <p class="status waiting" aria-live="polite">Open <b>Storage on your computer</b> in Google Drive's settings: MYLE presses Clear cache there as soon as it opens.</p>
+  {:else if s.running && s.progress}
+    <p class="status" aria-live="polite" title={s.progress.current ?? ""}>Checking uploaded files… {s.progress.visited.toLocaleString()} checked · {s.progress.requested.toLocaleString()} requests · {s.progress.pendingUploads.toLocaleString()} waiting for upload</p>
+  {:else if s.error}
+    <p class="status error" role="alert">{s.error}</p>
+  {:else if s.result}
+    <p class="status" role="status" title={s.result.errors.join("\n")}>{summary}</p>
+  {/if}
 </section>
 
-<dialog
-  bind:this={dialog}
-  class="cloud-dialog"
-  aria-labelledby="cloud-storage-title"
-  aria-modal={s.selected ? "true" : undefined}
-  oncancel={(event) => { if (s.running) event.preventDefault(); else s.close(); }}
-  onclose={() => s.close()}
->
-  {#if s.current}
-    <header class="dialog-header">
-      <div><CloudDownload size={22} /><h2 id="cloud-storage-title">{s.current.name}</h2></div>
-      <button type="button" class="close-btn" disabled={s.running} aria-label="Close cloud storage" onclick={() => s.close()}><X size={18} /></button>
-    </header>
-    <div class="dialog-content">
-      <p class="provider-detail">{s.current.detail}</p>
-      {#if s.current.mode === "native"}
-        <h3>Make uploaded files online-only</h3>
-        <p>Request online-only copies in all the cloud folders below. Files still uploading or whose sync status can't be verified stay on this PC. Opening online-only files again needs an internet connection.</p>
-      {:else}
-        <h3>{s.current.provider === "mega" ? "MEGA storage options" : "Manage offline availability"}</h3>
-        <ol class="instructions">{#each instructions[s.current.provider] as instruction}<li>{instruction}</li>{/each}</ol>
-      {/if}
-      {#if s.current.folders.length}
-        <ul class="folder-list" aria-label="Cloud folders">
-          {#each s.current.folders as folder (folder.path)}
-            <li><div><span>{folder.label}</span><strong title={folder.path}>{folder.path}</strong></div><button type="button" class="btn small" disabled={s.running} onclick={() => s.openFolder(folder.path)}><FolderOpen size={14} />Open</button></li>
-          {/each}
-        </ul>
-      {/if}
-      {#if s.running && s.progress}
-        <div class="request-progress" role="status">
-          <strong>{s.cancelling ? "Stopping…" : "Checking uploaded files…"}</strong>
-          <span>{s.progress.visited.toLocaleString()} checked · {s.progress.requested.toLocaleString()} requests · {s.progress.pendingUploads.toLocaleString()} waiting for upload</span>
-          {#if s.progress.current}<small title={s.progress.current}>{s.progress.current}</small>{/if}
-        </div>
-      {/if}
-      {#if s.result}
-        <div class="request-result" role="status">
-          <h3>{s.result.cancelled ? "Request stopped" : s.result.requested ? "Online-only requests sent" : "No online-only requests sent"}</h3>
-          <p>{s.result.requested.toLocaleString()} files requested. Your cloud app completes the change; this count does not mean that space has already been released.</p>
-          <dl>
-            <div><dt>Already online-only</dt><dd>{s.result.alreadyOnline.toLocaleString()}</dd></div>
-            <div><dt>Waiting for upload</dt><dd>{s.result.pendingUploads.toLocaleString()}</dd></div>
-            <div><dt>Left unchanged</dt><dd>{s.result.skipped.toLocaleString()}</dd></div>
-            <div><dt>Couldn't process</dt><dd>{s.result.failed.toLocaleString()}</dd></div>
-          </dl>
-          {#if s.result.pendingUploads}<p>Pending files stay local. Wait for uploads to finish, then retry.</p>{/if}
-          {#if s.result.errors.length}<details><summary>Show details</summary><ul>{#each s.result.errors as error}<li>{error}</li>{/each}</ul></details>{/if}
-        </div>
-      {/if}
-      {#if s.error}<p class="action-error" role="alert">{s.error}</p>{/if}
-      {#if s.loadError}<p class="action-error" role="alert">Refresh the cloud folders before requesting a change: {s.loadError}</p>{/if}
-    </div>
-    <footer class="dialog-actions">
-      <button type="button" class="btn" onclick={() => s.help()}><ExternalLink size={15} />{s.current.provider === "mega" ? "MEGAcmd mounting guide" : "Official instructions"}</button>
-      {#if s.running}
-        <button type="button" class="btn danger" disabled={s.cancelling} onclick={() => s.cancel()}>{s.cancelling ? "Stopping…" : "Stop request"}</button>
-      {:else if s.current.mode === "native"}
-        <button type="button" class="btn primary" disabled={s.loading || !!s.loadError} onclick={() => s.makeOnlineOnly()}><CloudDownload size={16} />{s.result ? "Retry online only" : "Make uploaded files online-only"}</button>
-      {:else}
-        <button type="button" class="btn primary" onclick={() => s.close()}>Done</button>
-      {/if}
-    </footer>
-  {/if}
-</dialog>
-
 <style>
-  .cloud-storage { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; margin-bottom: var(--fluid-gap-3); padding: 13px 17px; border-radius: 13px; }
-  .cloud-heading { display: flex; align-items: center; gap: 10px; color: rgb(var(--accent-soft-rgb)); }
-  .cloud-heading h2 { margin: 0; color: var(--text-1); font-size: 13px; }
-  .cloud-heading p { margin: 3px 0 0; font-size: 11px; color: var(--text-3); }
-  .providers { display: flex; flex: 1; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-  .provider-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 35px; padding: 0 12px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--chip-fill); color: var(--text-1); font-size: 12px; font-weight: 600; cursor: pointer; }
-  .provider-btn:hover:not(:disabled) { background: var(--chip-fill-hover); border-color: rgb(var(--accent-rgb) / 0.45); }
-  .provider-btn.unavailable { color: var(--text-2); }
-  .provider-btn:disabled { opacity: 0.55; cursor: default; }
-  .status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); opacity: 0.6; }
-  .status-dot.ready { background: #69bf97; opacity: 1; }
-  .refresh-btn, .close-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 0; border-radius: 7px; color: var(--text-2); background: transparent; cursor: pointer; }
-  .refresh-btn:hover:not(:disabled), .close-btn:hover:not(:disabled) { background: var(--hover); color: var(--text-1); }
-  .load-error, .active-request { flex-basis: 100%; margin: 0; color: var(--text-2); font-size: 12px; }
-  .load-error { color: #ffb4b0; }
-  .load-error button, .active-request button { padding: 2px 5px; text-decoration: underline; color: var(--text-1); }
-  .cloud-dialog { width: min(630px, calc(100vw - 32px)); max-height: min(740px, calc(100vh - 40px)); margin: auto; padding: 0; border: 1px solid var(--btn-border); border-radius: 17px; background: var(--float-bg); color: var(--text-1); box-shadow: 0 25px 90px #0008; }
-  .cloud-dialog[open] { display: flex; flex-direction: column; }
-  .cloud-dialog::backdrop { background: #0009; }
-  .dialog-header, .dialog-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 17px 20px; flex-shrink: 0; }
-  .dialog-header { border-bottom: 1px solid var(--btn-border); }
-  .dialog-header > div { display: flex; align-items: center; gap: 10px; color: rgb(var(--accent-soft-rgb)); }
-  .dialog-header h2 { margin: 0; color: var(--text-1); font-size: 19px; }
-  .dialog-content { overflow-y: auto; padding: 17px 20px; font-size: 13px; line-height: 1.6; }
-  .dialog-content h3 { margin: 14px 0 7px; font-size: 14px; }
-  .dialog-content p { margin: 0 0 12px; color: var(--text-2); }
-  .provider-detail { color: var(--text-3); font-size: 12px; }
-  .instructions { margin: 0; padding-left: 20px; color: var(--text-2); }
-  .instructions li + li { margin-top: 9px; }
-  .folder-list { list-style: none; padding: 0; margin: 18px 0; }
-  .folder-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--input-fill); }
-  .folder-list li + li { margin-top: 7px; }
-  .folder-list li > div { display: flex; flex-direction: column; min-width: 0; }
-  .folder-list span { color: var(--text-3); font-size: 11px; }
-  .folder-list strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 600; }
-  .request-progress, .request-result { display: flex; flex-direction: column; gap: 5px; padding: 12px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--input-fill); }
-  .request-progress span, .request-progress small { color: var(--text-2); font-size: 11px; }
-  .request-progress small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .request-result h3 { margin: 0; }
-  .request-result p { margin: 5px 0; font-size: 12px; }
-  .request-result dl { margin: 7px 0; font-size: 12px; }
-  .request-result dl > div { display: flex; justify-content: space-between; gap: 10px; }
-  .request-result dt { color: var(--text-2); }
-  .request-result dd { margin: 0; font-variant-numeric: tabular-nums; }
-  .request-result details { font-size: 11px; }
-  .request-result details li { overflow-wrap: anywhere; }
-  .dialog-content .action-error { padding: 10px 12px; margin-top: 14px; border: 1px solid rgb(229 72 77 / 0.4); border-radius: 8px; color: #ffb4b0; }
-  .dialog-actions { border-top: 1px solid var(--btn-border); }
-  .dialog-actions .btn { font-size: 12px; }
-  :global(.refreshing) { animation: cloud-refresh 1s linear infinite; }
-  @keyframes cloud-refresh { to { transform: rotate(360deg); } }
-  @media (max-width: 720px) { .providers { flex-basis: 100%; justify-content: flex-start; } .provider-btn { flex: 1 1 130px; } .refresh-btn { margin-left: auto; } .dialog-actions .btn { flex: 1; } }
-  @media (prefers-reduced-motion: reduce) { :global(.refreshing) { animation: none; } }
+  .cloud-storage { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-bottom: var(--fluid-gap-3); padding: 15px 18px; border: 1px solid var(--glass-border); border-radius: 14px; background: var(--bg-1); box-shadow: var(--surface-depth); }
+  .cloud-heading { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 180px; }
+  .cloud-symbol { display: grid; place-items: center; flex: none; width: 42px; height: 42px; border-radius: 12px; background: rgb(var(--accent-rgb) / 0.1); color: rgb(var(--accent-soft-rgb)); }
+  .cloud-heading h2 { margin: 0; color: var(--text-1); font-size: 14px; font-weight: 700; }
+  .cloud-heading p { margin: 3px 0 0; font-size: 12px; color: var(--text-3); line-height: 1.4; }
+  .info { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; color: var(--text-3); cursor: help; }
+  .info:hover { color: var(--text-1); background: var(--hover); }
+  .cloud-storage .all-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 37px; padding: 0 14px; gap: 7px; font-size: 13px; white-space: nowrap; border-radius: 9px; background: var(--btn-fill); border: 1px solid var(--btn-border); box-shadow: none; color: rgb(var(--accent-soft-rgb)); font-weight: 700; cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }
+  .cloud-storage .all-btn:hover:not(:disabled) { background: var(--btn-fill-hover); border-color: rgb(var(--accent-rgb) / 0.5); }
+  .all-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .all-btn:disabled { opacity: 0.5; cursor: default; }
+  .stop-btn { min-height: 37px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
+  .status { flex-basis: 100%; margin: 0; padding: 10px 0 0 54px; border-top: 1px solid var(--panel-rim); overflow: hidden; color: var(--text-2); font-size: 12px; line-height: 1.5; white-space: nowrap; text-overflow: ellipsis; }
+  .status.waiting { color: var(--text-1); white-space: normal; }
+  .status.error { color: #ffb4b0; white-space: normal; }
+  .status button { padding: 2px 5px; text-decoration: underline; color: var(--text-1); }
+  @media (max-width: 600px) { .cloud-storage { padding: 13px; gap: 12px; } .cloud-heading { flex-basis: calc(100% - 44px); } .all-btn, .stop-btn { width: 100%; } .status { padding-left: 0; } }
 </style>

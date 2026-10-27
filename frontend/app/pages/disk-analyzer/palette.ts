@@ -27,7 +27,7 @@ const DEFAULT_COLORS: Record<Category, string> = {
   document: "#688c4f",
   code: "#9d8843",
   system: "#5c6370",
-  other: "#464a53",
+  other: "#6a7180",
 };
 
 const NAVY_COLORS: Record<Category, string> = {
@@ -39,8 +39,21 @@ const NAVY_COLORS: Record<Category, string> = {
   document: "#6f925d",
   code: "#a59255",
   system: "#636c83",
-  other: "#4c5361",
+  other: "#6c7990",
 };
+
+// Folder frames are distinct from the file-type legend. Five muted accents
+// separate nested groups without suggesting that any colour means safe to delete.
+const FOLDER_COLORS = ["#7f9ac0", "#71a397", "#b49a73", "#9e8caf", "#8e9f78"];
+const NAVY_FOLDERS = ["#8ca2cb", "#7aa69e", "#b7a481", "#a79cc0", "#97aa8c"];
+
+/** Stable across rescans, sorting and navigation; independent of tile index. */
+export function folderColor(name: string, navy = false): string {
+  let hash = 2166136261;
+  for (const character of name.toLowerCase()) hash = Math.imul(hash ^ character.codePointAt(0)!, 16777619) >>> 0;
+  const palette = navy ? NAVY_FOLDERS : FOLDER_COLORS;
+  return palette[hash % palette.length];
+}
 
 const EXTENSIONS: Record<Exclude<Category, "other">, string> = {
   video: "mp4 mkv avi mov wmv flv webm m4v mpg mpeg m2ts mts ts vob 3gp ogv rmvb bik bk2 usm",

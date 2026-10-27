@@ -14,6 +14,7 @@ import {
   sizeOf,
   SMALLER_ID,
   type Crumb,
+  type DeleteProgress,
   type Drive,
   type ExtStat,
   type FileView,
@@ -48,14 +49,21 @@ const isView = (v: unknown) => v === "folders" || v === "files" || v === "types"
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 /** The question asked before anything goes to the Recycle Bin. */
-export function recycleQuestion(items: readonly NodeView[], locked: number, mode: SizeMode): ConfirmOptions {
-  const bytes = items.reduce((sum, item) => sum + sizeOf(item, mode), 0);
+export function recycleQuestion(items: readonly NodeView[], locked: number, mode: SizeMode, permanent = false): ConfirmOptions {
+  const bytes = items.reduce((sum, item) => sum + (permanent ? item.size : sizeOf(item, mode)), 0);
   const files = items.reduce((sum, item) => sum + (item.kind === "dir" ? item.files : 1), 0);
   const lines = [
-    `${plural(items.length, "item")}, ${formatSize(bytes)}. You can restore ${items.length === 1 ? "it" : "them"} from the Recycle Bin.`,
+    permanent
+      ? `${plural(items.length, "item")}, ${formatSize(bytes)}. ${items.length === 1 ? "It" : "They"} will bypass the Recycle Bin and cannot be restored. This cannot be undone.`
+      : `${plural(items.length, "item")}, ${formatSize(bytes)}. You can restore ${items.length === 1 ? "it" : "them"} from the Recycle Bin.`,
   ];
+  if (permanent) {
+    const names = items.slice(0, CAUTIONS_SHOWN).map((item) => `• ${item.name}`);
+    if (items.length > CAUTIONS_SHOWN) names.push(`• and ${plural(items.length - CAUTIONS_SHOWN, "more item")}`);
+    lines.push(names.join("\n"));
+  }
   if (bytes > TEN_GB) {
-    lines.push("That is more than 10 GB. Anything too big for the Recycle Bin stays where it is: nothing is deleted for good.");
+    lines.push(permanent ? "That is more than 10 GB. Check the selected items carefully before continuing." : "That is more than 10 GB. Anything too big for the Recycle Bin stays where it is: nothing is deleted for good.");
   }
   if (files > MANY_FILES) lines.push(`That is ${files.toLocaleString()} files.`);
   const warned = items.filter((item) => item.caution);
@@ -66,7 +74,7 @@ export function recycleQuestion(items: readonly NodeView[], locked: number, mode
   }
   if (items.some((item) => item.kind === "cloud")) lines.push("Cloud files are removed from your cloud storage too.");
   if (locked) lines.push(`${plural(locked, "protected item")} ${locked === 1 ? "stays where it is" : "stay where they are"}.`);
-  return { title: "Move to Recycle Bin?", message: lines.join("\n\n"), confirmLabel: "Move to Recycle Bin", danger: true };
+  return { title: permanent ? "Delete permanently?" : "Move to Recycle Bin?", message: lines.join("\n\n"), confirmLabel: permanent ? "Delete permanently" : "Move to Recycle Bin", danger: true };
 }
 
 class DiskAnalyzerState {
@@ -98,7 +106,8 @@ class DiskAnalyzerState {
   topFiles = $state.raw<FileView[] | null>(null);
   filter = $state("");
   extensions = $state.raw<ExtStat[] | null>(null);
-  deleting = $state.raw<{ done: number; total: number; current: string } | null>(null);
+  deleting = $state.raw<DeleteProgress | null>(null);
+  deletingPermanently = $state(false);
   /** What the last move to the Recycle Bin left behind, and why. */
   skipped = $state.raw<Skipped[]>([]);
   error = $state<string | null>(null);
@@ -488,6 +497,15 @@ class DiskAnalyzerState {
 
   /** Asks, then moves the items (the selection by default) to the Recycle Bin. */
   async recycle(ids: number[] = [...this.selection]) {
+    return this.#remove(ids, false);
+  }
+
+  /** A separate, explicitly confirmed action for items the bin could not take. */
+  async deletePermanently(ids: number[]) {
+    return this.#remove(ids, true);
+  }
+
+  async #remove(ids: number[], permanent: boolean) {
     const scanId = this.scanId;
     const wanted = ids.filter((id) => id !== SMALLER_ID);
     if (scanId === null || this.phase !== "ready" || !wanted.length) return;
@@ -505,17 +523,19 @@ class DiskAnalyzerState {
       toast.info(views.length === 1 && one ? `“${one.name}” stays where it is. ${one.reason ?? ""}`.trim() : "None of these can be moved to the Recycle Bin.");
       return;
     }
-    if (!(await confirm(recycleQuestion(allowed, locked, this.sizeMode)))) return;
+    if (!(await confirm(recycleQuestion(allowed, locked, this.sizeMode, permanent)))) return;
     if (this.phase !== "ready" || this.scanId !== scanId) return;
     this.phase = "deleting";
+    this.deletingPermanently = permanent;
     this.deleting = { done: 0, total: allowed.length, current: allowed[0].name };
     try {
-      const outcome = await diskApi.recycle(
+      const remove = permanent ? diskApi.deletePermanently : diskApi.recycle;
+      const outcome = await remove(
         scanId,
         allowed.map((view) => view.id),
         (e) => (this.deleting = e.data),
       );
-      this.skipped = outcome.skipped;
+      this.skipped = permanent ? [...this.skipped.filter((item) => !wanted.includes(item.id)), ...outcome.skipped] : outcome.skipped;
       for (const id of outcome.ids) {
         this.selection.delete(id);
         this.expanded.delete(id);
@@ -523,16 +543,20 @@ class DiskAnalyzerState {
       if (outcome.recycled) {
         toast.success(`Moved ${plural(outcome.recycled, "item")} to the Recycle Bin · ${formatSize(outcome.freedBytes)} freed.`);
       }
+      if (outcome.deleted) {
+        toast.success(`${plural(outcome.deleted, "item")} permanently deleted · ${formatSize(outcome.freedBytes)} freed.`);
+      }
       if (outcome.skipped.length) {
         const n = outcome.skipped.length;
         toast.info(`${plural(n, "item")} ${n === 1 ? "stays where it is" : "stay where they are"}. The list says why.`);
       }
       await this.#afterDelete(outcome.ids);
     } catch (err) {
-      toast.error(`Moving to the Recycle Bin failed: ${message(err)}`);
+      toast.error(`${permanent ? "Permanent deletion" : "Moving to the Recycle Bin"} failed: ${message(err)}`);
     } finally {
       this.phase = "ready";
       this.deleting = null;
+      this.deletingPermanently = false;
     }
   }
 

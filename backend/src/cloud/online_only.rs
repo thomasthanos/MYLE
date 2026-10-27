@@ -1,16 +1,28 @@
-//! Provider-managed online-only requests. No content is read or deleted.
-use std::collections::{HashSet, VecDeque};
+//! Provider-managed online-only requests, for every cloud app that allows
+//! them. Apps on the Windows cloud files API (OneDrive, Dropbox, iCloud,
+//! Box…) get one request per uploaded file; Google Drive gets its own "Online
+//! only" command per Drive folder. No content is read or deleted.
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
+use std::time::{Duration, Instant};
+
 use serde::Serialize;
 
+use super::google_drive::{self, CacheClear};
+use super::sync_roots::{self, SyncRoot};
 use super::{CloudFolder, CloudProvider};
 
 const MAX_ERRORS: usize = 20;
+const CHANGED: &str =
+    "The cloud folders changed. Refresh Disk Analyzer before requesting online-only files.";
+/// How long a request waits for Google Drive's storage window to be opened.
+const DRIVE_WAIT: Duration = Duration::from_secs(120);
+const DRIVE_POLL: Duration = if cfg!(test) { Duration::from_millis(1) } else { Duration::from_secs(1) };
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +33,10 @@ struct Counts {
     pub pending_uploads: u64,
     pub skipped: u64,
     pub failed: u64,
+    /// Google Drive folders whose "Online only" was turned on.
+    pub folders_requested: u64,
+    /// Google Drive folders that were online-only already.
+    pub folders_already_online: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -29,6 +45,8 @@ pub struct CloudOnlyProgress {
     #[serde(flatten)]
     counts: Counts,
     current: Option<String>,
+    /// Waiting for Google Drive's storage window, to press Clear cache there.
+    waiting_for_drive: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -38,6 +56,8 @@ pub struct CloudOnlyOutcome {
     counts: Counts,
     cancelled: bool,
     errors: Vec<String>,
+    /// Google Drive's cache, when Drive was part of the request.
+    drive_cache: Option<CacheClear>,
 }
 
 #[derive(Clone)]
@@ -80,49 +100,247 @@ trait CloudFiles {
     fn request_unpin(&mut self, handle: &Self::Handle) -> Result<(), String>;
 }
 
+/// Google Drive's "Online only" command (see google_drive.rs).
+trait DriveMenu {
+    fn is_online_only(&mut self, path: &Path) -> Result<bool, String>;
+    /// False when it was on already.
+    fn make_online_only(&mut self, path: &Path) -> Result<bool, String>;
+    fn clear_cache(&mut self) -> Result<CacheClear, String>;
+}
+
+struct DriveShell;
+
+impl DriveMenu for DriveShell {
+    fn is_online_only(&mut self, path: &Path) -> Result<bool, String> {
+        google_drive::is_online_only(path)
+    }
+    fn make_online_only(&mut self, path: &Path) -> Result<bool, String> {
+        google_drive::make_online_only(path)
+    }
+    fn clear_cache(&mut self) -> Result<CacheClear, String> {
+        google_drive::clear_cache()
+    }
+}
+
+/// How a cloud app's files can be made online-only.
+#[derive(Clone, Debug)]
+enum Action {
+    /// The Windows cloud files API, in these verified sync roots.
+    Native(Vec<SyncRoot>),
+    /// Google Drive's own Explorer command, for each of its folders.
+    DriveMenu,
+    /// Only with the app's own controls, for this reason.
+    Guided(&'static str),
+    Unavailable,
+}
+
+/// A cloud app on this PC.
+#[derive(Clone, Debug)]
+struct Cloud {
+    /// "googleDrive", "mega", "dropbox", "oneDrive", or "sync:<app>" for any
+    /// other app on the Windows cloud files API.
+    id: String,
+    name: String,
+    /// Each folder's label and path.
+    folders: Vec<(String, PathBuf)>,
+    action: Action,
+}
+
+const UNAVAILABLE: &str =
+    "No local cloud folder was detected. Check the desktop app's account and folder settings.";
+const UNVERIFIED: &str = "Compatible Windows online-only support could not be verified for these folders. Use this cloud app's own storage controls.";
+
+fn key(provider: CloudProvider) -> &'static str {
+    match provider {
+        CloudProvider::Dropbox => "dropbox",
+        CloudProvider::GoogleDrive => "googleDrive",
+        CloudProvider::Mega => "mega",
+        CloudProvider::OneDrive => "oneDrive",
+    }
+}
+
+/// The cloud apps on this PC: the four the app knows by name (always listed,
+/// as the page shows them), then every other app with a Windows sync root.
+fn clouds(
+    detected: &[CloudFolder],
+    roots: &[SyncRoot],
+    files: &mut impl CloudFiles,
+    drive: &mut impl DriveMenu,
+) -> Vec<Cloud> {
+    let detected_of = |provider| -> Vec<(String, PathBuf)> {
+        detected
+            .iter()
+            .filter(|folder| folder.provider == provider)
+            .map(|folder| (folder.label.clone(), folder.path.clone()))
+            .collect()
+    };
+    let named = |provider: &str| -> Vec<SyncRoot> {
+        roots
+            .iter()
+            .filter(|root| root.provider.eq_ignore_ascii_case(provider))
+            .cloned()
+            .collect()
+    };
+    let mut out = Vec::new();
+    for provider in [
+        CloudProvider::GoogleDrive,
+        CloudProvider::Mega,
+        CloudProvider::Dropbox,
+        CloudProvider::OneDrive,
+    ] {
+        let folders = detected_of(provider);
+        let id = key(provider).to_string();
+        let name = provider.name().to_string();
+        out.push(match provider {
+            CloudProvider::Dropbox | CloudProvider::OneDrive => {
+                native_cloud(id, name, named(provider.name()), folders, files)
+            }
+            CloudProvider::GoogleDrive => {
+                let action = if folders.is_empty() {
+                    Action::Unavailable
+                } else if folders.iter().all(|(_, path)| drive.is_online_only(path).is_ok()) {
+                    Action::DriveMenu
+                } else {
+                    Action::Guided(
+                        "Google Drive manages offline availability and its streaming cache through its own desktop app.",
+                    )
+                };
+                Cloud { id, name, folders, action }
+            }
+            CloudProvider::Mega => {
+                let action = if folders.is_empty() {
+                    Action::Unavailable
+                } else {
+                    Action::Guided(
+                        "MEGA Desktop sync has no online-only conversion. MEGAcmd offers a separate on-demand mount (beta on Windows).",
+                    )
+                };
+                Cloud { id, name, folders, action }
+            }
+        });
+    }
+    let mut others: BTreeMap<&str, Vec<SyncRoot>> = BTreeMap::new();
+    for root in roots.iter().filter(|root| {
+        !["OneDrive", "Dropbox"]
+            .iter()
+            .any(|known| root.provider.eq_ignore_ascii_case(known))
+    }) {
+        others.entry(&root.provider).or_default().push(root.clone());
+    }
+    for (provider, roots) in others {
+        // "Nextcloud - name@host" names the app before its account.
+        let name = roots[0].name.split(" - ").next().unwrap_or(provider).trim().to_string();
+        out.push(native_cloud(format!("sync:{provider}"), name, roots, Vec::new(), files));
+    }
+    out
+}
+
+/// An app on the Windows cloud files API: its sync roots that pass every
+/// check, or the app's own controls when none does.
+fn native_cloud(
+    id: String,
+    name: String,
+    roots: Vec<SyncRoot>,
+    detected: Vec<(String, PathBuf)>,
+    files: &mut impl CloudFiles,
+) -> Cloud {
+    let mut keys = HashSet::new();
+    let roots: Vec<_> = roots
+        .into_iter()
+        .filter(|root| root_key(&root.path).is_ok_and(|key| keys.insert(key)))
+        .collect();
+    let verified: Vec<_> = roots.iter().filter(|root| verified(files, root).is_ok()).cloned().collect();
+    if !verified.is_empty() {
+        return Cloud {
+            id,
+            name,
+            folders: verified.iter().map(|root| (root.name.clone(), root.path.clone())).collect(),
+            action: Action::Native(verified),
+        };
+    }
+    let mut folders: Vec<_> = roots.into_iter().map(|root| (root.name, root.path)).collect();
+    for (label, path) in detected {
+        if root_key(&path).is_ok_and(|key| keys.insert(key)) {
+            folders.push((label, path));
+        }
+    }
+    let action = if folders.is_empty() { Action::Unavailable } else { Action::Guided(UNVERIFIED) };
+    Cloud { id, name, folders, action }
+}
+
+/// What one request covers.
+#[derive(Debug, Default)]
+struct Plan {
+    roots: Vec<SyncRoot>,
+    /// Google Drive folders.
+    drive: Vec<PathBuf>,
+    /// How long to wait for Drive's storage window to clear its cache.
+    drive_wait: Duration,
+}
+
+/// The request for the apps `wanted`, when their folders are still exactly
+/// the `expected` ones the page showed.
+fn plan(clouds: &[Cloud], wanted: &[String], expected: &[String]) -> Result<Plan, String> {
+    let wanted: HashSet<&str> = wanted.iter().map(String::as_str).collect();
+    let mut plan = Plan::default();
+    let mut actual = HashSet::new();
+    let mut found = 0;
+    for cloud in clouds.iter().filter(|cloud| wanted.contains(cloud.id.as_str())) {
+        match &cloud.action {
+            Action::Native(roots) => plan.roots.extend(roots.iter().cloned()),
+            Action::DriveMenu => plan.drive.extend(cloud.folders.iter().map(|(_, path)| path.clone())),
+            Action::Guided(_) | Action::Unavailable => {
+                return Err(format!("Use {}'s storage controls for this app.", cloud.name));
+            }
+        }
+        found += 1;
+        for (_, path) in &cloud.folders {
+            actual.insert(root_key(path)?);
+        }
+    }
+    let expected: HashSet<_> = expected
+        .iter()
+        .map(|path| root_key(Path::new(path)))
+        .collect::<Result<_, _>>()?;
+    if found == 0 || found != wanted.len() || actual != expected {
+        return Err(CHANGED.into());
+    }
+    plan.drive_wait = DRIVE_WAIT;
+    Ok(plan)
+}
+
 fn execute_with(
     files: &mut impl CloudFiles,
-    provider: CloudProvider,
-    expected: &[String],
-    detected: &[CloudFolder],
+    drive: &mut impl DriveMenu,
+    plan: &Plan,
     cancel: &AtomicBool,
     mut progress: impl FnMut(&CloudOnlyProgress) -> bool,
 ) -> Result<CloudOnlyOutcome, String> {
-    if !matches!(provider, CloudProvider::OneDrive | CloudProvider::Dropbox) {
-        return Err(format!(
-            "Use {}'s storage controls for this provider.",
-            provider.name()
-        ));
-    }
     if cancel.load(Ordering::Relaxed) {
         return Ok(CloudOnlyOutcome {
             cancelled: true,
             ..Default::default()
         });
     }
-    let roots = selected_roots(provider, expected, detected)?;
     // Validate and hold every root before changing any file. Handles also hold
     // the ancestors against rename/reparse replacement throughout traversal.
-    let prepared: Vec<_> = roots.iter().map(|path| {
-        let handle = files.open_root(path)?;
-        let metadata = files.metadata(&handle)?;
-        let registration = files.registration(&handle)?;
-        if !metadata.directory || metadata.unsafe_reparse || metadata.id == 0
-            || metadata.id != registration.root_id || !compatible(provider, &registration)
-        {
-            return Err(format!("{} is not a compatible registered sync root. Refresh and use the provider's storage controls.", path.display()));
-        }
-        Ok((path, handle, metadata))
-    }).collect::<Result<_, String>>()?;
+    let prepared: Vec<_> = plan
+        .roots
+        .iter()
+        .map(|root| {
+            let (handle, metadata) = verified(files, root)?;
+            Ok((root, handle, metadata))
+        })
+        .collect::<Result<_, String>>()?;
     let mut outcome = CloudOnlyOutcome::default();
     let mut seen = HashSet::new();
-    for (path, handle, metadata) in &prepared {
+    for (root, handle, metadata) in &prepared {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
         Walker {
             files,
-            provider,
+            root,
             root_id: metadata.id,
             volume: metadata.volume,
             cancel,
@@ -130,14 +348,83 @@ fn execute_with(
             seen: &mut seen,
             outcome: &mut outcome,
         }
-        .visit(path, handle, 0);
+        .visit(&root.path, handle, 0);
+    }
+    for path in &plan.drive {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        match drive.make_online_only(path) {
+            Ok(true) => outcome.counts.folders_requested += 1,
+            Ok(false) => outcome.counts.folders_already_online += 1,
+            Err(error) => record_error(&mut outcome, path, error),
+        }
+        if !progress(&CloudOnlyProgress {
+            counts: outcome.counts.clone(),
+            current: Some(path.display().to_string()),
+            waiting_for_drive: false,
+        }) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+    // Online-only files still fill Drive's cache, and only Drive's own
+    // storage window empties it: wait for it to be opened, then press.
+    let deadline = Instant::now() + plan.drive_wait;
+    while !plan.drive.is_empty() && !cancel.load(Ordering::Relaxed) {
+        match drive.clear_cache() {
+            Ok(CacheClear::NotOpen) if Instant::now() < deadline => {
+                if !progress(&CloudOnlyProgress {
+                    counts: outcome.counts.clone(),
+                    current: None,
+                    waiting_for_drive: true,
+                }) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                std::thread::sleep(DRIVE_POLL);
+            }
+            Ok(found) => {
+                outcome.drive_cache = Some(found);
+                break;
+            }
+            Err(error) => {
+                record_error(&mut outcome, Path::new("Google Drive"), error);
+                break;
+            }
+        }
     }
     outcome.cancelled = cancel.load(Ordering::Relaxed);
     let _ = progress(&CloudOnlyProgress {
         counts: outcome.counts.clone(),
         current: None,
+        waiting_for_drive: false,
     });
     Ok(outcome)
+}
+
+/// A sync root opened and held, once it is the registered root it claims to be.
+fn verified<F: CloudFiles>(files: &mut F, root: &SyncRoot) -> Result<(F::Handle, Metadata), String> {
+    let handle = files.open_root(&root.path)?;
+    let metadata = files.metadata(&handle)?;
+    let registration = files.registration(&handle)?;
+    if !metadata.directory
+        || metadata.unsafe_reparse
+        || metadata.id == 0
+        || metadata.id != registration.root_id
+        || !compatible(root, &registration)
+    {
+        return Err(format!(
+            "{} is not a compatible registered sync root. Refresh and use the provider's storage controls.",
+            root.path.display()
+        ));
+    }
+    Ok((handle, metadata))
+}
+
+fn record_error(outcome: &mut CloudOnlyOutcome, path: &Path, error: String) {
+    outcome.counts.failed += 1;
+    if outcome.errors.len() < MAX_ERRORS {
+        outcome.errors.push(format!("{}: {error}", path.display()));
+    }
 }
 
 fn root_key(path: &Path) -> Result<String, String> {
@@ -161,44 +448,20 @@ fn root_key(path: &Path) -> Result<String, String> {
         .to_lowercase())
 }
 
-fn selected_roots(
-    provider: CloudProvider,
-    expected: &[String],
-    detected: &[CloudFolder],
-) -> Result<Vec<PathBuf>, String> {
-    let mut roots = Vec::new();
-    let mut actual = HashSet::new();
-    for folder in detected.iter().filter(|folder| folder.provider == provider) {
-        if actual.insert(root_key(&folder.path)?) {
-            roots.push(folder.path.clone());
-        }
-    }
-    let expected: HashSet<_> = expected
-        .iter()
-        .map(|path| root_key(Path::new(path)))
-        .collect::<Result<_, _>>()?;
-    if actual.is_empty() || actual != expected {
-        return Err(
-            "The cloud folders changed. Refresh Disk Analyzer before requesting online-only files."
-                .into(),
-        );
-    }
-    Ok(roots)
-}
-
-fn compatible(provider: CloudProvider, registration: &Registration) -> bool {
-    let name = registration.provider_name.to_lowercase();
+fn compatible(root: &SyncRoot, registration: &Registration) -> bool {
+    let engine = registration.provider_name.to_lowercase();
+    // OneDrive and Dropbox name their sync engines after themselves: another
+    // engine registered on their folder is left alone.
     matches!(registration.hydration, 1 | 2)
-        && match provider {
-            CloudProvider::OneDrive => name.contains("onedrive"),
-            CloudProvider::Dropbox => name.contains("dropbox"),
-            _ => false,
-        }
+        && ["onedrive", "dropbox"]
+            .into_iter()
+            .find(|known| root.provider.eq_ignore_ascii_case(known))
+            .is_none_or(|known| engine.contains(known))
 }
 
 struct Walker<'a, F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> {
     files: &'a mut F,
-    provider: CloudProvider,
+    root: &'a SyncRoot,
     root_id: u64,
     volume: u32,
     cancel: &'a AtomicBool,
@@ -209,18 +472,14 @@ struct Walker<'a, F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> {
 
 impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
     fn error(&mut self, path: &Path, error: String) {
-        self.outcome.counts.failed += 1;
-        if self.outcome.errors.len() < MAX_ERRORS {
-            self.outcome
-                .errors
-                .push(format!("{}: {error}", path.display()));
-        }
+        record_error(self.outcome, path, error);
     }
 
     fn emit(&mut self, path: &Path) {
         if !(self.progress)(&CloudOnlyProgress {
             counts: self.outcome.counts.clone(),
             current: Some(path.display().to_string()),
+            waiting_for_drive: false,
         }) {
             self.cancel.store(true, Ordering::Relaxed);
         }
@@ -231,7 +490,7 @@ impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
             && metadata.volume == self.volume
             && metadata.id != 0
             && self.files.registration(handle).is_ok_and(|registration| {
-                registration.root_id == self.root_id && compatible(self.provider, &registration)
+                registration.root_id == self.root_id && compatible(self.root, &registration)
             })
     }
 
@@ -418,8 +677,9 @@ pub struct StorageStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderStatus {
-    provider: CloudProvider,
-    name: &'static str,
+    /// The cloud's ID (see `Cloud::id`).
+    provider: String,
+    name: String,
     folders: Vec<FolderStatus>,
     mode: &'static str,
     detail: &'static str,
@@ -431,95 +691,60 @@ struct FolderStatus {
     label: String,
 }
 
-fn provider_status(provider: CloudProvider, detected: &[CloudFolder]) -> ProviderStatus {
-    let folders: Vec<_> = detected
-        .iter()
-        .filter(|folder| folder.provider == provider)
-        .collect();
-    let (mode, detail) = if folders.is_empty() {
-        (
-            "unavailable",
-            "No local cloud folder was detected. Check the desktop app's account and folder settings.",
-        )
-    } else {
-        match provider {
-            CloudProvider::GoogleDrive => (
-                "guided",
-                "Google Drive manages offline availability and its streaming cache through its own desktop app.",
+impl From<Cloud> for ProviderStatus {
+    fn from(cloud: Cloud) -> Self {
+        let (mode, detail) = match cloud.action {
+            Action::Native(_) => (
+                "native",
+                "Online-only requests are available. Each file's upload status is checked before requesting a change.",
             ),
-            CloudProvider::Mega => (
-                "guided",
-                "MEGA Desktop sync has no online-only conversion. MEGAcmd offers a separate on-demand mount (beta on Windows).",
+            Action::DriveMenu => (
+                "native",
+                "Online-only requests go through Google Drive's own Offline access > Online only command for each Drive folder, then Drive's own Clear cache in its Storage on your computer window.",
             ),
-            CloudProvider::OneDrive | CloudProvider::Dropbox => {
-                let mut files = native::WindowsFiles;
-                let supported = folders.iter().all(|folder| {
-                    let Ok(handle) = files.open_root(&folder.path) else {
-                        return false;
-                    };
-                    let Ok(info) = files.metadata(&handle) else {
-                        return false;
-                    };
-                    files.registration(&handle).is_ok_and(|registration| {
-                        info.directory
-                            && !info.unsafe_reparse
-                            && info.id != 0
-                            && info.id == registration.root_id
-                            && compatible(provider, &registration)
-                    })
-                });
-                if supported {
-                    (
-                        "native",
-                        "Online-only requests are available. Each file's upload status is checked before requesting a change.",
-                    )
-                } else {
-                    (
-                        "guided",
-                        "Compatible Windows online-only support could not be verified for every folder. Use this cloud app's own storage controls.",
-                    )
-                }
-            }
+            Action::Guided(detail) => ("guided", detail),
+            Action::Unavailable => ("unavailable", UNAVAILABLE),
+        };
+        ProviderStatus {
+            provider: cloud.id,
+            name: cloud.name,
+            mode,
+            detail,
+            folders: cloud
+                .folders
+                .into_iter()
+                .map(|(label, path)| FolderStatus {
+                    path: path.display().to_string(),
+                    label,
+                })
+                .collect(),
         }
-    };
-    ProviderStatus {
-        provider,
-        name: provider.name(),
-        mode,
-        detail,
-        folders: folders
-            .into_iter()
-            .map(|folder| FolderStatus {
-                path: folder.path.display().to_string(),
-                label: folder.label.clone(),
-            })
-            .collect(),
     }
+}
+
+/// The cloud apps on this PC, checked now.
+fn current_clouds() -> Vec<Cloud> {
+    clouds(
+        &super::detection::detect_folders(),
+        &sync_roots::sync_roots(),
+        &mut native::WindowsFiles,
+        &mut DriveShell,
+    )
 }
 
 #[tauri::command]
 pub async fn cloud_storage_status() -> Result<StorageStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let detected = super::detection::detect_folders();
-        StorageStatus {
-            providers: [
-                CloudProvider::GoogleDrive,
-                CloudProvider::Mega,
-                CloudProvider::Dropbox,
-                CloudProvider::OneDrive,
-            ]
-            .into_iter()
-            .map(|provider| provider_status(provider, &detected))
-            .collect(),
-        }
+    tauri::async_runtime::spawn_blocking(|| StorageStatus {
+        providers: current_clouds().into_iter().map(ProviderStatus::from).collect(),
     })
     .await
     .map_err(|error| error.to_string())
 }
 
+/// Online-only requests for the cloud apps `clouds` (their IDs), all at once.
 #[tauri::command]
 pub async fn cloud_storage_online_only(
-    provider: CloudProvider,
+    clouds: Vec<String>,
     expected_folders: Vec<String>,
     request_id: String,
     on_event: tauri::ipc::Channel<CloudOnlyProgress>,
@@ -533,13 +758,12 @@ pub async fn cloud_storage_online_only(
                 ..Default::default()
             });
         }
-        let detected = super::detection::detect_folders();
+        let plan = plan(&current_clouds(), &clouds, &expected_folders)?;
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
         execute_with(
             &mut native::WindowsFiles,
-            provider,
-            &expected_folders,
-            &detected,
+            &mut DriveShell,
+            &plan,
             &job.cancel,
             |progress| {
                 if progress.current.is_none()
@@ -563,42 +787,6 @@ pub fn cloud_storage_cancel(
     state: tauri::State<'_, OnlineOnlyState>,
 ) -> Result<(), String> {
     state.cancel(&request_id)
-}
-
-#[tauri::command]
-pub async fn cloud_storage_open_folder(
-    provider: CloudProvider,
-    path: String,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let key = root_key(Path::new(&path))?;
-        let known = super::detection::detect_folders()
-            .into_iter()
-            .find(|folder| {
-                folder.provider == provider
-                    && root_key(&folder.path).is_ok_and(|actual| actual == key)
-            })
-            .ok_or_else(|| {
-                "This cloud folder changed. Refresh the cloud apps first.".to_string()
-            })?;
-        tauri_plugin_opener::open_path(known.path.display().to_string(), None::<&str>)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub fn cloud_storage_open_help(provider: CloudProvider) -> Result<(), String> {
-    let url = match provider {
-        CloudProvider::GoogleDrive => "https://support.google.com/drive/answer/13401938?hl=en",
-        CloudProvider::Mega => "https://github.com/meganz/MEGAcmd/blob/master/contrib/docs/FUSE.md",
-        CloudProvider::Dropbox => "https://help.dropbox.com/sync/make-files-online-only",
-        CloudProvider::OneDrive => {
-            "https://learn.microsoft.com/en-us/onedrive/files-on-demand-windows"
-        }
-    };
-    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
 }
 
 mod native {
@@ -847,14 +1035,100 @@ mod tests {
             path
         }
         fn run(&mut self, cancel: &AtomicBool) -> Result<CloudOnlyOutcome, String> {
-            execute_with(
-                self,
-                CloudProvider::OneDrive,
-                &[r"C:\cloud".into()],
-                &[detected(r"C:\cloud")],
-                cancel,
-                |_| true,
-            )
+            execute_with(self, &mut FakeDrive::default(), &native_plan(&[r"C:\cloud"]), cancel, |_| true)
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeDrive {
+        online: HashSet<PathBuf>,
+        failing: HashSet<PathBuf>,
+        changed: Vec<PathBuf>,
+        /// What each look at Drive's storage window finds; then Empty.
+        storage: VecDeque<Result<CacheClear, String>>,
+        storage_looks: usize,
+    }
+
+    impl DriveMenu for FakeDrive {
+        fn is_online_only(&mut self, path: &Path) -> Result<bool, String> {
+            if self.failing.contains(path) {
+                return Err("Drive's menu changed".into());
+            }
+            Ok(self.online.contains(path))
+        }
+        fn make_online_only(&mut self, path: &Path) -> Result<bool, String> {
+            if self.is_online_only(path)? {
+                return Ok(false);
+            }
+            self.changed.push(path.to_path_buf());
+            Ok(true)
+        }
+        fn clear_cache(&mut self) -> Result<CacheClear, String> {
+            self.storage_looks += 1;
+            self.storage.pop_front().unwrap_or(Ok(CacheClear::Empty))
+        }
+    }
+
+    fn with_storage(looks: impl IntoIterator<Item = Result<CacheClear, String>>) -> FakeDrive {
+        FakeDrive {
+            storage: looks.into_iter().collect(),
+            ..FakeDrive::default()
+        }
+    }
+
+    #[test]
+    fn drive_s_cache_is_cleared_once_its_storage_window_opens_and_never_waited_on_forever() {
+        let mut files = FakeFiles::new();
+        let plan = |wait| Plan {
+            drive: vec![r"G:\My Drive".into()],
+            drive_wait: Duration::from_secs(wait),
+            ..Plan::default()
+        };
+        // Opened while waiting: pressed once, with the size the window showed.
+        let mut drive = with_storage([Ok(CacheClear::NotOpen), Ok(CacheClear::NotOpen), Ok(CacheClear::Cleared(Some("94.4 GB".into())))]);
+        let mut waited = 0;
+        let outcome = execute_with(&mut files, &mut drive, &plan(60), &AtomicBool::new(false), |progress| {
+            waited += progress.waiting_for_drive as usize;
+            true
+        })
+        .unwrap();
+        assert_eq!((drive.storage_looks, waited), (3, 2));
+        let json = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(json["driveCache"], serde_json::json!({ "state": "cleared", "size": "94.4 GB" }));
+        // Never opened: the request ends and says so.
+        let mut drive = with_storage([Ok(CacheClear::NotOpen)]);
+        let outcome = execute_with(&mut files, &mut drive, &plan(0), &AtomicBool::new(false), |_| true).unwrap();
+        assert_eq!(outcome.drive_cache, Some(CacheClear::NotOpen));
+        // Stop while waiting ends the wait, without pressing anything.
+        let mut drive = with_storage(std::iter::repeat_with(|| Ok(CacheClear::NotOpen)).take(1000));
+        let cancel = AtomicBool::new(false);
+        let outcome = execute_with(&mut files, &mut drive, &plan(60), &cancel, |progress| {
+            !progress.waiting_for_drive
+        })
+        .unwrap();
+        assert!(outcome.cancelled && outcome.drive_cache.is_none());
+        assert_eq!(drive.storage_looks, 1);
+        // A window that changed is an error, not a guess.
+        let mut drive = with_storage([Err("no Clear cache button".into())]);
+        let outcome = execute_with(&mut files, &mut drive, &plan(60), &AtomicBool::new(false), |_| true).unwrap();
+        assert_eq!(outcome.counts.failed, 1);
+        // Without Google Drive in the request, its window is never looked at.
+        let mut drive = FakeDrive::default();
+        execute_with(&mut files, &mut drive, &native_plan(&[r"C:\cloud"]), &AtomicBool::new(false), |_| true).unwrap();
+        assert_eq!(drive.storage_looks, 0);
+    }
+
+    fn root(provider: &str, path: &str) -> SyncRoot {
+        SyncRoot {
+            provider: provider.into(),
+            name: format!("{provider} - Personal"),
+            path: path.into(),
+        }
+    }
+    fn native_plan(paths: &[&str]) -> Plan {
+        Plan {
+            roots: paths.iter().map(|path| root("OneDrive", path)).collect(),
+            ..Plan::default()
         }
     }
 
@@ -937,10 +1211,10 @@ mod tests {
             }),
         }
     }
-    fn detected(path: &str) -> CloudFolder {
+    fn detected_as(provider: CloudProvider, path: &str) -> CloudFolder {
         CloudFolder {
-            provider: CloudProvider::OneDrive,
-            label: "OneDrive".into(),
+            provider,
+            label: provider.name().into(),
             path: path.into(),
         }
     }
@@ -987,19 +1261,15 @@ mod tests {
     #[test]
     fn stale_or_arbitrary_expected_roots_are_rejected_before_any_request() {
         let mut files = FakeFiles::new();
-        files.add("uploaded.txt", uploaded(1));
-        assert!(
-            execute_with(
-                &mut files,
-                CloudProvider::OneDrive,
-                &[r"D:\other".into()],
-                &[detected(r"C:\cloud")],
-                &AtomicBool::new(false),
-                |_| true
-            )
-            .is_err()
-        );
-        assert!(files.requested.is_empty());
+        let clouds = clouds(&[], &[root("OneDrive", r"C:\cloud")], &mut files, &mut FakeDrive::default());
+        let wanted = ["oneDrive".to_string()];
+        assert!(plan(&clouds, &wanted, &[r"C:\cloud".into()]).is_ok());
+        for expected in [vec![r"D:\other".to_string()], vec![], vec![r"C:\cloud".into(), r"D:\other".into()]] {
+            assert!(plan(&clouds, &wanted, &expected).is_err(), "accepted {expected:?}");
+        }
+        // An app that is gone, or never was, fails the whole request.
+        assert!(plan(&clouds, &["oneDrive".into(), "sync:Box".into()], &[r"C:\cloud".into()]).is_err());
+        assert!(plan(&clouds, &[], &[]).is_err());
     }
 
     #[test]
@@ -1041,11 +1311,13 @@ mod tests {
         files.add("first.txt", uploaded(1));
         files.add("second.txt", uploaded(2));
         let cancel = AtomicBool::new(false);
+        let mut drive = FakeDrive::default();
+        let mut plan = native_plan(&[r"C:\cloud"]);
+        plan.drive.push(r"G:\My Drive".into());
         let outcome = execute_with(
             &mut files,
-            CloudProvider::OneDrive,
-            &[r"C:\cloud".into()],
-            &[detected(r"C:\cloud")],
+            &mut drive,
+            &plan,
             &cancel,
             |progress| {
                 if progress.counts.requested == 1 {
@@ -1056,6 +1328,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(files.requested.len(), 1);
+        assert!(drive.changed.is_empty(), "Google Drive is not asked after Stop");
         assert!(outcome.cancelled);
     }
 
@@ -1066,9 +1339,8 @@ mod tests {
         files.add("same-id.txt", uploaded(1));
         let result = execute_with(
             &mut files,
-            CloudProvider::OneDrive,
-            &[r"C:\cloud".into()],
-            &[detected(r"C:\cloud"), detected(r"C:\cloud")],
+            &mut FakeDrive::default(),
+            &native_plan(&[r"C:\cloud", r"C:\cloud"]),
             &AtomicBool::new(false),
             |_| true,
         )
@@ -1107,25 +1379,69 @@ mod tests {
     }
 
     #[test]
-    fn google_and_mega_cannot_use_the_native_action() {
-        for provider in [CloudProvider::GoogleDrive, CloudProvider::Mega] {
-            let mut files = FakeFiles::new();
-            files.add("one.txt", uploaded(1));
-            let mut root = detected(r"C:\cloud");
-            root.provider = provider;
-            assert!(
-                execute_with(
-                    &mut files,
-                    provider,
-                    &[r"C:\cloud".into()],
-                    &[root],
-                    &AtomicBool::new(false),
-                    |_| true
-                )
-                .is_err()
-            );
-            assert!(files.requested.is_empty());
+    fn mega_is_refused_and_google_drive_uses_its_own_menu_per_folder() {
+        let mut files = FakeFiles::new();
+        files.add("one.txt", uploaded(1));
+        let found = [
+            detected_as(CloudProvider::Mega, r"C:\Users\A\MEGA"),
+            detected_as(CloudProvider::GoogleDrive, r"G:\My Drive"),
+            detected_as(CloudProvider::GoogleDrive, r"H:\My Drive"),
+        ];
+        let mut drive = FakeDrive::default();
+        drive.online.insert(r"H:\My Drive".into());
+        let clouds = clouds(&found, &[], &mut files, &mut drive);
+        let mega = [r"C:\Users\A\MEGA".to_string()];
+        assert!(plan(&clouds, &["mega".into()], &mega).is_err());
+        let drives = [r"G:\My Drive".to_string(), r"H:\My Drive".to_string()];
+        let plan = plan(&clouds, &["googleDrive".into()], &drives).unwrap();
+        assert!(plan.roots.is_empty());
+        let outcome = execute_with(&mut files, &mut drive, &plan, &AtomicBool::new(false), |_| true).unwrap();
+        assert_eq!(drive.changed, [PathBuf::from(r"G:\My Drive")]);
+        assert_eq!((outcome.counts.folders_requested, outcome.counts.folders_already_online), (1, 1));
+        assert!(files.requested.is_empty(), "Drive folders never get file requests");
+        // A menu that changed fails that folder alone, with its reason.
+        drive.failing.insert(r"G:\My Drive".into());
+        let outcome = execute_with(&mut files, &mut drive, &plan, &AtomicBool::new(false), |_| true).unwrap();
+        assert_eq!((outcome.counts.failed, outcome.counts.folders_already_online), (1, 1));
+        assert!(outcome.errors[0].contains("menu changed"));
+    }
+
+    #[test]
+    #[ignore = "reads this PC's cloud apps and Google Drive's menu; changes nothing"]
+    fn this_pc_s_cloud_apps() {
+        for cloud in current_clouds().into_iter().map(ProviderStatus::from) {
+            let folders: Vec<_> = cloud.folders.iter().map(|folder| folder.path.as_str()).collect();
+            println!("{} ({}): {} {folders:?}", cloud.name, cloud.provider, cloud.mode);
         }
+    }
+
+    #[test]
+    fn every_sync_root_is_offered_under_its_app_and_unverified_ones_are_guided() {
+        let mut files = FakeFiles::new();
+        let mut icloud = root("iCloudDrive", r"C:\cloud");
+        icloud.name = "iCloud Drive - a@b.c".into();
+        let roots = [root("OneDrive", r"C:\cloud"), icloud, root("Box", r"C:\missing")];
+        let mut drive = FakeDrive::default();
+        drive.failing.insert(r"G:\My Drive".into());
+        let found = [detected_as(CloudProvider::GoogleDrive, r"G:\My Drive")];
+        let clouds = clouds(&found, &roots, &mut files, &mut drive);
+        let modes: Vec<_> = clouds
+            .into_iter()
+            .map(ProviderStatus::from)
+            .map(|cloud| (cloud.provider, cloud.name, cloud.mode, cloud.folders.len()))
+            .collect();
+        let expected = [
+            ("googleDrive", "Google Drive", "guided", 1),
+            ("mega", "MEGA", "unavailable", 0),
+            ("dropbox", "Dropbox", "unavailable", 0),
+            ("oneDrive", "OneDrive", "native", 1),
+            ("sync:Box", "Box", "guided", 1),
+            ("sync:iCloudDrive", "iCloud Drive", "native", 1),
+        ];
+        assert_eq!(
+            modes,
+            expected.map(|(id, name, mode, folders)| (id.to_string(), name.to_string(), mode, folders))
+        );
     }
 
     #[test]
@@ -1213,12 +1529,10 @@ mod tests {
             let child = files.open_child(&path).unwrap();
             let info = files.metadata(&child).unwrap();
             assert!(!info.directory && info.cloud.is_none());
-            let folder = detected(root.to_str().unwrap());
             let result = execute_with(
                 &mut files,
-                CloudProvider::OneDrive,
-                &[root.display().to_string()],
-                &[folder],
+                &mut FakeDrive::default(),
+                &native_plan(&[root.to_str().unwrap()]),
                 &AtomicBool::new(false),
                 |_| true,
             );
