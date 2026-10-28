@@ -14,8 +14,8 @@ For what the app does, see the <a href="../README.md"><kbd>README</kbd></a>.
 - <a href="#7-where-things-live-on-disk"><kbd>7 · Where things live on disk</kbd></a>
 - <a href="#8-updates-and-releases"><kbd>8 · Updates and releases</kbd></a> <a href="#the-cloudflare-pages-site"><kbd>the site</kbd></a>
 - <a href="#9-setup-and-uninstall"><kbd>9 · Setup and uninstall</kbd></a>
-- [10. Tests](#10-tests)
-- [11. Conventions](#11-conventions)
+- <a href="#10-tests"><kbd>10. Tests</kbd></a>
+- <a href="#11-conventions"><kbd>11. Conventions</kbd></a>
 
 ---
 
@@ -70,7 +70,7 @@ Tauri's `beforeDevCommand` and `beforeBuildCommand` (in `backend/tauri.conf.json
 | File | Runs on | Does |
 |---|---|---|
 | `ci.yml` | every push and pull request | frontend checks, Rust lint and tests, a Windows install smoke test. Each run's setup is kept as an artifact for 7 days |
-| `release.yml` | a `v*` tag, or by hand | the signed release (see [Updates and releases](#8-updates-and-releases)) |
+| `release.yml` | a `v*` tag, or by hand | the signed release (see <a href="#8-updates-and-releases"><kbd>Updates and releases</kbd></a>) |
 | `mobile.yml` | a `mobile/…` branch, a tag, or by hand | the Android and iOS builds |
 | `keepalive.yml` | a schedule | keeps the workflows' storage alive |
 
@@ -245,7 +245,7 @@ It never exceeds 95% of the area outside the taskbar (`src/window_sizing.rs`). W
 | `src/elevated_pipe.rs` | the administrator helper pipe: one UAC prompt per session, used by the System Cleaner, the debloater and the Disk Analyzer |
 | `src/console.rs` | the console output the maintenance and GitHub pages read |
 | `src/download.rs` | the one downloader (progress over a channel, cancellable) |
-| `src/updater.rs`, `src/whats_new.rs` | see [Updates and releases](#8-updates-and-releases) |
+| `src/updater.rs`, `src/whats_new.rs` | see <a href="#8-updates-and-releases"><kbd>Updates and releases</kbd></a> |
 | `src/startup.rs`, `src/tray.rs`, `src/taskbar.rs`, `src/shortcut_preferences.rs` | Windows start-up, the tray icon, the taskbar pin |
 | `src/webview_policy.rs` | the CSP and navigation rules the web views run under |
 | `src/apps/` | winget, the job registry (`Jobs`), process control, the catalog |
@@ -613,8 +613,8 @@ Preview the window in a browser: `npx vite` and `http://localhost:1420/installer
 
 Some suites only make sense on real Windows and are `#[ignore]`d or gated:
 
-- the debloater's `sandbox_tests.rs` (Windows Sandbox or a VM, see [Windows Optimization](#windows-optimization))
-- `cargo test measure_a_whole_drive -- --ignored` and `cargo test mft_matches_the_walk -- --ignored` (a real drive, see [Disk Analyzer](#disk-analyzer))
+- the debloater's `sandbox_tests.rs` (Windows Sandbox or a VM, see <a href="#windows-optimization"><kbd>Windows Optimization</kbd></a>)
+- `cargo test measure_a_whole_drive -- --ignored` and `cargo test mft_matches_the_walk -- --ignored` (a real drive, see <a href="#disk-analyzer"><kbd>Disk Analyzer</kbd></a>)
 
 `npm run check` catches what the tests do not: svelte-check for every component, `tsc` for the Vite config and the scripts, and the site check.
 

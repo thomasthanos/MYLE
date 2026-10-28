@@ -1,6 +1,6 @@
 ## MYLE Passwords 1.0.0
 
-The Password Manager of [MYLE](https://github.com/thomasthanos/MYLE) on your phone: your vault from the PC, in sync both ways.
+The Password Manager of <a href="https://github.com/thomasthanos/MYLE"><kbd>MYLE</kbd></a> on your phone: your vault from the PC, in sync both ways.
 
 | | |
 |---|---|
@@ -13,7 +13,7 @@ The Password Manager of [MYLE](https://github.com/thomasthanos/MYLE) on your pho
 
 ### Install
 
-- **Android:** download [MYLE-Passwords.apk](https://downloads.thomast.uk/MYLE-Passwords.apk) on the phone and open it (allow installing from your browser when Android asks). The app tells you when a new version is out.
-- **iPhone:** install [SideStore](https://sidestore.io), then in SideStore add the source `https://downloads.thomast.uk/sidestore.json` and install **MYLE Passwords**. With a free Apple ID, SideStore re-signs it every 7 days.
+- **Android:** download <a href="https://downloads.thomast.uk/MYLE-Passwords.apk"><kbd>MYLE-Passwords.apk</kbd></a> on the phone and open it (allow installing from your browser when Android asks). The app tells you when a new version is out.
+- **iPhone:** install <a href="https://sidestore.io"><kbd>SideStore</kbd></a>, then in SideStore add the source `https://downloads.thomast.uk/sidestore.json` and install **MYLE Passwords**. With a free Apple ID, SideStore re-signs it every 7 days.
 
 The app shows and edits your logins; it does not fill them into other apps.

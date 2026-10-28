@@ -207,12 +207,12 @@
 <style>
   .sidebar { container: navigation / size; grid-area: side; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-width: 0; min-height: 0; padding: 12px 9px; border-radius: var(--shell-panel-radius); background: var(--sidebar-fill); }
   /* On a short window the page list scrolls; Settings and the toggle stay. */
-  .top { min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px; mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
+  .top { min-height: 0; padding-top: clamp(0px, calc(3cqh - 15px), 12px); overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px; mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
   .top.more-above { --fade-top: 22px; }
   .top.more-below { --fade-bottom: 22px; }
   /* The actual sidebar height sets the rhythm, including window scaling. */
-  .section + .section { margin-top: clamp(8px, calc(7.5cqh - 33px), 30px); }
-  .section-heading { display: flex; align-items: center; gap: 8px; min-height: 22px; margin: 0 0 clamp(3px, calc(2.5cqh - 12px), 10px); padding: 0 12px; color: var(--text-1); font-size: clamp(13px, 1.6cqh, 15px); font-weight: 700; line-height: 1.35; white-space: nowrap; }
+  .section + .section { margin-top: clamp(6px, calc(3cqh - 10px), 14px); }
+  .section-heading { display: flex; align-items: center; gap: 8px; min-height: 22px; margin: 0 0 clamp(3px, calc(1.5cqh - 6px), 6px); padding: 0 12px; color: var(--text-1); font-size: clamp(13px, 1.6cqh, 15px); font-weight: 700; line-height: 1.35; white-space: nowrap; }
   .section-heading::after { content: ""; flex: 1; min-width: 16px; height: 1px; background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.35), transparent); }
   .section-heading :global(svg) { flex: none; }
   .collapsed .section-heading { display: none; }

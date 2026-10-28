@@ -12,4 +12,4 @@ This changes a website's editable label only. Websites determine whether they of
 
 The tests cover DOM fixtures and the MYLE creation integration. Google Account's current interface has not been verified because account reauthentication was unavailable. If the helper does not fill the label, use the site's own rename action where available.
 
-Reference: [Google's server-side registration guide](https://developers.google.com/identity/passkeys/developer-guides/server-registration) documents the optional credential name stored by a relying party.
+Reference: <a href="https://developers.google.com/identity/passkeys/developer-guides/server-registration"><kbd>Google's server-side registration guide</kbd></a> documents the optional credential name stored by a relying party.
