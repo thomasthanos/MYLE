@@ -9,7 +9,7 @@ use winreg::enums::{
 };
 use winreg::RegValue;
 use super::catalog::{Data, Hive};
-use super::system::{self, Value};
+use super::system::{self, Root, Value};
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const START_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Start";
@@ -235,29 +235,35 @@ pub fn apply_user_update(update: StartMenuUpdate) -> Result<StartMenuStatus, Str
     }
     Ok(status())
 }
+/// The user's own settings; their policy is the helper's to write.
 pub fn apply_user_hide_recommended(hide: bool) -> Result<(), String> {
     if hide {
-        system::write(Hive::User, USER_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
         system::write(Hive::User, ADVANCED, "Start_TrackDocs", Data::Dword(0))?;
         system::write(Hive::User, ADVANCED, "Start_IrisRecommendations", Data::Dword(0))?;
     } else {
-        system::restore(Hive::User, USER_EXPLORER_POLICY, "HideRecommendedSection", &Value::Absent, None)?;
         // Both parts hiding turned off come back, not only the recent files.
         system::write(Hive::User, ADVANCED, "Start_TrackDocs", Data::Dword(1))?;
         system::write(Hive::User, ADVANCED, "Start_IrisRecommendations", Data::Dword(1))?;
     }
     Ok(())
 }
-/// Runs inside the elevated administrator helper.
-pub fn apply_machine_hide_recommended(hide: bool) -> Result<(), String> {
+/// Runs inside the elevated administrator helper: the machine's policies,
+/// and the user's own in the hive of `account` (the app's user).
+pub fn apply_machine_hide_recommended(hide: bool, account: Option<&str>) -> Result<(), String> {
     if hide {
         system::write(Hive::Machine, MACHINE_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
         system::write(Hive::Machine, POLICY_MANAGER_START, "HideRecommendedSection", Data::Dword(1))?;
         system::write(Hive::Machine, POLICY_MANAGER_EDU, "IsEducationEnvironment", Data::Dword(1))?;
+        if let Some(sid) = account {
+            system::write(Root::Account(sid), USER_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
+        }
     } else {
         system::restore(Hive::Machine, MACHINE_EXPLORER_POLICY, "HideRecommendedSection", &Value::Absent, None)?;
         system::restore(Hive::Machine, POLICY_MANAGER_START, "HideRecommendedSection", &Value::Absent, None)?;
         system::restore(Hive::Machine, POLICY_MANAGER_EDU, "IsEducationEnvironment", &Value::Absent, None)?;
+        if let Some(sid) = account {
+            system::restore(Root::Account(sid), USER_EXPLORER_POLICY, "HideRecommendedSection", &Value::Absent, None)?;
+        }
     }
     Ok(())
 }

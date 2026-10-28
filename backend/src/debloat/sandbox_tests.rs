@@ -42,10 +42,14 @@ fn look(op: &Op) -> Seen {
         Op::Appx { .. } | Op::RemoveEdge | Op::Capability { .. } => Seen::Other,
     }
 }
+/// The account the helper writes the user's own policies for: this one.
+fn account() -> Option<String> {
+    crate::elevated_pipe::process_account(std::process::id())
+}
 fn apply(tweak: &'static catalog::Tweak) -> Vec<Saved> {
     let (mut saved, errors) = apply_user(tweak);
     assert!(errors.is_empty(), "{}: {errors:?}", tweak.id);
-    let reply = helper::handle(Request::Apply { tweak: tweak.id.into() });
+    let reply = helper::handle(Request::Apply { tweak: tweak.id.into() }, account().as_deref());
     assert!(reply.errors.is_empty(), "{}: {:?}", tweak.id, reply.errors);
     saved.extend(reply.saved);
     saved
@@ -54,7 +58,7 @@ fn undo(tweak: &'static catalog::Tweak, saved: &[Saved]) {
     let (undone, errors) = undo_user(tweak, saved);
     assert!(errors.is_empty(), "{}: {errors:?}", tweak.id);
     let machine: Vec<Saved> = saved.iter().filter(|record| !undone.contains(&record.op)).cloned().collect();
-    let reply = helper::handle(Request::Undo { tweak: tweak.id.into(), saved: machine.clone() });
+    let reply = helper::handle(Request::Undo { tweak: tweak.id.into(), saved: machine.clone() }, account().as_deref());
     assert!(reply.errors.is_empty(), "{}: {:?}", tweak.id, reply.errors);
     assert_eq!(reply.undone.len() + undone.len(), saved.len(), "{}: everything kept was put back", tweak.id);
 }
@@ -166,15 +170,15 @@ fn sandbox_start_menu_policies_come_and_go() {
     ];
     let look_all = || VALUES.map(|(path, name)| system::read(Hive::Machine, path, name));
     let before = look_all();
-    assert!(helper::handle(Request::SetHideRecommended { hide: true }).errors.is_empty());
+    assert!(helper::handle(Request::SetHideRecommended { hide: true }, account().as_deref()).errors.is_empty());
     assert!(start_menu::status().hide_recommended);
-    assert!(helper::handle(Request::SetHideRecommended { hide: false }).errors.is_empty());
+    assert!(helper::handle(Request::SetHideRecommended { hide: false }, account().as_deref()).errors.is_empty());
     let json = start_menu::build_pins_json(&["explorer".into(), "settings".into(), "terminal".into()]).unwrap();
-    assert!(helper::handle(Request::SetStartPins { json: Some(json.clone()) }).errors.is_empty());
+    assert!(helper::handle(Request::SetStartPins { json: Some(json.clone()) }, account().as_deref()).errors.is_empty());
     assert_eq!(look_all()[3], Value::Sz { value: json });
-    assert!(helper::handle(Request::SetStartPins { json: None }).errors.is_empty());
+    assert!(helper::handle(Request::SetStartPins { json: None }, account().as_deref()).errors.is_empty());
     let forged = r#"{"pinnedList":[{"desktopAppId":"C:\\evil.exe"}]}"#.to_string();
-    assert!(!helper::handle(Request::SetStartPins { json: Some(forged) }).errors.is_empty());
+    assert!(!helper::handle(Request::SetStartPins { json: Some(forged) }, account().as_deref()).errors.is_empty());
     assert_eq!(look_all(), before, "nothing is left behind");
 }
 #[test]
@@ -194,7 +198,7 @@ fn sandbox_edge_goes_and_webview2_stays() {
     let had_webview = webview.is_dir();
     let edge = catalog::find("edge").unwrap();
     let started = std::time::Instant::now();
-    let reply = helper::handle(Request::Apply { tweak: edge.id.into() });
+    let reply = helper::handle(Request::Apply { tweak: edge.id.into() }, account().as_deref());
     println!("Edge's uninstaller took {:?}", started.elapsed());
     assert!(reply.errors.is_empty(), "{:?}", reply.errors);
     assert!(!system::edge_installed(), "Edge is gone");
@@ -218,7 +222,7 @@ fn sandbox_a_windows_feature_goes_and_comes_back() {
     };
     println!("{}: installed", tweak.id);
     let started = std::time::Instant::now();
-    let removed = helper::handle(Request::Apply { tweak: tweak.id.into() });
+    let removed = helper::handle(Request::Apply { tweak: tweak.id.into() }, account().as_deref());
     println!("removed in {:?}: {:?}", started.elapsed(), removed.errors);
     assert!(removed.errors.is_empty(), "{:?}", removed.errors);
     assert_eq!(removed.saved.len(), 1, "the removal is kept for Undo");
@@ -227,7 +231,7 @@ fn sandbox_a_windows_feature_goes_and_comes_back() {
     let packages = system::installed_packages();
     assert_eq!(detect::tweak_state(tweak, system::windows_info().build, &packages), detect::State::Applied);
     let started = std::time::Instant::now();
-    let back = helper::handle(Request::Undo { tweak: tweak.id.into(), saved: removed.saved });
+    let back = helper::handle(Request::Undo { tweak: tweak.id.into(), saved: removed.saved }, account().as_deref());
     println!("added back in {:?}: {:?}", started.elapsed(), back.errors);
     assert!(back.errors.is_empty(), "{:?}", back.errors);
     assert_eq!(system::capability_installed(package), Some(true), "installed again");
@@ -236,7 +240,7 @@ fn sandbox_a_windows_feature_goes_and_comes_back() {
 #[ignore = "changes Windows: Windows Sandbox or a throwaway VM only"]
 fn sandbox_a_restore_point_is_made() {
     throwaway_windows();
-    let reply = helper::handle(Request::RestorePoint { turn_on: true });
+    let reply = helper::handle(Request::RestorePoint { turn_on: true }, account().as_deref());
     println!("{:?}", reply.restore_point);
     assert!(reply.restore_point.is_some());
 }

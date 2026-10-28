@@ -132,6 +132,48 @@ pub fn process_path(pid: u32) -> Option<PathBuf> {
         (ok != 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
     }
 }
+/// The SID of the account `pid` runs as ("S-1-5-21-..."): whose hive is the
+/// app's own when the helper runs as another administrator.
+pub fn process_account(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+    use windows_sys::Win32::System::Threading::OpenProcessToken;
+    // SAFETY: both handles are closed below; the buffer is u64-aligned and
+    // as large as Windows asks; the SID string is freed with LocalFree.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut token = std::ptr::null_mut();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token) != 0;
+        CloseHandle(process);
+        if !opened {
+            return None;
+        }
+        let mut needed = 0u32;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+        let read = needed > 0 && GetTokenInformation(token, TokenUser, buffer.as_mut_ptr().cast(), needed, &mut needed) != 0;
+        CloseHandle(token);
+        if !read {
+            return None;
+        }
+        let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+        let mut text = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 || text.is_null() {
+            return None;
+        }
+        let mut length = 0;
+        while *text.add(length) != 0 {
+            length += 1;
+        }
+        let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
+        LocalFree(text.cast());
+        sid.starts_with("S-1-").then_some(sid)
+    }
+}
 fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -355,5 +397,13 @@ pub mod tests {
     fn this_process_is_this_program() {
         assert!(is_this_program(std::process::id()));
         assert!(!is_this_program(4), "the System process is not");
+    }
+    #[test]
+    fn this_process_has_the_users_account() {
+        let sid = process_account(std::process::id()).unwrap();
+        // The account whose hive is HKEY_CURRENT_USER here.
+        let own = winreg::RegKey::predef(winreg::enums::HKEY_USERS).open_subkey(format!(r"{sid}\Software"));
+        assert!(own.is_ok(), "{sid}");
+        assert_eq!(process_account(u32::MAX), None);
     }
 }

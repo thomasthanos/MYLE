@@ -126,11 +126,12 @@ impl Progress<'_> {
         });
     }
 }
-/// The user's own part of a tweak: HKCU values and the time format.
+/// The user's own part of a tweak: HKCU values and the time format. The
+/// user's policies are the helper's: Windows lets the user only read them.
 fn apply_user(tweak: &'static Tweak) -> (Vec<Saved>, Vec<String>) {
     let mut saved = Vec::new();
     let mut errors = Vec::new();
-    for (index, op) in tweak.ops.iter().enumerate() {
+    for (index, op) in tweak.ops.iter().enumerate().filter(|(_, op)| op.as_user()) {
         match *op {
             Op::Reg { hive: Hive::User, path, name, data, best_effort } => {
                 let before = system::read(Hive::User, path, name);
@@ -180,7 +181,7 @@ fn undo_user(tweak: &'static Tweak, saved: &[Saved]) -> (Vec<usize>, Vec<String>
     let mut undone = Vec::new();
     let mut errors = Vec::new();
     for record in saved {
-        let result = match (tweak.ops.get(record.op), &record.before) {
+        let result = match (tweak.ops.get(record.op).filter(|op| op.as_user()), &record.before) {
             (Some(Op::Reg { hive: Hive::User, path, name, .. }), Before::Reg { value, created }) => {
                 // Only keys on the way to the value, never above it.
                 let created = created.as_deref().filter(|top| system::key_on_path(path, top));
@@ -561,6 +562,16 @@ mod tests {
         );
         let outcome = DebloatOutcome { changed: 2, failed: Vec::new(), reboot: true, needs_admin: false };
         assert_eq!(serde_json::to_string(&outcome).unwrap(), r#"{"changed":2,"failed":[],"reboot":true,"needsAdmin":false}"#);
+    }
+    #[test]
+    fn the_users_policies_are_left_to_the_helper() {
+        // On this PC too: a policy the app wrote itself would be refused.
+        let copilot = catalog::find("copilot").unwrap();
+        let (saved, errors) = apply_user(copilot);
+        assert!(saved.is_empty() && errors.is_empty(), "{saved:?} {errors:?}");
+        let kept = vec![Saved { op: 0, before: Before::Reg { value: system::Value::Absent, created: None } }];
+        assert_eq!(undo_user(copilot, &kept), (Vec::new(), Vec::new()), "undone by the helper");
+        assert!(detect::needs_admin(catalog::find("bing").unwrap()));
     }
     #[test]
     fn only_catalog_tweaks_for_this_windows_are_chosen() {

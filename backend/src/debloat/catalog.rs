@@ -109,6 +109,24 @@ pub enum Op {
     /// whether it is installed.
     Capability { name: &'static str, package: &'static str },
 }
+impl Op {
+    /// Whether the app changes it itself, as the user; the rest is the
+    /// administrator helper's, the user's own policies included.
+    pub fn as_user(&self) -> bool {
+        match self {
+            Op::Reg { hive: Hive::User, path, .. } => !user_policy(path),
+            Op::Clock24 => true,
+            _ => false,
+        }
+    }
+}
+/// Whether a key of the user's own hive holds policies: Windows lets the
+/// user read them but only an administrator write them.
+pub fn user_policy(path: &str) -> bool {
+    [r"Software\Policies\", r"Software\Microsoft\Windows\CurrentVersion\Policies\"]
+        .iter()
+        .any(|policies| path.get(..policies.len()).is_some_and(|start| start.eq_ignore_ascii_case(policies)))
+}
 /// Windows builds a tweak is for: `min` inclusive, `max` exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Builds {
@@ -680,9 +698,9 @@ pub const TWEAKS: &[Tweak] = &[
 pub fn find(id: &str) -> Option<&'static Tweak> {
     TWEAKS.iter().find(|tweak| tweak.id == id)
 }
-/// Values the administrator helper may write back on undo for a machine
-/// string: an undo record is the app's file, so it could have been edited.
-pub fn allowed_machine_strings(path: &str, name: &str) -> &'static [&'static str] {
+/// Values the administrator helper may write back on undo for a string it
+/// changed: an undo record is the app's file, so it could have been edited.
+pub fn allowed_helper_strings(path: &str, name: &str) -> &'static [&'static str] {
     if path.ends_with(r"ConsentStore\location") && name == "Value" {
         &["Allow", "Deny", "Prompt"]
     } else {
@@ -952,13 +970,12 @@ mod tests {
     fn registry_paths_are_relative_and_values_sane() {
         for tweak in TWEAKS {
             for op in tweak.ops {
-                if let Op::Reg { hive, path, data, .. } = op {
+                if let Op::Reg { path, name, data, .. } = op {
                     assert!(!path.starts_with('\\') && !path.contains("HKEY") && !path.contains('/'), "{path}");
                     assert!(!path.ends_with('\\'), "{path}");
-                    // Machine strings must be ones undo accepts back.
-                    if let (Hive::Machine, Data::Sz(value)) = (hive, data) {
-                        let Op::Reg { name, .. } = op else { unreachable!() };
-                        assert!(allowed_machine_strings(path, name).contains(value), "{path}\\{name}");
+                    // The helper's strings must be ones undo accepts back.
+                    if let (false, Data::Sz(value)) = (op.as_user(), data) {
+                        assert!(allowed_helper_strings(path, name).contains(value), "{path}\\{name}");
                     }
                 }
                 if let Op::Service { to, from, windows, .. } = op {

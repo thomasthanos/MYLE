@@ -1,6 +1,6 @@
 // ! Where each tweak stands on this PC, read without administrator rights: ! the registry, services, scheduled tasks, the time format and the ! installed Store apps.
 use serde::Serialize;
-use super::catalog::{self, Data, Hive, Op, Tweak};
+use super::catalog::{self, Data, Op, Tweak};
 use super::system::{self, Value};
 use super::undo::{Before, Store};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -175,7 +175,7 @@ pub fn apps(packages: &[String], store: &Store) -> Vec<AppStatus> {
 }
 /// Whether a tweak changes anything the administrator helper must do.
 pub fn needs_admin(tweak: &Tweak) -> bool {
-    tweak.ops.iter().any(|op| !matches!(op, Op::Reg { hive: Hive::User, .. } | Op::Clock24))
+    tweak.ops.iter().any(|op| !op.as_user())
 }
 #[cfg(test)]
 mod tests {
@@ -218,6 +218,11 @@ mod tests {
         assert!(!needs_admin(catalog::find("clock-24h").unwrap()));
         assert!(!needs_admin(catalog::find("taskbar-search").unwrap()));
         assert!(!needs_admin(catalog::find("classic-context-menu").unwrap()));
+        // The user's own policies, which only an administrator may write.
+        assert!(catalog::user_policy(r"Software\Policies\Microsoft\Windows\WindowsAI"));
+        assert!(catalog::user_policy(r"software\microsoft\windows\currentversion\policies\Explorer"));
+        assert!(!catalog::user_policy(r"Software\Microsoft\Windows\CurrentVersion\Search"));
+        assert!(!catalog::user_policy(r"Software\PoliciesAndMore\x"));
     }
     #[test]
     fn default_before_turns_every_op_off() {

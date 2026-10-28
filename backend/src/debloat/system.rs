@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use winreg::RegKey;
 use winreg::enums::{
-    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_DWORD,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_DWORD,
     REG_EXPAND_SZ, REG_SZ,
 };
 use super::catalog::{Data, Hive};
@@ -59,14 +59,29 @@ impl Value {
         }
     }
 }
-fn root(hive: Hive) -> RegKey {
-    RegKey::predef(match hive {
-        Hive::User => HKEY_CURRENT_USER,
-        Hive::Machine => HKEY_LOCAL_MACHINE,
-    })
+/// Where a value is read and written: one of the catalog's hives, or the
+/// hive of the account with this SID. The administrator helper writes the
+/// user's own policies there: Windows lets the user only read them, and the
+/// helper's HKEY_CURRENT_USER may be another account's.
+#[derive(Debug, Clone, Copy)]
+pub enum Root<'a> {
+    Hive(Hive),
+    Account(&'a str),
 }
-pub fn read(hive: Hive, path: &str, name: &str) -> Value {
-    let Ok(key) = root(hive).open_subkey_with_flags(path, KEY_READ | KEY_WOW64_64KEY) else {
+impl From<Hive> for Root<'_> {
+    fn from(hive: Hive) -> Self {
+        Root::Hive(hive)
+    }
+}
+fn root(at: Root) -> std::io::Result<RegKey> {
+    match at {
+        Root::Hive(Hive::User) => Ok(RegKey::predef(HKEY_CURRENT_USER)),
+        Root::Hive(Hive::Machine) => Ok(RegKey::predef(HKEY_LOCAL_MACHINE)),
+        Root::Account(sid) => RegKey::predef(HKEY_USERS).open_subkey_with_flags(sid, KEY_ALL_ACCESS | KEY_WOW64_64KEY),
+    }
+}
+pub fn read<'a>(at: impl Into<Root<'a>>, path: &str, name: &str) -> Value {
+    let Ok(key) = root(at.into()).and_then(|base| base.open_subkey_with_flags(path, KEY_READ | KEY_WOW64_64KEY)) else {
         return Value::Absent;
     };
     let Ok(raw) = key.get_raw_value(name) else {
@@ -94,8 +109,8 @@ pub fn read(hive: Hive, path: &str, name: &str) -> Value {
 }
 /// The first key of `path` that does not exist yet, which writing a value
 /// there creates (and undo removes again, if it is left empty).
-pub fn first_missing(hive: Hive, path: &str) -> Option<String> {
-    let base = root(hive);
+pub fn first_missing<'a>(at: impl Into<Root<'a>>, path: &str) -> Option<String> {
+    let base = root(at.into()).ok()?;
     let mut sofar = String::new();
     for part in path.split('\\') {
         if !sofar.is_empty() {
@@ -108,9 +123,9 @@ pub fn first_missing(hive: Hive, path: &str) -> Option<String> {
     }
     None
 }
-pub fn write(hive: Hive, path: &str, name: &str, data: Data) -> Result<(), String> {
-    let (key, _) = root(hive)
-        .create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)
+pub fn write<'a>(at: impl Into<Root<'a>>, path: &str, name: &str, data: Data) -> Result<(), String> {
+    let (key, _) = root(at.into())
+        .and_then(|base| base.create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY))
         .map_err(|e| format!("{path}: {e}"))?;
     match data {
         Data::Dword(value) => key.set_value(name, &value),
@@ -120,12 +135,13 @@ pub fn write(hive: Hive, path: &str, name: &str, data: Data) -> Result<(), Strin
 }
 /// Puts a value back as it was: its old data, or no value at all. Keys that
 /// applying created are removed again if nothing else is in them.
-pub fn restore(hive: Hive, path: &str, name: &str, before: &Value, created: Option<&str>) -> Result<(), String> {
+pub fn restore<'a>(at: impl Into<Root<'a>>, path: &str, name: &str, before: &Value, created: Option<&str>) -> Result<(), String> {
+    let at = at.into();
     match before {
-        Value::Dword { value } => write_raw(hive, path, name, |key| key.set_value(name, value)),
-        Value::Sz { value } => write_raw(hive, path, name, |key| key.set_value(name, value)),
+        Value::Dword { value } => write_raw(at, path, name, |key| key.set_value(name, value)),
+        Value::Sz { value } => write_raw(at, path, name, |key| key.set_value(name, value)),
         Value::Absent => {
-            if let Ok(key) = root(hive).open_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY) {
+            if let Ok(key) = root(at).and_then(|base| base.open_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)) {
                 match key.delete_value(name) {
                     Ok(()) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -137,18 +153,18 @@ pub fn restore(hive: Hive, path: &str, name: &str, before: &Value, created: Opti
         Value::Other => Ok(()),
     }?;
     if let Some(top) = created {
-        remove_empty_keys(hive, path, top);
+        remove_empty_keys(at, path, top);
     }
     Ok(())
 }
 fn write_raw(
-    hive: Hive,
+    at: Root,
     path: &str,
     name: &str,
     set: impl FnOnce(&RegKey) -> std::io::Result<()>,
 ) -> Result<(), String> {
-    let (key, _) = root(hive)
-        .create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)
+    let (key, _) = root(at)
+        .and_then(|base| base.create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY))
         .map_err(|e| format!("{path}: {e}"))?;
     set(&key).map_err(|e| format!("{path}\\{name}: {e}"))
 }
@@ -159,11 +175,13 @@ pub fn key_on_path(path: &str, top: &str) -> bool {
     top.contains('\\') && (path == top || path.starts_with(&format!("{top}\\")))
 }
 /// Deletes `path` and its parents up to `top` while each is empty.
-fn remove_empty_keys(hive: Hive, path: &str, top: &str) {
+fn remove_empty_keys(at: Root, path: &str, top: &str) {
     if !path.eq_ignore_ascii_case(top) && !path.to_ascii_lowercase().starts_with(&format!("{}\\", top.to_ascii_lowercase())) {
         return;
     }
-    let base = root(hive);
+    let Ok(base) = root(at) else {
+        return;
+    };
     let mut current = path.to_string();
     loop {
         let empty = base
@@ -665,6 +683,23 @@ mod tests {
         write(Hive::User, &path, "Mode", Data::Sz("Deny")).unwrap();
         restore(Hive::User, &path, "Mode", &before, None).unwrap();
         assert_eq!(read(Hive::User, &path, "Mode"), Value::Sz { value: "Allow".into() });
+    }
+    /// What the helper writes for the app's account lands in that user's
+    /// own hive: here this test's, which is HKEY_CURRENT_USER.
+    #[test]
+    fn an_accounts_hive_is_the_users_own() {
+        let key = TestKey::new();
+        let sid = crate::elevated_pipe::process_account(std::process::id()).unwrap();
+        let account = Root::Account(&sid);
+        let path = format!(r"{}\Policies\Deep", key.0);
+        let created = first_missing(account, &path);
+        assert_eq!(created, first_missing(Hive::User, &path));
+        write(account, &path, "Level", Data::Dword(1)).unwrap();
+        assert!(read(Hive::User, &path, "Level").matches(Data::Dword(1)));
+        restore(account, &path, "Level", &Value::Absent, created.as_deref()).unwrap();
+        assert!(first_missing(Hive::User, &path).is_some(), "the keys made for it are gone");
+        assert_eq!(read(Root::Account("S-1-5-21-0-0-0-1"), &path, "Level"), Value::Absent, "no such account");
+        assert!(write(Root::Account("S-1-5-21-0-0-0-1"), &path, "Level", Data::Dword(1)).is_err());
     }
     #[test]
     fn a_default_value_and_its_keys_come_and_go() {

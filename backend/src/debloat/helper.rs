@@ -1,4 +1,4 @@
-// ! The administrator half of the debloater: machine-wide registry values, ! services, scheduled tasks, Store apps for every user, Edge, and restore ! points. It acts only on what the catalog names: a request carries tweak ! ids and package names, and an undo record is checked against the ! catalog before anything is written back (the record is the app's file, ! which another program of the user's could have edited).
+// ! The administrator half of the debloater: machine-wide registry values, ! the user's own policies (in the app user's hive), services, scheduled ! tasks, Store apps for every user, Edge, and restore points. It acts only on what the catalog names: a request carries tweak ! ids and package names, and an undo record is checked against the ! catalog before anything is written back (the record is the app's file, ! which another program of the user's could have edited).
 use std::ffi::OsString;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use super::catalog::{self, Data, Hive, Op};
-use super::system::{self, Value};
+use super::system::{self, Root, Value};
 use super::undo::{Before, Saved};
 use crate::elevated_pipe::{self, Helper};
 pub const HELPER: Helper = Helper {
@@ -66,8 +66,18 @@ impl Reply {
 // --------------------------------------------------------------------------- Entry
 pub fn run_helper_from_args() -> Option<i32> {
     let args: Vec<OsString> = elevated_pipe::helper_args(&HELPER)?;
-    let served = elevated_pipe::parse_serve_args(&HELPER, &args)
-        .and_then(|(pipe, app_pid)| elevated_pipe::serve(&HELPER, &pipe, app_pid, handle, || Reply::error("Invalid debloat request.")));
+    let served = elevated_pipe::parse_serve_args(&HELPER, &args).and_then(|(pipe, app_pid)| {
+        // The user's own policies go to the app's account: the one approving
+        // the prompt may be another administrator, with another hive.
+        let account = elevated_pipe::process_account(app_pid);
+        elevated_pipe::serve(
+            &HELPER,
+            &pipe,
+            app_pid,
+            |request| handle(request, account.as_deref()),
+            || Reply::error("Invalid debloat request."),
+        )
+    });
     Some(match served {
         Ok(()) => 0,
         Err(error) => {
@@ -76,19 +86,20 @@ pub fn run_helper_from_args() -> Option<i32> {
         }
     })
 }
-pub fn handle(request: Request) -> Reply {
+/// `account`: the SID of the app's user, whose hive holds their policies.
+pub fn handle(request: Request, account: Option<&str>) -> Reply {
     match request {
         Request::Apply { tweak } => match catalog::find(&tweak) {
-            Some(tweak) => apply(tweak),
+            Some(tweak) => apply(tweak, account),
             None => Reply::error("Unknown tweak."),
         },
         Request::Undo { tweak, saved } => match catalog::find(&tweak) {
-            Some(tweak) => undo(tweak, &saved),
+            Some(tweak) => undo(tweak, &saved, account),
             None => Reply::error("Unknown tweak."),
         },
         Request::RemoveApps { packages } => remove_apps(&packages),
         Request::RestorePoint { turn_on } => Reply { restore_point: Some(restore_point(turn_on)), ..Reply::default() },
-        Request::SetHideRecommended { hide } => match super::start_menu::apply_machine_hide_recommended(hide) {
+        Request::SetHideRecommended { hide } => match super::start_menu::apply_machine_hide_recommended(hide, account) {
             Ok(()) => Reply::default(),
             Err(e) => Reply::error(e),
         },
@@ -99,23 +110,33 @@ pub fn handle(request: Request) -> Reply {
     }
 }
 // --------------------------------------------------------------------------- Tweaks
-fn apply(tweak: &catalog::Tweak) -> Reply {
+/// Where the helper reads and writes a value of `hive`: HKLM, or the app
+/// user's own hive (their policies), never the administrator's.
+fn root(hive: Hive, account: Option<&str>) -> Result<Root<'_>, String> {
+    match (hive, account) {
+        (Hive::Machine, _) => Ok(Root::Hive(Hive::Machine)),
+        (Hive::User, Some(sid)) => Ok(Root::Account(sid)),
+        (Hive::User, None) => Err("Your Windows account was not found, so its own policies were left alone.".into()),
+    }
+}
+fn apply(tweak: &catalog::Tweak, account: Option<&str>) -> Reply {
     let mut reply = Reply::default();
     for (index, op) in tweak.ops.iter().enumerate() {
         let result = match *op {
-            Op::Reg { hive: Hive::Machine, path, name, data, best_effort } => {
-                let before = system::read(Hive::Machine, path, name);
+            // The user's own part runs in the app, as the user.
+            _ if op.as_user() => Ok(None),
+            Op::Reg { hive, path, name, data, best_effort } => root(hive, account).and_then(|at| {
+                let before = system::read(at, path, name);
                 if before.matches(data) {
-                    Ok(None)
-                } else {
-                    let created = system::first_missing(Hive::Machine, path);
-                    match system::write(Hive::Machine, path, name, data) {
-                        Ok(()) => Ok(Some(Before::Reg { value: before, created })),
-                        Err(_) if best_effort => Ok(None),
-                        Err(e) => Err(e),
-                    }
+                    return Ok(None);
                 }
-            }
+                let created = system::first_missing(at, path);
+                match system::write(at, path, name, data) {
+                    Ok(()) => Ok(Some(Before::Reg { value: before, created })),
+                    Err(_) if best_effort => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }),
             Op::Service { name, to, from, .. } => match system::start_type(name) {
                 Ok(Some(current)) if from.contains(&current) => {
                     system::set_start_type(name, to).map(|()| Some(Before::Service { start: current }))
@@ -135,8 +156,7 @@ fn apply(tweak: &catalog::Tweak) -> Reply {
             }
             Op::RemoveEdge => edge::remove().map(|removed| removed.then_some(Before::Edge)),
             Op::Capability { name, .. } => capability(name, false).map(|changed| changed.then_some(Before::Capability)),
-            // The user's own part runs in the app, as the user.
-            Op::Reg { hive: Hive::User, .. } | Op::Clock24 => Ok(None),
+            Op::Clock24 => Ok(None),
         };
         match result {
             Ok(Some(before)) => reply.saved.push(Saved { op: index, before }),
@@ -151,10 +171,10 @@ fn apply(tweak: &catalog::Tweak) -> Reply {
 fn valid_undo(tweak: &catalog::Tweak, saved: &Saved) -> Option<&'static Op> {
     let op = tweak.ops.get(saved.op)?;
     let ok = match (op, &saved.before) {
-        (Op::Reg { hive: Hive::Machine, path, name, .. }, Before::Reg { value, created }) => {
+        (Op::Reg { path, name, .. }, Before::Reg { value, created }) if !op.as_user() => {
             let value_ok = match value {
                 Value::Absent | Value::Dword { .. } | Value::Other => true,
-                Value::Sz { value } => catalog::allowed_machine_strings(path, name).contains(&value.as_str()),
+                Value::Sz { value } => catalog::allowed_helper_strings(path, name).contains(&value.as_str()),
             };
             // Only keys on the way to the value, which applying may have made.
             let created_ok = created.as_deref().is_none_or(|top| system::key_on_path(path, top));
@@ -167,15 +187,15 @@ fn valid_undo(tweak: &catalog::Tweak, saved: &Saved) -> Option<&'static Op> {
     };
     ok.then_some(op)
 }
-fn undo(tweak: &catalog::Tweak, saved: &[Saved]) -> Reply {
+fn undo(tweak: &catalog::Tweak, saved: &[Saved], account: Option<&str>) -> Reply {
     let mut reply = Reply::default();
     for record in saved {
         let Some(op) = valid_undo(tweak, record) else {
             continue;
         };
         let result = match (*op, &record.before) {
-            (Op::Reg { path, name, .. }, Before::Reg { value, created }) => {
-                system::restore(Hive::Machine, path, name, value, created.as_deref())
+            (Op::Reg { hive, path, name, .. }, Before::Reg { value, created }) => {
+                root(hive, account).and_then(|at| system::restore(at, path, name, value, created.as_deref()))
             }
             (Op::Service { name, .. }, Before::Service { start }) => system::set_start_type(name, *start),
             (Op::Task { folder, name }, Before::Task { enabled }) => system::set_task_enabled(folder, name, *enabled),
@@ -447,8 +467,24 @@ mod tests {
         assert_eq!(json, r#"{"do":"apply","tweak":"telemetry"}"#);
         let json = serde_json::to_string(&Request::RestorePoint { turn_on: true }).unwrap();
         assert_eq!(json, r#"{"do":"restorePoint","turnOn":true}"#);
-        let reply = handle(Request::Apply { tweak: "../../evil".into() });
+        let reply = handle(Request::Apply { tweak: "../../evil".into() }, None);
         assert!(!reply.errors.is_empty());
+    }
+    #[test]
+    fn the_users_policies_are_the_helpers_and_go_to_the_apps_account() {
+        let copilot = catalog::find("copilot").unwrap();
+        // op 0: HKCU\Software\Policies\...\WindowsCopilot, read-only for the user.
+        assert!(matches!(copilot.ops[0], Op::Reg { hive: Hive::User, .. }) && !copilot.ops[0].as_user());
+        let honest = Saved { op: 0, before: Before::Reg { value: Value::Absent, created: Some(r"Software\Policies\Microsoft\Windows\WindowsCopilot".into()) } };
+        assert!(valid_undo(copilot, &honest).is_some());
+        let forged_key = Saved { op: 0, before: Before::Reg { value: Value::Absent, created: Some("Software".into()) } };
+        assert!(valid_undo(copilot, &forged_key).is_none(), "never delete Software");
+        let forged_value = Saved { op: 0, before: Before::Reg { value: Value::Sz { value: r"C:\evil.exe".into() }, created: None } };
+        assert!(valid_undo(copilot, &forged_value).is_none());
+        // Without the app's account, nothing is written to the administrator's.
+        assert!(root(Hive::User, None).is_err());
+        assert!(matches!(root(Hive::User, Some("S-1-5-21-1")), Ok(Root::Account("S-1-5-21-1"))));
+        assert!(matches!(root(Hive::Machine, None), Ok(Root::Hive(Hive::Machine))));
     }
     #[test]
     fn an_edited_undo_record_cannot_write_elsewhere() {
