@@ -1,21 +1,21 @@
 # MYLE · development guide
 
 Everything about building, the structure, each page, the updater and the setup.
-For what the app does, see the <a href="../README.md"><kbd>README</kbd></a>.
+For what the app does, see the <a href="../README.md"><img alt="README" src="https://img.shields.io/static/v1?label=&message=README&color=8b83ff&labelColor=151c31&style=flat-square" /></a>.
 
 **Contents**
 
-- <a href="#1-get-started"><kbd>1 · Get started</kbd></a> <a href="#commands"><kbd>commands</kbd></a> <a href="#ci"><kbd>CI</kbd></a> <a href="#where-builds-land"><kbd>where builds land</kbd></a>
-- <a href="#2-repository-map"><kbd>2 · Repository map</kbd></a> <a href="#not-in-git"><kbd>not in git</kbd></a> <a href="#versions-that-must-agree"><kbd>versions</kbd></a>
-- <a href="#3-frontend"><kbd>3 · Frontend</kbd></a> <a href="#add-a-page"><kbd>add a page</kbd></a> <a href="#frontend-conventions"><kbd>conventions</kbd></a>
-- <a href="#4-backend"><kbd>4 · Backend</kbd></a> <a href="#start-up-and-the-hand-over"><kbd>start-up</kbd></a> <a href="#shared-backend-modules"><kbd>shared modules</kbd></a>
-- <a href="#5-the-pages"><kbd>5 · The pages</kbd></a> <a href="#install-apps"><kbd>Install Apps</kbd></a> <a href="#creative-suite"><kbd>Creative Suite</kbd></a> <a href="#spotify-hub"><kbd>Spotify Hub</kbd></a> <a href="#game-saves"><kbd>Game Saves</kbd></a> <a href="#project-backups"><kbd>Project Backups</kbd></a> <a href="#github-releases"><kbd>GitHub Releases</kbd></a> <a href="#windows-optimization"><kbd>Windows Optimization</kbd></a> <a href="#system-cleaner"><kbd>System Cleaner</kbd></a> <a href="#system-maintenance"><kbd>System Maintenance</kbd></a> <a href="#disk-analyzer"><kbd>Disk Analyzer</kbd></a> <a href="#auto-clicker--macros"><kbd>Auto Clicker</kbd></a> <a href="#password-manager"><kbd>Password Manager</kbd></a> <a href="#myle-passwords-android-and-iphone"><kbd>MYLE Passwords</kbd></a> <a href="#settings"><kbd>Settings</kbd></a>
-- <a href="#6-owner-only-pages"><kbd>6 · Owner-only pages</kbd></a>
-- <a href="#7-where-things-live-on-disk"><kbd>7 · Where things live on disk</kbd></a>
-- <a href="#8-updates-and-releases"><kbd>8 · Updates and releases</kbd></a> <a href="#the-cloudflare-pages-site"><kbd>the site</kbd></a>
-- <a href="#9-setup-and-uninstall"><kbd>9 · Setup and uninstall</kbd></a>
-- <a href="#10-tests"><kbd>10. Tests</kbd></a>
-- <a href="#11-conventions"><kbd>11. Conventions</kbd></a>
+- <a href="#1-get-started"><img alt="1 · Get started" src="https://img.shields.io/static/v1?label=&message=1%20%C2%B7%20Get%20started&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#commands"><img alt="commands" src="https://img.shields.io/static/v1?label=&message=commands&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#ci"><img alt="CI" src="https://img.shields.io/static/v1?label=&message=CI&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#where-builds-land"><img alt="where builds land" src="https://img.shields.io/static/v1?label=&message=where%20builds%20land&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#2-repository-map"><img alt="2 · Repository map" src="https://img.shields.io/static/v1?label=&message=2%20%C2%B7%20Repository%20map&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#not-in-git"><img alt="not in git" src="https://img.shields.io/static/v1?label=&message=not%20in%20git&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#versions-that-must-agree"><img alt="versions" src="https://img.shields.io/static/v1?label=&message=versions&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#3-frontend"><img alt="3 · Frontend" src="https://img.shields.io/static/v1?label=&message=3%20%C2%B7%20Frontend&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#add-a-page"><img alt="add a page" src="https://img.shields.io/static/v1?label=&message=add%20a%20page&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#frontend-conventions"><img alt="conventions" src="https://img.shields.io/static/v1?label=&message=conventions&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#4-backend"><img alt="4 · Backend" src="https://img.shields.io/static/v1?label=&message=4%20%C2%B7%20Backend&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#start-up-and-the-hand-over"><img alt="start-up" src="https://img.shields.io/static/v1?label=&message=start-up&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#shared-backend-modules"><img alt="shared modules" src="https://img.shields.io/static/v1?label=&message=shared%20modules&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#5-the-pages"><img alt="5 · The pages" src="https://img.shields.io/static/v1?label=&message=5%20%C2%B7%20The%20pages&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#install-apps"><img alt="Install Apps" src="https://img.shields.io/static/v1?label=&message=Install%20Apps&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#creative-suite"><img alt="Creative Suite" src="https://img.shields.io/static/v1?label=&message=Creative%20Suite&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#spotify-hub"><img alt="Spotify Hub" src="https://img.shields.io/static/v1?label=&message=Spotify%20Hub&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#game-saves"><img alt="Game Saves" src="https://img.shields.io/static/v1?label=&message=Game%20Saves&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#project-backups"><img alt="Project Backups" src="https://img.shields.io/static/v1?label=&message=Project%20Backups&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#github-releases"><img alt="GitHub Releases" src="https://img.shields.io/static/v1?label=&message=GitHub%20Releases&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#windows-optimization"><img alt="Windows Optimization" src="https://img.shields.io/static/v1?label=&message=Windows%20Optimization&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#system-cleaner"><img alt="System Cleaner" src="https://img.shields.io/static/v1?label=&message=System%20Cleaner&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#system-maintenance"><img alt="System Maintenance" src="https://img.shields.io/static/v1?label=&message=System%20Maintenance&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#disk-analyzer"><img alt="Disk Analyzer" src="https://img.shields.io/static/v1?label=&message=Disk%20Analyzer&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#auto-clicker--macros"><img alt="Auto Clicker" src="https://img.shields.io/static/v1?label=&message=Auto%20Clicker&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#password-manager"><img alt="Password Manager" src="https://img.shields.io/static/v1?label=&message=Password%20Manager&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#myle-passwords-android-and-iphone"><img alt="MYLE Passwords" src="https://img.shields.io/static/v1?label=&message=MYLE%20Passwords&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#settings"><img alt="Settings" src="https://img.shields.io/static/v1?label=&message=Settings&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#6-owner-only-pages"><img alt="6 · Owner-only pages" src="https://img.shields.io/static/v1?label=&message=6%20%C2%B7%20Owner-only%20pages&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#7-where-things-live-on-disk"><img alt="7 · Where things live on disk" src="https://img.shields.io/static/v1?label=&message=7%20%C2%B7%20Where%20things%20live%20on%20disk&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#8-updates-and-releases"><img alt="8 · Updates and releases" src="https://img.shields.io/static/v1?label=&message=8%20%C2%B7%20Updates%20and%20releases&color=8b83ff&labelColor=151c31&style=flat-square" /></a> <a href="#the-cloudflare-pages-site"><img alt="the site" src="https://img.shields.io/static/v1?label=&message=the%20site&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#9-setup-and-uninstall"><img alt="9 · Setup and uninstall" src="https://img.shields.io/static/v1?label=&message=9%20%C2%B7%20Setup%20and%20uninstall&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#10-tests"><img alt="10. Tests" src="https://img.shields.io/static/v1?label=&message=10.%20Tests&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
+- <a href="#11-conventions"><img alt="11. Conventions" src="https://img.shields.io/static/v1?label=&message=11.%20Conventions&color=8b83ff&labelColor=151c31&style=flat-square" /></a>
 
 ---
 
@@ -70,7 +70,7 @@ Tauri's `beforeDevCommand` and `beforeBuildCommand` (in `backend/tauri.conf.json
 | File | Runs on | Does |
 |---|---|---|
 | `ci.yml` | every push and pull request | frontend checks, Rust lint and tests, a Windows install smoke test. Each run's setup is kept as an artifact for 7 days |
-| `release.yml` | a `v*` tag, or by hand | the signed release (see <a href="#8-updates-and-releases"><kbd>Updates and releases</kbd></a>) |
+| `release.yml` | a `v*` tag, or by hand | the signed release (see <a href="#8-updates-and-releases"><img alt="Updates and releases" src="https://img.shields.io/static/v1?label=&message=Updates%20and%20releases&color=8b83ff&labelColor=151c31&style=flat-square" /></a>) |
 | `mobile.yml` | a `mobile/…` branch, a tag, or by hand | the Android and iOS builds |
 | `keepalive.yml` | a schedule | keeps the workflows' storage alive |
 
@@ -195,7 +195,7 @@ Svelte 5 (runes: `$state`, `$derived`, `$props`), TypeScript, Vite 8. No SvelteK
 
 3. Give it an icon in `lib/icons/` and list it in the sidebar (nothing else to touch: `lib/sidebar.ts` derives groups, order and shortcuts from the registry).
 
-Icons come from <a href="https://lucide.dev/icons"><kbd>Lucide</kbd></a>: `import Star from "@lucide/svelte/icons/star"`.
+Icons come from <a href="https://lucide.dev/icons"><img alt="Lucide" src="https://img.shields.io/static/v1?label=&message=Lucide&color=8b83ff&labelColor=151c31&style=flat-square" /></a>: `import Star from "@lucide/svelte/icons/star"`.
 
 ### Frontend conventions
 
@@ -245,7 +245,7 @@ It never exceeds 95% of the area outside the taskbar (`src/window_sizing.rs`). W
 | `src/elevated_pipe.rs` | the administrator helper pipe: one UAC prompt per session, used by the System Cleaner, the debloater and the Disk Analyzer |
 | `src/console.rs` | the console output the maintenance and GitHub pages read |
 | `src/download.rs` | the one downloader (progress over a channel, cancellable) |
-| `src/updater.rs`, `src/whats_new.rs` | see <a href="#8-updates-and-releases"><kbd>Updates and releases</kbd></a> |
+| `src/updater.rs`, `src/whats_new.rs` | see <a href="#8-updates-and-releases"><img alt="Updates and releases" src="https://img.shields.io/static/v1?label=&message=Updates%20and%20releases&color=8b83ff&labelColor=151c31&style=flat-square" /></a> |
 | `src/startup.rs`, `src/tray.rs`, `src/taskbar.rs`, `src/shortcut_preferences.rs` | Windows start-up, the tray icon, the taskbar pin |
 | `src/webview_policy.rs` | the CSP and navigation rules the web views run under |
 | `src/apps/` | winget, the job registry (`Jobs`), process control, the catalog |
@@ -468,7 +468,7 @@ An end-to-end encrypted vault (`backend/src/passwords/`, page in `frontend/app/p
 
 ### MYLE Passwords (Android and iPhone)
 
-The Password Manager on phones: see, copy and edit the logins, with their 2FA codes, in sync with MYLE on the PC. It does not fill other apps. It is distributed outside the stores: an APK for Android, and an IPA that <a href="https://sidestore.io"><kbd>SideStore</kbd></a> installs with the user's own (free) Apple ID.
+The Password Manager on phones: see, copy and edit the logins, with their 2FA codes, in sync with MYLE on the PC. It does not fill other apps. It is distributed outside the stores: an APK for Android, and an IPA that <a href="https://sidestore.io"><img alt="SideStore" src="https://img.shields.io/static/v1?label=&message=SideStore&color=8b83ff&labelColor=151c31&style=flat-square" /></a> installs with the user's own (free) Apple ID.
 
 - **Code.** `backend/vault` (`myle-vault`) is the vault itself, used by both apps: encryption, entries, 2FA codes, passkeys, imports, website icons, the sync and the account's Supabase sign-in (`account.rs`, `Cloud`). It knows nothing of Tauri or Windows; TLS is native-tls on Windows and rustls on phones (Mozilla's root certificates on Android, `http.rs`). `backend/mobile` answers the page with the same command names as the Windows app (`passwords_*`, `account_*`), so `frontend/app/pages/password-manager/` serves both; `frontend/lib/platform.ts` (`MOBILE`, from `vite build --mode mobile`) leaves out what only Windows does (browser filling, Windows programs, import and export, passkey prompts) and words things for a phone. `frontend/mobile/` is the phone's shell: the bar, the welcome screen, the account sheet, the camera's QR frame, the back button.
 - **Account.** Sign-in shows Discord's or Google's page inside the app (`backend/mobile/plugin`, `tauri-plugin-myle-mobile`): iOS's sign-in sheet (`ASWebAuthenticationSession`, sharing Safari's sign-ins), and on Android a Custom Tab over the app (Google refuses sign-in inside an app's own webview). Both come back to `uk.thomast.myle.passwords://auth-callback` (a Redirect URL of the Supabase project, Authentication → URL Configuration): iOS hands the address straight back; on Android it arrives as a link, and a return to the app without it means the tab was closed (the sign-in is cancelled). The PKCE verifier waits in `sign-in.json` for 10 minutes, so a return that starts the app again still finishes. The session is kept in `account.json` in the app's own folder, which no other app can read.
@@ -613,8 +613,8 @@ Preview the window in a browser: `npx vite` and `http://localhost:1420/installer
 
 Some suites only make sense on real Windows and are `#[ignore]`d or gated:
 
-- the debloater's `sandbox_tests.rs` (Windows Sandbox or a VM, see <a href="#windows-optimization"><kbd>Windows Optimization</kbd></a>)
-- `cargo test measure_a_whole_drive -- --ignored` and `cargo test mft_matches_the_walk -- --ignored` (a real drive, see <a href="#disk-analyzer"><kbd>Disk Analyzer</kbd></a>)
+- the debloater's `sandbox_tests.rs` (Windows Sandbox or a VM, see <a href="#windows-optimization"><img alt="Windows Optimization" src="https://img.shields.io/static/v1?label=&message=Windows%20Optimization&color=8b83ff&labelColor=151c31&style=flat-square" /></a>)
+- `cargo test measure_a_whole_drive -- --ignored` and `cargo test mft_matches_the_walk -- --ignored` (a real drive, see <a href="#disk-analyzer"><img alt="Disk Analyzer" src="https://img.shields.io/static/v1?label=&message=Disk%20Analyzer&color=8b83ff&labelColor=151c31&style=flat-square" /></a>)
 
 `npm run check` catches what the tests do not: svelte-check for every component, `tsc` for the Vite config and the scripts, and the site check.
 

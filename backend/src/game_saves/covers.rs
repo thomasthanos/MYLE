@@ -43,30 +43,45 @@ pub async fn game_saves_covers(ids: Vec<u32>, online: bool) -> Result<HashMap<u3
     if online && !missing.is_empty() {
         let client = crate::download::http_client("MYLE")?;
         let paths = cover_paths(&client, &missing).await;
-        let fetched: Vec<(u32, Option<Vec<u8>>)> = futures_util::stream::iter(missing)
+        let fetched = futures_util::stream::iter(missing)
             .map(|id| {
                 let client = client.clone();
                 let path = paths.get(&id).cloned().unwrap_or_else(|| COVER.to_string());
                 async move { (id, fetch(&client, id, &path).await) }
             })
-            .buffer_unordered(AT_ONCE)
-            .collect()
-            .await;
-        let _ = std::fs::create_dir_all(&folder);
-        for (id, bytes) in fetched {
-            match bytes {
-                Some(bytes) => {
-                    let _ = super::atomic::write(&folder.join(format!("{id}.jpg")), &bytes);
-                    found.insert(id, data_url(&bytes));
-                }
-                // Not there (or not now): noted, so it is not asked again at once. (`.missing`, not the first version's `.none`: those were written before the newer covers could be found.)
-                None => {
-                    let _ = std::fs::write(folder.join(format!("{id}.missing")), b"");
-                }
-            }
-        }
+            .buffer_unordered(AT_ONCE);
+        found.extend(store_fetched(folder, fetched).await);
     }
     Ok(found)
+}
+async fn store_fetched(
+    folder: PathBuf,
+    fetched: impl futures_util::Stream<Item = (u32, Option<Vec<u8>>)>,
+) -> HashMap<u32, String> {
+    let mut found = HashMap::new();
+    let directory = folder.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || std::fs::create_dir_all(directory)).await;
+    futures_util::pin_mut!(fetched);
+    while let Some((id, bytes)) = fetched.next().await {
+        let directory = folder.clone();
+        // Save each completed cover before asking the stream for more; only
+        // the four active downloads hold raw image bytes in memory.
+        let saved = tauri::async_runtime::spawn_blocking(move || match bytes {
+            Some(bytes) => {
+                let _ = super::atomic::write(&directory.join(format!("{id}.jpg")), &bytes);
+                Some((id, data_url(&bytes)))
+            }
+            // Not there (or not now): do not ask again at once.
+            None => {
+                let _ = std::fs::write(directory.join(format!("{id}.missing")), b"");
+                None
+            }
+        }).await;
+        if let Ok(Some((id, url))) = saved {
+            found.insert(id, url);
+        }
+    }
+    found
 }
 /// The covers on this PC, and the ids still worth asking Steam for.
 fn on_this_pc(ids: &[u32], folder: &Path) -> (HashMap<u32, String>, Vec<u32>) {
@@ -111,7 +126,12 @@ fn steam_cover(cache: &Path, id: u32) -> Option<Vec<u8>> {
     })
 }
 fn read_cover(path: &Path) -> Option<Vec<u8>> {
-    let bytes = std::fs::read(path).ok()?;
+    read_cover_from(std::fs::File::open(path).ok()?)
+}
+fn read_cover_from(reader: impl std::io::Read) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    reader.take((MAX_COVER + 1) as u64).read_to_end(&mut bytes).ok()?;
     is_cover(&bytes).then_some(bytes)
 }
 /// A JPEG of a sensible size, whatever the file or the server claims.
@@ -174,11 +194,22 @@ fn safe_path(path: &str) -> bool {
 async fn fetch(client: &reqwest::Client, id: u32, path: &str) -> Option<Vec<u8>> {
     let url = format!("{IMAGES}/{id}/{path}");
     let response = client.get(url).timeout(Duration::from_secs(15)).send().await.ok()?;
-    if !response.status().is_success() || response.content_length().is_some_and(|n| n as usize > MAX_COVER) {
+    fetch_response(response).await
+}
+async fn fetch_response(response: reqwest::Response) -> Option<Vec<u8>> {
+    if !response.status().is_success() || response.content_length().is_some_and(|n| n > MAX_COVER as u64) {
         return None;
     }
-    let bytes = response.bytes().await.ok()?;
-    is_cover(&bytes).then(|| bytes.to_vec())
+    let mut bytes = Vec::new();
+    let mut body = response.bytes_stream();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.ok()?;
+        if chunk.len() > MAX_COVER - bytes.len() {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    is_cover(&bytes).then_some(bytes)
 }
 fn data_url(bytes: &[u8]) -> String {
     format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes))
@@ -207,6 +238,74 @@ fn cleanup_legacy_markers(folder: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_oversized_local_cover_is_rejected_without_reading_it_all() {
+        struct CountingRead {
+            remaining: usize,
+            read: usize,
+        }
+        impl std::io::Read for CountingRead {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let count = buffer.len().min(self.remaining);
+                buffer[..count].fill(0);
+                self.remaining -= count;
+                self.read += count;
+                Ok(count)
+            }
+        }
+        let mut reader = CountingRead { remaining: MAX_COVER * 4, read: 0 };
+        assert!(read_cover_from(&mut reader).is_none());
+        assert!(reader.read <= MAX_COVER + 1, "read {} bytes before rejecting the cover", reader.read);
+    }
+    #[tokio::test]
+    async fn an_oversized_chunked_cover_is_rejected_before_the_server_finishes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 2048];
+            let _ = socket.read(&mut request).await;
+            socket.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n").await.unwrap();
+            let mut bytes = vec![0; MAX_COVER + 1];
+            bytes[..3].copy_from_slice(&[0xFF, 0xD8, 0xFF]);
+            socket.write_all(format!("{:X}\r\n", bytes.len()).as_bytes()).await.unwrap();
+            socket.write_all(&bytes).await.unwrap();
+            socket.write_all(b"\r\n").await.unwrap();
+            // An oversized body must be rejected without waiting for its end.
+            let _ = socket.read(&mut request).await;
+        });
+        let response = crate::download::http_client("test").unwrap()
+            .get(format!("http://{address}/cover.jpg")).send().await.unwrap();
+        let cover = tokio::time::timeout(Duration::from_secs(2), fetch_response(response)).await;
+        assert!(cover.expect("oversized chunked bodies must stop at the cover limit").is_none());
+    }
+    #[tokio::test]
+    async fn a_finished_cover_is_saved_while_other_covers_are_still_pending() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let folder = std::env::temp_dir().join(format!("myle-streamed-covers-{}", uuid::Uuid::new_v4()));
+        let observed = Arc::new(AtomicBool::new(false));
+        let checked = observed.clone();
+        let waiting = folder.join("1.jpg");
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF];
+        jpeg.resize(4096, 0);
+        let first = jpeg.clone();
+        let fetched = futures_util::stream::once(async move { (1, Some(first)) })
+            .chain(futures_util::stream::once(async move {
+                let saved = tokio::time::timeout(Duration::from_millis(500), async {
+                    while !waiting.exists() {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }).await.is_ok();
+                checked.store(saved, Ordering::Relaxed);
+                (2, None)
+            }));
+        let found = store_fetched(folder.clone(), fetched).await;
+        assert_eq!(found.get(&1), Some(&data_url(&jpeg)));
+        assert!(folder.join("2.missing").exists());
+        let _ = std::fs::remove_dir_all(&folder);
+        assert!(observed.load(Ordering::Relaxed), "the first completed cover was held until all downloads finished");
+    }
     #[test]
     fn only_jpegs_of_a_sensible_size_are_covers() {
         let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0];

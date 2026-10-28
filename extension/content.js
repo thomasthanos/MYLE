@@ -1928,6 +1928,22 @@
 
   /** Pictures read already, and whether each was a QR code. */
   const readPictures = new WeakMap();
+  const loadingPictures = new Map();
+
+  /** A not-yet-loaded QR candidate gets one later look, without caching a failure. */
+  function waitForPicture(el) {
+    if (loadingPictures.has(el)) return;
+    const ready = (event) => {
+      el.removeEventListener("load", ready);
+      el.removeEventListener("error", ready);
+      loadingPictures.delete(el);
+      if (event.type === "error") readPictures.set(el, false);
+      else scanForKey();
+    };
+    loadingPictures.set(el, ready);
+    el.addEventListener("load", ready, { once: true });
+    el.addEventListener("error", ready, { once: true });
+  }
 
   /* A picture shaped like a QR code: square, 90–600 px, not rounded (an avatar) and not named as something else; one read and found not to be a QR code is not. */
   function qrShaped(el) {
@@ -1992,6 +2008,10 @@
       if (readPictures.has(el) || !qrShaped(el)) continue;
       if (!scanWordsNear(el)) {
         readPictures.set(el, false);
+        continue;
+      }
+      if (el instanceof HTMLImageElement && !el.complete) {
+        waitForPicture(el);
         continue;
       }
       const grey = await greyOf(el);
@@ -2148,19 +2168,32 @@
   const KEY_SCAN_EVERY = 2000;
   const KEY_SCANS = 80;
   let keyWatcher = null;
+  let keyWatching = true;
+
+  function stopKeyWatch() {
+    keyWatching = false;
+    keyWatcher?.disconnect();
+    clearTimeout(keyTimer);
+    keyTimer = 0;
+    for (const [el, ready] of loadingPictures) {
+      el.removeEventListener("load", ready);
+      el.removeEventListener("error", ready);
+    }
+    loadingPictures.clear();
+  }
 
   function scanForKey() {
-    if (keyTimer) return;
+    if (!keyWatching || keyTimer) return;
     keyTimer = setTimeout(async () => {
       keyTimer = 0;
       if (scanning || prompted || !bar.hidden) return;
-      if (++keyScans > KEY_SCANS) return keyWatcher?.disconnect();
+      if (++keyScans > KEY_SCANS) return stopKeyWatch();
       scanning = true;
       try {
         const key = await findSetupKey();
-        if (!key || offeredKeys.has(key)) return;
+        if (!keyWatching || !key || offeredKeys.has(key)) return;
         offeredKeys.add(key);
-        keyWatcher?.disconnect();
+        stopKeyWatch();
         await offerKey(key);
       } finally {
         scanning = false;
@@ -2168,6 +2201,7 @@
     }, KEY_SCAN_EVERY);
   }
 
+  addEventListener("pagehide", stopKeyWatch);
   if (window === window.top && document.documentElement) {
     keyWatcher = new MutationObserver(scanForKey);
     keyWatcher.observe(document.documentElement, { childList: true, subtree: true });

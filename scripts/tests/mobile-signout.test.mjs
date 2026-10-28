@@ -13,21 +13,23 @@ const transpile = (text, module = ModuleKind.ESNext) => transpileModule(text, {
 const executable = transpile(compileModule(transpile(source) + "\nglobalThis.mobileAccount = account;", {
   filename: "mobile-account.svelte.js", generate: "client",
 }).js.code, ModuleKind.CommonJS);
-function harness({ accept = true, fail = false, signIn } = {}) {
-  const calls = [], questions = [], errors = [];
+function harness({ accept = true, fail = false, signIn, cancelSignIn = async () => true } = {}) {
+  const calls = [], questions = [], errors = [], timers = [];
   const context = vm.createContext({
     require: createRequire(import.meta.url), exports: {}, URLSearchParams, navigator: { userAgent: "Android" },
-    isTauri: () => true, shell: { settingsOpen: true },
+    isTauri: () => true, shell: { settingsOpen: true }, document: { visibilityState: "visible" },
+    setTimeout: (run) => { timers.push(run); return timers.length; },
+    invoke: (command) => { assert.equal(command, "account_cancel_sign_in"); return cancelSignIn(); },
     confirm: async (options) => { questions.push(options); return accept; },
-    passwords: { lock: async () => calls.push("lock"), resetLocal: () => calls.push("reset") },
-    accountApi: { signIn, cancelSignIn() {}, signOut: async () => { calls.push("native"); if (fail) throw new Error("file cannot be removed"); } },
+    passwords: { lock: async () => calls.push("lock"), resetLocal: () => calls.push("reset"), syncNow: async () => {} },
+    accountApi: { signIn, cancelSignIn, signOut: async () => { calls.push("native"); if (fail) throw new Error("file cannot be removed"); } },
     localStorage: { clear: () => calls.push("localStorage") }, sessionStorage: { clear: () => calls.push("sessionStorage") },
     toast: { info() {}, success() {}, error: (message) => errors.push(message) },
   });
   vm.runInContext(executable, context);
   const account = context.mobileAccount;
   account.profile = { id: "fixture", name: "Fixture", email: "fixture@example.com" };
-  return { account, calls, questions, errors, shell: context.shell };
+  return { account, calls, questions, errors, timers, shell: context.shell };
 }
 test("confirmed sign out clears the phone and tells the shell to show welcome", async () => {
   const h = harness();
@@ -69,9 +71,42 @@ test("a cancelled sign-in response is ignored", async () => {
   let answer;
   const h = harness({ signIn: () => new Promise((resolve) => { answer = resolve; }) });
   const pending = h.account.signIn("google");
-  h.account.cancelSignIn();
+  await h.account.cancelSignIn();
   answer({ id: "late", name: "Late fixture" });
   await pending;
   assert.equal(h.account.profile.id, "fixture");
   assert.equal(h.errors.length, 0);
+});
+
+test("resuming during a slow OAuth callback keeps its eventual successful account", async () => {
+  let answer;
+  const h = harness({ signIn: () => new Promise((resolve) => { answer = resolve; }), cancelSignIn: async () => false });
+  h.account.profile = null;
+  const pending = h.account.signIn("google");
+  h.account.resumed();
+  await h.timers[0]();
+  answer({ id: "returned", name: "Returned fixture" });
+  await pending;
+  assert.equal(h.account.profile?.id, "returned");
+  assert.equal(h.account.signingIn, null);
+  assert.equal(h.errors.length, 0);
+});
+
+test("an old resume timer cannot cancel a new sign-in to the same provider", async () => {
+  const answers = [];
+  let cancellations = 0;
+  const h = harness({
+    signIn: () => new Promise((resolve) => answers.push(resolve)),
+    cancelSignIn: async () => { cancellations++; return true; },
+  });
+  const first = h.account.signIn("google");
+  h.account.resumed();
+  await h.account.cancelSignIn();
+  const second = h.account.signIn("google");
+  await h.timers[0]();
+  answers[0]({ id: "stale" });
+  answers[1]({ id: "current", name: "Current fixture" });
+  await Promise.all([first, second]);
+  assert.equal(h.account.profile?.id, "current");
+  assert.equal(cancellations, 1);
 });

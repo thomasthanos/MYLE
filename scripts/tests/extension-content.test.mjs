@@ -129,3 +129,88 @@ test("the 2FA key prompt closes only itself", () => {
   });
   settleKey({ textContent: "" }, "Saved.", "totp-1");
 });
+
+function qrLoading({ reply = { ok: true, link: "otpauth://totp/Fixture?secret=FIXTURE" } } = {}) {
+  class Picture extends EventTarget {
+    complete = false;
+    id = "qr";
+    parentElement = { textContent: "Scan this authenticator QR code", parentElement: null };
+    listeners = new Map();
+    getBoundingClientRect() { return { width: 100, height: 100 }; }
+    getAttribute() { return ""; }
+    addEventListener(kind, listener, options) {
+      super.addEventListener(kind, listener, options);
+      this.listeners.set(kind, (this.listeners.get(kind) ?? 0) + 1);
+    }
+    removeEventListener(kind, listener, options) {
+      super.removeEventListener(kind, listener, options);
+      this.listeners.set(kind, (this.listeners.get(kind) ?? 0) - 1);
+    }
+  }
+  const picture = new Picture(), timers = new Map(), events = new Map(), offered = [];
+  let nextTimer = 0, decodes = 0;
+  const window = {};
+  window.top = window;
+  const drawing = { fillRect() {}, drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray(40000) }) };
+  const context = vm.createContext({
+    window, Event, HTMLImageElement: Picture, SVGSVGElement: class {},
+    document: { documentElement: {}, createElement: () => ({ getContext: () => drawing }) },
+    visible: () => true, getComputedStyle: () => ({ borderTopLeftRadius: "0" }), queryAll: () => [picture],
+    Uint8Array, btoa, send: async () => { decodes++; return reply; },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setTimeout: (run) => { timers.set(++nextTimer, run); return nextTimer; }, clearTimeout: (id) => timers.delete(id),
+    addEventListener: (kind, listener) => events.set(kind, listener),
+    prompted: null, bar: { hidden: true }, offerKey: async (key) => offered.push(key),
+  });
+  const start = source.indexOf("  const SCAN_WORDS = ");
+  const end = source.indexOf("  /* A 2FA setup is a QR code", start);
+  const watcher = source.indexOf("  let scanning = false;");
+  vm.runInContext(source.slice(start, end) + "\nasync function findSetupKey() { return linkInQr(); }\n" + source.slice(watcher, source.lastIndexOf("})();")) + "\nglobalThis.rescan = scanForKey;", context);
+  return {
+    picture, timers, events, offered, rescan: context.rescan, decodes: () => decodes,
+    async tick() {
+      const [id, run] = timers.entries().next().value;
+      timers.delete(id);
+      await run();
+    },
+  };
+}
+
+test("an incomplete QR image is decoded once it loads, with one deferred rescan", async () => {
+  const h = qrLoading();
+  await h.tick();
+  h.rescan();
+  await h.tick();
+  assert.equal(h.decodes(), 0);
+  assert.equal(h.picture.listeners.get("load"), 1, "repeated scans share one load listener");
+  h.picture.complete = true;
+  h.picture.dispatchEvent(new Event("load"));
+  assert.equal(h.timers.size, 1);
+  await h.tick();
+  assert.deepEqual(h.offered, ["otpauth://totp/Fixture?secret=FIXTURE"]);
+  assert.equal(h.decodes(), 1);
+  assert.equal(h.picture.listeners.get("load"), 0);
+  assert.equal(h.picture.listeners.get("error"), 0);
+});
+
+test("leaving a QR setup page removes deferred image listeners and scans", async () => {
+  const h = qrLoading();
+  await h.tick();
+  h.events.get("pagehide")?.();
+  h.picture.complete = true;
+  h.picture.dispatchEvent(new Event("load"));
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.picture.listeners.get("load") ?? 0, 0);
+  assert.equal(h.picture.listeners.get("error") ?? 0, 0);
+  assert.equal(h.decodes(), 0);
+});
+
+test("a fully loaded picture rejected by the QR decoder is not decoded repeatedly", async () => {
+  const h = qrLoading({ reply: { ok: false, error: "noQr" } });
+  h.picture.complete = true;
+  await h.tick();
+  h.rescan();
+  await h.tick();
+  assert.equal(h.decodes(), 1);
+  assert.deepEqual(h.offered, []);
+});

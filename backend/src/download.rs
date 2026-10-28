@@ -92,12 +92,8 @@ async fn fetch(
         tokio::fs::create_dir_all(dir).await.map_err(err)?;
     }
     // Asking for the whole file as a range tells, in the same request, whether the server can serve parts: 206 and a total, or a plain 200.
-    let response = client
-        .get(url)
-        .header(RANGE, "bytes=0-")
-        .send()
-        .await
-        .map_err(err)?
+    let response = send_request(client.get(url).header(RANGE, "bytes=0-"), &is_cancelled)
+        .await?
         .error_for_status()
         .map_err(err)?;
     let content_type = response
@@ -137,11 +133,8 @@ async fn fetch(
             Err(e) if e == CANCELLED => return Err(e),
             // Some servers refuse parallel ranges part-way; one plain connection still gets the file.
             Err(_) => {
-                let response = client
-                    .get(url)
-                    .send()
-                    .await
-                    .map_err(err)?
+                let response = send_request(client.get(url), &is_cancelled)
+                    .await?
                     .error_for_status()
                     .map_err(err)?;
                 return stream(response, dest, None, on_progress, is_cancelled, want_hash).await;
@@ -152,11 +145,8 @@ async fn fetch(
     let response = match range {
         Some(range) if !range.is_whole_file() => {
             drop(response);
-            client
-                .get(url)
-                .send()
-                .await
-                .map_err(err)?
+            send_request(client.get(url), &is_cancelled)
+                .await?
                 .error_for_status()
                 .map_err(err)?
         }
@@ -171,6 +161,25 @@ async fn fetch(
         want_hash,
     )
     .await
+}
+/// Checks cancellation while connecting or waiting for response headers.
+async fn send_request(
+    request: reqwest::RequestBuilder,
+    is_cancelled: &impl Fn() -> bool,
+) -> Result<reqwest::Response, String> {
+    tokio::select! {
+        biased;
+        _ = wait_for_cancellation(is_cancelled) => Err(CANCELLED.into()),
+        result = request.send() => result.map_err(err),
+    }
+}
+async fn wait_for_cancellation(is_cancelled: &impl Fn() -> bool) {
+    loop {
+        if is_cancelled() {
+            return;
+        }
+        tokio::time::sleep(PROGRESS_INTERVAL).await;
+    }
 }
 /// One connection, written as it arrives and hashed on the way.
 async fn stream(
@@ -219,6 +228,9 @@ async fn stream(
                 None => break,
             },
             _ = ticker.tick() => {
+                if is_cancelled() {
+                    return Err(CANCELLED.into());
+                }
                 on_progress(downloaded, shown(downloaded));
                 continue;
             }
@@ -334,7 +346,9 @@ async fn segmented(
     if is_cancelled() {
         return Err(CANCELLED.into());
     }
-    // The parts stopped because of a failure report "cancelled"; the failure itself is what counts (and is not the user cancelling).
+    // Wait until every writer has stopped before cleanup or a fallback can
+    // truncate this destination. Preserve the original failure from the part
+    // that set `stop`, rather than a sibling's cancellation.
     let mut errors = results.into_iter().filter_map(Result::err);
     match errors.find(|e| e != CANCELLED) {
         Some(error) => Err(error),
@@ -361,16 +375,16 @@ async fn fetch_range(
     let mut position = start;
     let mut failures = 0;
     let mut last_error = String::new();
+    let is_stopped = || stop.load(Ordering::Relaxed);
     while position <= end {
         if stop.load(Ordering::Relaxed) {
             return Err(CANCELLED.into());
         }
         let resumed_at = position;
-        let response = client
-            .get(&url)
-            .header(RANGE, format!("bytes={position}-{end}"))
-            .send()
-            .await;
+        let response = send_request(
+            client.get(&url).header(RANGE, format!("bytes={position}-{end}")),
+            &is_stopped,
+        ).await;
         match response {
             Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
                 // Written where it belongs only if it is the part asked for.
@@ -379,7 +393,13 @@ async fn fetch_range(
                 }
                 file.seek(SeekFrom::Start(position)).await.map_err(err)?;
                 let mut body = response.bytes_stream();
-                while let Some(chunk) = body.next().await {
+                loop {
+                    let chunk = tokio::select! {
+                        biased;
+                        _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
+                        chunk = body.next() => chunk,
+                    };
+                    let Some(chunk) = chunk else { break };
                     if stop.load(Ordering::Relaxed) {
                         return Err(CANCELLED.into());
                     }
@@ -402,7 +422,8 @@ async fn fetch_range(
             }
             // Anything but a part of the file: ranges are not really supported.
             Ok(response) => return Err(format!("the server answered {}", response.status())),
-            Err(e) => last_error = e.to_string(),
+            Err(e) if e == CANCELLED => return Err(e),
+            Err(e) => last_error = e,
         }
         if position <= end {
             // Only drops in a row count: a long download over a flaky connection may lose its link many times and still get there.
@@ -413,7 +434,11 @@ async fn fetch_range(
             if failures > SEGMENT_RETRIES {
                 return Err(last_error);
             }
-            tokio::time::sleep(Duration::from_millis(500 * u64::from(failures))).await;
+            tokio::select! {
+                biased;
+                _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
+                _ = tokio::time::sleep(Duration::from_millis(500 * u64::from(failures))) => {}
+            }
         }
     }
     file.flush().await.map_err(err)
@@ -498,6 +523,85 @@ pub fn err(e: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Sends the headers, then leaves every response body open and silent.
+    async fn serve_stalled_download(total: u64, ranged: bool, headers: bool) -> (String, Arc<AtomicU64>) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(AtomicU64::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut buffer = [0u8; 1024];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let Ok(read) = socket.read(&mut buffer).await else { return };
+                        if read == 0 { return }
+                        request.extend_from_slice(&buffer[..read]);
+                    }
+                    if !headers {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        let _ = socket.read(&mut buffer).await;
+                        return;
+                    }
+                    let head = if ranged {
+                        let text = String::from_utf8_lossy(&request);
+                        let (start, end) = text.lines().find_map(|line| {
+                            let range = line.strip_prefix("range: bytes=")?;
+                            let (start, end) = range.trim().split_once('-')?;
+                            Some((start.parse::<u64>().ok()?, end.parse::<u64>().unwrap_or(total - 1)))
+                        }).unwrap_or((0, total - 1));
+                        format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/{total}\r\n\r\n", end - start + 1)
+                    } else {
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\n\r\n")
+                    };
+                    socket.write_all(head.as_bytes()).await.unwrap();
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    // Keep the connection alive until the client cancels it.
+                    let _ = socket.read(&mut buffer).await;
+                });
+            }
+        });
+        (format!("http://{address}/file.bin"), requests)
+    }
+    async fn cancelled_stalled_download(ranged: bool, headers: bool) {
+        let total = if ranged { SEGMENTED_MIN } else { 1024 };
+        let (url, requests) = serve_stalled_download(total, ranged, headers).await;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        tokio::spawn(async move {
+            let expected = if ranged { SEGMENTS + 1 } else { 1 };
+            while requests.load(Ordering::Relaxed) < expected {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            signal.store(true, Ordering::Relaxed);
+        });
+        let dest = std::env::temp_dir().join(format!("myle-stalled-{}.bin", uuid::Uuid::new_v4()));
+        let result = tokio::time::timeout(Duration::from_secs(2), download_file(
+            &http_client("test").unwrap(), &url, &dest, None, |_, _| {},
+            || cancel.load(Ordering::Relaxed), false,
+        )).await;
+        let left_partial = dest.exists();
+        let _ = tokio::fs::remove_file(&dest).await;
+        assert_eq!(result.expect("cancel must interrupt a silent response body").unwrap_err(), CANCELLED);
+        assert!(!left_partial, "cancelled downloads leave no partial file");
+    }
+    #[tokio::test]
+    async fn a_stalled_single_download_cancels_promptly() {
+        cancelled_stalled_download(false, true).await;
+    }
+    #[tokio::test]
+    async fn stalled_segmented_downloads_cancel_promptly() {
+        cancelled_stalled_download(true, true).await;
+    }
+    #[tokio::test]
+    async fn a_download_waiting_for_headers_cancels_promptly() {
+        cancelled_stalled_download(false, false).await;
+    }
     #[test]
     fn digest_parsing() {
         let hex = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";

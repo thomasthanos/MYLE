@@ -18,6 +18,8 @@ use crate::http::err;
 use crate::vault::{Record, RemoteHeader, RemoteItem};
 
 const PAGE: usize = 1000;
+/// Bound progress lost to a crash, without rewriting the vault for every row.
+const ACK_BATCH: usize = 20;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "state")]
@@ -208,22 +210,42 @@ pub async fn run(cloud: Option<Cloud>, state: &VaultCell) -> Result<SyncResult, 
 
     let items = get_items(&cloud).await?;
     let merged = state.with_quiet(|vault| vault.merge(items))?;
-    let outgoing = merged.outgoing;
-    let mut sent = 0;
-    let mut pending = 0;
-    for record in &outgoing {
-        if push_item(&cloud, record).await? {
-            state.with_quiet(|vault| vault.mark_pushed(&record.id, record.revision))?;
-            sent += 1;
-        } else {
-            pending += 1;
-        }
-    }
+    let (sent, pending) = push_outgoing(state, &merged.outgoing, |record| push_item(&cloud, record)).await?;
     Ok(SyncResult::Synced {
         sent,
         pending,
         rejected: merged.rejected,
     })
+}
+
+async fn push_outgoing<'a, F, Fut>(state: &VaultCell, outgoing: &'a [Record], mut push: F) -> Result<(usize, usize), String>
+where
+    F: FnMut(&'a Record) -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    let mut sent = 0;
+    let mut pending = 0;
+    let mut acknowledged = Vec::with_capacity(ACK_BATCH);
+    for record in outgoing {
+        match push(record).await {
+            Ok(true) => {
+                acknowledged.push((record.id.as_str(), record.revision));
+                sent += 1;
+                if acknowledged.len() == ACK_BATCH {
+                    state.with_quiet(|vault| vault.mark_pushed_many(&acknowledged))?;
+                    acknowledged.clear();
+                }
+            }
+            Ok(false) => pending += 1,
+            Err(error) => {
+                // A later network failure cannot discard earlier successes.
+                state.with_quiet(|vault| vault.mark_pushed_many(&acknowledged))?;
+                return Err(error);
+            }
+        }
+    }
+    state.with_quiet(|vault| vault.mark_pushed_many(&acknowledged))?;
+    Ok((sent, pending))
 }
 
 /// The user chose the account's vault over the one on this PC.
@@ -232,4 +254,107 @@ pub async fn use_account_vault(cloud: Option<Cloud>, state: &VaultCell) -> Resul
     let header = get_header(&cloud).await?.ok_or("Your account has no password vault.")?;
     let items = get_items(&cloud).await?;
     state.with_quiet(|vault| vault.adopt(header, items))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::KdfParams;
+    use crate::vault::{EntryInput, VaultFile};
+
+    struct Fixture {
+        path: std::path::PathBuf,
+        state: VaultCell,
+        outgoing: Vec<Record>,
+    }
+
+    impl Fixture {
+        fn new(count: usize) -> Self {
+            let path = std::env::temp_dir().join(format!("myle-sync-test-{}.json", uuid::Uuid::new_v4()));
+            let cell_path = path.clone();
+            let state = VaultCell::new(move || Ok(cell_path.clone()));
+            state.with(|vault| {
+                vault.create("fixture master", KdfParams::cheap_for_tests())?;
+                for i in 0..count {
+                    let entry: EntryInput = serde_json::from_value(json!({ "title": format!("Entry {i}"), "password": "fixture" })).unwrap();
+                    vault.save(&entry)?;
+                }
+                Ok(())
+            }).unwrap();
+            let outgoing = state.with_quiet(|vault| Ok(vault.merge(Vec::new())?.outgoing)).unwrap();
+            Self { path, state, outgoing }
+        }
+
+        fn on_disk(&self) -> Vec<Record> {
+            serde_json::from_slice::<VaultFile>(&std::fs::read(&self.path).unwrap()).unwrap().records
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    #[tokio::test]
+    async fn uploads_acknowledge_in_bounded_batches_and_flush_the_final_batch() {
+        let fixture = Fixture::new(21);
+        let mut call = 0;
+        let result = push_outgoing(&fixture.state, &fixture.outgoing, |_| {
+            if call == 1 {
+                assert!(fixture.on_disk()[0].dirty, "one upload must not rewrite the whole vault");
+            }
+            if call == 20 {
+                assert!(fixture.on_disk()[..20].iter().all(|r| !r.dirty), "a full batch is durable before more uploads");
+            }
+            call += 1;
+            std::future::ready(Ok(true))
+        }).await.unwrap();
+        assert_eq!(result, (21, 0));
+        assert!(fixture.on_disk().iter().all(|r| !r.dirty));
+    }
+
+    #[tokio::test]
+    async fn an_upload_error_keeps_successful_acknowledgements_durable_and_conflicts_pending() {
+        let fixture = Fixture::new(3);
+        let mut call = 0;
+        let result = push_outgoing(&fixture.state, &fixture.outgoing, |_| {
+            call += 1;
+            std::future::ready(match call {
+                1 => Ok(true),
+                2 => Ok(false),
+                _ => Err("fixture network failure".to_string()),
+            })
+        }).await;
+        assert_eq!(result.unwrap_err(), "fixture network failure");
+        let disk = fixture.on_disk();
+        assert!(!disk[0].dirty);
+        assert_eq!(disk[0].base_revision, Some(1));
+        assert!(disk[1].dirty, "a conflict was not acknowledged");
+        assert!(disk[2].dirty, "a failed upload was not acknowledged");
+    }
+
+    #[tokio::test]
+    async fn a_batch_acknowledges_the_uploaded_revision_without_clearing_a_concurrent_edit() {
+        let fixture = Fixture::new(2);
+        let edited = fixture.outgoing[0].id.clone();
+        let mut call = 0;
+        push_outgoing(&fixture.state, &fixture.outgoing, |_| {
+            if call == 0 {
+                fixture.state.with(|vault| {
+                    let entry: EntryInput = serde_json::from_value(json!({ "id": edited, "title": "Edited during upload", "password": "new fixture" })).unwrap();
+                    vault.save(&entry)?;
+                    Ok(())
+                }).unwrap();
+            }
+            call += 1;
+            std::future::ready(Ok(true))
+        }).await.unwrap();
+        let disk = fixture.on_disk();
+        assert_eq!(disk[0].revision, 2);
+        assert_eq!(disk[0].base_revision, Some(1));
+        assert!(disk[0].dirty);
+        assert!(!disk[1].dirty);
+        assert_eq!(fixture.state.with(|vault| Ok(vault.password(&edited)?.to_string())).unwrap(), "new fixture");
+    }
 }

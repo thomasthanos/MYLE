@@ -1222,12 +1222,22 @@ impl Vault {
 
     /// The account now has `revision` of `id`.
     pub fn mark_pushed(&mut self, id: &str, revision: u64) -> Result<(), String> {
+        self.mark_pushed_many(&[(id, revision)])
+    }
+
+    /// Persists a batch of successful uploads in one replacement of the file.
+    pub fn mark_pushed_many(&mut self, pushed: &[(&str, u64)]) -> Result<(), String> {
+        if pushed.is_empty() {
+            return Ok(());
+        }
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
-        if let Some(record) = file.records.iter_mut().find(|r| r.id == id) {
-            record.base_revision = Some(revision);
-            // An edit made while it was sending stays to be sent.
-            if record.revision == revision {
-                record.dirty = false;
+        for &(id, revision) in pushed {
+            if let Some(record) = file.records.iter_mut().find(|r| r.id == id) {
+                record.base_revision = Some(revision);
+                // An edit made while it was sending stays to be sent.
+                if record.revision == revision {
+                    record.dirty = false;
+                }
             }
         }
         self.write()
@@ -1777,6 +1787,48 @@ mod tests {
         for (id, revision) in dirty {
             vault.mark_pushed(&id, revision).unwrap();
         }
+    }
+
+    #[test]
+    fn a_reordered_snapshot_updates_first_matching_records_and_new_repeated_ids() {
+        let (path, mut vault) = temp_vault();
+        vault.create("fixture master", KdfParams::cheap_for_tests()).unwrap();
+        let key = vault.unlocked.as_ref().unwrap().key.clone();
+        let mut entry = Entry { title: "Fixture".into(), password: "original fixture".into(), ..Entry::default() };
+        for i in 0..4096 {
+            let id = format!("fixture-{i}");
+            let mut record = sealed(&key, &id, Some(&entry), 1, 0).unwrap();
+            record.dirty = false;
+            record.base_revision = Some(1);
+            apply(vault.unlocked.as_mut().unwrap(), &id, Some(entry.clone()));
+            vault.file.as_mut().unwrap().records.push(record);
+        }
+        // Preserve the old first-match behavior even for a duplicate local ID.
+        let duplicate = vault.file.as_ref().unwrap().records[0].clone();
+        vault.file.as_mut().unwrap().records.push(duplicate);
+        let mut remote: Vec<RemoteItem> = vault.file.as_ref().unwrap().records[..4096].iter().rev().map(RemoteItem::from_record).collect();
+        entry.password = "updated fixture".into();
+        let changed = sealed(&key, "fixture-0", Some(&entry), 2, 1).unwrap();
+        *remote.last_mut().unwrap() = RemoteItem::from_record(&changed);
+        // A new ID appearing twice must resolve to the one newly added record.
+        let first = sealed(&key, "new-fixture", Some(&entry), 1, 0).unwrap();
+        entry.password = "newer fixture".into();
+        let second = sealed(&key, "new-fixture", Some(&entry), 2, 1).unwrap();
+        remote.extend([RemoteItem::from_record(&first), RemoteItem::from_record(&second)]);
+        let started = Instant::now();
+        let merged = vault.merge(remote).unwrap();
+        eprintln!("4096-record reordered merge: {:?}", started.elapsed());
+        assert!(merged.outgoing.is_empty());
+        assert_eq!(merged.rejected, 0);
+        let records = &vault.file.as_ref().unwrap().records;
+        assert_eq!(records.len(), 4098);
+        assert_eq!(records[0].revision, 2);
+        assert_eq!(records[4096].revision, 1, "the duplicate after the first match stays untouched");
+        assert_eq!(records[4097].revision, 2);
+        assert_eq!(vault.password("fixture-0").unwrap().as_str(), "updated fixture");
+        assert_eq!(vault.password("new-fixture").unwrap().as_str(), "newer fixture");
+        drop(vault);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

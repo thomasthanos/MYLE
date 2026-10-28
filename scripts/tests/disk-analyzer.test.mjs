@@ -242,6 +242,12 @@ function backend() {
 }
 const done = { scanId: 3, rootId: 0, root: "D:\\", files: 3, dirs: 1, bytes: 1000, alloc: 2000, inaccessible: 0, inaccessiblePaths: [], elapsedMs: 1200, windowsDrive: false, memory: 1000, method: "mft", fallback: null };
 const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 async function scanned() {
   backend();
   diskApi.scan = async (root, fast, onEvent) => {
@@ -350,6 +356,118 @@ test("zooming in and out moves the treemap and its breadcrumbs", async () => {
   await settle();
   assert.equal(state.current, 0);
   assert.deepEqual(state.trail.map((c) => c.id), [0]);
+});
+test("reopening a folder while its first page loads shares the pending request", async () => {
+  await scanned();
+  const pending = deferred();
+  const read = diskApi.children;
+  let requests = 0;
+  diskApi.children = (...args) => { requests++; return pending.promise.then(() => read(...args)); };
+  state.toggle(1, true);
+  state.toggle(1, false);
+  state.toggle(1, true);
+  pending.resolve();
+  await settle();
+  assert.equal(requests, 1, "collapse and reopen must not duplicate the native folder read");
+  assert.deepEqual(state.pages.get(1).items.map((item) => item.id), [4]);
+  assert.ok(state.expanded.has(1));
+});
+test("an older folder error cannot erase a successful new sort", async () => {
+  await scanned();
+  state.toggle(1, true);
+  await settle();
+  const pending = deferred();
+  const read = diskApi.children;
+  let first = true;
+  diskApi.children = (...args) => {
+    if (args[1] === 1 && first) { first = false; return pending.promise; }
+    return read(...args);
+  };
+  const old = state.loadChildren(1);
+  await state.setSort("name");
+  pending.reject(new Error("The old folder read failed."));
+  await old;
+  assert.deepEqual(state.pages.get(1)?.items.map((item) => item.id), [4]);
+  assert.ok(state.expanded.has(1), "a stale error must leave the newly sorted folder open");
+  assert.equal(toast.visible.length, 0);
+});
+test("a failed first folder read can still be retried by reopening it", async () => {
+  await scanned();
+  const read = diskApi.children;
+  diskApi.children = async () => { throw new Error("The folder is temporarily unavailable."); };
+  state.expanded.add(1);
+  await state.loadChildren(1);
+  assert.equal(state.expanded.has(1), false);
+  assert.equal(state.pages.has(1), false);
+  assert.ok(toast.visible.some((item) => item.message.includes("temporarily unavailable")));
+  diskApi.children = read;
+  state.toggle(1, true);
+  await settle();
+  assert.deepEqual(state.pages.get(1).items.map((item) => item.id), [4]);
+});
+for (const outcome of ["success", "failure"]) {
+  test(`the latest folder wins when an older navigation ends in ${outcome}`, async () => {
+    await scanned();
+    nodes[5] = view(5, "Photos", "dir", 100, 200);
+    const pending = deferred();
+    const root = state.trail[0];
+    diskApi.trail = async (_scanId, id) => id === 1 ? pending.promise : [root, { id: 5, name: "Photos", size: 100, alloc: 200 }];
+    const old = state.zoomTo(1);
+    await state.zoomTo(5);
+    if (outcome === "success") pending.resolve([root, { id: 1, name: "Games", size: 800, alloc: 1600 }]);
+    else pending.reject(new Error("The old navigation failed."));
+    await old;
+    assert.equal(state.current, 5);
+    assert.deepEqual(state.trail.map((crumb) => crumb.id), [0, 5]);
+    assert.deepEqual(state.treemap.ids, [5]);
+    assert.equal(toast.visible.length, 0, "superseded navigation errors are silent");
+  });
+}
+test("returning to the current folder cancels a pending navigation away", async () => {
+  await scanned();
+  const pending = deferred();
+  const root = state.trail[0];
+  diskApi.trail = async () => pending.promise;
+  const old = state.zoomTo(1);
+  await state.zoomTo(0);
+  pending.resolve([root, { id: 1, name: "Games", size: 800, alloc: 1600 }]);
+  await old;
+  assert.equal(state.current, 0);
+  assert.deepEqual(state.trail.map((crumb) => crumb.id), [0]);
+});
+test("starting a new scan discards a pending navigation error from the old scan", async () => {
+  await scanned();
+  const pending = deferred();
+  const read = diskApi.trail;
+  diskApi.trail = (...args) => args[0] === done.scanId && args[1] === 1 ? pending.promise : read(...args);
+  const old = state.zoomTo(1);
+  diskApi.scan = async () => ({ ...done, scanId: 4 });
+  await state.scan();
+  pending.reject(new Error("The old scan was replaced."));
+  await old;
+  assert.equal(state.scanId, 4);
+  assert.equal(state.current, 0);
+  assert.deepEqual(state.trail.map((crumb) => crumb.id), [0]);
+  assert.equal(toast.visible.length, 0);
+});
+test("a treemap response from before navigation cannot replace the displayed map", async () => {
+  await scanned();
+  const map = deferred();
+  const trail = deferred();
+  const readMap = diskApi.treemap;
+  const readTrail = diskApi.trail;
+  const oldPayload = { ...state.treemap, names: ["Stale root response"] };
+  diskApi.treemap = (...args) => args[1] === 0 ? map.promise : readMap(...args);
+  diskApi.trail = () => trail.promise;
+  const old = state.loadTreemap();
+  const navigating = state.zoomTo(1);
+  map.resolve(oldPayload);
+  await old;
+  const shownBeforeTrail = state.treemap.names[0];
+  trail.resolve(await readTrail(done.scanId, 1));
+  await navigating;
+  assert.equal(shownBeforeTrail, "D:\\", "an obsolete map must stay discarded while navigation waits");
+  assert.deepEqual(state.treemap.ids, [1]);
 });
 test("selecting: one, Ctrl adds, Shift takes the rows in between", async () => {
   await scanned();

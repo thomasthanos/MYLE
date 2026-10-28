@@ -271,18 +271,19 @@ pub fn account_profile(state: State<'_, AccountState>) -> Option<Profile> {
 
 /// Ends the sign-in waiting for its page, unless the page came back and it
 /// is being finished.
-fn cancel(state: &AccountState) {
+fn cancel(state: &AccountState) -> bool {
     let waiter = {
         let mut inner = state.lock();
         if inner.returning {
-            return;
+            return false;
         }
         inner.waiting.take()
     };
+    let cancelled = waiter.is_some();
     if let Some(waiter) = waiter {
         let _ = waiter.send(Err("Sign-in was cancelled.".into()));
     }
-    let _ = state.take_pending();
+    state.take_pending().is_some() || cancelled
 }
 
 /// Signs in with the provider inside the app and returns who signed in.
@@ -319,7 +320,7 @@ pub async fn account_sign_in(
     match shown {
         Ok(Some(back)) => returned(&app, Url::parse(&back).map_err(err)?),
         Ok(None) => {}
-        Err(e) if e.contains(CANCELLED) => cancel(&state),
+        Err(e) if e.contains(CANCELLED) => { cancel(&state); }
         // No sign-in page in the app here (Windows): the browser.
         Err(_) => app
             .opener()
@@ -337,14 +338,14 @@ pub async fn account_sign_in(
 
 /// Stops waiting for the sign-in page (the user closed it, or gave up).
 #[tauri::command]
-pub async fn account_cancel_sign_in(app: AppHandle, state: State<'_, AccountState>) -> Result<(), String> {
-    if state.lock().returning {
-        return Ok(());
+pub async fn account_cancel_sign_in(app: AppHandle, state: State<'_, AccountState>) -> Result<bool, String> {
+    if !cancel(&state) {
+        return Ok(false);
     }
-    cancel(&state);
     tauri::async_runtime::spawn_blocking(move || app.myle_mobile().cancel_sign_in())
         .await
-        .map_err(err)
+        .map_err(err)?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -373,6 +374,29 @@ pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>, pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelling_reports_only_a_waiting_sign_in_and_preserves_a_returning_callback() {
+        let dir = std::env::temp_dir().join(format!("myle-cancel-{}", supabase::pkce_pair().0));
+        let state = AccountState::new(dir.clone());
+        assert!(!cancel(&state), "a completed sign-in has nothing left to cancel");
+        state.save_pending("fixture verifier").unwrap();
+        let (waiter, mut answer) = oneshot::channel();
+        {
+            let mut inner = state.lock();
+            inner.waiting = Some(waiter);
+            inner.returning = true;
+        }
+        assert!(!cancel(&state), "a returning callback must finish");
+        assert!(matches!(answer.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        assert!(dir.join(PENDING_FILE).exists());
+        state.lock().returning = false;
+        assert!(cancel(&state));
+        assert!(answer.await.unwrap().unwrap_err().contains("cancelled"));
+        assert!(!dir.join(PENDING_FILE).exists());
+        assert!(!cancel(&state), "cancelling twice cannot cancel a later result");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn the_browser_comes_back_with_a_code_or_an_error() {

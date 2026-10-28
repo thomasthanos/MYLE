@@ -107,6 +107,7 @@ class DiskAnalyzerState {
   #area = { width: 0, height: 0 };
   #treemapArea = 0;
   #treemapRequest = 0;
+  #navigationRequest = 0;
   #filesRequest = 0;
   #typesRequest = 0;
   /** Bumped when the size mode or the sort changes: older answers are dropped. */
@@ -194,6 +195,8 @@ class DiskAnalyzerState {
     writeJson(KEY.fast, on);
   }
   #reset() {
+    this.#navigationRequest++;
+    this.#treemapRequest++;
     this.done = null;
     this.root = null;
     this.current = 0;
@@ -243,7 +246,7 @@ class DiskAnalyzerState {
     const before = this.pages.get(id);
     if (before?.loading) return;
     const offset = more && before ? before.items.length : 0;
-    if (before) this.#setPage(id, { ...before, loading: true });
+    this.#setPage(id, { items: [], total: 0, rest: null, ...before, loading: true });
     const generation = this.#generation;
     try {
       const page = await diskApi.children(scanId, id, offset, PAGE, this.sort, this.sizeMode);
@@ -251,7 +254,7 @@ class DiskAnalyzerState {
       const items = offset ? [...(this.pages.get(id)?.items ?? []), ...page.items] : page.items;
       this.#setPage(id, { items, total: page.total, rest: page.rest, loading: false });
     } catch (err) {
-      if (this.scanId !== scanId) return;
+      if (this.scanId !== scanId || generation !== this.#generation) return;
       this.expanded.delete(id);
       const next = new Map(this.pages);
       next.delete(id);
@@ -365,17 +368,23 @@ class DiskAnalyzerState {
   /** Shows a folder in the treemap. */
   async zoomTo(id: number) {
     const scanId = this.scanId;
-    if (scanId === null || id === SMALLER_ID || id === this.current) return;
+    if (scanId === null || id === SMALLER_ID) return;
+    // Picking the current folder also cancels a pending move away from it.
+    const request = ++this.#navigationRequest;
+    if (id === this.current) return;
+    this.#treemapRequest++;
     try {
       const trail = await diskApi.trail(scanId, id);
-      if (this.scanId !== scanId) return;
+      if (request !== this.#navigationRequest || this.scanId !== scanId) return;
       this.current = id;
       this.trail = trail;
     } catch (err) {
+      if (request !== this.#navigationRequest || this.scanId !== scanId) return;
       toast.error(`That folder could not be shown: ${message(err)}`);
       return;
     }
     await this.loadTreemap();
+    if (request !== this.#navigationRequest || this.scanId !== scanId) return;
     if (this.view === "types" || this.extensions) void this.loadExtensions();
   }
   /** One folder up. */

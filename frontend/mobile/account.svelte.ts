@@ -1,5 +1,5 @@
 // The account on the phone: only who is signed in. MYLE's settings are not synced here; the vault syncs through the Password Manager's own state.
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { accountApi, type Profile, type Provider } from "../app/account/api";
 import { passwords } from "../app/pages/password-manager/state.svelte";
@@ -67,17 +67,25 @@ class MobileAccount {
     // Brings the account's vault here, or sends this phone's up.
     await passwords.syncNow();
   }
-  cancelSignIn() {
-    this.#authEpoch++;
-    if (!preview) void accountApi.cancelSignIn();
-    this.signingIn = null;
+  async cancelSignIn(epoch = this.#authEpoch) {
+    if (epoch !== this.#authEpoch || !this.signingIn) return;
+    try {
+      // A callback already being exchanged for a session must finish. The
+      // native side alone knows whether the browser closed or came back.
+      const cancelled = preview || await invoke<boolean>("account_cancel_sign_in");
+      if (!cancelled || epoch !== this.#authEpoch) return;
+      this.#authEpoch++;
+      this.signingIn = null;
+    } catch (error) {
+      if (epoch === this.#authEpoch) toast.error(`Could not cancel sign-in: ${message(error)}`);
+    }
   }
   /* The app is in front again. On Android, back from the sign-in tab with no answer means the user closed it: the sign-in ends as cancelled. */
   resumed() {
     if (!android || !this.signingIn) return;
-    const waiting = this.signingIn;
+    const epoch = this.#authEpoch;
     setTimeout(() => {
-      if (this.signingIn === waiting && document.visibilityState === "visible") this.cancelSignIn();
+      if (this.signingIn && epoch === this.#authEpoch && document.visibilityState === "visible") void this.cancelSignIn(epoch);
     }, CLOSED_AFTER_MS);
   }
   async signOut() {

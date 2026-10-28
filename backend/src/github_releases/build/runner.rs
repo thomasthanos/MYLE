@@ -16,6 +16,8 @@ const MAX_DIAGNOSTICS: usize = 1000;
 const BATCH: Duration = Duration::from_millis(120);
 /// How long output may stay open after the shell has ended.
 const LINGER: Duration = Duration::from_secs(3);
+/// Queue at most 1 MiB of output; full pipes slow the build until caught up.
+const OUTPUT_CHUNKS: usize = 64;
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogLine {
@@ -207,17 +209,17 @@ pub(crate) async fn run(
     if let (Some(job), Some(handle)) = (job.as_ref(), child.raw_handle()) {
         job.assign(handle as _);
     }
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Chunk>();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Chunk>(OUTPUT_CHUNKS);
     if let Some(mut stdout) = child.stdout.take() {
         let sender = sender.clone();
         tokio::spawn(async move {
             let mut buffer = vec![0u8; 16 * 1024];
             while let Ok(count) = stdout.read(&mut buffer).await {
-                if count == 0 || sender.send(Chunk::Out(buffer[..count].to_vec())).is_err() {
+                if count == 0 || sender.send(Chunk::Out(buffer[..count].to_vec())).await.is_err() {
                     break;
                 }
             }
-            let _ = sender.send(Chunk::OutDone);
+            let _ = sender.send(Chunk::OutDone).await;
         });
     }
     if let Some(mut stderr) = child.stderr.take() {
@@ -225,11 +227,11 @@ pub(crate) async fn run(
         tokio::spawn(async move {
             let mut buffer = vec![0u8; 16 * 1024];
             while let Ok(count) = stderr.read(&mut buffer).await {
-                if count == 0 || sender.send(Chunk::Err(buffer[..count].to_vec())).is_err() {
+                if count == 0 || sender.send(Chunk::Err(buffer[..count].to_vec())).await.is_err() {
                     break;
                 }
             }
-            let _ = sender.send(Chunk::ErrDone);
+            let _ = sender.send(Chunk::ErrDone).await;
         });
     }
     drop(sender);
@@ -457,6 +459,49 @@ fn record(outcome: &mut BuildOutcome, diagnostic: &Diagnostic) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn output_flood_child() {
+        use std::io::Write;
+        let Some(marker) = std::env::var_os("MYLE_TEST_OUTPUT_MARKER") else { return };
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(b"error: output flood\n").unwrap();
+        stdout.flush().unwrap();
+        stdout.write_all(&vec![b'x'; 8 * 1024 * 1024]).unwrap();
+        stdout.flush().unwrap();
+        std::fs::write(marker, b"finished writing").unwrap();
+    }
+    #[test]
+    fn a_slow_build_consumer_applies_backpressure_and_can_cancel() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2).enable_all().build().unwrap();
+        let marker = std::env::temp_dir().join(format!("myle-build-backpressure-{}", uuid::Uuid::new_v4()));
+        let command = format!(
+            "set \"MYLE_TEST_OUTPUT_MARKER={}\"&&\"{}\" --exact github_releases::build::runner::tests::output_flood_child --nocapture",
+            marker.display(), std::env::current_exe().unwrap().display(),
+        );
+        let cancel = Arc::new(AtomicBool::new(false));
+        let measured = AtomicBool::new(false);
+        let producer_finished = AtomicBool::new(false);
+        let outcome = runtime.block_on(run(
+            Request { dir: &std::env::temp_dir(), command: &command, last: None, log_path: None },
+            cancel.clone(),
+            |event| {
+                if matches!(event, BuildEvent::Diagnostic { .. }) && !measured.swap(true, Ordering::Relaxed) {
+                    // Pause the consumer while the runtime's other workers keep draining the child.
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    while !marker.exists() && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    producer_finished.store(marker.exists(), Ordering::Relaxed);
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        ));
+        let _ = std::fs::remove_file(&marker);
+        assert!(measured.load(Ordering::Relaxed), "the flood diagnostic must reach the consumer");
+        assert!(!producer_finished.load(Ordering::Relaxed), "a paused consumer allowed all 8 MiB of output to accumulate");
+        assert!(outcome.cancelled);
+    }
     #[test]
     fn the_estimate_blends_time_and_lines_and_never_claims_done() {
         let last = BuildStats {

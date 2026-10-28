@@ -1,8 +1,10 @@
 <script lang="ts">
-  import type { Component } from "svelte";
+  import { untrack } from "svelte";
   import { nav } from "../../lib/nav.svelte";
   import { account } from "../account/account.svelte";
   import { canOpen, pages } from "../pages/registry";
+  import { whenShown } from "../../lib/startup";
+  import { PageModules } from "./page-modules.svelte";
 
   // An owner-only page someone else lands on (a link, a sign-out while it is open) gives way to the first page. Before the first answer about the account is in, the first page shows without forgetting where to go.
   const asked = $derived(pages.find((p) => p.id === nav.current));
@@ -11,32 +13,32 @@
   $effect(() => {
     if (!allowed && account.accessKnown) nav.go(pages[0].id);
   });
-  // The owner-only pages load the first time they are needed: fetched while idle once the owner is known, so they still open at once for the owner, and never fetched for anyone else.
-  let loaded = $state.raw<Record<string, Component>>({});
-  let loadError = $state<string | null>(null);
-  function load(id: string, module: NonNullable<(typeof pages)[number]["load"]>) {
-    if (loaded[id]) return;
-    module()
-      .then((m) => {
-        loaded = { ...loaded, [id]: m.default };
-        loadError = null;
-      })
-      .catch((error) => {
-        if (nav.current === id) loadError = error instanceof Error ? error.message : String(error);
-      });
-  }
+  const modules = new PageModules();
+  const loadError = $derived(modules.errors[def.id]);
   $effect(() => {
-    if (!def.load) return;
-    loadError = null;
-    load(def.id, def.load);
+    const { id, load } = def;
+    if (load) untrack(() => void modules.load(id, load));
   });
+  // Parse secondary pages one at a time while idle, after the main window is
+  // visible. Owner-only modules remain unavailable to other accounts.
   $effect(() => {
-    if (!account.owner) return;
-    const idle = (work: () => void) =>
-      "requestIdleCallback" in window ? requestIdleCallback(work, { timeout: 3000 }) : setTimeout(work, 1500);
-    for (const page of pages) if (page.load && canOpen(page, true)) idle(() => load(page.id, page.load!));
+    const owner = account.owner;
+    let cancelled = false;
+    const idle = () => new Promise<void>((resolve) =>
+      "requestIdleCallback" in window ? requestIdleCallback(() => resolve(), { timeout: 3000 }) : setTimeout(resolve, 1500));
+    void (async () => {
+      await whenShown();
+      for (const page of pages) {
+        if (cancelled) return;
+        if (!page.load || !canOpen(page, owner) || modules.loaded[page.id]) continue;
+        await idle();
+        if (cancelled) return;
+        await modules.load(page.id, page.load);
+      }
+    })();
+    return () => { cancelled = true; };
   });
-  const Page = $derived(def.component ?? loaded[def.id]);
+  const Page = $derived(def.component ?? modules.loaded[def.id]);
   let scroller = $state<HTMLDivElement>();
   // Ignore the scroll events caused by swapping pages.
   let restoring = false;
@@ -62,7 +64,10 @@
         {#if Page}
           <Page />
         {:else if loadError}
-          <p class="page-state" role="alert">This page could not be loaded: {loadError}</p>
+          <div class="page-state" role="alert">
+            <p>This page could not be loaded: {loadError}</p>
+            {#if def.load}<button class="btn small" onclick={() => modules.load(def.id, def.load!)}>Try again</button>{/if}
+          </div>
         {:else}
           <p class="page-state" aria-busy="true">Loading {def.label}…</p>
         {/if}
