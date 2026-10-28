@@ -567,10 +567,19 @@ mod tests {
     fn the_users_policies_are_left_to_the_helper() {
         // On this PC too: a policy the app wrote itself would be refused.
         let copilot = catalog::find("copilot").unwrap();
+        assert!(!copilot.ops[0].as_user());
+        assert!(!copilot.ops[4].as_user());
+        assert!(!copilot.ops[7].as_user());
         let (saved, errors) = apply_user(copilot);
-        assert!(saved.is_empty() && errors.is_empty(), "{saved:?} {errors:?}");
+        assert!(
+            saved.iter().all(|s| copilot.ops.get(s.op).is_some_and(|op| op.as_user()) && s.op != 0 && s.op != 4 && s.op != 7),
+            "{saved:?}"
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let _ = undo_user(copilot, &saved);
         let kept = vec![Saved { op: 0, before: Before::Reg { value: system::Value::Absent, created: None } }];
         assert_eq!(undo_user(copilot, &kept), (Vec::new(), Vec::new()), "undone by the helper");
+        assert!(detect::needs_admin(copilot));
         assert!(detect::needs_admin(catalog::find("bing").unwrap()));
     }
     #[test]
