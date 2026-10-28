@@ -1,26 +1,15 @@
-//! The finished scan, kept in memory as one flat list of nodes.
-//!
-//! A node is 40 bytes plus its name, which lives in one shared buffer. A
-//! folder's children are added together, so they sit next to each other and
-//! the folder only keeps where they start and how many there are. Folder
-//! totals are summed once the walk is over: children always come after their
-//! folder in the list, so one pass from the end adds every node to its
-//! parent after its own children were added to it.
-
+// ! The finished scan, kept in memory as one flat list of nodes. ! ! A node is 40 bytes plus its name, which lives in one shared buffer. A ! folder's children are added together, so they sit next to each other and ! the folder only keeps where they start and how many there are. Folder ! totals are summed once the walk is over: children always come after their ! folder in the list, so one pass from the end adds every node to its ! parent after its own children were added to it.
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
-
 /// No node: the root's parent, a file's folder index.
 pub const NONE: u32 = u32::MAX;
 /// How many extensions get their own colour; the rest share one.
 pub const RANKED: usize = 20;
 /// The colour rank of everything outside the first `RANKED`.
 pub const UNRANKED: u8 = 255;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -31,7 +20,6 @@ pub enum Kind {
     /// A cloud placeholder (OneDrive and others): counted, never opened.
     Cloud = 3,
 }
-
 impl Kind {
     pub fn label(self) -> &'static str {
         match self {
@@ -41,12 +29,10 @@ impl Kind {
             Kind::Cloud => "cloud",
         }
     }
-
     fn is_file(self) -> bool {
         matches!(self, Kind::File | Kind::Cloud)
     }
 }
-
 pub mod flag {
     /// A folder that could not be listed.
     pub const INACCESSIBLE: u8 = 1;
@@ -58,7 +44,6 @@ pub mod flag {
     /// known only to the fast scan).
     pub const HARD_LINK: u8 = 8;
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SizeMode {
@@ -67,13 +52,11 @@ pub enum SizeMode {
     /// Size on disk (AllocationSize).
     Alloc,
 }
-
 impl SizeMode {
     fn slot(self) -> usize {
         self as usize
     }
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortKey {
@@ -82,7 +65,6 @@ pub enum SortKey {
     Files,
     Modified,
 }
-
 #[derive(Clone, Copy)]
 pub struct Node {
     pub size: u64,
@@ -98,7 +80,6 @@ pub struct Node {
     pub kind: Kind,
     pub flags: u8,
 }
-
 #[derive(Clone, Copy, Default)]
 struct Folder {
     first: u32,
@@ -107,7 +88,6 @@ struct Folder {
     files: u32,
     dirs: u32,
 }
-
 /// One entry of a folder listing, as the scanner read it.
 pub struct Entry {
     /// Its name's length in `Listing::names`, where the names follow each other.
@@ -118,14 +98,12 @@ pub struct Entry {
     pub modified: u32,
     pub system: bool,
 }
-
 /// A whole folder's entries; names are WTF-8 (`OsStr::as_encoded_bytes`).
 #[derive(Default)]
 pub struct Listing {
     pub names: Vec<u8>,
     pub entries: Vec<Entry>,
 }
-
 impl Listing {
     #[cfg(test)]
     pub fn push(&mut self, name: &[u8], entry: Entry) {
@@ -133,7 +111,6 @@ impl Listing {
         self.entries.push(entry);
     }
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtStat {
@@ -146,7 +123,6 @@ pub struct ExtStat {
     /// The colour, the same as in the treemap.
     pub rank: u8,
 }
-
 /// A pruned subtree for drawing, as flat arrays: index 0 is the node asked
 /// for, `parent` points into the same arrays.
 #[derive(Serialize)]
@@ -168,9 +144,7 @@ pub struct Treemap {
     /// The node cap was reached before every folder was opened.
     pub truncated: bool,
 }
-
 pub const SMALLER: u8 = 4;
-
 /// One page of a folder's children.
 pub struct Page {
     pub ids: Vec<u32>,
@@ -179,7 +153,6 @@ pub struct Page {
     pub rest_size: u64,
     pub rest_alloc: u64,
 }
-
 pub struct Tree {
     pub scan_id: u64,
     /// The scanned folder, as Windows shows it (no `\\?\`).
@@ -196,7 +169,6 @@ pub struct Tree {
     top: [Option<Vec<u32>>; 2],
     ranks: [Option<Vec<u8>>; 2],
 }
-
 impl Tree {
     pub fn new(scan_id: u64, root: PathBuf, modified: u32) -> Self {
         let name = root.as_os_str().as_encoded_bytes().to_vec();
@@ -228,18 +200,15 @@ impl Tree {
         });
         tree
     }
-
     fn store_name(&mut self, name: &[u8]) -> u32 {
         let at = self.names.len() as u32;
         self.names.extend_from_slice(&name[..name.len().min(u16::MAX as usize)]);
         at
     }
-
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
-
     /// Adds a folder's listing as its children and returns their ids.
     pub fn add_children(&mut self, parent: u32, listing: &Listing) -> std::ops::Range<u32> {
         let first = self.nodes.len() as u32;
@@ -276,7 +245,6 @@ impl Tree {
         }
         first..end
     }
-
     fn ext_id(&mut self, name: &[u8]) -> u16 {
         let Some(ext) = extension(name) else { return 0 };
         if let Some(&id) = self.ext_ids.get(&ext) {
@@ -290,20 +258,17 @@ impl Tree {
         self.ext_ids.insert(ext, id);
         id
     }
-
     pub fn mark_inaccessible(&mut self, id: u32) {
         if let Some(node) = self.nodes.get_mut(id as usize) {
             node.flags |= flag::INACCESSIBLE;
             self.inaccessible.push(id);
         }
     }
-
     pub fn mark_hard_link(&mut self, id: u32) {
         if let Some(node) = self.nodes.get_mut(id as usize) {
             node.flags |= flag::HARD_LINK;
         }
     }
-
     /// Sums every folder bottom-up, once the walk is over.
     pub fn finish(&mut self) {
         self.ext_ids = HashMap::new();
@@ -329,17 +294,14 @@ impl Tree {
             folder.dirs += dirs;
         }
     }
-
     fn folder(&self, id: u32) -> Option<Folder> {
         let node = self.nodes.get(id as usize)?;
         (node.folder != NONE).then(|| self.folders[node.folder as usize])
     }
-
     fn folder_mut(&mut self, id: u32) -> Option<&mut Folder> {
         let folder = self.nodes.get(id as usize)?.folder;
         (folder != NONE).then(|| &mut self.folders[folder as usize])
     }
-
     /// Checks that `id` belongs to this scan and is still there.
     pub fn check(&self, scan_id: u64, id: u32) -> Result<(), String> {
         if scan_id != self.scan_id {
@@ -351,19 +313,15 @@ impl Tree {
             None => Err(STALE.into()),
         }
     }
-
     pub fn node(&self, id: u32) -> &Node {
         &self.nodes[id as usize]
     }
-
     pub fn name(&self, id: u32) -> &OsStr {
         let node = &self.nodes[id as usize];
         let bytes = &self.names[node.name_at as usize..node.name_at as usize + node.name_len as usize];
-        // SAFETY: every name was stored from `OsStr::as_encoded_bytes` (or
-        // from valid UTF-8, which is the same) by this same program.
+        // SAFETY: every name was stored from `OsStr::as_encoded_bytes` (or from valid UTF-8, which is the same) by this same program.
         unsafe { OsStr::from_encoded_bytes_unchecked(bytes) }
     }
-
     pub fn size(&self, id: u32, mode: SizeMode) -> u64 {
         let node = &self.nodes[id as usize];
         match mode {
@@ -371,7 +329,6 @@ impl Tree {
             SizeMode::Alloc => node.alloc,
         }
     }
-
     pub fn files(&self, id: u32) -> u32 {
         match self.nodes[id as usize].kind {
             Kind::Dir => self.folder(id).map_or(0, |f| f.files),
@@ -379,27 +336,21 @@ impl Tree {
             Kind::Link => 0,
         }
     }
-
     pub fn dirs(&self, id: u32) -> u32 {
         self.folder(id).map_or(0, |f| f.dirs)
     }
-
     pub fn is_removed(&self, id: u32) -> bool {
         self.nodes[id as usize].flags & flag::REMOVED != 0
     }
-
     pub fn has_children(&self, id: u32) -> bool {
         self.live_children(id).next().is_some()
     }
-
     fn child_range(&self, id: u32) -> std::ops::Range<u32> {
         self.folder(id).map_or(0..0, |f| f.first..f.first + f.count)
     }
-
     fn live_children(&self, id: u32) -> impl Iterator<Item = u32> + '_ {
         self.child_range(id).filter(|&c| !self.is_removed(c))
     }
-
     /// The scanned folder down to `id`.
     pub fn trail(&self, id: u32) -> Vec<u32> {
         let mut trail = vec![id];
@@ -411,7 +362,6 @@ impl Tree {
         trail.reverse();
         trail
     }
-
     /// The item's path as Windows shows it.
     pub fn path(&self, id: u32) -> PathBuf {
         let trail = self.trail(id);
@@ -421,10 +371,7 @@ impl Tree {
         }
         path
     }
-
-    // ------------------------------------------------------------------
-    // Children
-
+    // ------------------------------------------------------------------ Children
     fn sorted(&mut self, mode: SizeMode) -> &[u32] {
         if self.order[mode.slot()].is_none() {
             let mut order: Vec<u32> = (0..self.nodes.len() as u32).collect();
@@ -436,7 +383,6 @@ impl Tree {
         }
         self.order[mode.slot()].as_deref().unwrap_or_default()
     }
-
     /// A page of `id`'s children, plus what is left after it.
     pub fn children(&mut self, id: u32, offset: usize, limit: usize, sort: SortKey, mode: SizeMode) -> Page {
         let range = self.child_range(id);
@@ -464,10 +410,7 @@ impl Tree {
             total,
         }
     }
-
-    // ------------------------------------------------------------------
-    // Largest files and file types
-
+    // ------------------------------------------------------------------ Largest files and file types
     /// The largest files of the whole scan, largest first. Without a filter
     /// the answer is worked out once and kept.
     pub fn top_files(&mut self, mode: SizeMode, limit: usize, filter: Option<&str>) -> Vec<u32> {
@@ -508,7 +451,6 @@ impl Tree {
         }
         ids.into_iter().take(limit).collect()
     }
-
     fn ext_totals(&self, under: u32) -> Vec<(u64, u64, u64)> {
         let mut totals = vec![(0u64, 0u64, 0u64); self.exts.len()];
         let mut add = |node: &Node| {
@@ -535,7 +477,6 @@ impl Tree {
         }
         totals
     }
-
     /// The colour rank of every extension: the `RANKED` largest of the whole
     /// scan get one each, in order. Kept for the scan, so colours stay put
     /// after a delete.
@@ -552,7 +493,6 @@ impl Tree {
         }
         self.ranks[mode.slot()].as_deref().unwrap_or_default()
     }
-
     /// Files by extension below `under`: the largest `RANKED`, then "Other".
     pub fn extensions(&mut self, under: u32, mode: SizeMode) -> Vec<ExtStat> {
         let totals = self.ext_totals(under);
@@ -584,14 +524,10 @@ impl Tree {
         }
         stats
     }
-
     pub fn ext_of(&self, id: u32) -> &str {
         &self.exts[self.nodes[id as usize].ext as usize]
     }
-
-    // ------------------------------------------------------------------
-    // Treemap
-
+    // ------------------------------------------------------------------ Treemap
     /// The subtree of `id` for the treemap. Big folders are opened first, so
     /// when `cap` is reached the detail went where the space is. Entries
     /// under `min_bytes` are merged, per folder, into one block.
@@ -653,7 +589,6 @@ impl Tree {
         self.order[mode.slot()] = Some(order);
         out
     }
-
     fn push_treemap(
         &self,
         out: &mut Treemap,
@@ -680,10 +615,7 @@ impl Tree {
         out.ext.push(ext);
         out.names.push(self.name(id).to_string_lossy().into_owned());
     }
-
-    // ------------------------------------------------------------------
-    // Removing
-
+    // ------------------------------------------------------------------ Removing
     /// Takes an item out after it went to the Recycle Bin: its sizes and
     /// counts come off every folder above it, and it and everything inside
     /// it are marked removed. Returns its (size, size on disk).
@@ -714,8 +646,7 @@ impl Tree {
             self.nodes[at as usize].flags |= flag::REMOVED;
             stack.extend(self.child_range(at));
         }
-        // The folders above shrank: their place among their siblings may
-        // have changed.
+        // The folders above shrank: their place among their siblings may have changed.
         let trail = self.trail(node.parent);
         for slot in 0..2 {
             let Some(mut order) = self.order[slot].take() else { continue };
@@ -729,7 +660,6 @@ impl Tree {
         self.top = [None, None];
         (node.size, node.alloc)
     }
-
     /// Bytes held by the tree, for the measurements in the PR.
     pub fn memory(&self) -> usize {
         self.nodes.capacity() * size_of::<Node>()
@@ -739,18 +669,15 @@ impl Tree {
             + self.order.iter().flatten().map(|o| o.capacity() * 4).sum::<usize>()
     }
 }
-
 pub const STALE: &str = "These results are from an earlier scan. Scan again.";
 /// How many of the largest files are worked out and kept.
 const TOP_CACHED: usize = 1000;
-
 fn pick(total: (u64, u64, u64), mode: SizeMode) -> u64 {
     match mode {
         SizeMode::Size => total.0,
         SizeMode::Alloc => total.1,
     }
 }
-
 /// Largest first; equal sizes keep the listing's order.
 fn sort_by_size(ids: &mut [u32], nodes: &[Node], mode: SizeMode) {
     ids.sort_unstable_by_key(|&c| {
@@ -762,7 +689,6 @@ fn sort_by_size(ids: &mut [u32], nodes: &[Node], mode: SizeMode) {
         (Reverse(size), c)
     });
 }
-
 /// "mp4" for "Clip.MP4". None for names without one, ".gitignore", and
 /// anything after the dot that does not look like an extension.
 fn extension(name: &[u8]) -> Option<String> {
@@ -773,7 +699,6 @@ fn extension(name: &[u8]) -> Option<String> {
     }
     Some(String::from_utf8_lossy(ext).to_ascii_lowercase())
 }
-
 fn contains_ignore_case(name: &OsStr, needle: &str) -> bool {
     let bytes = name.as_encoded_bytes();
     if needle.is_ascii() {
@@ -783,13 +708,11 @@ fn contains_ignore_case(name: &OsStr, needle: &str) -> bool {
     }
     name.to_string_lossy().to_lowercase().contains(needle)
 }
-
 /// Seconds since 1970 from a FILETIME (100 ns since 1601), kept in a u32.
 pub fn unix_seconds(filetime: i64) -> u32 {
     const SINCE_1601: i64 = 11_644_473_600;
     (filetime / 10_000_000 - SINCE_1601).clamp(0, u32::MAX as i64) as u32
 }
-
 /// `C:\x` for `\\?\C:\x`, `\\server\share` for `\\?\UNC\server\share`.
 pub fn display_path(path: &Path) -> PathBuf {
     let text = path.as_os_str().to_string_lossy();
@@ -801,7 +724,6 @@ pub fn display_path(path: &Path) -> PathBuf {
         path.to_path_buf()
     }
 }
-
 /// The `\\?\` form, which has no length limit.
 pub fn long_path(path: &Path) -> PathBuf {
     let text = path.as_os_str().to_string_lossy();
@@ -813,15 +735,12 @@ pub fn long_path(path: &Path) -> PathBuf {
         PathBuf::from(format!(r"\\?\{text}"))
     }
 }
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
-
     pub fn entry(kind: Kind, size: u64, alloc: u64) -> (Kind, u64, u64) {
         (kind, size, alloc)
     }
-
     /// A listing from (name, kind, size, size on disk).
     pub fn listing(items: &[(&str, (Kind, u64, u64))]) -> Listing {
         let mut listing = Listing::default();
@@ -833,7 +752,6 @@ pub mod tests {
         }
         listing
     }
-
     /// root
     ///   docs/ (a.pdf 100, b.txt 50, deep/ (c.pdf 400))
     ///   video.mp4 1000
@@ -862,17 +780,14 @@ pub mod tests {
         tree.finish();
         tree
     }
-
     fn id_of(tree: &Tree, name: &str) -> u32 {
         (0..tree.len() as u32).find(|&i| tree.name(i) == name).unwrap()
     }
-
     #[test]
     fn a_node_stays_small() {
         assert_eq!(size_of::<Node>(), 40);
         assert_eq!(size_of::<Folder>(), 16);
     }
-
     #[test]
     fn folder_totals_are_summed_bottom_up() {
         let tree = sample();
@@ -887,7 +802,6 @@ pub mod tests {
         assert_eq!(tree.path(id_of(&tree, "c.pdf")), PathBuf::from(r"C:\Data\docs\deep\c.pdf"));
         assert!(!tree.has_children(id_of(&tree, "empty")));
     }
-
     #[test]
     fn children_come_largest_first_with_the_rest_summed() {
         let mut tree = sample();
@@ -908,7 +822,6 @@ pub mod tests {
         assert_eq!(tree.name(by_name.ids[0]), "docs");
         assert_eq!(tree.name(by_name.ids[4]), "video.mp4");
     }
-
     #[test]
     fn the_largest_files_and_a_filter() {
         let mut tree = sample();
@@ -919,7 +832,6 @@ pub mod tests {
         assert_eq!(pdfs.len(), 2);
         assert_eq!(tree.top_files(SizeMode::Size, 10, Some("nothing")).len(), 0);
     }
-
     #[test]
     fn extensions_are_counted_and_ranked_for_colours() {
         let mut tree = sample();
@@ -932,7 +844,6 @@ pub mod tests {
         assert_eq!(stats[0].ext, "pdf");
         assert_eq!(stats[0].rank, 1);
     }
-
     #[test]
     fn only_the_first_ranked_extensions_get_a_colour() {
         let mut tree = Tree::new(1, PathBuf::from(r"D:\"), 0);
@@ -947,7 +858,6 @@ pub mod tests {
         assert_eq!(stats[RANKED].count, 5);
         assert_eq!(stats[RANKED].rank, UNRANKED);
     }
-
     #[test]
     fn removing_a_node_fixes_the_totals_up_the_tree() {
         let mut tree = sample();
@@ -968,7 +878,6 @@ pub mod tests {
         assert_eq!(tree.remove(deep), (0, 0));
         assert_eq!(tree.remove(0), (0, 0));
     }
-
     #[test]
     fn removing_moves_a_folder_down_among_its_siblings() {
         let mut tree = sample();
@@ -981,7 +890,6 @@ pub mod tests {
         let page = tree.children(0, 0, 10, SortKey::Size, SizeMode::Alloc);
         assert_eq!(tree.name(page.ids[0]), "tiny.txt", "4 KB on disk beats docs' 0 now");
     }
-
     #[test]
     fn a_stale_scan_id_is_refused() {
         let tree = sample();
@@ -989,15 +897,13 @@ pub mod tests {
         assert_eq!(tree.check(8, 1).unwrap_err(), STALE);
         assert!(tree.check(7, 999).is_err());
     }
-
     #[test]
     fn the_treemap_merges_small_entries_and_respects_the_cap() {
         let mut tree = sample();
         let map = tree.treemap(0, 8, 60, SizeMode::Size, 20_000);
         assert_eq!(map.ids[0], 0);
         assert_eq!(map.parent[0], -1);
-        // Root: video, docs, then "2 smaller items"? tiny.txt is 1 byte; the
-        // link and the empty folder are 0, so the block holds 1 byte.
+        // Root: video, docs, then "2 smaller items"? tiny.txt is 1 byte; the link and the empty folder are 0, so the block holds 1 byte.
         let smaller: Vec<_> = map.names.iter().filter(|n| n.contains("smaller")).collect();
         assert!(smaller.iter().any(|n| n.starts_with("3 smaller items")), "{smaller:?}");
         let total_children: u64 = (0..map.ids.len()).filter(|&i| map.parent[i] == 0).map(|i| map.size[i]).sum();
@@ -1014,7 +920,6 @@ pub mod tests {
         let shallow = tree.treemap(0, 1, 1, SizeMode::Size, 20_000);
         assert!(!shallow.ids.contains(&id_of(&tree, "a.pdf")), "depth 1 stops at the root's children");
     }
-
     #[test]
     fn extensions_and_paths_are_read_from_names() {
         assert_eq!(extension(b"Clip.MP4").as_deref(), Some("mp4"));

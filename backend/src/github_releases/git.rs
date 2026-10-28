@@ -1,27 +1,16 @@
-//! Running git and reading what it says.
-//!
-//! git runs hidden, in English (`LC_ALL=C`, so its messages can be told
-//! apart), never asks on a terminal (`GIT_TERMINAL_PROMPT=0`) and never
-//! colors. The GitHub token, when one is needed for a push, goes in through
-//! the environment as an HTTP header for github.com only: never on the
-//! command line (visible in process lists) and never into `.git/config`.
-
+// ! Running git and reading what it says. ! ! git runs hidden, in English (`LC_ALL=C`, so its messages can be told ! apart), never asks on a terminal (`GIT_TERMINAL_PROMPT=0`) and never ! colors. The GitHub token, when one is needed for a push, goes in through ! the environment as an HTTP header for github.com only: never on the ! command line (visible in process lists) and never into `.git/config`.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-
 use base64::Engine;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
-
 use super::{CANCELLED, Problem};
 use crate::apps::process::hidden;
 use crate::console::LineSplitter;
-
 // ─── Finding the programs ──────────────────────────────────────────────────
-
 /// `name` (`git.exe`) on the PATH, or in one of `fallbacks` (full paths).
 pub(crate) fn find_program(name: &str, fallbacks: &[PathBuf]) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PATH") {
@@ -34,11 +23,9 @@ pub(crate) fn find_program(name: &str, fallbacks: &[PathBuf]) -> Option<PathBuf>
     }
     fallbacks.iter().find(|path| path.is_file()).cloned()
 }
-
 fn env_dir(variable: &str) -> Option<PathBuf> {
     std::env::var_os(variable).map(PathBuf::from)
 }
-
 /// git for Windows, also when it was installed after MYLE started (the
 /// PATH MYLE got then doesn't have it yet).
 pub(crate) fn git_exe() -> Option<PathBuf> {
@@ -53,7 +40,6 @@ pub(crate) fn git_exe() -> Option<PathBuf> {
     }
     find_program("git.exe", &fallbacks)
 }
-
 /// The GitHub CLI.
 pub(crate) fn gh_exe() -> Option<PathBuf> {
     let mut fallbacks = Vec::new();
@@ -68,7 +54,6 @@ pub(crate) fn gh_exe() -> Option<PathBuf> {
     }
     find_program("gh.exe", &fallbacks)
 }
-
 pub(crate) fn require_git() -> Result<PathBuf, String> {
     git_exe().ok_or_else(|| {
         Problem::new(
@@ -78,25 +63,20 @@ pub(crate) fn require_git() -> Result<PathBuf, String> {
         .into()
     })
 }
-
 // ─── Running ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Default)]
 pub(crate) struct Output {
     pub code: i32,
     pub stdout: Vec<u8>,
     pub stderr: String,
 }
-
 impl Output {
     pub(crate) fn ok(&self) -> bool {
         self.code == 0
     }
-
     pub(crate) fn text(&self) -> String {
         String::from_utf8_lossy(&self.stdout).into_owned()
     }
-
     /// stderr then stdout, for "Show details".
     pub(crate) fn all(&self) -> String {
         let stdout = self.text();
@@ -107,7 +87,6 @@ impl Output {
         }
     }
 }
-
 /// Extra environment for one git run.
 #[derive(Clone, Default)]
 pub(crate) struct GitEnv {
@@ -116,7 +95,6 @@ pub(crate) struct GitEnv {
     /// No sign-in window from Git Credential Manager (background fetches).
     pub quiet: bool,
 }
-
 /// The environment that hands git the token for github.com over HTTPS,
 /// through `GIT_CONFIG_*` (git 2.31+): an `Authorization` header like the
 /// one actions/checkout uses.
@@ -134,7 +112,6 @@ pub(crate) fn token_env(token: &str) -> Vec<(String, String)> {
         ),
     ]
 }
-
 fn command(git: &Path, repo: &Path, args: &[&str], env: &GitEnv) -> tokio::process::Command {
     let mut cmd = hidden(git);
     cmd.arg("-C")
@@ -168,7 +145,6 @@ fn command(git: &Path, repo: &Path, args: &[&str], env: &GitEnv) -> tokio::proce
     }
     cmd
 }
-
 /// Runs `git -C repo args`, with `input` on stdin, up to `limit`.
 pub(crate) async fn run_with(
     repo: &Path,
@@ -209,7 +185,6 @@ pub(crate) async fn run_with(
         )),
     }
 }
-
 pub(crate) async fn run(repo: &Path, args: &[&str]) -> Result<Output, String> {
     run_with(
         repo,
@@ -220,7 +195,6 @@ pub(crate) async fn run(repo: &Path, args: &[&str]) -> Result<Output, String> {
     )
     .await
 }
-
 /// stdout of a git run that must succeed.
 pub(crate) async fn read(repo: &Path, args: &[&str]) -> Result<String, String> {
     let output = run(repo, args).await?;
@@ -230,7 +204,6 @@ pub(crate) async fn read(repo: &Path, args: &[&str]) -> Result<String, String> {
         Err(first_error(&output.all()))
     }
 }
-
 /// Runs a network command (push, pull, fetch), sending each line git prints
 /// to `on_line` (progress lines repaint: `replace`), until it ends or
 /// `cancel` is set.
@@ -294,7 +267,6 @@ pub(crate) async fn stream(
         stderr: err_text,
     })
 }
-
 /// The line of git's output that tells what went wrong.
 pub(crate) fn first_error(text: &str) -> String {
     let lines: Vec<&str> = text
@@ -313,9 +285,7 @@ pub(crate) fn first_error(text: &str) -> String {
         })
         .unwrap_or_else(|| "git failed.".into())
 }
-
 // ─── Status ────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
@@ -328,7 +298,6 @@ pub enum ChangeKind {
     Untracked,
     Conflicted,
 }
-
 /// How much of a file's change is staged for the next commit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -337,7 +306,6 @@ pub enum Staged {
     Partial,
     None,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
@@ -348,7 +316,6 @@ pub struct FileChange {
     pub kind: ChangeKind,
     pub staged: Staged,
 }
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchInfo {
@@ -361,14 +328,12 @@ pub struct BranchInfo {
     pub ahead: u32,
     pub behind: u32,
 }
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub branch: BranchInfo,
     pub changes: Vec<FileChange>,
 }
-
 fn kind_of(code: char) -> ChangeKind {
     match code {
         'A' => ChangeKind::Added,
@@ -379,7 +344,6 @@ fn kind_of(code: char) -> ChangeKind {
         _ => ChangeKind::Modified,
     }
 }
-
 /// Reads `git status --porcelain=v2 --branch -z --untracked-files=all`.
 pub(crate) fn parse_status(raw: &[u8]) -> Status {
     let text = String::from_utf8_lossy(raw);
@@ -413,8 +377,7 @@ pub(crate) fn parse_status(raw: &[u8]) -> Status {
         let tag = chars.next().unwrap_or(' ');
         match tag {
             '1' | '2' => {
-                // `1 XY sub mH mI mW hH hI path`; `2` adds `Xscore` and the
-                // original path comes as the next record.
+                // `1 XY sub mH mI mW hH hI path`; `2` adds `Xscore` and the original path comes as the next record.
                 let fields = if tag == '1' { 9 } else { 10 };
                 let parts: Vec<&str> = record.splitn(fields, ' ').collect();
                 if parts.len() < fields {
@@ -435,8 +398,7 @@ pub(crate) fn parse_status(raw: &[u8]) -> Status {
                     _ => Staged::None,
                 };
                 let kind = if x != '.' { kind_of(x) } else { kind_of(y) };
-                // Added to the index, then deleted from the folder: a
-                // deletion is what is left to see.
+                // Added to the index, then deleted from the folder: a deletion is what is left to see.
                 let kind = if x == 'A' && y == 'D' {
                     ChangeKind::Deleted
                 } else {
@@ -472,7 +434,6 @@ pub(crate) fn parse_status(raw: &[u8]) -> Status {
     status.changes.sort_by_key(|c| c.path.to_lowercase());
     status
 }
-
 pub(crate) async fn status(repo: &Path) -> Result<Status, String> {
     let output = run_with(
         repo,
@@ -494,9 +455,7 @@ pub(crate) async fn status(repo: &Path) -> Result<Status, String> {
     }
     Ok(parse_status(&output.stdout))
 }
-
 // ─── Remotes ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Remote {
@@ -510,7 +469,6 @@ pub struct Remote {
     /// The remote is reached over SSH (the token can't help a push then).
     pub ssh: bool,
 }
-
 /// Owner and name of a GitHub repository from any of the URL forms git
 /// accepts (`https://github.com/o/r(.git)`, `git@github.com:o/r.git`,
 /// `ssh://git@github.com/o/r`, with a user name or a port).
@@ -561,7 +519,6 @@ pub(crate) fn parse_remote(name: &str, url: &str) -> Remote {
     }
     remote
 }
-
 /// `https://user:secret@host/…` → `https://host/…`: a token someone put in
 /// a remote URL is never shown or kept.
 fn strip_credentials(url: &str) -> String {
@@ -575,7 +532,6 @@ fn strip_credentials(url: &str) -> String {
     }
     url.to_string()
 }
-
 /// `origin`, or the only/first remote there is.
 pub(crate) async fn remote(repo: &Path) -> Result<Option<Remote>, String> {
     let names = read(repo, &["remote"]).await?;
@@ -594,9 +550,7 @@ pub(crate) async fn remote(repo: &Path) -> Result<Option<Remote>, String> {
     let url = read(repo, &["remote", "get-url", name]).await?;
     Ok(Some(parse_remote(name, url.trim())))
 }
-
 // ─── Tags and commits ──────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
@@ -604,7 +558,6 @@ pub struct Tag {
     /// Unix seconds.
     pub date: i64,
 }
-
 pub(crate) fn parse_tags(text: &str) -> Vec<Tag> {
     text.lines()
         .filter_map(|line| {
@@ -617,7 +570,6 @@ pub(crate) fn parse_tags(text: &str) -> Vec<Tag> {
         .filter(|tag| !tag.name.is_empty())
         .collect()
 }
-
 /// Every tag, newest first.
 pub(crate) async fn tags(repo: &Path) -> Result<Vec<Tag>, String> {
     let text = read(
@@ -632,7 +584,6 @@ pub(crate) async fn tags(repo: &Path) -> Result<Vec<Tag>, String> {
     .await?;
     Ok(parse_tags(&text))
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
@@ -642,7 +593,6 @@ pub struct Commit {
     /// Unix seconds.
     pub date: i64,
 }
-
 pub(crate) fn parse_log(text: &str) -> Vec<Commit> {
     text.split('\x1e')
         .filter_map(|record| {
@@ -660,7 +610,6 @@ pub(crate) fn parse_log(text: &str) -> Vec<Commit> {
         })
         .collect()
 }
-
 /// Commits in `range` (`v1.0.0..HEAD`, or `HEAD`), newest first, limited to
 /// `path` (a monorepo app folder) when given.
 pub(crate) async fn log(
@@ -691,9 +640,7 @@ pub(crate) async fn log(
     }
     Ok(parse_log(&output.text()))
 }
-
 // ─── What went wrong ───────────────────────────────────────────────────────
-
 /// Gives a failed commit, push or pull the code the page has an action for.
 pub(crate) fn classify(action: &str, output: &str) -> Problem {
     let lower = output.to_lowercase();
@@ -806,11 +753,9 @@ pub(crate) fn classify(action: &str, output: &str) -> Problem {
     };
     Problem::new(code, message).with_details(output.trim().to_string())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn porcelain_v2_status_with_renames_partial_staging_and_untracked() {
         let raw = concat!(
@@ -848,7 +793,6 @@ mod tests {
         assert!(status.changes.iter().all(|c| c.path != "ignored.log"));
         assert_eq!(status.changes.len(), 8);
     }
-
     #[test]
     fn a_new_repository_and_a_detached_head() {
         let status = parse_status(b"# branch.oid (initial)\0# branch.head master\0? a.txt\0");
@@ -858,7 +802,6 @@ mod tests {
         let detached = parse_status(b"# branch.oid abc\0# branch.head (detached)\0");
         assert_eq!(detached.branch.branch, None);
     }
-
     #[test]
     fn github_remotes_in_every_form() {
         for url in [
@@ -888,7 +831,6 @@ mod tests {
         assert!(!secret.url.contains("ghp_secret"));
         assert_eq!(secret.owner.as_deref(), Some("a"));
     }
-
     #[test]
     fn tags_and_log_records() {
         let tags = parse_tags("v9.5.0\t1760000000\nbackup_projects-v2.0.7\t1759000000\n\n");
@@ -902,7 +844,6 @@ mod tests {
         assert_eq!(log[0].subject, "Fix: a | b");
         assert_eq!(log[1].date, 1);
     }
-
     #[test]
     fn push_and_commit_failures_get_their_codes() {
         let rejected = " ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'https://github.com/a/b.git'\nhint: Updates were rejected because the remote contains work";
@@ -964,7 +905,6 @@ mod tests {
         assert_eq!(other.message, "something odd");
         assert!(other.details.is_some());
     }
-
     #[test]
     fn the_token_goes_in_as_a_header_for_github_only() {
         let env = token_env("ghp_example");

@@ -1,19 +1,13 @@
-//! Names and folders, the same as backup_projects writes them, so both apps
-//! keep adding to the same backups:
-//! `<cloud>\Projects Backup\<AppName>\<YYYY-MM Month>\<AppName>_D<day>_V<n>.zip`.
-
+// ! Names and folders, the same as backup_projects writes them, so both apps ! keep adding to the same backups: ! `<cloud>\Projects Backup\<AppName>\<YYYY-MM Month>\<AppName>_D<day>_V<n>.zip`.
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use super::rules::PARTIAL_PREFIX;
-
 pub(crate) const BACKUP_ROOT_NAME: &str = "Projects Backup";
 /// backup_projects' copy of its project list, next to the backups.
 pub(crate) const CONFIG_MIRROR_FILE: &str = ".backup-projects.json";
 /// A folder backup_projects keeps beside the month folders; never a month.
 const PRE_RELEASE_FOLDER: &str = "all - pre release backups";
-
 /// backup_projects names the month folders in Greek; any language is read.
 const GREEK_MONTHS: [&str; 12] = [
     "Ιανουάριος",
@@ -29,7 +23,6 @@ const GREEK_MONTHS: [&str; 12] = [
     "Νοέμβριος",
     "Δεκέμβριος",
 ];
-
 /// A calendar date and time (local, unless said otherwise).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Civil {
@@ -41,13 +34,11 @@ pub(crate) struct Civil {
     pub second: u32,
     pub millis: u32,
 }
-
 /// `2026-10 Οκτώβριος`.
 pub(crate) fn month_folder(year: i64, month: u32) -> String {
     let name = GREEK_MONTHS[(month.clamp(1, 12) - 1) as usize];
     format!("{year:04}-{month:02} {name}")
 }
-
 /// `(year, month, label)` of a month folder in any language: `2026-10 October`.
 pub(crate) fn parse_month_folder(name: &str) -> Option<(i64, u32, String)> {
     let bytes = name.as_bytes();
@@ -66,14 +57,12 @@ pub(crate) fn parse_month_folder(name: &str) -> Option<(i64, u32, String)> {
     let label = name[7..].trim().to_string();
     Some((year, month, label))
 }
-
 /// The folders inside a project's backup folder that hold its backups.
 pub(crate) fn is_month_folder(name: &str) -> bool {
     !name.eq_ignore_ascii_case(PRE_RELEASE_FOLDER)
         && !name.starts_with(PARTIAL_PREFIX)
         && parse_month_folder(name).is_some()
 }
-
 /// `<App>_D5_V3`, older `<App>_V3_D5` and plain `<App>_V3`, with or without
 /// `.zip`: `(base name, day, version)`.
 pub(crate) fn parse_backup_name(name: &str) -> (String, u32, u32) {
@@ -103,7 +92,6 @@ pub(crate) fn parse_backup_name(name: &str) -> (String, u32, u32) {
         _ => (base, 0, 0),
     }
 }
-
 pub(crate) fn strip_zip(name: &str) -> &str {
     if name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(".zip") {
         &name[..name.len() - 4]
@@ -111,12 +99,10 @@ pub(crate) fn strip_zip(name: &str) -> &str {
         name
     }
 }
-
 /// `<App>_D<day>_V<version>`.
 pub(crate) fn backup_name(app: &str, day: u32, version: u32) -> String {
     format!("{app}_D{day}_V{version}")
 }
-
 /// Whether `name` (file or folder) is a backup of `app`: `<App>_…`, any case.
 pub(crate) fn belongs_to(name: &str, app: &str) -> bool {
     name.len() > app.len() + 1
@@ -125,7 +111,6 @@ pub(crate) fn belongs_to(name: &str, app: &str) -> bool {
         && name.as_bytes()[app.len()] == b'_'
         && !name.starts_with(PARTIAL_PREFIX)
 }
-
 /// One more than the highest version of `app` in any month folder of
 /// `app_dir`: numbering carries on across months and both apps.
 pub(crate) fn next_version(app_dir: &Path, app: &str) -> u32 {
@@ -155,7 +140,6 @@ pub(crate) fn next_version(app_dir: &Path, app: &str) -> u32 {
     }
     highest + 1
 }
-
 /// Leftovers of interrupted backups (`__partial__…`) older than `age`; a
 /// fresh one may belong to a backup running in the other app right now.
 pub(crate) fn remove_stale_partials(app_dir: &Path, age: Duration) {
@@ -187,9 +171,7 @@ pub(crate) fn remove_stale_partials(app_dir: &Path, age: Duration) {
         }
     }
 }
-
 // ─── Time ───────────────────────────────────────────────────────────────────
-
 /// Days since 1970-01-01 to a calendar date (Howard Hinnant's algorithm).
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
@@ -203,7 +185,6 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
-
 fn civil_from_unix_millis(millis: i64) -> Civil {
     let days = millis.div_euclid(86_400_000);
     let rest = millis.rem_euclid(86_400_000);
@@ -218,23 +199,19 @@ fn civil_from_unix_millis(millis: i64) -> Civil {
         millis: (rest % 1000) as u32,
     }
 }
-
 pub(crate) fn unix_millis(time: SystemTime) -> i64 {
     match time.duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_millis() as i64,
         Err(before) => -(before.duration().as_millis() as i64),
     }
 }
-
 pub(crate) fn utc(time: SystemTime) -> Civil {
     civil_from_unix_millis(unix_millis(time))
 }
-
 /// The same moment on this PC's clock.
 pub(crate) fn local(time: SystemTime) -> Civil {
     civil_from_unix_millis(unix_millis(time) + local_offset_millis(time))
 }
-
 #[cfg(windows)]
 fn local_offset_millis(time: SystemTime) -> i64 {
     use windows_sys::Win32::Foundation::FILETIME;
@@ -260,12 +237,10 @@ fn local_offset_millis(time: SystemTime) -> i64 {
     let local_ticks = ((local.dwHighDateTime as i64) << 32) | local.dwLowDateTime as i64;
     (local_ticks - ticks) / 10_000
 }
-
 #[cfg(not(windows))]
 fn local_offset_millis(_time: SystemTime) -> i64 {
     0
 }
-
 /// `2026-10-08T09:39:05.123Z`, as JavaScript's `toISOString`.
 pub(crate) fn iso_utc(time: SystemTime) -> String {
     let c = utc(time);
@@ -274,7 +249,6 @@ pub(crate) fn iso_utc(time: SystemTime) -> String {
         c.year, c.month, c.day, c.hour, c.minute, c.second, c.millis
     )
 }
-
 /// `8/10/2026, 12:39:05 μ.μ.`, as backup_projects shows dates (el-GR).
 pub(crate) fn greek_display(c: Civil) -> String {
     let (hour, suffix) = match c.hour {
@@ -288,11 +262,9 @@ pub(crate) fn greek_display(c: Civil) -> String {
         c.day, c.month, c.year, hour, c.minute, c.second, suffix
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn month_folders_are_greek_and_any_language_is_read() {
         assert_eq!(month_folder(2026, 10), "2026-10 Οκτώβριος");
@@ -313,7 +285,6 @@ mod tests {
         assert_eq!(parse_month_folder("all - pre release backups"), None);
         assert!(!is_month_folder("__partial__2026-10"));
     }
-
     #[test]
     fn backup_names_of_every_generation_are_parsed() {
         assert_eq!(
@@ -332,7 +303,6 @@ mod tests {
             "__partial__steam"
         ));
     }
-
     #[test]
     fn numbering_continues_across_months_and_ignores_partials() {
         let root = std::env::temp_dir().join(format!("myle-naming-{}", std::process::id()));
@@ -363,7 +333,6 @@ mod tests {
         assert_eq!(next_version(&root.join("missing"), "App"), 1);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn dates_match_javascript() {
         let time = UNIX_EPOCH + Duration::from_millis(1_791_452_345_123);

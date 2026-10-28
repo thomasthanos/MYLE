@@ -1,14 +1,7 @@
-//! The build commands a project offers: its package.json scripts (with the
-//! package manager its lock file names), `tauri build`, `cargo build`,
-//! `dotnet publish`, PyInstaller or `python -m build`, `go build`,
-//! `flutter build`.
-
+// ! The build commands a project offers: its package.json scripts (with the ! package manager its lock file names), `tauri build`, `cargo build`, ! `dotnet publish`, PyInstaller or `python -m build`, `go build`, ! `flutter build`.
 use std::path::Path;
-
 use serde::Serialize;
-
 use super::super::project;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildOption {
@@ -27,14 +20,12 @@ pub struct BuildOption {
     /// to run before a release.
     pub full: bool,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildStep {
     pub title: String,
     pub command: Option<String>,
 }
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildPlan {
@@ -46,7 +37,6 @@ pub struct BuildPlan {
     /// The command that installs them.
     pub install_command: Option<String>,
 }
-
 /// The package manager of the project in `dir`, from the lock file there or
 /// in a folder above it up to `root` (a monorepo keeps one at the top).
 pub(crate) fn package_manager(dir: &Path, root: &Path) -> &'static str {
@@ -71,7 +61,6 @@ pub(crate) fn package_manager(dir: &Path, root: &Path) -> &'static str {
     }
     "npm"
 }
-
 /// Scripts that build something to ship, best first.
 const SCRIPTS: &[&str] = &[
     "build-all",
@@ -84,7 +73,6 @@ const SCRIPTS: &[&str] = &[
     "build:prod",
     "build",
 ];
-
 /// The script a command line starts through a package manager
 /// (`npm run x`, `pnpm x`, `yarn run x`, `bun run x`), when it is one of
 /// `scripts`.
@@ -105,7 +93,6 @@ fn script_called<'a>(
     };
     scripts.contains_key(name).then_some(name)
 }
-
 /// A script file a command line starts (`./scripts/build-setup.ps1`), inside
 /// `dir`.
 fn file_called(part: &str, dir: &Path) -> Option<std::path::PathBuf> {
@@ -121,7 +108,6 @@ fn file_called(part: &str, dir: &Path) -> Option<std::path::PathBuf> {
         .map(|word| dir.join(word.trim_start_matches("./").replace('\\', "/")))
         .filter(|path| path.is_file())
 }
-
 fn short(text: &str, max: usize) -> String {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.chars().count() <= max {
@@ -130,7 +116,6 @@ fn short(text: &str, max: usize) -> String {
         format!("{}…", text.chars().take(max - 1).collect::<String>())
     }
 }
-
 /// The steps of a script file: its named steps (`Invoke-Step "App" { … }`,
 /// `echo "==> App"`), else the build tools it runs.
 pub(crate) fn file_steps(text: &str) -> Vec<BuildStep> {
@@ -199,7 +184,6 @@ pub(crate) fn file_steps(text: &str) -> Vec<BuildStep> {
     steps.truncate(30);
     steps
 }
-
 /// What a package.json script runs, in order, with the scripts and script
 /// files it calls opened up (a few levels deep).
 fn script_steps(
@@ -253,7 +237,6 @@ fn script_steps(
     }
     steps
 }
-
 /// Whether Tauri makes installers for the project (`bundle.active`).
 fn tauri_bundles(tauri_dir: &Path) -> bool {
     std::fs::read_to_string(tauri_dir.join("tauri.conf.json"))
@@ -262,7 +245,6 @@ fn tauri_bundles(tauri_dir: &Path) -> bool {
         .and_then(|json| json.get("bundle")?.get("active")?.as_bool())
         .unwrap_or(true)
 }
-
 pub(crate) fn plan(dir: &Path, root: &Path) -> BuildPlan {
     let mut plan = BuildPlan::default();
     let tauri = project::tauri_dir(dir);
@@ -404,8 +386,7 @@ pub(crate) fn plan(dir: &Path, root: &Path) -> BuildPlan {
             full: false,
         });
     }
-    // Without a build script, the first detected command is the build
-    // (not Tauri when it makes the app alone).
+    // Without a build script, the first detected command is the build (not Tauri when it makes the app alone).
     if !plan.options.iter().any(|o| o.full)
         && let Some(first) = plan
             .options
@@ -416,7 +397,6 @@ pub(crate) fn plan(dir: &Path, root: &Path) -> BuildPlan {
     }
     plan
 }
-
 fn tauri_option(command: String, tauri_dir: &Path, full: bool) -> BuildOption {
     let bundles = tauri_bundles(tauri_dir);
     BuildOption {
@@ -440,7 +420,6 @@ fn tauri_option(command: String, tauri_dir: &Path, full: bool) -> BuildOption {
         full: full && bundles,
     }
 }
-
 /// A command the user typed: one line, nothing that would make it more
 /// than one command by surprise.
 pub(crate) fn check_command(command: &str) -> Result<String, String> {
@@ -453,11 +432,9 @@ pub(crate) fn check_command(command: &str) -> Result<String, String> {
     }
     Ok(command.to_string())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn temp(name: &str) -> std::path::PathBuf {
         let dir =
             std::env::temp_dir().join(format!("myle-gr-detect-{name}-{}", std::process::id()));
@@ -465,7 +442,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
-
     #[test]
     fn scripts_package_managers_and_tauri() {
         let dir = temp("node");
@@ -486,7 +462,6 @@ mod tests {
         assert!(!super::plan(&dir, &dir).needs_install);
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn a_monorepo_app_uses_the_lock_file_at_the_top_and_other_languages() {
         let root = temp("mono");
@@ -509,12 +484,9 @@ mod tests {
         assert!(check_command("  ").is_err());
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn the_projects_own_build_script_is_the_full_pipeline() {
-        // MYLE: "build" runs scripts/build-setup.ps1, which runs tauri build
-        // itself; Tauri's bundling is off, so `tauri build` alone makes only
-        // the exe and must not be offered as "app and installer".
+        // MYLE: "build" runs scripts/build-setup.ps1, which runs tauri build itself; Tauri's bundling is off, so `tauri build` alone makes only the exe and must not be offered as "app and installer".
         let dir = temp("myle");
         std::fs::write(
             dir.join("package.json"),
@@ -555,7 +527,6 @@ mod tests {
             Some("npx tauri build --no-bundle")
         );
         assert!(build.label.contains("5 steps"));
-
         // Without such a script, tauri build says what it makes.
         std::fs::write(
             dir.join("package.json"),
@@ -579,7 +550,6 @@ mod tests {
         assert!(plan.options[0].full);
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn a_chain_of_scripts_is_opened_up() {
         let dir = temp("chain");

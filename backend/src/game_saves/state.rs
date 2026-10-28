@@ -2,21 +2,16 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-
 use std::os::windows::fs::OpenOptionsExt;
-
 use super::models::{GameSaveEntry, GameSavesScan, GameSavesSettings, OperationKind};
-
 #[derive(Clone, Default)]
 pub struct GameSavesState(Arc<Mutex<Inner>>);
-
 #[derive(Default)]
 struct Inner {
     active: Option<ActiveOperation>,
     cached_scan: Option<GameSavesScan>,
     next_token: u64,
 }
-
 #[derive(Clone)]
 struct ActiveOperation {
     kind: OperationKind,
@@ -29,32 +24,26 @@ struct ActiveOperation {
     /// then only stops before the next game.
     killable: bool,
 }
-
 pub(crate) struct OperationHandle {
     state: GameSavesState,
     token: u64,
     _lock: OperationFileLock,
 }
-
 pub(crate) struct OperationFileLock {
     path: PathBuf,
     #[allow(dead_code)]
     file: Option<File>,
 }
-
 /// Why an operation cannot begin while another process (the scheduled
 /// backup, or the app while that backup waits) holds the lock.
 pub(crate) const BUSY: &str = "Another Game Saves operation is already running.";
-
 /// The operation locks this process holds. Taking or releasing one never runs
 /// alongside `held_elsewhere`, whose look at the file would otherwise make it
 /// fail (or be taken for another process's).
 static HELD_HERE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-
 fn held_here() -> MutexGuard<'static, Vec<PathBuf>> {
     HELD_HERE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 /// Whether another process holds the operation lock: with the app being
 /// single-instance, that is the scheduled backup running on its own.
 pub(crate) fn held_elsewhere(config_root: &Path) -> bool {
@@ -74,16 +63,13 @@ pub(crate) fn held_elsewhere(config_root: &Path) -> bool {
     drop(held);
     busy
 }
-
 const LOCK_FILE: &str = "operation.lock";
-
 /// Holds the same cross-process lock as a Game Saves operation without
 /// starting one. Destructive system actions keep this guard alive so neither
 /// the UI nor the scheduled headless process can begin while they are pending.
 pub(crate) struct GameSavesReservation {
     _lock: OperationFileLock,
 }
-
 impl GameSavesState {
     pub(crate) fn begin(
         &self,
@@ -99,12 +85,10 @@ impl GameSavesState {
                 ));
             }
         }
-
         let operation_lock = OperationFileLock::acquire(config_root)?;
         let token = {
             let mut inner = self.lock();
-            // The file lock prevents a second process from entering, but two
-            // tasks in this process may have raced before either set `active`.
+            // The file lock prevents a second process from entering, but two tasks in this process may have raced before either set `active`.
             if inner.active.is_some() {
                 return Err("Another Game Saves operation just started.".into());
             }
@@ -125,44 +109,33 @@ impl GameSavesState {
             _lock: operation_lock,
         })
     }
-
     pub(crate) fn active_kind(&self) -> Option<OperationKind> {
         self.lock().active.as_ref().map(|active| active.kind)
     }
-
     pub(crate) fn reserve_idle(&self, config_root: &Path) -> Result<GameSavesReservation, String> {
         if self.active_kind().is_some() {
             return Err("Wait for the current Game Saves operation to finish.".into());
         }
-
-        // Acquiring the file lock closes both races: an in-process operation
-        // that passed the state check must acquire this same lock before it can
-        // publish itself, and the scheduled task runs in another process and
-        // therefore can only be excluded by the file handle.
+        // Acquiring the file lock closes both races: an in-process operation that passed the state check must acquire this same lock before it can publish itself, and the scheduled task runs in another process and therefore can only be excluded by the file handle.
         let operation_lock = OperationFileLock::acquire(config_root)?;
         if self.active_kind().is_some() {
             return Err("Wait for the current Game Saves operation to finish.".into());
         }
-
         Ok(GameSavesReservation {
             _lock: operation_lock,
         })
     }
-
     pub(crate) fn cache_scan(&self, scan: GameSavesScan) {
         self.lock().cached_scan = Some(scan);
     }
-
     pub(crate) fn cached_scan(&self) -> Option<GameSavesScan> {
         self.lock().cached_scan.clone()
     }
-
     /// Settings may recover or select another destination while this process
     /// already has a scan. Sanitize the stored copy as well as the UI copy.
     pub(crate) fn cached_scan_for(&self, settings: &GameSavesSettings) -> Option<GameSavesScan> {
         self.publish_cached_scan(settings, None)
     }
-
     /// A page load may have read disk before a fresh scan finished. Install
     /// that fallback only if memory is still empty, under the same lock used
     /// for destination validation and copying the published result.
@@ -179,7 +152,6 @@ impl GameSavesState {
         super::scan_cache::validate_destination(scan, settings);
         Some(scan.clone())
     }
-
     pub(crate) fn find_game(&self, id: &str) -> Option<GameSaveEntry> {
         let inner = self.lock();
         let scan = inner.cached_scan.as_ref()?;
@@ -189,13 +161,11 @@ impl GameSavesState {
             .find(|game| game.id == id)
             .cloned()
     }
-
     pub(crate) fn cancel(&self) {
         for pid in self.cancel_marking() {
             crate::apps::process::kill_tree(pid);
         }
     }
-
     /// Marks the running operation cancelled; answers the engine processes
     /// to stop now (none while saves are being written).
     fn cancel_marking(&self) -> Vec<u32> {
@@ -206,20 +176,17 @@ impl GameSavesState {
         active.cancelled = true;
         if active.killable { active.pids.clone() } else { Vec::new() }
     }
-
     pub(crate) fn ensure_idle(&self) -> Result<(), String> {
         self.active_kind()
             .map(|_| Err("Wait for the current Game Saves operation to finish.".into()))
             .unwrap_or(Ok(()))
     }
-
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
-
 impl OperationHandle {
     /// Records a running engine process (`running`), or forgets it once it
     /// has exited. A process started after Cancel is stopped straight away.
@@ -244,7 +211,6 @@ impl OperationHandle {
             crate::apps::process::kill_tree(pid);
         }
     }
-
     /// While `false`, Cancel no longer stops the engine mid-way: it only stops
     /// the operation before its next step (see `ActiveOperation::killable`).
     pub(crate) fn set_killable(&self, killable: bool) {
@@ -258,7 +224,6 @@ impl OperationHandle {
             active.killable = killable;
         }
     }
-
     pub(crate) fn is_cancelled(&self) -> bool {
         self.state
             .lock()
@@ -268,7 +233,6 @@ impl OperationHandle {
             .is_some_and(|active| active.cancelled)
     }
 }
-
 impl Drop for OperationHandle {
     fn drop(&mut self) {
         let mut inner = self.state.lock();
@@ -281,7 +245,6 @@ impl Drop for OperationHandle {
         }
     }
 }
-
 impl OperationFileLock {
     pub(crate) fn acquire(config_root: &Path) -> Result<Self, String> {
         fs::create_dir_all(config_root).map_err(|error| error.to_string())?;
@@ -297,7 +260,6 @@ impl OperationFileLock {
         }
     }
 }
-
 impl Drop for OperationFileLock {
     fn drop(&mut self) {
         let mut held = held_here();
@@ -309,7 +271,6 @@ impl Drop for OperationFileLock {
         }
     }
 }
-
 fn create_lock(path: &Path) -> std::io::Result<OperationFileLock> {
     let mut file = OpenOptions::new()
         .read(true)
@@ -326,11 +287,9 @@ fn create_lock(path: &Path) -> std::io::Result<OperationFileLock> {
         file: Some(file),
     })
 }
-
 fn lock_error(error: std::io::Error) -> String {
     format!("The Game Saves operation lock could not be created: {error}")
 }
-
 fn operation_name(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Scan => "scan",
@@ -340,11 +299,9 @@ fn operation_name(kind: OperationKind) -> &'static str {
         OperationKind::ScheduledBackup => "scheduled backup",
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn a_page_fallback_cannot_replace_a_scan_that_completed_after_it_was_read() {
         let state = GameSavesState::default();
@@ -357,7 +314,6 @@ mod tests {
         assert_eq!(state.publish_cached_scan(&settings, Some(fallback)), Some(fresh.clone()));
         assert_eq!(state.cached_scan(), Some(fresh));
     }
-
     #[test]
     fn publishing_for_another_destination_also_removes_history_from_the_live_backend_cache() {
         let game = serde_json::json!({
@@ -381,7 +337,6 @@ mod tests {
         assert!(actionable.snapshots.is_empty(), "backend actions must not retain the stale restore choice");
         assert_eq!(state.cached_scan().unwrap(), published, "the stored cache, not just a returned clone, is sanitized");
     }
-
     #[test]
     fn operation_lock_is_exclusive_and_released() {
         let root =
@@ -393,7 +348,6 @@ mod tests {
         assert!(OperationFileLock::acquire(&root).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
-
     #[test]
     fn the_lock_of_another_process_is_told_from_this_ones() {
         let root = std::env::temp_dir().join(format!("myle-game-saves-elsewhere-test-{}", std::process::id()));
@@ -405,8 +359,7 @@ mod tests {
         assert!(!held_elsewhere(&root), "this process's own operation");
         drop(operation);
         assert!(!held_elsewhere(&root), "released");
-        // Another process: the file held with no sharing, outside this
-        // process's bookkeeping.
+        // Another process: the file held with no sharing, outside this process's bookkeeping.
         let other = OpenOptions::new().read(true).write(true).create(true).truncate(true).share_mode(0).open(root.join(LOCK_FILE)).unwrap();
         assert!(held_elsewhere(&root));
         assert_eq!(state.begin(&root, OperationKind::Scan).err().as_deref(), Some(BUSY));
@@ -415,7 +368,6 @@ mod tests {
         assert!(state.begin(&root, OperationKind::Scan).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
-
     #[test]
     fn idle_reservation_blocks_ui_and_headless_operations_until_drop() {
         let root = std::env::temp_dir().join(format!(
@@ -424,16 +376,13 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         let state = GameSavesState::default();
-
         let reservation = state.reserve_idle(&root).unwrap();
         assert!(state.begin(&root, OperationKind::Scan).is_err());
         assert!(OperationFileLock::acquire(&root).is_err());
-
         drop(reservation);
         assert!(state.begin(&root, OperationKind::Scan).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
-
     #[test]
     fn cancel_never_stops_the_engine_while_it_writes_saves() {
         let root = std::env::temp_dir().join(format!(
@@ -444,11 +393,9 @@ mod tests {
         let state = GameSavesState::default();
         let operation = state.begin(&root, OperationKind::Restore).unwrap();
         state.lock().active.as_mut().unwrap().pids.push(4242);
-
         operation.set_killable(false);
         assert!(state.cancel_marking().is_empty(), "a restore writing saves is not killed");
         assert!(operation.is_cancelled(), "it stops before the next game instead");
-
         operation.set_killable(true);
         assert_eq!(state.cancel_marking(), vec![4242], "a scan or preview still stops at once");
         drop(operation);

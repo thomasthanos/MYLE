@@ -66,17 +66,12 @@
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
   }
 
-  /**
-   * True only for Clip Studio once the restore exe is present in Downloads.
-   * Checked instantly on page load and right after install — no polling delay.
-   */
+  /* True only for Clip Studio once the restore exe is present in Downloads. Checked instantly on page load and right after install — no polling delay. */
   const showRevert = $derived(
     app.id === CLIP_STUDIO_ID && creativeState.clipStudioRestoreReady,
   );
 
-  /**
-   * True only for Wand Enhancer once the exe is present in roaming directory.
-   */
+  /* True only for Wand Enhancer once the exe is present in roaming directory. */
   const showWandLaunch = $derived(
     app.id === WAND_ENHANCER_ID && creativeState.wandEnhancerReady,
   );
@@ -147,8 +142,7 @@
 </article>
 
 <style>
-  /* 3D glass card: lit top edge, inner depth, and a lift on hover.
-     No backdrop-filter here: it sits inside the content panel. */
+  /* 3D glass card: lit top edge, inner depth, and a lift on hover. No backdrop-filter here: it sits inside the content panel. */
   .card { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px 16px 14px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: var(--radius-lg); background: var(--grain), linear-gradient(180deg, rgb(200 210 255 / 0.09), rgb(200 210 255 / 0.025) 60%, rgb(0 0 0 / 0.06)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-2); transition: transform var(--dur-med) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med) var(--ease-out); }
 
   .card:hover { transform: translateY(-2px); border-color: rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 -1px 0 rgb(0 0 0 / 0.25), var(--elev-3); }

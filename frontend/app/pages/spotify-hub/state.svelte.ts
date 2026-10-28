@@ -63,9 +63,7 @@ class SpotifyHubState {
     purgeAll: "Ready",
   });
   #pollTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Last backend outcome already reflected in `statuses`. A failed run
-   *  leaves the previous outcome in place, and re-applying it would turn
-   *  the fresh "Error" back into "Completed". */
+  /* Last backend outcome already reflected in `statuses`. A failed run leaves the previous outcome in place, and re-applying it would turn the fresh "Error" back into "Completed". */
   #seenOutcome: string | null = null;
   #loadedAt = 0;
   #updateRequest = 0;
@@ -84,8 +82,7 @@ class SpotifyHubState {
   progressOf(action: SpotifyHubAction): number | null {
     return this.activeAction === action ? (this.activeJob?.progress ?? null) : null;
   }
-  /** `force` after an action; a plain page visit reuses a fresh detection.
-   *  The app's preload leaves the online update check for later. */
+  /* `force` after an action; a plain page visit reuses a fresh detection. The app's preload leaves the online update check for later. */
   async load(force = false, { checkUpdates = true } = {}) {
     if (!isTauri() || this.loading) return;
     if (!force && this.snapshot && !this.error && Date.now() - this.#loadedAt < FRESH_MS) return;
@@ -293,8 +290,7 @@ class SpotifyHubState {
   }
   private onEvent(action: SpotifyHubAction, event: SpotifyHubEvent) {
     if (event.event === "stage") {
-      // The backend announces "preparing" twice (on start and inside the
-      // action); one line per actual change is enough.
+      // The backend announces "preparing" twice (on start and inside the action); one line per actual change is enough.
       const changed = this.liveJob?.jobId !== event.data.jobId || this.liveJob.stage !== event.data.stage;
       this.liveJob = { jobId: event.data.jobId, action, stage: event.data.stage, progress: changed ? null : (this.liveJob?.progress ?? null) };
       if (changed) this.append(action, `${STAGE_LABELS[event.data.stage]}…`);

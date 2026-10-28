@@ -1,15 +1,10 @@
-//! Restart-to-firmware support. The executable and every argument are fixed
-//! by this module; the webview can only ask for the operation to begin.
-
+// ! Restart-to-firmware support. The executable and every argument are fixed ! by this module; the webview can only ask for the operation to begin.
 use std::path::{Path, PathBuf};
-
 use super::elevated::{self, ElevatedProcessOutcome};
 use super::models::{
     FirmwareRestartOutcome, FirmwareRestartResult, FirmwareRestartSnapshot, FirmwareType,
 };
-
 const SHUTDOWN_ARGUMENTS: [&str; 6] = ["/r", "/fw", "/t", "0", "/d", "p:0:0"];
-
 trait RestartPlatform {
     fn detect_firmware(&self) -> Result<FirmwareType, String>;
     fn system_directory(&self) -> Result<PathBuf, String>;
@@ -19,18 +14,14 @@ trait RestartPlatform {
         arguments: &[String],
     ) -> Result<ElevatedProcessOutcome, String>;
 }
-
 struct NativePlatform;
-
 impl RestartPlatform for NativePlatform {
     fn detect_firmware(&self) -> Result<FirmwareType, String> {
         native_firmware_type()
     }
-
     fn system_directory(&self) -> Result<PathBuf, String> {
         native_system_directory()
     }
-
     fn run_elevated(
         &self,
         executable: &Path,
@@ -39,17 +30,14 @@ impl RestartPlatform for NativePlatform {
         elevated::run_sync(executable, arguments)
     }
 }
-
 pub(crate) fn snapshot(active: bool) -> FirmwareRestartSnapshot {
     snapshot_with(&NativePlatform, active)
 }
-
 pub(crate) async fn restart() -> Result<FirmwareRestartOutcome, String> {
     tauri::async_runtime::spawn_blocking(|| restart_with(&NativePlatform))
         .await
         .map_err(|error| format!("The firmware restart task failed: {error}"))?
 }
-
 fn snapshot_with(platform: &impl RestartPlatform, active: bool) -> FirmwareRestartSnapshot {
     match platform.detect_firmware() {
         Ok(FirmwareType::Uefi) => FirmwareRestartSnapshot {
@@ -78,7 +66,6 @@ fn snapshot_with(platform: &impl RestartPlatform, active: bool) -> FirmwareResta
         },
     }
 }
-
 fn restart_with(platform: &impl RestartPlatform) -> Result<FirmwareRestartOutcome, String> {
     match platform.detect_firmware() {
         Ok(FirmwareType::Uefi) => {}
@@ -95,7 +82,6 @@ fn restart_with(platform: &impl RestartPlatform) -> Result<FirmwareRestartOutcom
             ));
         }
     }
-
     let system_directory = platform.system_directory()?;
     if !system_directory.is_absolute() {
         return Err("Windows returned an invalid system directory.".into());
@@ -118,14 +104,12 @@ fn restart_with(platform: &impl RestartPlatform) -> Result<FirmwareRestartOutcom
         ElevatedProcessOutcome::Exited(code) => classify_shutdown_error(code),
     }
 }
-
 fn classify_shutdown_error(code: u32) -> Result<FirmwareRestartOutcome, String> {
     use windows_sys::Win32::Foundation::{
         ERROR_ACCESS_DENIED, ERROR_ELEVATION_REQUIRED, ERROR_ENVVAR_NOT_FOUND,
         ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_PRIVILEGE_NOT_HELD,
         ERROR_SHUTDOWN_IN_PROGRESS, ERROR_SHUTDOWN_IS_SCHEDULED,
     };
-
     match code {
         ERROR_ACCESS_DENIED | ERROR_ELEVATION_REQUIRED | ERROR_PRIVILEGE_NOT_HELD => Ok(outcome(
             FirmwareRestartResult::NeedsAdmin,
@@ -143,23 +127,19 @@ fn classify_shutdown_error(code: u32) -> Result<FirmwareRestartOutcome, String> 
         )),
     }
 }
-
 fn outcome(result: FirmwareRestartResult, note: impl Into<String>) -> FirmwareRestartOutcome {
     FirmwareRestartOutcome {
         result,
         note: Some(note.into()),
     }
 }
-
 fn native_firmware_type() -> Result<FirmwareType, String> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::SystemInformation::{
         FIRMWARE_TYPE, FirmwareTypeBios, FirmwareTypeUefi, GetFirmwareType,
     };
-
     let mut firmware: FIRMWARE_TYPE = 0;
-    // SAFETY: `firmware` is a valid writable FIRMWARE_TYPE for the duration
-    // of the call.
+    // SAFETY: `firmware` is a valid writable FIRMWARE_TYPE for the duration of the call.
     if unsafe { GetFirmwareType(&mut firmware) } == 0 {
         let error = unsafe { GetLastError() };
         return Err(format!(
@@ -174,12 +154,10 @@ fn native_firmware_type() -> Result<FirmwareType, String> {
         FirmwareType::Unknown
     })
 }
-
 fn native_system_directory() -> Result<PathBuf, String> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
-
     let mut buffer = vec![0u16; 32_768];
     // SAFETY: the buffer is writable for the advertised capacity.
     let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
@@ -195,20 +173,16 @@ fn native_system_directory() -> Result<PathBuf, String> {
     buffer.truncate(length as usize);
     Ok(std::ffi::OsString::from_wide(&buffer).into())
 }
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-
     use super::*;
-
     struct MockPlatform {
         firmware: Result<FirmwareType, String>,
         system_directory: PathBuf,
         launch: Result<ElevatedProcessOutcome, String>,
         observed: RefCell<Option<(PathBuf, Vec<String>)>>,
     }
-
     impl MockPlatform {
         fn new(
             firmware: Result<FirmwareType, String>,
@@ -222,16 +196,13 @@ mod tests {
             }
         }
     }
-
     impl RestartPlatform for MockPlatform {
         fn detect_firmware(&self) -> Result<FirmwareType, String> {
             self.firmware.clone()
         }
-
         fn system_directory(&self) -> Result<PathBuf, String> {
             Ok(self.system_directory.clone())
         }
-
         fn run_elevated(
             &self,
             executable: &Path,
@@ -241,7 +212,6 @@ mod tests {
             self.launch.clone()
         }
     }
-
     #[test]
     fn capability_exposes_only_confirmed_uefi() {
         let uefi = MockPlatform::new(
@@ -257,7 +227,6 @@ mod tests {
                 active: false,
             }
         );
-
         let bios = MockPlatform::new(
             Ok(FirmwareType::LegacyBios),
             Ok(ElevatedProcessOutcome::Exited(0)),
@@ -266,13 +235,11 @@ mod tests {
         assert_eq!(bios.firmware_type, FirmwareType::LegacyBios);
         assert!(!bios.available);
         assert!(bios.active);
-
         let unknown = MockPlatform::new(Err("api failed".into()), Err("must not run".into()));
         let unknown = snapshot_with(&unknown, false);
         assert_eq!(unknown.firmware_type, FirmwareType::Unknown);
         assert!(!unknown.available);
     }
-
     #[test]
     fn uefi_restart_uses_only_system_shutdown_and_fixed_safe_arguments() {
         let platform = MockPlatform::new(
@@ -281,7 +248,6 @@ mod tests {
         );
         let result = restart_with(&platform).unwrap();
         assert_eq!(result.result, FirmwareRestartResult::Scheduled);
-
         let observed = platform.observed.borrow();
         let (executable, arguments) = observed.as_ref().unwrap();
         assert_eq!(
@@ -295,7 +261,6 @@ mod tests {
                 .any(|argument| argument.eq_ignore_ascii_case("/f"))
         );
     }
-
     #[test]
     fn unsupported_firmware_never_launches_a_process() {
         for firmware in [FirmwareType::LegacyBios, FirmwareType::Unknown] {
@@ -308,7 +273,6 @@ mod tests {
             assert!(platform.observed.borrow().is_none());
         }
     }
-
     #[test]
     fn elevation_outcomes_remain_distinct() {
         let cancelled = MockPlatform::new(
@@ -319,7 +283,6 @@ mod tests {
             restart_with(&cancelled).unwrap().result,
             FirmwareRestartResult::Cancelled
         );
-
         let denied = MockPlatform::new(
             Ok(FirmwareType::Uefi),
             Ok(ElevatedProcessOutcome::NeedsAdmin),
@@ -329,14 +292,12 @@ mod tests {
             FirmwareRestartResult::NeedsAdmin
         );
     }
-
     #[test]
     fn known_nonzero_shutdown_results_are_classified() {
         use windows_sys::Win32::Foundation::{
             ERROR_ENVVAR_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_PRIVILEGE_NOT_HELD,
             ERROR_SHUTDOWN_IN_PROGRESS,
         };
-
         let unsupported = MockPlatform::new(
             Ok(FirmwareType::Uefi),
             Ok(ElevatedProcessOutcome::Exited(ERROR_NOT_SUPPORTED)),
@@ -345,7 +306,6 @@ mod tests {
             restart_with(&unsupported).unwrap().result,
             FirmwareRestartResult::Unsupported
         );
-
         let unavailable_target = MockPlatform::new(
             Ok(FirmwareType::Uefi),
             Ok(ElevatedProcessOutcome::Exited(ERROR_ENVVAR_NOT_FOUND)),
@@ -354,7 +314,6 @@ mod tests {
             restart_with(&unavailable_target).unwrap().result,
             FirmwareRestartResult::Unsupported
         );
-
         let denied = MockPlatform::new(
             Ok(FirmwareType::Uefi),
             Ok(ElevatedProcessOutcome::Exited(ERROR_PRIVILEGE_NOT_HELD)),
@@ -363,7 +322,6 @@ mod tests {
             restart_with(&denied).unwrap().result,
             FirmwareRestartResult::NeedsAdmin
         );
-
         let in_progress = MockPlatform::new(
             Ok(FirmwareType::Uefi),
             Ok(ElevatedProcessOutcome::Exited(ERROR_SHUTDOWN_IN_PROGRESS)),

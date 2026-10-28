@@ -18,10 +18,7 @@
   let { size = 124, paused = false }: { size?: number; paused?: boolean } = $props();
   const uid = $props.id();
 
-  // The app icon in layers, so the coder can type: the code lines, caret,
-  // screen glow and figure are separate elements animated only through
-  // transform and opacity. The compositor runs those even while the main
-  // window's page is busy starting up in the background.
+  // The app icon in layers, so the coder can type: the code lines, caret, screen glow and figure are separate elements animated only through transform and opacity. The compositor runs those even while the main window's page is busy starting up in the background.
 
   /** Typing rhythm, in ms. */
   const LEAD = 380;
@@ -64,8 +61,7 @@
     const timing: KeyframeAnimationOptions = { duration: CYCLE, iterations: Infinity };
     const at = (ms: number) => ms / CYCLE;
 
-    // Each token is wiped in from the left: its clip box slides right while
-    // the ink inside slides left by the same amount, so the ink stays put.
+    // Each token is wiped in from the left: its clip box slides right while the ink inside slides left by the same amount, so the ink stays put.
     steps.forEach(({ start, end }, i) => {
       animations.push(
         tokens[i].animate(
@@ -89,8 +85,7 @@
       );
     });
 
-    // The caret rides the edge of whatever is being typed and jumps between
-    // tokens; once the screen is wiped it goes back to the first line.
+    // The caret rides the edge of whatever is being typed and jumps between tokens; once the screen is wiped it goes back to the first line.
     const home = caretStart(CODE[0]);
     const caretFrames: Keyframe[] = [{ transform: home }];
     steps.forEach(({ start, end }, i) => {

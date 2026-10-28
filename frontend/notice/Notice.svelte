@@ -1,7 +1,5 @@
 <script lang="ts">
-  // The notice a scheduled Game Saves backup leaves at the bottom right of
-  // the screen: what happened, a short chime, and a click to open MYLE.
-  // It goes by itself after a few seconds, and waits while the pointer is on it.
+  // The notice a scheduled Game Saves backup leaves at the bottom right of the screen: what happened, a short chime, and a click to open MYLE. It goes by itself after a few seconds, and waits while the pointer is on it.
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";

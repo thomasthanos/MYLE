@@ -1,6 +1,5 @@
 <script lang="ts">
-  // "What will be backed up": the project as a tree with sizes, what is left
-  // out marked with the rule that leaves it out, and a count per rule.
+  // "What will be backed up": the project as a tree with sizes, what is left out marked with the rule that leaves it out, and a count per rule.
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import File from "@lucide/svelte/icons/file";
   import Folder from "@lucide/svelte/icons/folder";
@@ -33,8 +32,7 @@
 
   const lines = $derived.by(() => {
     const nodes = preview.tree;
-    // A search, a rule or a kept/left filter shows matching rows on their own,
-    // flat; otherwise the tree, with folded folders' contents left out.
+    // A search, a rule or a kept/left filter shows matching rows on their own, flat; otherwise the tree, with folded folders' contents left out.
     if (flat) {
       const needle = query.trim().toLowerCase();
       return nodes.filter((node) =>

@@ -2,18 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { verifyRegistrationResponse, verifyAuthenticationResponse } from "@simplewebauthn/server";
-
 const result = spawnSync("cargo", ["run", "--quiet", "--locked", "--manifest-path", "backend/Cargo.toml", "-p", "myle-vault", "--example", "rp-vectors"], {
   cwd: new URL("../../", import.meta.url), encoding: "utf8", windowsHide: true, timeout: 180_000, maxBuffer: 2 * 1024 * 1024,
 });
 assert.equal(result.status, 0, result.error?.message ?? result.stderr);
 const vectors = JSON.parse(result.stdout);
-
 async function rejectsVerification(run) {
   try { assert.equal((await run()).verified, false); }
   catch (error) { if (error.code === "ERR_ASSERTION") throw error; }
 }
-
 for (const vector of vectors) {
   test(`independent RP accepts MYLE registration and assertion: ${vector.name}`, async () => {
     const registration = await verifyRegistrationResponse({ response: vector.registration, expectedChallenge: vector.registrationChallenge,

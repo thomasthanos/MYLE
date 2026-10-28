@@ -125,8 +125,7 @@ export class AutoClickerState {
       await this.configured();
       if (generation !== this.#startGeneration) return;
       const status = await this.#api.start(config);
-      // Stop may have arrived while the Start command was in flight. Stop again
-      // after its acknowledgement so command scheduling cannot restart the worker.
+      // Stop may have arrived while the Start command was in flight. Stop again after its acknowledgement so command scheduling cannot restart the worker.
       this.accept(generation === this.#startGeneration ? status : await this.#api.stop());
     }
     catch (error) { this.error = message(error); }

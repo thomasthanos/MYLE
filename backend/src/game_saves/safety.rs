@@ -1,32 +1,20 @@
-//! The restore's safety net. Before Ludusavi writes a single save file, MYLE
-//! copies every file the restore is about to overwrite into a slot of its own
-//! (the files the fresh preview names, at the path really written, restore
-//! locations included), byte for byte, and checks each copy by its SHA-256;
-//! the files the restore will create are listed too. A game whose restore does
-//! not finish cleanly is then put back exactly as it was, at once, and "Undo
-//! last restore" puts every game of that restore back the same way.
-
+// ! The restore's safety net. Before Ludusavi writes a single save file, MYLE ! copies every file the restore is about to overwrite into a slot of its own ! (the files the fresh preview names, at the path really written, restore ! locations included), byte for byte, and checks each copy by its SHA-256; ! the files the restore will create are listed too. A game whose restore does ! not finish cleanly is then put back exactly as it was, at once, and "Undo ! last restore" puts every game of that restore back the same way.
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-
 use super::atomic;
 use super::parser::ApiOutput;
-
 /// The slot's list of what it holds.
 pub(crate) const MANIFEST: &str = "manifest.json";
 /// The copies themselves, by number, inside the slot.
 const FILES: &str = "files";
 /// Room left over on a drive after the copies or the restore, for Windows.
 const SPARE_BYTES: u64 = 64 * 1024 * 1024;
-
 /// A save file a restore will write, and the game it belongs to.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Target {
@@ -35,7 +23,6 @@ pub(crate) struct Target {
     /// The size the restore writes.
     pub bytes: u64,
 }
-
 /// What a slot holds: one entry per file the restore writes.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +31,6 @@ pub(crate) struct Manifest {
     pub created_at: u64,
     pub entries: Vec<Entry>,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Entry {
@@ -64,7 +50,6 @@ pub(crate) struct Entry {
     #[serde(default)]
     pub readonly: bool,
 }
-
 impl Manifest {
     pub(crate) fn games(&self) -> Vec<String> {
         let mut games: Vec<String> = self.entries.iter().map(|entry| entry.game.clone()).collect();
@@ -73,7 +58,6 @@ impl Manifest {
         games
     }
 }
-
 /// The files a restore will write, from its fresh preview (one game's): every
 /// file not ignored whose backed-up copy differs from this PC's ("Same" files
 /// are skipped by the restore and left alone here too).
@@ -93,12 +77,10 @@ pub(crate) fn targets(api: &ApiOutput) -> Vec<Target> {
     }
     found.into_values().collect()
 }
-
 /// Ludusavi writes paths with forward slashes ("C:/Users/…").
 fn windows_path(path: &str) -> PathBuf {
     PathBuf::from(path.replace('/', "\\"))
 }
-
 /// Files among `targets` that another program holds open so that nothing else
 /// may write them: the game (or its launcher) is still running. Writing then
 /// would fail part-way through, or be undone when the game saves on exit.
@@ -116,12 +98,10 @@ pub(crate) fn locked(targets: &[Target]) -> Vec<String> {
         .map(|target| target.path.display().to_string())
         .collect()
 }
-
 /// ERROR_SHARING_VIOLATION or ERROR_LOCK_VIOLATION: someone holds the file.
 fn in_use(error: &io::Error) -> bool {
     matches!(error.raw_os_error(), Some(32 | 33))
 }
-
 /// Whether `folder`'s drive can take `needed` more bytes (with room to spare).
 /// An error naming the drive when it cannot; unknown space counts as enough.
 pub(crate) fn ensure_room(folder: &Path, needed: u64, what: &str) -> Result<(), String> {
@@ -138,19 +118,16 @@ pub(crate) fn ensure_room(folder: &Path, needed: u64, what: &str) -> Result<(), 
     }
     Ok(())
 }
-
 fn free_space(folder: &Path) -> Option<u64> {
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     // The nearest folder that exists: the target's own may be created later.
     let existing = folder.ancestors().find(|path| path.is_dir())?;
     let wide: Vec<u16> = existing.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut free = 0u64;
-    // SAFETY: `wide` is NUL-terminated and alive for the call; the two other
-    // out-parameters are optional and passed as null.
+    // SAFETY: `wide` is NUL-terminated and alive for the call; the two other out-parameters are optional and passed as null.
     let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
     (ok != 0).then_some(free)
 }
-
 /// Copies every target that exists into `slot` and checks each copy, and
 /// lists the targets that do not exist yet, then writes the slot's manifest.
 /// Any failure is an error: the restore must not start without its copy.
@@ -197,14 +174,12 @@ pub(crate) fn take(slot: &Path, targets: &[Target], now: u64) -> Result<Manifest
     atomic::write(&slot.join(MANIFEST), &json)?;
     Ok(manifest)
 }
-
 /// The manifest of a slot MYLE copied itself; `None` for a slot made by an
 /// older MYLE (a Ludusavi backup), which is put back by Ludusavi instead.
 pub(crate) fn load(slot: &Path) -> Option<Manifest> {
     let text = fs::read_to_string(slot.join(MANIFEST)).ok()?;
     serde_json::from_str(&text).ok()
 }
-
 /// Puts the files of `games` (every game when `None`) back as they were
 /// before the restore: each copy comes back (checked by its SHA-256 first),
 /// files the restore created are removed, and read-only files are read-only
@@ -228,7 +203,6 @@ pub(crate) fn put_back(slot: &Path, manifest: &Manifest, games: Option<&HashSet<
     }
     failed
 }
-
 /// After a game restored cleanly: its files that were read-only before are
 /// read-only again (Ludusavi clears the flag to write them).
 pub(crate) fn keep_readonly(manifest: &Manifest, games: &HashSet<String>) {
@@ -240,7 +214,6 @@ pub(crate) fn keep_readonly(manifest: &Manifest, games: &HashSet<String>) {
         let _ = set_readonly(Path::new(&entry.target), true);
     }
 }
-
 fn restore_copy(slot: &Path, entry: &Entry, target: &Path) -> Result<(), String> {
     let copy = slot.join(FILES).join(entry.copy.as_deref().ok_or("its safety copy is missing")?);
     let (_, sha256) = hash_of(&copy).map_err(|error| format!("its safety copy cannot be read: {error}"))?;
@@ -250,8 +223,7 @@ fn restore_copy(slot: &Path, entry: &Entry, target: &Path) -> Result<(), String>
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    // Written beside the save and swapped in, so a failure part-way leaves
-    // the save as it is rather than half-written.
+    // Written beside the save and swapped in, so a failure part-way leaves the save as it is rather than half-written.
     let staged = target.with_file_name(format!(
         "{}.myle-restore-{}",
         target.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -275,7 +247,6 @@ fn restore_copy(slot: &Path, entry: &Entry, target: &Path) -> Result<(), String>
     }
     Ok(())
 }
-
 fn remove_created(target: &Path) -> Result<(), String> {
     match fs::remove_file(target) {
         Ok(()) => Ok(()),
@@ -287,7 +258,6 @@ fn remove_created(target: &Path) -> Result<(), String> {
         Err(error) => Err(error.to_string()),
     }
 }
-
 fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
     let mut permissions = fs::metadata(path)?.permissions();
     if permissions.readonly() != readonly {
@@ -296,7 +266,6 @@ fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
     }
     Ok(())
 }
-
 /// Copies `from` into the new file `to`, flushes it to disk, then reads the
 /// copy back: it must hash the same as the original read. Answers the size and
 /// the SHA-256.
@@ -325,7 +294,6 @@ fn copy_verified(from: &Path, to: &Path) -> io::Result<(u64, String)> {
     }
     Ok((bytes, expected))
 }
-
 fn hash_of(path: &Path) -> io::Result<(u64, String)> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -341,7 +309,6 @@ fn hash_of(path: &Path) -> io::Result<(u64, String)> {
     }
     Ok((bytes, crate::download::to_hex(&hasher.finalize())))
 }
-
 /// Reads every file of a snapshot zip to its end, which checks each one's
 /// CRC: a damaged backup (a bad copy in a cloud folder, a disk error) then
 /// stops the restore before any save is touched, instead of being half
@@ -364,7 +331,6 @@ pub(crate) fn verify_snapshot(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// Why backing `title` up now would destroy its older snapshots, if it would.
 ///
 /// Ludusavi keeps a game's snapshots (`backup-*`) in the game's folder and
@@ -409,8 +375,7 @@ pub(crate) fn history_damage(backup: &Path, title: &str) -> Option<String> {
     if !text.lines().any(|line| line.trim_start().starts_with("name:")) {
         return Some(format!("Not backed up, to keep its older backups: the backup list (mapping.yaml) in {shown} is damaged."));
     }
-    // A snapshot older than the list that the list no longer names was lost
-    // from it; a newer one is what an interrupted backup left (harmless).
+    // A snapshot older than the list that the list no longer names was lost from it; a newer one is what an interrupted backup left (harmless).
     let listed_at = fs::metadata(&mapping).and_then(|meta| meta.modified()).ok();
     let forgotten: Vec<&str> = snapshots
         .iter()
@@ -427,7 +392,6 @@ pub(crate) fn history_damage(backup: &Path, title: &str) -> Option<String> {
     }
     None
 }
-
 /// The folder Ludusavi keeps a game's backups in (its `escape_folder_name`).
 fn escape_folder_name(title: &str) -> String {
     let mut escaped: Vec<char> = title.chars().collect();
@@ -443,23 +407,19 @@ fn escape_folder_name(title: &str) -> String {
         .map(|character| if matches!(character, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '_' } else { character })
         .collect()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game_saves::parser;
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-safety-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     #[test]
     fn the_files_a_restore_writes_come_from_its_fresh_preview() {
-        // A game the cached scan did not know as local, a redirected file,
-        // a file that is the same already, and an ignored one.
+        // A game the cached scan did not know as local, a redirected file, a file that is the same already, and an ignored one.
         let api = parser::parse_api(
             r#"{"games":{"Game":{"decision":"Processed","change":"Different","files":{
                 "C:/Users/me/AppData/Local/Game/save.dat":{"change":"Different","bytes":10},
@@ -474,7 +434,6 @@ mod tests {
         assert_eq!(paths, vec![r"C:\Users\me\AppData\Local\Game\save.dat", r"D:\Saves\Game\profile.dat"]);
         assert!(found.iter().all(|target| target.game == "Game"));
     }
-
     #[test]
     fn a_game_is_put_back_byte_for_byte_and_what_the_restore_made_is_removed() {
         let root = temp("put-back");
@@ -490,7 +449,6 @@ mod tests {
         let slot = root.join("slot");
         let manifest = take(&slot, &targets, 1).unwrap();
         assert!(manifest.entries[0].existed && !manifest.entries[1].existed);
-
         // The restore writes both, then something goes wrong.
         fs::write(&kept, b"after!").unwrap();
         fs::write(&made, b"new").unwrap();
@@ -499,7 +457,6 @@ mod tests {
         assert!(!made.exists(), "a file the restore created is removed again");
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn only_the_games_asked_for_are_put_back() {
         let root = temp("one-game");
@@ -521,7 +478,6 @@ mod tests {
         assert_eq!(fs::read(&b).unwrap(), b"b1");
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_damaged_safety_copy_is_never_written_over_a_save() {
         let root = temp("damaged");
@@ -536,7 +492,6 @@ mod tests {
         assert_eq!(fs::read(&save).unwrap(), b"restored", "left as it is rather than overwritten");
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn read_only_saves_are_read_only_again() {
         let root = temp("readonly");
@@ -554,7 +509,6 @@ mod tests {
         set_readonly(&save, false).unwrap();
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_save_the_game_holds_open_is_reported_before_anything_is_written() {
         let root = temp("locked");
@@ -573,7 +527,6 @@ mod tests {
         assert!(locked(&targets).is_empty());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_damaged_snapshot_zip_is_refused_and_a_sound_one_passes() {
         let root = temp("zip");
@@ -593,7 +546,6 @@ mod tests {
         assert!(verify_snapshot(&path).is_err());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_manifest_round_trips_and_an_older_slot_has_none() {
         let root = temp("manifest");
@@ -605,14 +557,12 @@ mod tests {
         assert_eq!(load(&root.join("ludusavi-slot")), None);
         let _ = fs::remove_dir_all(root);
     }
-
     fn history(name: &str) -> (PathBuf, PathBuf) {
         let root = temp(name);
         let game = root.join("Hades");
         fs::create_dir_all(&game).unwrap();
         (root, game)
     }
-
     #[test]
     fn a_game_without_snapshots_is_backed_up() {
         let (root, game) = history("fresh");
@@ -622,7 +572,6 @@ mod tests {
         assert_eq!(history_damage(&root, "Hades"), None);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn snapshots_with_a_sound_list_are_backed_up() {
         let (root, game) = history("sound");
@@ -631,7 +580,6 @@ mod tests {
         assert_eq!(history_damage(&root, "Hades"), None);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_missing_or_empty_list_protects_the_snapshots() {
         let (root, game) = history("missing");
@@ -641,7 +589,6 @@ mod tests {
         assert!(history_damage(&root, "Hades").unwrap().contains("damaged"));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_synced_conflict_copy_of_the_list_protects_the_snapshots() {
         let (root, game) = history("conflict");
@@ -651,7 +598,6 @@ mod tests {
         assert!(history_damage(&root, "Hades").unwrap().contains("mapping-DESKTOP-7.yaml"));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_snapshot_the_list_forgot_protects_it_and_an_interrupted_one_does_not() {
         let (root, game) = history("forgotten");
@@ -667,7 +613,6 @@ mod tests {
         assert_eq!(history_damage(&root, "Hades"), None);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn folder_names_follow_the_engine() {
         assert_eq!(escape_folder_name("Hades"), "Hades");

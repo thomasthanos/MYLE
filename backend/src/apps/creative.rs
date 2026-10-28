@@ -1,26 +1,15 @@
-//! Creative Hub: self-hosted packages (a zip or an installer) that the app
-//! downloads with progress, unpacks, runs, and then cleans up after.
-//!
-//! The list lives in `catalog/creative-apps.json`, which is compiled into the
-//! binary: every user gets exactly what ships, and nothing on the machine can
-//! change it. The page only ever sends an id, so URLs, passwords and commands
-//! never come from the webview.
-
+// ! Creative Hub: self-hosted packages (a zip or an installer) that the app ! downloads with progress, unpacks, runs, and then cleans up after. ! ! The list lives in `catalog/creative-apps.json`, which is compiled into the ! binary: every user gets exactly what ships, and nothing on the machine can ! change it. The page only ever sends an id, so URLs, passwords and commands ! never come from the webview.
 use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
-
 use super::jobs::{JobHandle, Jobs};
 use super::process::hidden;
 use super::resolver::{self, Resolver};
 use super::{Cleanup, JobEvent, JobOutcome, Stage};
 use crate::download::{self, CANCELLED, err, parse_sha256_digest};
-
 const DEFAULT_CATALOG: &str = include_str!("../../catalog/creative-apps.json");
 const USER_AGENT: &str = "MakeYourLifeEasier-Apps";
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreativeApp {
@@ -37,7 +26,6 @@ struct CreativeApp {
     /// Optional `"sha256:…"` of the package.
     digest: Option<String>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum Setup {
@@ -67,7 +55,6 @@ enum Setup {
     /// Save the built executable to %APPDATA%\ThomasThanos\MakeYourLifeEasier and run it.
     WandEnhancer,
 }
-
 impl Setup {
     fn action_label(&self) -> &'static str {
         match self {
@@ -77,10 +64,7 @@ impl Setup {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Catalog
-
+// --------------------------------------------------------------------------- Catalog
 /// The list is fixed: it is compiled into the app and cannot be edited from
 /// the outside, so what ships is exactly what every user gets.
 ///
@@ -93,7 +77,6 @@ fn catalog() -> Vec<CreativeApp> {
         Vec::new()
     })
 }
-
 /// The list is private: the public repository ships the file empty, and a
 /// build made from it has no Creative Hub cards rather than a broken list.
 fn parse_catalog(text: &str) -> serde_json::Result<Vec<CreativeApp>> {
@@ -102,14 +85,12 @@ fn parse_catalog(text: &str) -> serde_json::Result<Vec<CreativeApp>> {
     }
     serde_json::from_str(text)
 }
-
 fn find(id: &str) -> Result<CreativeApp, String> {
     catalog()
         .into_iter()
         .find(|a| a.id == id)
         .ok_or_else(|| format!("unknown item: {id}"))
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreativeAppInfo {
@@ -123,7 +104,6 @@ pub struct CreativeAppInfo {
     configured: bool,
     action_label: String,
 }
-
 #[tauri::command]
 pub fn creative_catalog() -> Vec<CreativeAppInfo> {
     catalog()
@@ -140,10 +120,8 @@ pub fn creative_catalog() -> Vec<CreativeAppInfo> {
         })
         .collect()
 }
-
 /// Icons bigger than this are ignored: a card icon is ~46 px.
 const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
-
 /// Turns the `icon` field into something the page can render:
 /// * `https://…`, `data:…` — used as they are
 /// * `/icons/app.svg` — a file shipped in the app's own `frontend/public/` folder
@@ -163,7 +141,6 @@ fn resolve_icon(icon: &str) -> Option<String> {
     }
     icon_data_url(&PathBuf::from(super::custom::expand_env(icon)))
 }
-
 fn icon_data_url(path: &Path) -> Option<String> {
     let mime = match path
         .extension()?
@@ -189,10 +166,7 @@ fn icon_data_url(path: &Path) -> Option<String> {
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
     ))
 }
-
-// ---------------------------------------------------------------------------
-// Download & setup
-
+// --------------------------------------------------------------------------- Download & setup
 #[tauri::command]
 pub async fn creative_install(
     app: AppHandle,
@@ -203,20 +177,15 @@ pub async fn creative_install(
 ) -> Result<JobOutcome, String> {
     let entry = find(&id)?;
     let job = jobs.start(&id)?;
-    // Everything lands in Downloads, where the user can see it, and stays
-    // there: an installer that relaunches itself must not have its file
-    // deleted from under it.
+    // Everything lands in Downloads, where the user can see it, and stays there: an installer that relaunches itself must not have its file deleted from under it.
     let work_dir = downloads_dir();
     tokio::fs::create_dir_all(&work_dir).await.map_err(err)?;
-
     let result = run(&app, &job, &entry, &on_event, &work_dir, &cleanup).await;
-
     match result {
         Err(e) if e == CANCELLED || job.is_cancelled() => Ok(JobOutcome::Cancelled),
         other => other,
     }
 }
-
 async fn run(
     app: &AppHandle,
     job: &JobHandle,
@@ -229,12 +198,10 @@ async fn run(
         .source
         .as_ref()
         .ok_or("this item has no download link yet")?;
-
     let _ = on_event.send(JobEvent::Stage {
         stage: Stage::Resolving,
     });
     let resolved = resolver::resolve(app, &format!("creative:{}", entry.id), source).await?;
-
     let _ = on_event.send(JobEvent::Stage {
         stage: Stage::Downloading,
     });
@@ -265,8 +232,7 @@ async fn run(
                     });
                 }
             }
-            // Size unknown (or the catalog's guess was too small): the card
-            // still shows how much has arrived, every few megabytes.
+            // Size unknown (or the catalog's guess was too small): the card still shows how much has arrived, every few megabytes.
             None if done >= next_unsized => {
                 next_unsized = done + 8 * 1024 * 1024;
                 let _ = on_event.send(JobEvent::Progress {
@@ -281,7 +247,6 @@ async fn run(
         expected.is_some(),
     )
     .await?;
-
     if let Some(expected) = expected {
         let _ = on_event.send(JobEvent::Stage {
             stage: Stage::Verifying,
@@ -290,7 +255,6 @@ async fn run(
             return Err("The download failed its SHA-256 check.".into());
         }
     }
-
     let (target, args) = match &entry.setup {
         Setup::WandEnhancer => {
             let _ = on_event.send(JobEvent::Stage {
@@ -299,22 +263,17 @@ async fn run(
             let _ = on_event.send(JobEvent::Note {
                 text: "Configuring Wand Enhancer...".into(),
             });
-
             // Close existing instances to prevent file lock when updating
             let _ = super::process::hidden("taskkill")
                 .args(["/IM", WAND_ENHANCER_EXE, "/F"])
                 .status()
                 .await;
-
             let roaming = crate::storage::roaming_dir()?;
             tokio::fs::create_dir_all(&roaming).await.map_err(err)?;
             let dest_exe = roaming.join(WAND_ENHANCER_EXE);
-
             tokio::fs::copy(&file, &dest_exe).await.map_err(err)?;
-
             // Launch the built executable
             let _ = std::process::Command::new(&dest_exe).spawn();
-
             return Ok(JobOutcome::Done {
                 note: Some(format!("Saved to {} and launched.", dest_exe.display())),
             });
@@ -354,9 +313,7 @@ async fn run(
             let unpacked = work_dir.join(folder_name(&entry.name));
             let existed = unpacked.exists();
             let (zip, dest, pw) = (file.clone(), unpacked.clone(), password.clone());
-
-            // A self-contained installer inside a big archive: pull out that one
-            // file instead of unpacking thousands.
+            // A self-contained installer inside a big archive: pull out that one file instead of unpacking thousands.
             let target = match (only_run, run) {
                 (true, Some(name)) => {
                     let (name, pw, events) = (name.clone(), pw.clone(), on_event.clone());
@@ -394,15 +351,13 @@ async fn run(
             if !target.exists() {
                 return Err(format!("{} is not in the package", target.display()));
             }
-            // Only clean up a folder we created: never touch one that was
-            // already sitting in Downloads.
+            // Only clean up a folder we created: never touch one that was already sitting in Downloads.
             if !existed {
                 cleanup.add(unpacked.clone());
             }
             (target, args.clone())
         }
     };
-
     if job.is_cancelled() {
         return Err(CANCELLED.into());
     }
@@ -415,7 +370,6 @@ async fn run(
         note: Some(note.map_or(where_to.clone(), |n| format!("{n} {where_to}"))),
     })
 }
-
 /// Picks the installer inside an unpacked package: prefers names that look like
 /// a setup, and only looks at the top two levels.
 fn find_setup(dir: &Path) -> Option<PathBuf> {
@@ -455,7 +409,6 @@ fn find_setup(dir: &Path) -> Option<PathBuf> {
     });
     found.into_iter().next()
 }
-
 /// Reports unpack progress, at most once per percent.
 fn unpack_progress(events: Channel<JobEvent>) -> impl FnMut(u64, u64) {
     let mut last = -1.0f64;
@@ -474,12 +427,10 @@ fn unpack_progress(events: Channel<JobEvent>) -> impl FnMut(u64, u64) {
         }
     }
 }
-
 /// The user's Downloads folder.
 fn downloads_dir() -> PathBuf {
     PathBuf::from(super::custom::expand_env(r"%USERPROFILE%\Downloads"))
 }
-
 /// Where an `extract` package is unpacked: the configured folder, or
 /// `%USERPROFILE%\Downloads\<name>`.
 fn extract_destination(to: Option<&str>, name: &str) -> PathBuf {
@@ -488,7 +439,6 @@ fn extract_destination(to: Option<&str>, name: &str) -> PathBuf {
         None => downloads_dir().join(folder_name(name)),
     }
 }
-
 /// A folder name Windows accepts, from an app's display name.
 fn folder_name(name: &str) -> String {
     let cleaned: String = name
@@ -503,10 +453,7 @@ fn folder_name(name: &str) -> String {
         cleaned
     }
 }
-
-// ---------------------------------------------------------------------------
-// Clip Studio Paint: exe swap (revert to bundled version after a CELSYS update)
-
+// --------------------------------------------------------------------------- Clip Studio Paint: exe swap (revert to bundled version after a CELSYS update)
 /// The source exe that our zip ships — extracted into Downloads by `creative_install`.
 const CSP_RESTORE_EXE: &str = "CLIPStudioPaint-restoreversion.exe";
 /// The canonical exe that Clip Studio runs.
@@ -517,7 +464,6 @@ const CSP_VENDOR: &str = "CELSYS";
 const CSP_SUBFOLDER_SUFFIX: &str = "CLIP STUDIO PAINT";
 /// The zip unpacks into a folder named after the catalog entry.
 const CSP_UNPACK_FOLDER: &str = "Clip Studio Paint EX";
-
 /// Finds the Clip Studio install directory, ignoring the version number in the
 /// path (`CLIP STUDIO 1.5`, `CLIP STUDIO 2.0`, …).
 ///
@@ -526,7 +472,6 @@ fn find_clip_studio_paint_dir() -> Result<std::path::PathBuf, String> {
     let vendor = PathBuf::from(r"C:\Program Files").join(CSP_VENDOR);
     let entries = std::fs::read_dir(&vendor)
         .map_err(|_| format!("Cannot read {:?} — is Clip Studio installed?", vendor))?;
-
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -551,7 +496,6 @@ fn find_clip_studio_paint_dir() -> Result<std::path::PathBuf, String> {
         vendor
     ))
 }
-
 /// Returns `true` when the restore exe (extracted by `creative_install`) is
 /// present in Downloads and the swap button should be shown.
 #[tauri::command]
@@ -561,7 +505,6 @@ pub fn creative_clip_studio_restore_available() -> bool {
         .join(CSP_RESTORE_EXE)
         .exists()
 }
-
 /// Swaps the live `CLIPStudioPaint.exe` with the bundled restore version.
 ///
 /// The source exe is the one extracted into Downloads when the user ran
@@ -573,7 +516,6 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     let source = downloads_dir()
         .join(CSP_UNPACK_FOLDER)
         .join(CSP_RESTORE_EXE);
-
     if !source.exists() {
         return Err(format!(
             "Restore exe not found at {:?}.\n\
@@ -582,12 +524,9 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
             source
         ));
     }
-
     let paint_dir = find_clip_studio_paint_dir()?;
     let target = paint_dir.join(CSP_LIVE_EXE);
-
-    // Build a PowerShell snippet that copies the file with admin rights.
-    // Both paths are fixed — no user input ever reaches this script.
+    // Build a PowerShell snippet that copies the file with admin rights. Both paths are fixed — no user input ever reaches this script.
     let script = format!(
         "Copy-Item -LiteralPath '{src}' -Destination '{dst}' -Force",
         src = source.to_string_lossy().replace('\'', "''"),
@@ -596,7 +535,6 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     let script = format!(
         "try {{ {script}; exit 0 }} catch {{ Write-Error $_.Exception.Message; exit 1 }}"
     );
-
     let args: Vec<String> = [
         "-NoProfile",
         "-NonInteractive",
@@ -608,7 +546,6 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     .map(String::from)
     .chain([super::process::encode_command(&script)])
     .collect();
-
     let code = super::process::run_elevated("powershell.exe", &args, true).await?;
     match code {
         0 => Ok(format!(
@@ -619,22 +556,18 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
         c => Err(format!("PowerShell exited with code {c}.")),
     }
 }
-
 #[allow(dead_code)]
 pub const WAND_ENHANCER_ID: &str = "creative.wandenhancer";
 pub const WAND_ENHANCER_EXE: &str = "WandEnhancer.exe";
-
 /// Location where WandEnhancer.exe is saved: %APPDATA%\ThomasThanos\MakeYourLifeEasier\WandEnhancer.exe
 pub fn wand_enhancer_exe_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(WAND_ENHANCER_EXE))
 }
-
 /// Returns true when WandEnhancer.exe is already present in roaming dir.
 #[tauri::command]
 pub fn creative_wand_enhancer_available() -> bool {
     wand_enhancer_exe_path().map(|p| p.is_file()).unwrap_or(false)
 }
-
 /// Launches the installed WandEnhancer.exe.
 #[tauri::command]
 pub async fn creative_wand_enhancer_launch() -> Result<String, String> {
@@ -647,11 +580,9 @@ pub async fn creative_wand_enhancer_launch() -> Result<String, String> {
         .map_err(|e| format!("Failed to launch WandEnhancer: {e}"))?;
     Ok("Wand Enhancer launched.".into())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn bundled_catalog_parses() {
         // Empty in the public repository; whatever a build carries must parse.
@@ -662,7 +593,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn an_empty_list_has_no_cards_and_an_entry_like_the_readme_parses() {
         assert!(parse_catalog("").unwrap().is_empty());
@@ -683,7 +613,6 @@ mod tests {
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].setup.action_label(), "Download & Setup");
     }
-
     #[test]
     fn icons_can_be_urls_bundled_files_or_files_on_disk() {
         assert_eq!(
@@ -701,7 +630,6 @@ mod tests {
         assert_eq!(resolve_icon("   "), None);
         assert_eq!(resolve_icon("C:\\nope\\missing.png"), None);
         assert_eq!(resolve_icon("C:\\nope\\notes.txt"), None);
-
         let dir = std::env::temp_dir().join(format!("myle-icon-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let svg = dir.join("mark.svg");
@@ -710,13 +638,11 @@ mod tests {
             resolve_icon(&svg.display().to_string()).as_deref(),
             Some("data:image/svg+xml;base64,PHN2Zy8+")
         );
-
         // Also works through an environment variable in the path.
         unsafe { std::env::set_var("MYLE_ICON_TEST_DIR", &dir) };
         assert!(resolve_icon("%MYLE_ICON_TEST_DIR%\\mark.svg").is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
-
     #[test]
     fn extract_destinations() {
         let downloads = super::super::custom::expand_env("%USERPROFILE%\\Downloads");
@@ -736,7 +662,6 @@ mod tests {
         );
         assert_eq!(folder_name("   "), "Package");
     }
-
     #[test]
     fn action_labels_match_the_setup_kind() {
         assert_eq!(
@@ -766,7 +691,6 @@ mod tests {
             "Download & Build"
         );
     }
-
     #[test]
     fn setup_detection_prefers_installers() {
         let dir = std::env::temp_dir().join(format!("myle-setup-test-{}", std::process::id()));

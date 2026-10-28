@@ -159,8 +159,7 @@ fn inside_myle(point: POINT) -> bool {
     if hit.is_null() {
         return false;
     }
-    // WebView2 child HWNDs can belong to the renderer process. Its root is
-    // MYLE's host window, which owns the Cancel control and must keep its clicks.
+    // WebView2 child HWNDs can belong to the renderer process. Its root is MYLE's host window, which owns the Cancel control and must keep its clicks.
     let root = unsafe { GetAncestor(hit, GA_ROOT) };
     let window = if root.is_null() { hit } else { root };
     unsafe {

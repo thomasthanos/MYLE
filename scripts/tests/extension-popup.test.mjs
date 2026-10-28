@@ -2,13 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-
-// The real popup.js, run against a small DOM of its own: elements, text,
-// attributes, classes, events (with bubbling) and focus, nothing more.
+// The real popup.js, run against a small DOM of its own: elements, text, attributes, classes, events (with bubbling) and focus, nothing more.
 const source = readFileSync(new URL("../../extension/popup.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../../extension/popup.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../extension/popup.css", import.meta.url), "utf8");
-
 class Node {
   constructor(tag, document) {
     this.tagName = tag.toUpperCase();
@@ -95,7 +92,6 @@ class Node {
     return this.descendants().filter((node) => node.tagName === "BUTTON");
   }
 }
-
 function fakeDocument() {
   const document = {
     activeElement: null,
@@ -130,17 +126,14 @@ function fakeDocument() {
   element("debug", "input");
   return document;
 }
-
 function deferred() {
   let resolve;
   const promise = new Promise((done) => (resolve = done));
   return { promise, resolve };
 }
-
 const settle = async () => {
   for (let i = 0; i < 6; i++) await new Promise((done) => setImmediate(done));
 };
-
 /** Opens the popup on `url`; `answer(message)` answers what it sends. */
 function popup(url, answer = () => ({ ok: true, enabled: true, state: "unlocked" })) {
   const document = fakeDocument();
@@ -183,12 +176,10 @@ function popup(url, answer = () => ({ ok: true, enabled: true, state: "unlocked"
   };
   return { context, document, window, sent, timers, id, text, runTimers };
 }
-
 const login = (extra = {}) => ({
   id: "a", title: "Example", username: "ana@example.com", site: "example.com", exact: true,
   totp: false, frameId: 0, frameSite: "example.com", embedded: false, ...extra,
 });
-
 test("MYLE's errors are told in words that say what to do", () => {
   const { context } = popup("chrome://newtab/");
   assert.match(context.errorView("hostMissing").text, /Browser filling is turned off/);
@@ -198,7 +189,6 @@ test("MYLE's errors are told in words that say what to do", () => {
   assert.equal(context.errorView("vaultError").text, "MYLE could not read your vault just now. Try again in a moment.");
   assert.match(context.reasonFor("noContent"), /reload it/);
 });
-
 test("the chip says whether MYLE is connected and the vault unlocked", () => {
   const { context } = popup("chrome://newtab/");
   const chip = (answer, old) => {
@@ -213,7 +203,6 @@ test("the chip says whether MYLE is connected and the vault unlocked", () => {
   assert.deepEqual(chip({ ok: false, error: "hostMissing" }), ["bad", "Not connected", "open"]);
   assert.deepEqual(chip({ ok: true, enabled: true, state: "unlocked" }, true), ["warn", "Update MYLE", "open"]);
 });
-
 test("a browser page shows the chip and asks MYLE for nothing else", async () => {
   const opened = popup("chrome://newtab/");
   await settle();
@@ -223,14 +212,12 @@ test("a browser page shows the chip and asks MYLE for nothing else", async () =>
   assert.equal(opened.id("chip").hidden, false);
   assert.equal(opened.id("chip-text").textContent, "Connected · Unlocked");
 });
-
 test("a plain http page is not a secure page and its logins are not asked for", async () => {
   const opened = popup("http://example.com/login");
   await settle();
   assert.deepEqual(opened.sent.map((message) => message.type), ["status"]);
   assert.match(opened.text(), /Not a secure page/);
 });
-
 test("the status and the logins are asked for side by side", async () => {
   const opened = popup("https://example.com/login", (message) =>
     message.type === "tabLogins" ? { ok: true, logins: [login(), login({ id: "b", title: "Work" })] } : { ok: true, enabled: true, state: "unlocked", appVersion: "9.18.0" });
@@ -245,7 +232,6 @@ test("the status and the logins are asked for side by side", async () => {
   opened.id("search").dispatch("input");
   assert.equal(opened.id("count").textContent, "1/2");
 });
-
 test("a late list never covers a scanned 2FA key", async () => {
   const first = deferred();
   let lists = 0;
@@ -267,7 +253,6 @@ test("a late list never covers a scanned 2FA key", async () => {
   assert.doesNotThrow(() => opened.id("search").dispatch("keydown", { key: "Enter" }));
   assert.ok(!opened.text().includes("JBSWY3DPEHPK3PXP"), "the key is never in the page");
 });
-
 test("a copy that fails right after one that worked shows no check mark", async () => {
   let copies = 0;
   const opened = popup("https://example.com/login", (message) => {
@@ -290,7 +275,6 @@ test("a copy that fails right after one that worked shows no check mark", async 
   opened.runTimers();
   assert.ok(!copy.classList.contains("done"));
 });
-
 test("a login without a password offers no Copy password", async () => {
   const opened = popup("https://example.com/login", (message) =>
     message.type === "tabLogins" ? { ok: true, logins: [login({ hasPassword: false, totp: true })] } : { ok: true, enabled: true, state: "unlocked" });
@@ -298,7 +282,6 @@ test("a login without a password offers no Copy password", async () => {
   const labels = opened.id("content").buttons().map((node) => node.getAttribute("aria-label"));
   assert.deepEqual(labels, ["Copy the user name: Example", "Copy the 2FA code: Example", "Fill the user name of Example"]);
 });
-
 test("each Fill names its login, and the list is not one live region", async () => {
   const opened = popup("https://example.com/login", (message) =>
     message.type === "tabLogins" ? { ok: true, logins: [login()] } : { ok: true, enabled: true, state: "unlocked" });
@@ -309,7 +292,6 @@ test("each Fill names its login, and the list is not one live region", async () 
   assert.doesNotMatch(html, /id="content"[^>]*aria-live/);
   assert.match(html, /id="live" role="status"/);
 });
-
 test("replacing a login's 2FA key takes a second, explicit click", async () => {
   const opened = popup("https://example.com/login", (message) => {
     if (message.type === "tabLogins") return { ok: true, logins: [login({ totp: true })] };
@@ -334,7 +316,6 @@ test("replacing a login's 2FA key takes a second, explicit click", async () => {
   assert.deepEqual({ id: saved.id, secret: saved.secret }, { id: "a", secret: "otpauth://totp/x?secret=ABC" });
   assert.match(opened.text(), /Key replaced/);
 });
-
 test("Open MYLE closes the popup only when MYLE answered", async () => {
   let reply = { ok: false, error: "hostMissing" };
   const opened = popup("chrome://newtab/", (message) => (message.type === "open" ? reply : { ok: false, error: "notRunning" }));
@@ -348,7 +329,6 @@ test("Open MYLE closes the popup only when MYLE answered", async () => {
   await settle();
   assert.equal(opened.window.closed, true);
 });
-
 test("white text on the primary and danger buttons reaches WCAG AA", () => {
   const luminance = (r, g, b) => {
     const linear = (value) => {

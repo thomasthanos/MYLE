@@ -1,13 +1,8 @@
-//! Where each tweak stands on this PC, read without administrator rights:
-//! the registry, services, scheduled tasks, the time format and the
-//! installed Store apps.
-
+// ! Where each tweak stands on this PC, read without administrator rights: ! the registry, services, scheduled tasks, the time format and the ! installed Store apps.
 use serde::Serialize;
-
 use super::catalog::{self, Data, Hive, Op, Tweak};
 use super::system::{self, Value};
 use super::undo::{Before, Store};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
@@ -18,7 +13,6 @@ pub enum State {
     /// Not for this version of Windows.
     Unavailable,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TweakStatus {
@@ -36,7 +30,6 @@ pub struct TweakStatus {
     /// MYLE applied it and kept what was there before.
     pub can_undo: bool,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
@@ -52,7 +45,6 @@ pub struct AppStatus {
     pub removed_by_myle: bool,
     pub store_id: Option<&'static str>,
 }
-
 /// One operation's standing: `None` when it does not apply here (a
 /// service or task this PC does not have, or one the user set by hand).
 pub(super) fn op_applied(op: &Op, packages: &[String]) -> Option<bool> {
@@ -79,7 +71,6 @@ pub(super) fn op_applied(op: &Op, packages: &[String]) -> Option<bool> {
         Op::Capability { package, .. } => system::capability_installed(package).map(|installed| !installed),
     }
 }
-
 /// The Windows default ("Off" state) for an operation when turning off a
 /// tweak that was already in place on this PC before MYLE ran.
 pub(super) fn default_before(op: &Op) -> Option<Before> {
@@ -124,7 +115,6 @@ pub(super) fn default_before(op: &Op) -> Option<Before> {
         Op::Appx { .. } => None,
     }
 }
-
 pub fn tweak_state(tweak: &Tweak, build: u32, packages: &[String]) -> State {
     if !tweak.builds.contains(build) {
         return State::Unavailable;
@@ -141,7 +131,6 @@ pub fn tweak_state(tweak: &Tweak, build: u32, packages: &[String]) -> State {
         _ => State::Partial,
     }
 }
-
 pub fn tweaks(build: u32, packages: &[String], store: &Store) -> Vec<TweakStatus> {
     catalog::TWEAKS
         .iter()
@@ -164,7 +153,6 @@ pub fn tweaks(build: u32, packages: &[String], store: &Store) -> Vec<TweakStatus
         })
         .collect()
 }
-
 pub fn apps(packages: &[String], store: &Store) -> Vec<AppStatus> {
     catalog::APPS
         .iter()
@@ -185,16 +173,13 @@ pub fn apps(packages: &[String], store: &Store) -> Vec<AppStatus> {
         })
         .collect()
 }
-
 /// Whether a tweak changes anything the administrator helper must do.
 pub fn needs_admin(tweak: &Tweak) -> bool {
     tweak.ops.iter().any(|op| !matches!(op, Op::Reg { hive: Hive::User, .. } | Op::Clock24))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn every_tweak_has_a_state_on_this_pc() {
         let info = system::windows_info();
@@ -215,7 +200,6 @@ mod tests {
         }
         assert_eq!(apps(&packages, &store).len(), catalog::APPS.len());
     }
-
     #[test]
     fn turning_services_off_never_starts_what_windows_keeps_off() {
         let services = catalog::find("services").unwrap();
@@ -227,7 +211,6 @@ mod tests {
         assert_eq!(start_of("RetailDemo"), Some(Before::Service { start: catalog::Start::Manual }));
         assert_eq!(start_of("TrkWks"), Some(Before::Service { start: catalog::Start::Auto }));
     }
-
     #[test]
     fn what_runs_as_administrator() {
         assert!(needs_admin(catalog::find("telemetry").unwrap()));
@@ -236,7 +219,6 @@ mod tests {
         assert!(!needs_admin(catalog::find("taskbar-search").unwrap()));
         assert!(!needs_admin(catalog::find("classic-context-menu").unwrap()));
     }
-
     #[test]
     fn default_before_turns_every_op_off() {
         for tweak in catalog::TWEAKS {

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // One project: where it stands (GitHub, branch, versions, last release,
-  // CI) and its tabs.
+  // One project: where it stands (GitHub, branch, versions, last release, CI) and its tabs.
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -43,8 +42,7 @@
   const busy = $derived(gr.running(repoId));
   let menuOpen = $state(false);
   let cancellingCi = $state(false);
-  // Poll remote while CI is running so the status updates to passed/failed/cancelled
-  // automatically as soon as the run finishes on GitHub.
+  // Poll remote while CI is running so the status updates to passed/failed/cancelled automatically as soon as the run finishes on GitHub.
   $effect(() => {
     if (ci === "running" && repoId) {
       const interval = setInterval(() => {

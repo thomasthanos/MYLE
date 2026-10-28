@@ -1,17 +1,12 @@
-// Typed bridge to the Disk Analyzer commands in backend/src/disk_analyzer/.
-// The page sends one folder to scan, then only ids the backend gave it.
+// Typed bridge to the Disk Analyzer commands in backend/src/disk_analyzer/. The page sends one folder to scan, then only ids the backend gave it.
 import { Channel, invoke } from "@tauri-apps/api/core";
-
 export { formatSize } from "../system-cleaner/api";
-
 /** "size" is the files' length, "alloc" what they take on the disk. */
 export type SizeMode = "size" | "alloc";
 export type SortKey = "size" | "name" | "files" | "modified";
 export type NodeKind = "dir" | "file" | "link" | "cloud";
-
 /** A treemap block that merges a folder's small entries. */
 export const SMALLER_ID = 4294967295;
-
 export interface Drive {
   letter: string;
   /** `C:\` */
@@ -26,10 +21,8 @@ export interface Drive {
   /** A fixed NTFS drive: the fast scan can read its file table. */
   mftPossible: boolean;
 }
-
 /** A fast scan's step: waiting for the UAC prompt, reading the file table, building the tree. */
 export type ScanPhase = "approval" | "table" | "build";
-
 export interface Progress {
   files: number;
   dirs: number;
@@ -39,7 +32,6 @@ export interface Progress {
   /** None for a walk. */
   phase?: ScanPhase | null;
 }
-
 export interface ScanDone {
   scanId: number;
   rootId: number;
@@ -59,9 +51,7 @@ export interface ScanDone {
   /** Why a fast scan asked for became a walk. */
   fallback: string | null;
 }
-
 export type ScanEvent = { event: "progress"; data: Progress } | { event: "done"; data: ScanDone } | { event: "cancelled" };
-
 export interface NodeView {
   id: number;
   name: string;
@@ -83,21 +73,18 @@ export interface NodeView {
   /** Another name of a file counted under its first name (fast scan only). */
   hardLink: boolean;
 }
-
 export interface Children {
   items: NodeView[];
   total: number;
   /** What comes after this page. */
   rest: { count: number; size: number; alloc: number } | null;
 }
-
 export interface Crumb {
   id: number;
   name: string;
   size: number;
   alloc: number;
 }
-
 /** A pruned subtree as flat arrays; index 0 is the folder asked for. */
 export interface TreemapPayload {
   scanId: number;
@@ -112,14 +99,12 @@ export interface TreemapPayload {
   ranks: number[];
   truncated: boolean;
 }
-
 export interface FileView extends NodeView {
   path: string;
   parent: number;
   /** Its extension's colour, as in the treemap. */
   rank: number;
 }
-
 export interface ExtStat {
   ext: string;
   other: boolean;
@@ -128,7 +113,6 @@ export interface ExtStat {
   count: number;
   rank: number;
 }
-
 export interface DeleteProgress {
   done: number;
   total: number;
@@ -137,23 +121,19 @@ export interface DeleteProgress {
   workDone?: number | null;
   workTotal?: number | null;
 }
-
 export type DeleteEvent = { event: "progress"; data: DeleteProgress };
-
 /** Include work inside the current folder, rather than waiting for it to vanish. */
 export function deletionShare(progress: DeleteProgress | null): number | null {
   if (!progress || progress.total <= 0 || !progress.workTotal || progress.workTotal <= 0 || progress.workDone == null) return null;
   const within = Math.max(0, Math.min(1, progress.workDone / progress.workTotal));
   return Math.max(0, Math.min(1, (progress.done + within) / progress.total));
 }
-
 export interface Skipped {
   id: number;
   path: string;
   reason: string;
   canDeletePermanently: boolean;
 }
-
 export interface DeleteOutcome {
   recycled: number;
   deleted: number;
@@ -163,13 +143,11 @@ export interface DeleteOutcome {
   freedSize: number;
   skipped: Skipped[];
 }
-
 function channel<T>(onEvent: (e: T) => void): Channel<T> {
   const ch = new Channel<T>();
   ch.onmessage = onEvent;
   return ch;
 }
-
 export const diskApi = {
   drives: () => invoke<Drive[]>("disk_analyzer_drives"),
   pickFolder: () => invoke<string | null>("disk_analyzer_pick_folder"),
@@ -194,7 +172,6 @@ export const diskApi = {
   deletePermanently: (scanId: number, nodeIds: number[], onEvent: (e: DeleteEvent) => void) =>
     invoke<DeleteOutcome>("disk_analyzer_delete_permanently", { scanId, nodeIds, onEvent: channel(onEvent) }),
 };
-
 /** The size a view counts, by the size mode. */
 export function sizeOf(item: { size: number; alloc: number }, mode: SizeMode): number {
   return mode === "alloc" ? item.alloc : item.size;

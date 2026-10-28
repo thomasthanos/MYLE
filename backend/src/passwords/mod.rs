@@ -1,8 +1,4 @@
-//! The Password Manager: an end-to-end encrypted vault (`vault.rs`,
-//! `crypto.rs`). The page never receives the vault key; a password reaches
-//! it only when the user reveals it, and copying goes through
-//! `clipboard.rs` without passing through the page at all.
-
+// ! The Password Manager: an end-to-end encrypted vault (`vault.rs`, ! `crypto.rs`). The page never receives the vault key; a password reaches ! it only when the user reveals it, and copying goes through ! `clipboard.rs` without passing through the page at all.
 pub mod browser;
 mod clipboard;
 mod extension_folder;
@@ -11,28 +7,21 @@ pub mod icons;
 mod qr;
 mod session;
 pub mod windows_fill;
-
 // The vault itself, shared with MYLE Passwords for phones.
 use myle_vault::{VaultCell, crypto, generator, import, passkeys, sync, totp, vault};
-
 pub use windows_fill::WindowsFillState;
-
 pub fn start_windows_fill(app: AppHandle, target: WindowsFillState) {
     windows_fill::start(app, target);
 }
-
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
-
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
-
 use crate::storage;
 use crypto::KdfParams;
 use vault::{EntryInput, OldPassword, Status, StatusInfo, Summary, Vault, check_master};
-
 /// Sent to the page when the vault locks itself.
 const LOCKED_EVENT: &str = "passwords-locked";
 /// Sent when an entry changed outside the page (saved from the browser).
@@ -44,24 +33,20 @@ const VERIFY_EVENT: &str = "passwords-verify";
 const VERIFY_CANCELLED_EVENT: &str = "passwords-verify-cancelled";
 /// How often the vault syncs by itself while the app runs.
 const SYNC_EVERY: Duration = Duration::from_secs(5 * 60);
-
 /// One sync at a time: a background pass and "Sync now" must not interleave.
 static SYNCING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 async fn sync_once(app: &AppHandle, state: &PasswordsState) -> Result<sync::SyncResult, String> {
     let _one = SYNCING.lock().await;
     sync::run(crate::account::cloud(app).await?, &state.cell).await
 }
 /// Larger than any real export; a guard against picking the wrong file.
 const MAX_IMPORT_BYTES: u64 = 20 * 1024 * 1024;
-
 #[derive(Clone)]
 pub struct PasswordsState {
     cell: VaultCell,
     /// The file picked in "Import passwords": the only one an import reads.
     picked_import: Arc<Mutex<Option<String>>>,
 }
-
 impl Default for PasswordsState {
     fn default() -> Self {
         Self {
@@ -70,30 +55,25 @@ impl Default for PasswordsState {
         }
     }
 }
-
 impl PasswordsState {
     fn lock(&self) -> MutexGuard<'_, Option<Vault>> {
         self.cell.lock()
     }
-
     /// Runs `f` on the vault for something the user did on the vault page:
     /// the vault counts as in use and stays open longer.
     fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, String>) -> Result<T, String> {
         self.cell.with(f)
     }
-
     /// Runs `f` on the vault, opening its file the first time. For the
     /// browser extension, the sync and other background work, which must
     /// never keep an unattended vault from locking itself.
     fn with_quiet<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, String>) -> Result<T, String> {
         self.cell.with_quiet(f)
     }
-
     /// Whether this PC has a vault (made here or taken from the account).
     pub fn has_vault(&self) -> bool {
         self.cell.has_vault()
     }
-
     /// The same, off the async runtime: deriving a key takes a moment.
     async fn with_blocking<T: Send + 'static>(
         &self,
@@ -105,11 +85,9 @@ impl PasswordsState {
             .map_err(|e| e.to_string())?
     }
 }
-
 fn vault_path() -> Result<PathBuf, String> {
     Ok(storage::roaming_dir()?.join("passwords.vault"))
 }
-
 /// Locks the vault after the chosen idle time and whenever Windows locks,
 /// and syncs it every few minutes.
 pub fn watch(app: AppHandle, state: PasswordsState) {
@@ -155,7 +133,6 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
         }
     });
 }
-
 /// Locks the vault now (the tray's "Lock the vault"), and tells the page.
 pub fn lock_now(app: &AppHandle) {
     use tauri::Manager;
@@ -171,12 +148,10 @@ pub fn lock_now(app: &AppHandle) {
         let _ = app.emit(LOCKED_EVENT, ());
     }
 }
-
 #[tauri::command(async)]
 pub fn passwords_status(state: State<'_, PasswordsState>) -> Result<StatusInfo, String> {
     state.with(|vault| Ok(vault.status_info()))
 }
-
 /// A new vault. Returns the recovery code, shown to the user once.
 #[tauri::command]
 pub async fn passwords_create(
@@ -193,7 +168,6 @@ pub async fn passwords_create(
     mend_browser_registration(&state);
     Ok(code)
 }
-
 #[tauri::command]
 pub async fn passwords_unlock(
     state: State<'_, PasswordsState>,
@@ -205,7 +179,6 @@ pub async fn passwords_unlock(
     mend_browser_registration(&state);
     Ok(())
 }
-
 #[tauri::command]
 pub async fn passwords_recover(
     state: State<'_, PasswordsState>,
@@ -219,7 +192,6 @@ pub async fn passwords_recover(
     mend_browser_registration(&state);
     Ok(())
 }
-
 #[tauri::command]
 pub async fn passwords_change_master(
     state: State<'_, PasswordsState>,
@@ -231,13 +203,11 @@ pub async fn passwords_change_master(
         .with_blocking(move |vault| vault.change_master(&current, &master, KdfParams::new()))
         .await
 }
-
 /// Syncs now: after a change, on opening the page, and from "Sync now".
 #[tauri::command]
 pub async fn passwords_sync(app: AppHandle, state: State<'_, PasswordsState>) -> Result<sync::SyncResult, String> {
     sync_once(&app, &state).await
 }
-
 /// The account holds a different vault than this PC: replace this PC's with
 /// it (the page asks first and suggests a backup).
 #[tauri::command]
@@ -245,7 +215,6 @@ pub async fn passwords_use_account_vault(app: AppHandle, state: State<'_, Passwo
     let _one = SYNCING.lock().await;
     sync::use_account_vault(crate::account::cloud(&app).await?, &state.cell).await
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloStatus {
@@ -254,7 +223,6 @@ pub struct HelloStatus {
     /// It opens this vault here.
     enabled: bool,
 }
-
 #[tauri::command]
 pub async fn passwords_hello_status(state: State<'_, PasswordsState>) -> Result<HelloStatus, String> {
     let vault_id = state.with(|vault| Ok(vault.vault_id()))?;
@@ -265,7 +233,6 @@ pub async fn passwords_hello_status(state: State<'_, PasswordsState>) -> Result<
     .await
     .map_err(|e| e.to_string())
 }
-
 /// Turns Windows Hello on (the vault must be open). The prompts run
 /// without holding the vault, so the rest of the app keeps answering.
 #[tauri::command]
@@ -278,14 +245,12 @@ pub async fn passwords_hello_enable(state: State<'_, PasswordsState>) -> Result<
         .await
         .map_err(|e| e.to_string())?
 }
-
 #[tauri::command]
 pub async fn passwords_hello_disable() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(hello::disable)
         .await
         .map_err(|e| e.to_string())
 }
-
 #[tauri::command]
 pub async fn passwords_hello_unlock(state: State<'_, PasswordsState>) -> Result<(), String> {
     let vault_id = state
@@ -298,7 +263,6 @@ pub async fn passwords_hello_unlock(state: State<'_, PasswordsState>) -> Result<
     mend_browser_registration(&state);
     Ok(())
 }
-
 #[tauri::command(async)]
 pub fn passwords_lock(state: State<'_, PasswordsState>) -> Result<(), String> {
     state.with(|vault| {
@@ -306,7 +270,6 @@ pub fn passwords_lock(state: State<'_, PasswordsState>) -> Result<(), String> {
         Ok(())
     })
 }
-
 #[tauri::command(async)]
 pub fn passwords_set_auto_lock(
     state: State<'_, PasswordsState>,
@@ -318,7 +281,6 @@ pub fn passwords_set_auto_lock(
         vault.set_prefs(prefs)
     })
 }
-
 /// Shows each website's icon in the list, or stops and forgets them all.
 #[tauri::command(async)]
 pub fn passwords_set_website_icons(state: State<'_, PasswordsState>, on: bool) -> Result<(), String> {
@@ -332,7 +294,6 @@ pub fn passwords_set_website_icons(state: State<'_, PasswordsState>, on: bool) -
         Ok(())
     })
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserSetup {
@@ -364,26 +325,22 @@ pub struct BrowserSetup {
     /// MYLE runs as administrator: the browsers cannot reach it.
     elevated: bool,
 }
-
 /// The `version` of an extension folder's manifest.
 fn manifest_version(dir: &Path) -> Option<String> {
     let text = std::fs::read(dir.join("manifest.json")).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&text).ok()?;
     value.get("version")?.as_str().map(str::to_string)
 }
-
 /// `a < b` for dotted versions (1.5.0 < 1.5.1 < 1.10.0).
 fn older(a: &str, b: &str) -> bool {
     let parts = |v: &str| v.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
     parts(a) < parts(b)
 }
-
 /// The copy of the extension for "Load unpacked": a folder of its own that
 /// MYLE keeps current, so an update never moves it.
 fn local_extension_dir() -> Option<PathBuf> {
     crate::storage::local_dir().ok().map(|dir| dir.join("extension"))
 }
-
 /// Copies the bundled extension over the folder copy (files written in
 /// place; nothing else there is touched, so the browser keeps its id).
 fn sync_local_extension(app: &AppHandle) -> Result<PathBuf, String> {
@@ -395,7 +352,6 @@ fn sync_local_extension(app: &AppHandle) -> Result<PathBuf, String> {
     extension_folder::copy_tree(&from, &to).map_err(|e| format!("Could not update the extension folder: {e}"))?;
     Ok(to)
 }
-
 /// Check both builds, including the Firefox folder missing from older installs.
 fn local_extension_outdated(local: &Path, bundled: &Path) -> bool {
     ["", "firefox"].iter().any(|folder| {
@@ -403,7 +359,6 @@ fn local_extension_outdated(local: &Path, bundled: &Path) -> bool {
         manifest_version(&local.join(folder)).is_none_or(|have| older(&have, &ours))
     })
 }
-
 /// At start: a folder copy older than the bundled extension is brought up
 /// to date (the app was updated), so reloading the extension picks it up.
 pub fn refresh_local_extension(app: &AppHandle) {
@@ -412,13 +367,11 @@ pub fn refresh_local_extension(app: &AppHandle) {
         let _ = sync_local_extension(app);
     }
 }
-
 /// Updates the folder copy now ("Update Local Extension").
 #[tauri::command(async)]
 pub fn passwords_extension_sync(app: AppHandle) -> Result<String, String> {
     sync_local_extension(&app).map(|dir| dir.to_string_lossy().into_owned())
 }
-
 fn extension_dir(app: &AppHandle) -> Option<PathBuf> {
     use tauri::Manager;
     let clean = |dir: PathBuf| {
@@ -439,12 +392,10 @@ fn extension_dir(app: &AppHandle) -> Option<PathBuf> {
         .is_file()
         .then(|| clean(source.canonicalize().unwrap_or(source)))
 }
-
 #[tauri::command(async)]
 pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -> Result<BrowserSetup, String> {
     let (enabled, status) = state.with(|vault| Ok((vault.prefs().browser_filling, vault.status())))?;
-    // Mends a missing or stale registration (the program moved, a manifest
-    // was deleted) and says what is still wrong.
+    // Mends a missing or stale registration (the program moved, a manifest was deleted) and says what is still wrong.
     let registration_error = if enabled { browser::ensure_registered().err() } else { None };
     let bundled_version = extension_dir(&app).and_then(|d| manifest_version(&d));
     let local = local_extension_dir().filter(|d| d.join("manifest.json").is_file());
@@ -480,7 +431,6 @@ pub fn passwords_browser_get(app: AppHandle, state: State<'_, PasswordsState>) -
         elevated: windows_fill::this_app_elevated(),
     })
 }
-
 /// Points the browsers at this program again (their host registration and
 /// the `myle:` link), without changing any setting: the "Repair" of Browser
 /// filling.
@@ -493,7 +443,6 @@ pub fn passwords_browser_repair(state: State<'_, PasswordsState>) -> Result<(), 
     browser::register_hosts()?;
     browser::register_protocol()
 }
-
 /// Browser filling on or off: registers the native messaging host with the
 /// browsers, or removes it.
 #[tauri::command(async)]
@@ -507,8 +456,7 @@ pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) ->
         prefs.browser_filling = enabled;
         vault.set_prefs(prefs)
     });
-    // Taken back only when filling was off before: a save that failed never
-    // disconnects browsers that were working.
+    // Taken back only when filling was off before: a save that failed never disconnects browsers that were working.
     if saved.is_err() && enabled && !was {
         browser::unregister_hosts();
     }
@@ -518,7 +466,6 @@ pub fn passwords_browser_set(state: State<'_, PasswordsState>, enabled: bool) ->
     }
     Ok(())
 }
-
 /// Shows the extension's folder in File Explorer, for "Load unpacked".
 #[tauri::command(async)]
 pub fn passwords_open_extension_dir(app: AppHandle) -> Result<(), String> {
@@ -530,7 +477,6 @@ pub fn passwords_open_extension_dir(app: AppHandle) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
-
 /// Starts answering the browser extension, and keeps the browsers pointed
 /// at this program while filling is on.
 pub fn serve_browser(app: AppHandle, state: PasswordsState) {
@@ -540,7 +486,6 @@ pub fn serve_browser(app: AppHandle, state: PasswordsState) {
     let enabled = state.with_quiet(|vault| Ok(vault.prefs().browser_filling));
     browser::serve(app, state, enabled);
 }
-
 /// After an unlock: makes sure the browsers can still reach this program
 /// (a manifest deleted meanwhile, say), off the caller's thread.
 fn mend_browser_registration(state: &PasswordsState) {
@@ -550,7 +495,6 @@ fn mend_browser_registration(state: &PasswordsState) {
         });
     }
 }
-
 /// A site that insists on user verification for a passkey, on a PC without
 /// Windows Hello: the master password, typed in MYLE, stands in.
 struct Verifying {
@@ -558,26 +502,21 @@ struct Verifying {
     site: String,
     reply: tokio::sync::oneshot::Sender<bool>,
 }
-
 static VERIFYING: Mutex<Option<Verifying>> = Mutex::new(None);
 static NEXT_VERIFY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 const VERIFY_WAIT: Duration = Duration::from_secs(120);
-
 /// Dropping a timed-out or cancelled browser wait clears only its own
 /// verification cell and modal; a newer site's prompt remains untouched.
 struct VerificationGuard<'a> {
     id: u64,
     app: &'a AppHandle,
 }
-
 fn take_verification(slot: &mut Option<Verifying>, id: u64) -> Option<Verifying> {
     if slot.as_ref().is_some_and(|pending| pending.id == id) { slot.take() } else { None }
 }
-
 #[cfg(test)]
 mod verification_tests {
     use super::*;
-
     #[test]
     fn local_updates_repair_missing_and_older_firefox_builds() {
         let root = std::env::temp_dir().join(format!("myle-extension-versions-{}", uuid::Uuid::new_v4()));
@@ -595,7 +534,6 @@ mod verification_tests {
         assert!(!local_extension_outdated(&local, &bundled));
         std::fs::remove_dir_all(root).unwrap();
     }
-
     #[tokio::test]
     async fn cancelling_master_verification_clears_only_its_own_waiter() {
         let (reply, answer) = tokio::sync::oneshot::channel();
@@ -607,7 +545,6 @@ mod verification_tests {
         assert!(answer.await.is_err(), "its master-password receiver is released on cancellation");
     }
 }
-
 impl Drop for VerificationGuard<'_> {
     fn drop(&mut self) {
         let mut slot = VERIFYING.lock().unwrap_or_else(|p| p.into_inner());
@@ -616,14 +553,12 @@ impl Drop for VerificationGuard<'_> {
         let _ = self.app.emit(VERIFY_CANCELLED_EVENT, self.id);
     }
 }
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyRequest {
     id: u64,
     site: String,
 }
-
 /// Brings MYLE forward to ask for the master password; true once the right
 /// one was typed, false when cancelled or after two minutes.
 pub(crate) async fn ask_master(app: &AppHandle, site: &str) -> bool {
@@ -636,7 +571,6 @@ pub(crate) async fn ask_master(app: &AppHandle, site: &str) -> bool {
     let _ = app.emit(VERIFY_EVENT, VerifyRequest { id, site: site.to_string() });
     matches!(tokio::time::timeout(VERIFY_WAIT, answer).await, Ok(Ok(true)))
 }
-
 /// The master password asked for, if a passkey waits for it (the page may
 /// open after the request).
 #[tauri::command(async)]
@@ -647,7 +581,6 @@ pub fn passwords_verify_pending() -> Option<VerifyRequest> {
         .as_ref()
         .map(|pending| VerifyRequest { id: pending.id, site: pending.site.clone() })
 }
-
 /// The page's answer: the master password, or `None` to cancel. A wrong
 /// password is an error and the request stays.
 #[tauri::command]
@@ -676,7 +609,6 @@ pub async fn passwords_verify_answer(
     }
     Ok(())
 }
-
 /// Removes one passkey from a login.
 #[tauri::command(async)]
 pub fn passwords_passkey_delete(
@@ -689,7 +621,6 @@ pub fn passwords_passkey_delete(
     let _ = app.emit(CHANGED_EVENT, ());
     Ok(())
 }
-
 /// A program's .exe, picked in a dialog, for linking a login to it.
 #[tauri::command]
 pub async fn passwords_pick_program(app: AppHandle) -> Result<Option<String>, String> {
@@ -705,18 +636,15 @@ pub async fn passwords_pick_program(app: AppHandle) -> Result<Option<String>, St
     .await
     .map_err(|e| e.to_string())?
 }
-
 #[tauri::command(async)]
 pub fn passwords_list(state: State<'_, PasswordsState>) -> Result<Vec<Summary>, String> {
     state.with(Vault::summaries)
 }
-
 /// The password itself, for the page to show while "Show" is on.
 #[tauri::command(async)]
 pub fn passwords_reveal(state: State<'_, PasswordsState>, id: String) -> Result<String, String> {
     state.with(|vault| Ok(vault.password(&id)?.to_string()))
 }
-
 #[tauri::command(async)]
 pub fn passwords_history(
     state: State<'_, PasswordsState>,
@@ -724,7 +652,6 @@ pub fn passwords_history(
 ) -> Result<Vec<OldPassword>, String> {
     state.with(|vault| vault.history(&id))
 }
-
 /// Copies an entry's password or user name straight from the vault.
 #[tauri::command(async)]
 pub fn passwords_copy(
@@ -740,21 +667,18 @@ pub fn passwords_copy(
     })?;
     clipboard::copy_secret(&text)
 }
-
 /// The entry's 2FA code now; the page asks again when it runs out. Showing
 /// it does not keep the vault open: only the user's clicks do.
 #[tauri::command(async)]
 pub fn passwords_totp(state: State<'_, PasswordsState>, id: String) -> Result<totp::Code, String> {
     state.with_quiet(|vault| Ok(vault.totp(&id)?.now()))
 }
-
 /// Whose key it is and how its codes are made, for the editor to show
 /// before saving; never the key.
 #[tauri::command(async)]
 pub fn passwords_totp_check(text: String) -> Result<totp::Info, String> {
     Ok(totp::Totp::parse(&zeroize::Zeroizing::new(text))?.info())
 }
-
 /// The 2FA link in a QR code snipped or copied to the clipboard.
 #[tauri::command]
 pub async fn passwords_totp_scan_clipboard() -> Result<String, String> {
@@ -767,7 +691,6 @@ pub async fn passwords_totp_scan_clipboard() -> Result<String, String> {
     .await
     .map_err(|e| e.to_string())?
 }
-
 /// The 2FA link in a QR code saved as a picture; `None` when the user
 /// closed the dialog.
 #[tauri::command]
@@ -787,13 +710,11 @@ pub async fn passwords_totp_scan_file(app: AppHandle) -> Result<Option<String>, 
     .await
     .map_err(|e| e.to_string())?
 }
-
 /// Copies text the page already has (a generated password), the same way.
 #[tauri::command(async)]
 pub fn passwords_copy_text(text: String) -> Result<(), String> {
     clipboard::copy_secret(&zeroize::Zeroizing::new(text))
 }
-
 #[tauri::command(async)]
 pub fn passwords_save(
     state: State<'_, PasswordsState>,
@@ -801,7 +722,6 @@ pub fn passwords_save(
 ) -> Result<String, String> {
     state.with(|vault| vault.save(&entry))
 }
-
 /// "Delete all passwords": asks for the master password again, then removes
 /// every password (entries with passkeys stay unless `with_passkeys`). The
 /// page syncs right after, so the account and other devices follow.
@@ -819,22 +739,18 @@ pub async fn passwords_delete_all(
         })
         .await
 }
-
 #[tauri::command(async)]
 pub fn passwords_delete(state: State<'_, PasswordsState>, id: String) -> Result<(), String> {
     state.with(|vault| vault.delete(&id))
 }
-
 #[tauri::command(async)]
 pub fn passwords_generate(options: generator::Options) -> Result<String, String> {
     Ok(generator::generate(&options)?.to_string())
 }
-
 #[tauri::command(async)]
 pub fn passwords_strength(password: String) -> generator::Strength {
     generator::strength(&zeroize::Zeroizing::new(password))
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
@@ -845,7 +761,6 @@ pub struct ImportPreview {
     /// A few titles and user names, to check it is the right file.
     sample: Vec<(String, String)>,
 }
-
 fn read_import(path: &str) -> Result<String, String> {
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     if size > MAX_IMPORT_BYTES {
@@ -853,7 +768,6 @@ fn read_import(path: &str) -> Result<String, String> {
     }
     std::fs::read_to_string(path).map_err(|_| "That file could not be read as text.".to_string())
 }
-
 /// Asks for an export file and shows what it holds, without importing.
 #[tauri::command]
 pub async fn passwords_import_pick(
@@ -895,7 +809,6 @@ pub async fn passwords_import_pick(
             .collect(),
     }))
 }
-
 /// Imports the picked file. A backup needs `backup_password`.
 #[tauri::command]
 pub async fn passwords_import(
@@ -924,7 +837,6 @@ pub async fn passwords_import(
         })
         .await
 }
-
 /// Writes an encrypted backup of every entry, under its own password. Every
 /// password leaves the vault this way, so the master password is asked
 /// again first, even while the vault is open.

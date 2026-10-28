@@ -1,49 +1,20 @@
-//! The fast scan: the NTFS file table, read straight from the volume.
-//!
-//! On NTFS every file and folder has a record in the file table ($MFT, 1 KB
-//! a record, 4 KB on some disks), and the table is itself a file whose first
-//! record says where its pieces lie. Reading it in large sequential chunks is
-//! much quicker than listing every folder, and a record holds what the page
-//! needs: each name with the folder it is in (several for a hard link), the
-//! size, the size on disk, the attributes, the reparse tag and the date.
-//! Opening a volume needs an administrator, so the elevated helper
-//! (`elevated.rs`) reads the table and sends the app a compact snapshot, and
-//! the app builds from it the same tree the walk builds.
-//!
-//! The layouts are the publicly documented NTFS ones: the boot sector, FILE
-//! records and their update sequence (the last two bytes of each 512-byte
-//! block are kept apart, so a torn write shows), attributes and data runs.
-//! The volume is only read.
-//!
-//! Rules: a hard link counts once, where it is met first walking down from
-//! the root (System32 before WinSxS); its other names are listed with no size
-//! and marked. The file system's own files ($MFT, $LogFile…) are listed at
-//! the root like other system files, so the total is close to the space
-//! used. Size is the main data stream's; size on disk adds the clusters every
-//! stream and a folder's index really have, from their data runs (a hole in
-//! a sparse or compressed stream takes nothing). A name that could not come
-//! from Windows (a path separator, `..`) is dropped, on both sides.
-
+// ! The fast scan: the NTFS file table, read straight from the volume. ! ! On NTFS every file and folder has a record in the file table ($MFT, 1 KB ! a record, 4 KB on some disks), and the table is itself a file whose first ! record says where its pieces lie. Reading it in large sequential chunks is ! much quicker than listing every folder, and a record holds what the page ! needs: each name with the folder it is in (several for a hard link), the ! size, the size on disk, the attributes, the reparse tag and the date. ! Opening a volume needs an administrator, so the elevated helper ! (`elevated.rs`) reads the table and sends the app a compact snapshot, and ! the app builds from it the same tree the walk builds. ! ! The layouts are the publicly documented NTFS ones: the boot sector, FILE ! records and their update sequence (the last two bytes of each 512-byte ! block are kept apart, so a torn write shows), attributes and data runs. ! The volume is only read. ! ! Rules: a hard link counts once, where it is met first walking down from ! the root (System32 before WinSxS); its other names are listed with no size ! and marked. The file system's own files ($MFT, $LogFile…) are listed at ! the root like other system files, so the total is close to the space ! used. Size is the main data stream's; size on disk adds the clusters every ! stream and a folder's index really have, from their data runs (a hole in ! a sparse or compressed stream takes nothing). A name that could not come ! from Windows (a path separator, `..`) is dropped, on both sides.
 use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-
 use super::scan::{PROGRESS_EVERY, Progress, Throttle, kind_of, push_name};
 use super::tree::{Entry, Kind, Listing, Tree, unix_seconds};
-
 /// The root folder's record.
 pub const ROOT: u32 = 5;
 /// The table is read this much at a time.
 const CHUNK: usize = 4 << 20;
 /// The update sequence protects blocks of this size.
 const BLOCK: usize = 512;
-
 const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-
 // Attribute types.
 const STANDARD_INFORMATION: u32 = 0x10;
 const ATTRIBUTE_LIST: u32 = 0x20;
@@ -52,32 +23,24 @@ const DATA: u32 = 0x80;
 const INDEX_ALLOCATION: u32 = 0xA0;
 const REPARSE_POINT: u32 = 0xC0;
 const END: u32 = 0xFFFF_FFFF;
-
 const RECORD_IN_USE: u16 = 0x1;
 const RECORD_DIRECTORY: u16 = 0x2;
 /// The short 8.3 names, kept beside the real ones.
 const DOS_NAMESPACE: u8 = 2;
 /// A file reference's record number; the top 16 bits are its sequence number.
 const NUMBER_MASK: u64 = 0xFFFF_FFFF_FFFF;
-
 pub const NOT_NTFS: &str = "This drive is not NTFS.";
 pub const BAD_TABLE: &str = "The drive's file table could not be read.";
-
 fn u16_at(bytes: &[u8], at: usize) -> u16 {
     bytes.get(at..at + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
 }
-
 fn u32_at(bytes: &[u8], at: usize) -> u32 {
     bytes.get(at..at + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
-
 fn u64_at(bytes: &[u8], at: usize) -> u64 {
     bytes.get(at..at + 8).map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap_or_default()))
 }
-
-// ---------------------------------------------------------------------------
-// The boot sector, records and data runs: pure functions
-
+// --------------------------------------------------------------------------- The boot sector, records and data runs: pure functions
 /// What the boot sector says about the volume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Geometry {
@@ -90,7 +53,6 @@ pub struct Geometry {
     /// The table's first cluster.
     pub mft_lcn: u64,
 }
-
 pub fn geometry(boot: &[u8]) -> Result<Geometry, String> {
     if boot.len() < BLOCK || &boot[3..11] != b"NTFS    " {
         return Err(NOT_NTFS.into());
@@ -118,7 +80,6 @@ pub fn geometry(boot: &[u8]) -> Result<Geometry, String> {
     }
     Ok(Geometry { sector, cluster, record, mft_lcn })
 }
-
 /// Puts back the last two bytes of each 512-byte block from the update
 /// sequence. `false` when the record is not whole (a torn write) or is not
 /// a record at all.
@@ -139,7 +100,6 @@ pub fn fixup(record: &mut [u8]) -> bool {
     }
     true
 }
-
 /// A piece of a stream on the disk: `clusters` from cluster `lcn`, or a
 /// hole of a sparse stream (`None`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,7 +107,6 @@ pub struct Run {
     pub lcn: Option<u64>,
     pub clusters: u64,
 }
-
 /// Decodes data runs: each starts with a byte whose low half is how many
 /// bytes the length takes and whose high half how many the offset from the
 /// last run takes (none for a hole). `None` when they do not make sense.
@@ -176,17 +135,14 @@ pub fn runs(bytes: &[u8]) -> Option<Vec<Run>> {
     }
     Some(out)
 }
-
 fn unsigned(bytes: &[u8]) -> u64 {
     bytes.iter().rev().fold(0, |value, &b| (value << 8) | b as u64)
 }
-
 fn signed(bytes: &[u8]) -> i64 {
     let value = unsigned(bytes);
     let bits = bytes.len() * 8;
     if bits < 64 && value & (1 << (bits - 1)) != 0 { (value | (!0u64 << bits)) as i64 } else { value as i64 }
 }
-
 /// What one FILE record says. Reused from record to record.
 #[derive(Default)]
 pub struct Record {
@@ -211,7 +167,6 @@ pub struct Record {
     pub pieces: Vec<(u64, Vec<Run>)>,
     pub parts: Vec<u32>,
 }
-
 impl Record {
     fn clear(&mut self) {
         let (mut names, mut units, mut pieces, mut parts) =
@@ -223,7 +178,6 @@ impl Record {
         *self = Record { names, units, pieces, parts, ..Record::default() };
     }
 }
-
 /// Reads one FILE record whose update sequence was put back, on a volume of
 /// `cluster`-byte clusters. `whole`: keep the main stream's runs and
 /// attribute list too (for the table's own record). `false` when it is not a
@@ -287,9 +241,7 @@ pub fn parse(bytes: &[u8], out: &mut Record, whole: bool, cluster: u64) -> bool 
             let first_vcn = u64_at(attribute, 0x10);
             let runs_at = u16_at(attribute, 0x20) as usize;
             if matches!(kind, DATA | INDEX_ALLOCATION) {
-                // What a stream takes is the clusters it really has: the
-                // header's allocated size counts holes too, and the bad
-                // cluster file's stream "allocates" the whole volume that way.
+                // What a stream takes is the clusters it really has: the header's allocated size counts holes too, and the bad cluster file's stream "allocates" the whole volume that way.
                 let found = attribute.get(runs_at..).and_then(runs);
                 let clusters: u64 = found.iter().flatten().filter(|run| run.lcn.is_some()).map(|run| run.clusters).sum();
                 out.alloc += clusters * cluster;
@@ -310,7 +262,6 @@ pub fn parse(bytes: &[u8], out: &mut Record, whole: bool, cluster: u64) -> bool 
     }
     true
 }
-
 /// A name Windows could have given: not empty, not `.` or `..`, and without
 /// a path separator, a stream's colon or another character Windows refuses.
 /// The table is read raw, so a damaged record must not name another path:
@@ -318,7 +269,6 @@ pub fn parse(bytes: &[u8], out: &mut Record, whole: bool, cluster: u64) -> bool 
 pub fn plain(name: &[u8]) -> bool {
     !name.is_empty() && name != b"." && name != b".." && !name.iter().any(|&b| b < 0x20 || br#"\/:*?"<>|"#.contains(&b))
 }
-
 /// The records an attribute list puts the main data stream's pieces in.
 fn list_parts(list: &[u8], parts: &mut Vec<u32>) {
     let mut at = 0;
@@ -336,10 +286,7 @@ fn list_parts(list: &[u8], parts: &mut Vec<u32>) {
         at += length;
     }
 }
-
-// ---------------------------------------------------------------------------
-// The snapshot: what the helper sends the app
-
+// --------------------------------------------------------------------------- The snapshot: what the helper sends the app
 /// A file or folder of the table.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FileInfo {
@@ -354,7 +301,6 @@ pub struct FileInfo {
     pub size: u64,
     pub alloc: u64,
 }
-
 /// One name of a file, in a folder. The names follow each other in `names`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Link {
@@ -364,7 +310,6 @@ pub struct Link {
     pub parent: u32,
     pub name_len: u16,
 }
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
     /// By record number.
@@ -373,11 +318,9 @@ pub struct Snapshot {
     /// WTF-8, as `OsStr::as_encoded_bytes`.
     pub names: Vec<u8>,
 }
-
 const MAGIC: &[u8; 8] = b"MYLEMFT1";
 const FILE_BYTES: usize = 33;
 const LINK_BYTES: usize = 10;
-
 impl Snapshot {
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(24 + self.files.len() * FILE_BYTES + self.links.len() * LINK_BYTES + self.names.len());
@@ -402,7 +345,6 @@ impl Snapshot {
         out.extend_from_slice(&self.names);
         out
     }
-
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let bad = || BAD_TABLE.to_string();
         if bytes.len() < 24 || &bytes[..8] != MAGIC {
@@ -453,7 +395,6 @@ impl Snapshot {
         Ok(out)
     }
 }
-
 /// Gathers records as the table is read, by record number: an extension
 /// record adds to its base record, whichever comes first.
 pub struct Table {
@@ -461,11 +402,9 @@ pub struct Table {
     links: Vec<RawLink>,
     names: Vec<u8>,
 }
-
 const IN_USE: u8 = 1;
 const DIR: u8 = 2;
 const REPARSE: u8 = 4;
-
 #[derive(Clone, Copy, Default)]
 struct Slot {
     flags: u8,
@@ -476,18 +415,15 @@ struct Slot {
     size: u64,
     alloc: u64,
 }
-
 struct RawLink {
     record: u32,
     parent: u64,
     name_len: u16,
 }
-
 impl Table {
     pub fn new(records: usize) -> Self {
         Self { slots: vec![Slot::default(); records], links: Vec::new(), names: Vec::new() }
     }
-
     /// Adds a record in use.
     pub fn add(&mut self, number: u32, record: &Record) {
         let target = record.base.unwrap_or(number);
@@ -517,7 +453,6 @@ impl Table {
             self.links.push(RawLink { record: target, parent, name_len });
         }
     }
-
     /// The files in use, and the names whose folder is in use, is a folder,
     /// and has the sequence number the name expects (else the name is left
     /// from a folder deleted since).
@@ -562,15 +497,11 @@ impl Table {
         kept
     }
 }
-
-// ---------------------------------------------------------------------------
-// Reading a volume
-
+// --------------------------------------------------------------------------- Reading a volume
 /// Reads `buffer.len()` bytes at `offset`; both on sector boundaries.
 pub trait ReadAt {
     fn read_at(&self, buffer: &mut [u8], offset: u64) -> io::Result<()>;
 }
-
 impl ReadAt for std::fs::File {
     fn read_at(&self, buffer: &mut [u8], offset: u64) -> io::Result<()> {
         use std::os::windows::fs::FileExt;
@@ -584,7 +515,6 @@ impl ReadAt for std::fs::File {
         Ok(())
     }
 }
-
 impl ReadAt for [u8] {
     fn read_at(&self, buffer: &mut [u8], offset: u64) -> io::Result<()> {
         let start = usize::try_from(offset).map_err(|_| io::ErrorKind::UnexpectedEof)?;
@@ -593,11 +523,9 @@ impl ReadAt for [u8] {
         Ok(())
     }
 }
-
 fn read_error(error: io::Error) -> String {
     format!("{BAD_TABLE} {error}")
 }
-
 /// One record at `offset`, its update sequence put back.
 fn read_record(volume: &(impl ReadAt + ?Sized), geometry: &Geometry, offset: u64) -> Result<Vec<u8>, String> {
     let start = offset / geometry.sector * geometry.sector;
@@ -611,7 +539,6 @@ fn read_record(volume: &(impl ReadAt + ?Sized), geometry: &Geometry, offset: u64
     }
     Ok(bytes)
 }
-
 /// Where on the disk record `number` is, from the table's pieces known so far.
 fn locate(pieces: &[(u64, Vec<Run>)], geometry: &Geometry, number: u32) -> Option<u64> {
     let byte = number as u64 * geometry.record;
@@ -627,7 +554,6 @@ fn locate(pieces: &[(u64, Vec<Run>)], geometry: &Geometry, number: u32) -> Optio
     }
     None
 }
-
 /// Reads a whole file table from `volume` (a volume, or an image of one).
 pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
     let mut boot = vec![0u8; 4096];
@@ -635,9 +561,7 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
     let geometry = geometry(&boot)?;
     let record_len = geometry.record as usize;
     let mut record = Record::default();
-
-    // The table's own record says where its pieces are; a very fragmented
-    // table lists the rest of them in extension records.
+    // The table's own record says where its pieces are; a very fragmented table lists the rest of them in extension records.
     let first = read_record(volume, &geometry, geometry.mft_lcn * geometry.cluster)?;
     if !parse(&first, &mut record, true, geometry.cluster) || !record.in_use || record.base.is_some() {
         return Err(BAD_TABLE.into());
@@ -672,7 +596,6 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
     if vcn * geometry.cluster < size || count > u32::MAX as u64 {
         return Err(BAD_TABLE.into());
     }
-
     let mut table = Table::new(count as usize);
     let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + record_len);
     let mut buffer = vec![0u8; CHUNK];
@@ -704,7 +627,6 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
     }
     Ok(table.finish())
 }
-
 /// Reads the file table of fixed NTFS drive `letter`. Needs an administrator.
 pub fn read_volume(letter: char) -> Result<Snapshot, String> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -726,10 +648,7 @@ pub fn read_volume(letter: char) -> Result<Snapshot, String> {
         .map_err(|e| format!("{letter}: could not be opened for reading: {e}"))?;
     read_table(&volume)
 }
-
-// ---------------------------------------------------------------------------
-// The app's side: the tree
-
+// --------------------------------------------------------------------------- The app's side: the tree
 /// Builds the tree the walk builds, from the root folder down, for the
 /// volume whose root Windows shows as `root`. `None` when cancelled.
 pub fn into_tree(
@@ -762,7 +681,6 @@ pub fn into_tree(
         grouped[next[link.parent as usize] as usize] = i as u32;
         next[link.parent as usize] += 1;
     }
-
     let mut tree = Tree::new(scan_id, root, files[root_at].modified);
     let mut counted = vec![false; files.len()];
     let mut opened = vec![false; files.len()];
@@ -840,28 +758,22 @@ pub fn into_tree(
     tree.finish();
     Ok(Some(tree))
 }
-
 #[cfg(test)]
 mod tests {
     use super::super::tree::{SizeMode, flag};
     use super::*;
-
     const RECORD: usize = 1024;
     const CLUSTER: u64 = 4096;
-
     fn refer(number: u64, seq: u16) -> u64 {
         number | (seq as u64) << 48
     }
-
     fn pad8(mut bytes: Vec<u8>) -> Vec<u8> {
         bytes.resize(bytes.len().div_ceil(8) * 8, 0);
         bytes
     }
-
     fn utf16(text: &str) -> Vec<u8> {
         text.encode_utf16().flat_map(u16::to_le_bytes).collect()
     }
-
     fn resident(kind: u32, name: &str, value: &[u8]) -> Vec<u8> {
         let name = utf16(name);
         let value_at = (0x18 + name.len()).div_ceil(8) * 8;
@@ -878,7 +790,6 @@ mod tests {
         a[4..8].copy_from_slice(&length.to_le_bytes());
         a
     }
-
     /// A non-resident stream's first piece; `packed`: compressed or sparse,
     /// with what it really takes.
     fn non_resident(kind: u32, name: &str, real: u64, allocated: u64, packed: Option<u64>, runs: &[u8]) -> Vec<u8> {
@@ -909,7 +820,6 @@ mod tests {
         a[4..8].copy_from_slice(&length.to_le_bytes());
         a
     }
-
     fn standard(attributes: u32) -> Vec<u8> {
         let mut v = vec![0u8; 0x48];
         // 2023-11-14 22:13:20 UTC.
@@ -918,7 +828,6 @@ mod tests {
         v[0x20..0x24].copy_from_slice(&attributes.to_le_bytes());
         resident(STANDARD_INFORMATION, "", &v)
     }
-
     fn name(parent: u64, text: &str, namespace: u8) -> Vec<u8> {
         let units = utf16(text);
         let mut v = vec![0u8; 0x42];
@@ -928,7 +837,6 @@ mod tests {
         v.extend_from_slice(&units);
         resident(FILE_NAME, "", &v)
     }
-
     /// A whole record with its update sequence applied, as on the disk.
     fn record(flags: u16, seq: u16, base: u64, attributes: &[Vec<u8>]) -> Vec<u8> {
         let mut r = vec![0u8; RECORD];
@@ -959,10 +867,8 @@ mod tests {
         }
         r
     }
-
     const FILE: u16 = RECORD_IN_USE;
     const FOLDER: u16 = RECORD_IN_USE | RECORD_DIRECTORY;
-
     fn boot(mft_lcn: u64) -> Vec<u8> {
         let mut b = vec![0u8; 4096];
         b[3..11].copy_from_slice(b"NTFS    ");
@@ -972,7 +878,6 @@ mod tests {
         b[0x40] = (-10i8) as u8;
         b
     }
-
     #[test]
     fn the_boot_sector_gives_the_volumes_geometry() {
         assert_eq!(geometry(&boot(786_432)).unwrap(), Geometry { sector: 512, cluster: 4096, record: 1024, mft_lcn: 786_432 });
@@ -987,7 +892,6 @@ mod tests {
         odd[0x40] = 3;
         assert_eq!(geometry(&odd).unwrap_err(), BAD_TABLE, "a 12 KB record makes no sense");
     }
-
     #[test]
     fn the_update_sequence_is_put_back_and_a_torn_record_is_refused() {
         let original = record(FILE, 1, 0, &[standard(0), name(refer(5, 5), "a.txt", 1)]);
@@ -1000,7 +904,6 @@ mod tests {
         assert!(!fixup(&mut torn));
         assert!(!fixup(&mut vec![0u8; RECORD]), "an empty slot");
     }
-
     #[test]
     fn data_runs_are_decoded() {
         // 0x18 clusters at 0x5634, 0x08 clusters 0x100 back, a hole, the end.
@@ -1016,7 +919,6 @@ mod tests {
         assert!(runs(&[0x21, 0x18]).is_none(), "cut short");
         assert!(runs(&[0x11, 0x01, 0x80]).is_none(), "before the first cluster");
     }
-
     #[test]
     fn a_record_gives_names_sizes_and_kind() {
         let mut bytes = record(
@@ -1044,12 +946,10 @@ mod tests {
         assert_eq!(parent, refer(16, 1));
         assert_eq!(String::from_utf16(&r.units[start..end]).unwrap(), "Long File Name.txt");
         assert_eq!(unix_seconds(r.modified.unwrap()), 1_700_000_000);
-
         let mut packed = record(FILE, 1, 0, &[standard(0), non_resident(DATA, "", 1_000_000, 1_048_576, Some(0), &[0x01, 0x80])]);
         assert!(fixup(&mut packed) && parse(&packed, &mut r, false, CLUSTER));
         assert_eq!((r.size, r.alloc), (Some(1_000_000), 0), "a cloud placeholder: sparse, nothing on the disk");
     }
-
     /// A small volume image: the table in two pieces (clusters 4–7 and
     /// 16–17, 24 records), so reading it has to follow its runs.
     fn image() -> Vec<u8> {
@@ -1101,16 +1001,13 @@ mod tests {
         }
         disk
     }
-
     fn snapshot() -> Snapshot {
         read_table(image().as_slice()).unwrap()
     }
-
     fn name_of(s: &Snapshot, link: usize) -> String {
         let at: usize = s.links[..link].iter().map(|l| l.name_len as usize).sum();
         String::from_utf8(s.names[at..at + s.links[link].name_len as usize].to_vec()).unwrap()
     }
-
     #[test]
     fn a_fragmented_table_is_read_record_by_record() {
         let s = snapshot();
@@ -1131,7 +1028,6 @@ mod tests {
         assert_eq!((wof.size, wof.alloc), (1_000_000, 401_408), "on the disk: the compressed stream");
         assert_eq!(Snapshot::decode(&s.encode()).unwrap(), s);
     }
-
     #[test]
     fn only_names_windows_could_give_are_kept() {
         for good in ["a.txt", "$MFT", "Ελληνικά 📦", ".gitignore", "a..b", "x y"] {
@@ -1141,7 +1037,6 @@ mod tests {
             assert!(!plain(bad.as_bytes()), "{bad:?}");
         }
     }
-
     #[test]
     fn a_damaged_snapshot_is_refused() {
         let bytes = snapshot().encode();
@@ -1151,7 +1046,6 @@ mod tests {
         assert!(Snapshot::decode(&wrong).is_err());
         assert!(Snapshot::decode(&[]).is_err());
     }
-
     fn find(tree: &Tree, path: &str) -> u32 {
         let mut at = 0;
         for part in path.split('\\') {
@@ -1159,7 +1053,6 @@ mod tests {
         }
         at
     }
-
     #[test]
     fn the_tree_counts_a_hard_link_once_where_it_is_met_first() {
         let cancel = AtomicBool::new(false);
@@ -1182,13 +1075,11 @@ mod tests {
         assert_eq!(tree.files(0), 8, "$MFT, $BadClus, three in Users, wof.exe and both names of shared.dll");
         assert_eq!(tree.size(0, SizeMode::Size), 24 * RECORD as u64 + 11 + 10_000 + 5_000_000 + 1_000_000 + 50_000);
     }
-
     #[test]
     fn building_the_tree_stops_when_cancelled() {
         let cancel = AtomicBool::new(true);
         assert!(into_tree(&snapshot(), 1, PathBuf::from(r"C:\"), &cancel, |_| {}).unwrap().is_none());
     }
-
     /// Reads C: as the fast scan does, and compares with the walk. Needs an
     /// administrator: `cargo test mft_matches_the_walk -- --ignored --nocapture`
     /// from an elevated terminal (`MYLE_MFT_DRIVE` picks another drive).

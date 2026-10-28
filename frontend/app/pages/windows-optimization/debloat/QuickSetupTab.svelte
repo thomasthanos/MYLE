@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The guided start: pick a profile, see what it would change, then review
-  // and apply from the bar below. Settings and Apps hold the same choices.
+  // The guided start: pick a profile, see what it would change, then review and apply from the bar below. Settings and Apps hold the same choices.
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
   import History from "@lucide/svelte/icons/history";

@@ -1,27 +1,18 @@
-//! The GitHub Releases settings (`github-releases.json` next to MYLE's other
-//! settings): the repositories on the page and what each project remembers.
-//! Nothing secret is kept here: the token and AI keys are in `secrets`.
-
+// ! The GitHub Releases settings (`github-releases.json` next to MYLE's other ! settings): the repositories on the page and what each project remembers. ! Nothing secret is kept here: the token and AI keys are in `secrets`.
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-
 use serde::{Deserialize, Serialize};
-
 use super::ai::ProviderId;
-
 const FILE_NAME: &str = "github-releases.json";
 pub(crate) const SETTINGS_VERSION: u32 = 1;
 /// Projects on the page at most.
 const MAX_REPOS: usize = 300;
-
 static EDIT: Mutex<()> = Mutex::new(());
-
 fn edit_lock() -> MutexGuard<'static, ()> {
     EDIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 /// A git repository on the page. Its sub-projects (a monorepo) are found
 /// every time it is read, so a new app folder shows up by itself.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -32,7 +23,6 @@ pub struct Repo {
     pub path: String,
     pub added_at: i64,
 }
-
 /// How the last good build of a project went: the next one's progress is
 /// estimated from it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -43,7 +33,6 @@ pub struct BuildStats {
     pub lines: u64,
     pub at: i64,
 }
-
 /// What one project (a repository, or one app folder of a monorepo) keeps.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -59,7 +48,6 @@ pub struct EntryConfig {
     /// `local` or `actions`; picked by itself when not set.
     pub release_mode: Option<String>,
 }
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Account {
@@ -70,7 +58,6 @@ pub struct Account {
     pub source: String,
     pub scopes: Vec<String>,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AiSettings {
@@ -84,7 +71,6 @@ pub struct AiSettings {
     /// Ollama (on this PC, no key) is used.
     pub ollama_enabled: bool,
 }
-
 impl Default for AiSettings {
     fn default() -> Self {
         AiSettings {
@@ -95,7 +81,6 @@ impl Default for AiSettings {
         }
     }
 }
-
 /// What the one-time import from Github-Build-Release did.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -109,7 +94,6 @@ pub struct GbrImport {
     pub error: Option<String>,
     pub dismissed: bool,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -122,7 +106,6 @@ pub struct Settings {
     /// Set once the Github-Build-Release import ran.
     pub gbr_import: Option<GbrImport>,
 }
-
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -135,7 +118,6 @@ impl Default for Settings {
         }
     }
 }
-
 impl Settings {
     pub(crate) fn repo(&self, id: &str) -> Result<&Repo, String> {
         self.repos
@@ -143,11 +125,9 @@ impl Settings {
             .find(|repo| repo.id == id)
             .ok_or_else(|| "This project is no longer on the page.".to_string())
     }
-
     pub(crate) fn entry(&self, id: &str) -> EntryConfig {
         self.entries.get(id).cloned().unwrap_or_default()
     }
-
     /// Adds `path` (a repository's top folder) unless it is there already;
     /// the repository's id either way.
     pub(crate) fn add_repo(&mut self, path: &Path) -> Result<String, String> {
@@ -169,7 +149,6 @@ impl Settings {
         });
         Ok(id)
     }
-
     pub(crate) fn remove_repo(&mut self, id: &str) {
         self.repos.retain(|repo| repo.id != id);
         let prefix = format!("{id}/");
@@ -177,7 +156,6 @@ impl Settings {
             .retain(|key, _| key != id && !key.starts_with(&prefix));
     }
 }
-
 /// Windows paths: case and slashes don't matter.
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| {
@@ -189,15 +167,12 @@ pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     };
     norm(a) == norm(b)
 }
-
 fn settings_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(FILE_NAME))
 }
-
 pub(crate) fn load() -> Result<Settings, String> {
     load_from(&settings_path()?)
 }
-
 pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -223,12 +198,10 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
         }
     }
 }
-
 pub(crate) fn save_to(path: &Path, settings: &Settings) -> Result<(), String> {
     let text = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
     crate::game_saves::atomic::write(path, &text)
 }
-
 /// Reads the settings afresh, changes and saves them under the edit lock.
 pub(crate) fn edit(
     change: impl FnOnce(&mut Settings) -> Result<(), String>,
@@ -240,11 +213,9 @@ pub(crate) fn edit(
     save_to(&path, &settings)?;
     Ok(settings)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn repos_are_added_once_and_removed_with_their_entries() {
         let mut settings = Settings::default();
@@ -260,7 +231,6 @@ mod tests {
         assert!(settings.repos.is_empty());
         assert_eq!(settings.entries.len(), 1);
     }
-
     #[test]
     fn a_damaged_file_is_set_aside_and_new_providers_are_appended() {
         let dir = std::env::temp_dir().join(format!("myle-gr-store-{}", std::process::id()));

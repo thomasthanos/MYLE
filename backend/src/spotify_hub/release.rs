@@ -1,20 +1,15 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-
 use semver::Version;
 use serde::Deserialize;
-
 use crate::download::{self, parse_sha256_digest};
-
 use super::state::Cancellation;
-
 const USER_AGENT: &str = "MakeYourLifeEasier/SpotifyHub";
 const CLI_RELEASES: &str = "https://api.github.com/repos/spicetify/cli/releases?per_page=30";
 const MARKETPLACE_RELEASES: &str =
     "https://api.github.com/repos/spicetify/marketplace/releases?per_page=30";
 const MAX_ARCHIVE_ENTRIES: usize = 20_000;
 const MAX_UNPACKED_BYTES: u64 = 768 * 1024 * 1024;
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct Asset {
     pub name: String,
@@ -22,7 +17,6 @@ pub struct Asset {
     pub size: Option<u64>,
     pub digest: Option<String>,
 }
-
 #[derive(Clone, Debug, Deserialize)]
 struct Release {
     tag_name: String,
@@ -30,14 +24,12 @@ struct Release {
     prerelease: bool,
     assets: Vec<Asset>,
 }
-
 #[derive(Clone, Debug)]
 pub struct VerifiedRelease {
     pub version: String,
     pub asset: Asset,
     pub digest: String,
 }
-
 pub async fn resolve_cli() -> Result<VerifiedRelease, String> {
     let releases = fetch(CLI_RELEASES).await?;
     let release = newest_stable(&releases).ok_or("No stable Spicetify release was found.")?;
@@ -55,7 +47,6 @@ pub async fn resolve_cli() -> Result<VerifiedRelease, String> {
     let expected = format!("spicetify-{version}-windows-{architecture}.zip");
     selected(release, &expected, "spicetify/cli", version)
 }
-
 pub async fn resolve_marketplace() -> Result<VerifiedRelease, String> {
     let releases = fetch(MARKETPLACE_RELEASES).await?;
     let release = newest_stable(&releases).ok_or("No stable Marketplace release was found.")?;
@@ -66,7 +57,6 @@ pub async fn resolve_marketplace() -> Result<VerifiedRelease, String> {
         release.tag_name.trim_start_matches('v'),
     )
 }
-
 async fn fetch(url: &str) -> Result<Vec<Release>, String> {
     let response = download::http_client(USER_AGENT)?
         .get(url)
@@ -90,7 +80,6 @@ async fn fetch(url: &str) -> Result<Vec<Release>, String> {
     }
     response.json().await.map_err(download::err)
 }
-
 fn newest_stable(releases: &[Release]) -> Option<&Release> {
     releases
         .iter()
@@ -102,7 +91,6 @@ fn newest_stable(releases: &[Release]) -> Option<&Release> {
         .max_by(|(a, _), (b, _)| a.cmp(b))
         .map(|(_, release)| release)
 }
-
 fn selected(
     release: &Release,
     expected_name: &str,
@@ -132,7 +120,6 @@ fn selected(
         digest,
     })
 }
-
 pub async fn download_verified(
     release: &VerifiedRelease,
     destination: &Path,
@@ -154,7 +141,6 @@ pub async fn download_verified(
     }
     Ok(())
 }
-
 /// Strict ZIP extraction for trusted release archives. Unlike a convenience
 /// extractor, this treats traversal entries and symlinks as an error instead
 /// of silently ignoring them.
@@ -185,7 +171,6 @@ pub fn extract_verified_zip(
             return Err("The release archive is unexpectedly large.".into());
         }
     }
-
     if destination.exists() {
         std::fs::remove_dir_all(destination).map_err(download::err)?;
     }
@@ -225,24 +210,20 @@ pub fn extract_verified_zip(
     }
     Ok(())
 }
-
 fn is_symlink<R: Read>(entry: &zip::read::ZipFile<'_, R>) -> bool {
     entry
         .unix_mode()
         .is_some_and(|mode| mode & 0o170000 == 0o120000)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::spotify_hub::models::SpotifyHubAction;
     use crate::spotify_hub::state::SpotifyHubState;
     use zip::write::SimpleFileOptions;
-
     fn temp_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("myle-spicetify-{name}-{}", std::process::id()))
     }
-
     fn zip_with(path: &Path, entries: &[(&str, &[u8])]) {
         let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
         let options =
@@ -253,7 +234,6 @@ mod tests {
         }
         writer.finish().unwrap();
     }
-
     fn release(tag: &str, prerelease: bool, digest: Option<&str>) -> Release {
         Release {
             tag_name: tag.into(),
@@ -269,7 +249,6 @@ mod tests {
             }],
         }
     }
-
     #[test]
     fn stable_release_wins_over_newer_beta() {
         let list = vec![
@@ -279,7 +258,6 @@ mod tests {
         ];
         assert_eq!(newest_stable(&list).unwrap().tag_name, "v2.45.1");
     }
-
     #[test]
     fn digest_is_mandatory_and_well_formed() {
         let missing = release("v1.0.0", false, None);
@@ -303,7 +281,6 @@ mod tests {
             .is_err()
         );
     }
-
     #[test]
     fn unofficial_download_host_is_rejected() {
         let mut item = release(
@@ -314,7 +291,6 @@ mod tests {
         item.assets[0].browser_download_url = "https://example.com/marketplace.zip".into();
         assert!(selected(&item, "marketplace.zip", "spicetify/marketplace", "1.0.0").is_err());
     }
-
     #[test]
     fn malformed_and_traversing_archives_are_rejected() {
         let root = temp_dir("unsafe-zip");
@@ -335,7 +311,6 @@ mod tests {
             )
             .is_err()
         );
-
         let unsafe_zip = root.join("unsafe.zip");
         zip_with(&unsafe_zip, &[("../escape.txt", b"must not escape")]);
         assert!(
@@ -350,7 +325,6 @@ mod tests {
         assert!(!root.join("escape.txt").exists());
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn cancelled_extraction_writes_no_payload() {
         let root = temp_dir("cancelled-zip");

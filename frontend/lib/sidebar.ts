@@ -1,18 +1,15 @@
-// The sidebar's order, groups, shortcuts and keyboard moves, kept apart from
-// the components so they can be tested on their own (scripts/tests).
+// The sidebar's order, groups, shortcuts and keyboard moves, kept apart from the components so they can be tested on their own (scripts/tests).
 export type NavGroup = "apps" | "data" | "system" | "owner" | "bottom";
 /** The groups of the upper list, in order. "bottom" (Settings) is pinned below. */
 export const TOP_GROUPS: readonly NavGroup[] = ["apps", "data", "system", "owner"];
 export const GROUP_LABELS: Record<NavGroup, string> = { apps: "Apps", data: "Your data", system: "System", owner: "Owner only", bottom: "App" };
 export interface NavEntry { id: string; group: NavGroup; numbered?: boolean }
 export interface NavSection<T extends NavEntry> { group: NavGroup; pages: T[] }
-/** The upper list's groups, each with its pages in registry order; empty
- *  groups (the owner's, for everyone else) are left out. */
+/* The upper list's groups, each with its pages in registry order; empty groups (the owner's, for everyone else) are left out. */
 export function sections<T extends NavEntry>(pages: readonly T[]): NavSection<T>[] {
   return TOP_GROUPS.map((group) => ({ group, pages: pages.filter((page) => page.group === group) })).filter((section) => section.pages.length > 0);
 }
-/** Ctrl+1 … Ctrl+9, then Ctrl+0, follow the upper list's order. Ctrl+. opens
- *  Settings; Ctrl+, remains an alias. */
+/* Ctrl+1 … Ctrl+9, then Ctrl+0, follow the upper list's order. Ctrl+. opens Settings; Ctrl+, remains an alias. */
 export const SETTINGS_SHORTCUT = "Ctrl+.";
 export const SIDEBAR_SHORTCUT = "Ctrl+B";
 export function shortcutOf<T extends NavEntry>(pages: readonly T[], id: string): string | null {
@@ -36,14 +33,12 @@ export function pageForShortcut<T extends NavEntry>(pages: readonly T[], event: 
   if (!/^[0-9]$/.test(digit)) return undefined;
   return sections(pages).flatMap((section) => section.pages).filter((page) => page.numbered !== false)[digit === "0" ? 9 : Number(digit) - 1];
 }
-/** Leave room for the floating panel's shadow while keeping its arrow on the
- *  button. The arrow stays clear of the rounded panel corners. */
+/* Leave room for the floating panel's shadow while keeping its arrow on the button. The arrow stays clear of the rounded panel corners. */
 export function tooltipPosition(anchorY: number, height: number, viewportHeight: number) {
   const top = Math.max(32, Math.min(anchorY - height / 2, viewportHeight - height - 32));
   return { top, arrow: Math.max(18, Math.min(anchorY - top, height - 18)) };
 }
-/** Arrow keys, Home and End inside the sidebar: the index to focus next
- *  (wrapping around), or null for any other key. */
+/* Arrow keys, Home and End inside the sidebar: the index to focus next (wrapping around), or null for any other key. */
 export function nextFocus(current: number, count: number, key: string): number | null {
   if (count <= 0) return null;
   switch (key) {

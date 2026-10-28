@@ -1,26 +1,11 @@
-//! Whether a program has a window the user can actually see: the moment an
-//! update can hand over from one program to the next without a gap.
-//!
-//! Shared by the app (`updater`) and the setup (`installer/src/processes.rs`).
-//!
-//! "Visible" (`IsWindowVisible`) is not enough. Tao, the windowing library
-//! under Tauri, creates a hidden helper window as soon as its event loop
-//! starts, long before any page is painted, and gives it `WS_VISIBLE` (it
-//! needs paint messages) while hiding it with `WS_EX_LAYERED` and
-//! `WS_EX_TOOLWINDOW`, no title and a 0 x 0 size. The tray icon's message
-//! window is the same kind. Counting those, the previous version quit a
-//! fraction of a second after starting the new one, which then took a few
-//! seconds (WebView2 starting, the splash loading) to show anything.
-
+// ! Whether a program has a window the user can actually see: the moment an ! update can hand over from one program to the next without a gap. ! ! Shared by the app (`updater`) and the setup (`installer/src/processes.rs`). ! ! "Visible" (`IsWindowVisible`) is not enough. Tao, the windowing library ! under Tauri, creates a hidden helper window as soon as its event loop ! starts, long before any page is painted, and gives it `WS_VISIBLE` (it ! needs paint messages) while hiding it with `WS_EX_LAYERED` and ! `WS_EX_TOOLWINDOW`, no title and a 0 x 0 size. The tray icon's message ! window is the same kind. Counting those, the previous version quit a ! fraction of a second after starting the new one, which then took a few ! seconds (WebView2 starting, the splash loading) to show anything.
 use std::time::{Duration, Instant};
-
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GWL_EXSTYLE, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId,
     IsWindowVisible, WS_EX_TOOLWINDOW,
 };
-
 /// How a wait for a program's first window ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wait {
@@ -31,17 +16,14 @@ pub enum Wait {
     /// Still running, nothing on screen yet.
     TimedOut,
 }
-
 /// Whether a top-level window that Windows calls visible is one a person
 /// sees: a titled, non-tool window with an area. Every window the app and
 /// the setup open has a title ("MYLE", "MYLE Setup").
 pub fn counts_as_shown(ex_style: u32, title_len: i32, width: i32, height: i32) -> bool {
     ex_style & WS_EX_TOOLWINDOW == 0 && title_len > 0 && width > 0 && height > 0
 }
-
 fn is_shown(window: HWND) -> bool {
-    // SAFETY: plain queries on a window handle from EnumWindows; a window
-    // that is gone by now makes them fail, which reads as "not shown".
+    // SAFETY: plain queries on a window handle from EnumWindows; a window that is gone by now makes them fail, which reads as "not shown".
     unsafe {
         if IsWindowVisible(window) == 0 {
             return false;
@@ -64,7 +46,6 @@ fn is_shown(window: HWND) -> bool {
         )
     }
 }
-
 /// Whether `pid` has a window on screen right now.
 pub fn has_shown_window(pid: u32) -> bool {
     struct Search {
@@ -87,7 +68,6 @@ pub fn has_shown_window(pid: u32) -> bool {
     unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
     search.found
 }
-
 /// Waits until `pid` shows a real window, exits, or `timeout` passes. The
 /// app's windows show themselves only once they have painted, so `Shown` is
 /// the moment it can be seen.
@@ -112,25 +92,21 @@ pub fn wait_for_window(pid: u32, timeout: Duration) -> Wait {
     unsafe { CloseHandle(process) };
     outcome
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
     };
-
     #[test]
     fn the_hidden_helper_windows_do_not_count() {
-        // Tao's event-loop window and the tray icon's: visible by style,
-        // but tool windows with no title and no size.
+        // Tao's event-loop window and the tray icon's: visible by style, but tool windows with no title and no size.
         let helper = WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
         assert!(!counts_as_shown(helper, 0, 0, 0));
         assert!(!counts_as_shown(helper, 4, 300, 380));
         assert!(!counts_as_shown(0, 0, 300, 380));
         assert!(!counts_as_shown(0, 4, 0, 0));
     }
-
     #[test]
     fn the_splash_and_the_main_window_count() {
         // The splash: titled, sized, a normal window.
@@ -138,7 +114,6 @@ mod tests {
         // The main window is transparent, which may make it layered.
         assert!(counts_as_shown(WS_EX_LAYERED, 4, 1280, 720));
     }
-
     #[test]
     fn a_program_that_exits_without_a_window_is_not_waited_for() {
         let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
@@ -153,7 +128,6 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
         let _ = child.wait();
     }
-
     /// Real windows: one made the way tao makes its event-loop window is
     /// "visible" to Windows but not shown; a titled, sized one is.
     #[test]
@@ -186,7 +160,6 @@ mod tests {
             assert!(!helper.is_null());
             assert_ne!(IsWindowVisible(helper), 0, "Windows calls it visible");
             assert!(!has_shown_window(pid), "but nobody can see it");
-
             let splash = CreateWindowExW(
                 0,
                 class.as_ptr(),

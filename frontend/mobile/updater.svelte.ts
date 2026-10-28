@@ -1,9 +1,6 @@
-// A newer MYLE Passwords on Android (backend/mobile/src/update.rs): found in
-// the feed, downloaded into the app's own folder with its progress shown,
-// checked, and handed to Android's installer, all without leaving the app.
+// A newer MYLE Passwords on Android (backend/mobile/src/update.rs): found in the feed, downloaded into the app's own folder with its progress shown, checked, and handed to Android's installer, all without leaving the app.
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { passwordsApi as api, type MobileUpdate } from "../app/pages/password-manager/api";
-
 export type UpdateStep =
   | { kind: "available" }
   | { kind: "downloading"; percent: number | null }
@@ -12,20 +9,16 @@ export type UpdateStep =
   /** Android first needs the user to allow this app to install updates. */
   | { kind: "allow" }
   | { kind: "error"; message: string };
-
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
-
 class Updater {
   update = $state<MobileUpdate | null>(null);
   step = $state<UpdateStep>({ kind: "available" });
   /** "Later": not shown again until the app starts again. */
   dismissed = $state(false);
   #path: string | null = null;
-
   readonly visible = $derived(this.update !== null && !this.dismissed);
-
   /** True once the feed answered, with a newer version or without one. */
   async check(): Promise<boolean> {
     if (this.step.kind === "downloading") return true;
@@ -46,7 +39,6 @@ class Updater {
       return false;
     }
   }
-
   /** Downloads (or reuses) the update, then shows Android's installer. */
   async start() {
     const update = this.update;
@@ -72,7 +64,6 @@ class Updater {
     }
     await this.install();
   }
-
   async install() {
     if (!this.#path) return this.start();
     try {
@@ -90,17 +81,14 @@ class Updater {
       }
     }
   }
-
   /** Back in the app: right after allowing installs, the installer opens. */
   resumed() {
     if (this.step.kind === "allow") void this.install();
     else void this.check();
   }
-
   /** The last way out: the browser downloads it. */
   inBrowser() {
     if (this.update) void openUrl(this.update.url);
   }
 }
-
 export const updater = new Updater();

@@ -9,8 +9,7 @@
   };
   /** A switch: the whole row turns it on or off. */
   type Switch = Common & { checked: boolean; onchange: (on: boolean) => void };
-  /** An action, often Android's own settings: the whole row opens it. The
-   *  badge tells its state at a glance (on, off, or why it is unavailable). */
+  /* An action, often Android's own settings: the whole row opens it. The badge tells its state at a glance (on, off, or why it is unavailable). */
   type Action = Common & { onclick: () => void; badge?: { text: string; on?: boolean } };
 
   let props: Switch | Action = $props();
@@ -26,8 +25,7 @@
       checked={props.checked}
       disabled={props.disabled}
       onchange={(event) => {
-        // The state decides: the switch moves once the change has happened
-        // (a fingerprint prompt can still be cancelled).
+        // The state decides: the switch moves once the change has happened (a fingerprint prompt can still be cancelled).
         const on = event.currentTarget.checked;
         event.currentTarget.checked = props.checked;
         props.onchange(on);

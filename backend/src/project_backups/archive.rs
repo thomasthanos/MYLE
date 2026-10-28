@@ -1,42 +1,28 @@
-//! Writing a backup zip that is known to be whole before it gets its name.
-//!
-//! The zip is built in a local staging folder (cloud folders such as Google
-//! Drive for desktop show a stale view of a file that is still uploading),
-//! every entry is read back and checked against what was read from the
-//! project (size and CRC-32), the project folder is walked once more to make
-//! sure nothing is missing, and only then is the zip copied next to the other
-//! backups under a `__partial__` name, re-read until its SHA-256 matches, and
-//! renamed. The same steps and names as backup_projects 2.0.6.
-
+// ! Writing a backup zip that is known to be whole before it gets its name. ! ! The zip is built in a local staging folder (cloud folders such as Google ! Drive for desktop show a stale view of a file that is still uploading), ! every entry is read back and checked against what was read from the ! project (size and CRC-32), the project folder is walked once more to make ! sure nothing is missing, and only then is the zip copied next to the other ! backups under a `__partial__` name, re-read until its SHA-256 matches, and ! renamed. The same steps and names as backup_projects 2.0.6.
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
-
 use super::naming;
 use super::rules::PARTIAL_PREFIX;
 use super::walk::SourceFile;
 use super::{Failure, Sink, Stage};
 use crate::cloud::onedrive::PROVIDER_NOT_RUNNING;
-
 /// Waits between re-reads of a copy at the destination (≈ 60 s in all).
 pub(crate) const RETRY_DELAYS: &[u64] = &[300, 700, 1500, 3000, 5000, 8000, 12000, 15000, 15000];
 /// An empty zip is only its 22-byte end record.
 pub(crate) const MIN_ZIP_SIZE: u64 = 22;
 const STAGING_MARGIN: u64 = 64 * 1024 * 1024;
 const BUFFER: usize = 1024 * 1024;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct EntryInfo {
     pub size: u64,
     pub crc: u32,
 }
-
 /// What went into a zip, as read from the source.
 #[derive(Debug, Default)]
 pub(crate) struct Written {
@@ -44,14 +30,12 @@ pub(crate) struct Written {
     pub dirs: Vec<String>,
     pub total_bytes: u64,
 }
-
 #[derive(Debug)]
 pub(crate) struct Verified {
     pub zip_size: u64,
     /// The renamed zip showed its full size in time.
     pub final_check_ok: bool,
 }
-
 /// What a zip holds, read back from it.
 #[derive(Debug, Default)]
 pub(crate) struct ZipCheck {
@@ -59,14 +43,12 @@ pub(crate) struct ZipCheck {
     pub dirs: usize,
     pub bytes: u64,
 }
-
 fn io_failure(context: String, error: io::Error, path: &Path) -> Failure {
     if error.raw_os_error() == Some(PROVIDER_NOT_RUNNING as i32) {
         return Failure::CloudOffline(path.to_path_buf());
     }
     Failure::Message(format!("{context}: {error}"))
 }
-
 pub(crate) fn dos_time(time: Option<SystemTime>) -> DateTime {
     let local = naming::local(time.unwrap_or_else(SystemTime::now));
     let year = local.year.clamp(1980, 2107) as u16;
@@ -80,7 +62,6 @@ pub(crate) fn dos_time(time: Option<SystemTime>) -> DateTime {
     )
     .unwrap_or_default()
 }
-
 /// Streams `files` (and small in-memory `buffers`) into a new zip at `path`.
 pub(crate) fn write_zip(
     path: &Path,
@@ -102,7 +83,6 @@ pub(crate) fn write_zip(
     }
     result
 }
-
 fn write_entries(
     file: File,
     files: &[SourceFile],
@@ -126,7 +106,6 @@ fn write_entries(
         .compression_method(CompressionMethod::Deflated)
         .compression_level(Some(6))
         .unix_permissions(0o644);
-
     for (index, source) in files.iter().enumerate() {
         if sink.cancelled() {
             return Err(Failure::Cancelled);
@@ -212,7 +191,6 @@ fn write_entries(
         .map_err(|error| Failure::Message(format!("Can't write the zip: {error}")))?;
     Ok(written)
 }
-
 /// Reads every entry of the zip at `path` (each one is checked against its
 /// CRC-32), and when `expected` is given, that the zip holds exactly those
 /// files with the same content.
@@ -299,14 +277,12 @@ pub(crate) fn verify_zip(
     }
     Ok(check)
 }
-
 /// Size and SHA-256 of a file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Content {
     pub size: u64,
     pub sha256: [u8; 32],
 }
-
 pub(crate) fn hash_file(path: &Path) -> io::Result<Content> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -325,7 +301,6 @@ pub(crate) fn hash_file(path: &Path) -> io::Result<Content> {
         sha256: hasher.finalize().into(),
     })
 }
-
 /// Copies `from` to `to` (which must not exist) and flushes it to disk.
 /// Returns the size and SHA-256 of what was read, so the zip is not read
 /// once more just to hash it.
@@ -359,8 +334,7 @@ fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<Content, Fail
             done += read as u64;
             sink.progress(done, total.max(done), 0, 0);
         }
-        // Not every virtual file system supports flushing; the copy is
-        // verified by reading it back either way.
+        // Not every virtual file system supports flushing; the copy is verified by reading it back either way.
         let _ = output.sync_all();
         Ok(Content {
             size: done,
@@ -373,7 +347,6 @@ fn copy_durable(from: &Path, to: &Path, sink: &dyn Sink) -> Result<Content, Fail
     }
     result
 }
-
 /// Sleeps `ms`, waking early when cancelled.
 fn pause(ms: u64, sink: &dyn Sink) -> Result<(), Failure> {
     let until = std::time::Instant::now() + Duration::from_millis(ms);
@@ -385,7 +358,6 @@ fn pause(ms: u64, sink: &dyn Sink) -> Result<(), Failure> {
     }
     Ok(())
 }
-
 /// Reads `path` until it shows `expected`, waiting `delays` in between: a
 /// cloud folder may show an older or half-written view for a while.
 /// `read` gives the size (and the SHA-256 unless `size_only`).
@@ -428,7 +400,6 @@ pub(crate) fn wait_for_content(
         waited.div_ceil(1000)
     )))
 }
-
 fn read_content(path: &Path, size_only: bool) -> io::Result<Content> {
     if size_only {
         return fs::metadata(path).map(|meta| Content {
@@ -446,7 +417,6 @@ fn read_content(path: &Path, size_only: bool) -> io::Result<Content> {
     }
     Ok(content)
 }
-
 pub(crate) fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
@@ -461,11 +431,9 @@ pub(crate) fn format_size(bytes: u64) -> String {
         format!("{value:.1} {}", UNITS[unit])
     }
 }
-
 /// The message of a backup that someone else saved under the same name
 /// while this one ran.
 pub(crate) const NAME_TAKEN: &str = "NAME_TAKEN";
-
 /// Renames `from` to `to`, never replacing an existing `to`: backup_projects
 /// may have saved a backup with the same name meanwhile.
 fn rename_with_retries(from: &Path, to: &Path, sink: &dyn Sink) -> Result<(), Failure> {
@@ -493,7 +461,6 @@ fn rename_with_retries(from: &Path, to: &Path, sink: &dyn Sink) -> Result<(), Fa
         last.map(|error| error.to_string()).unwrap_or_default()
     )))
 }
-
 #[cfg(windows)]
 fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -501,8 +468,7 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     let wide =
         |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain(Some(0)).collect() };
     let (from_w, to_w) = (wide(from), wide(to));
-    // SAFETY: both strings are NUL-terminated and outlive the call. Without
-    // MOVEFILE_REPLACE_EXISTING the call fails when `to` exists.
+    // SAFETY: both strings are NUL-terminated and outlive the call. Without MOVEFILE_REPLACE_EXISTING the call fails when `to` exists.
     let ok = unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_WRITE_THROUGH) };
     if ok != 0 {
         return Ok(());
@@ -514,7 +480,6 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     }
     Err(error)
 }
-
 #[cfg(not(windows))]
 fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     if to.exists() {
@@ -522,20 +487,17 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     }
     fs::rename(from, to)
 }
-
 pub(crate) fn partial_name(base: &str) -> String {
     let millis = naming::unix_millis(SystemTime::now());
     format!("{PARTIAL_PREFIX}{base}__{millis}.zip")
 }
-
 #[cfg(windows)]
 fn free_space(dir: &Path) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut available = 0u64;
-    // SAFETY: `wide` is NUL-terminated and outlives the call; the other
-    // outputs are optional.
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the other outputs are optional.
     let ok = unsafe {
         GetDiskFreeSpaceExW(
             wide.as_ptr(),
@@ -546,12 +508,10 @@ fn free_space(dir: &Path) -> Option<u64> {
     };
     (ok != 0).then_some(available)
 }
-
 #[cfg(not(windows))]
 fn free_space(_dir: &Path) -> Option<u64> {
     None
 }
-
 /// Removes zips left in the staging folder by an interrupted run.
 pub(crate) fn clean_staging(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -564,17 +524,14 @@ pub(crate) fn clean_staging(dir: &Path) {
         }
     }
 }
-
 /// Test hooks: called after the copy at the destination was written.
 pub(crate) type AfterCopy<'a> = Option<&'a dyn Fn(&Path)>;
-
 /// Everything that goes into one zip.
 pub(crate) struct ZipJob<'a> {
     pub files: &'a [SourceFile],
     pub empty_dirs: &'a [String],
     pub buffers: &'a [(String, Vec<u8>)],
 }
-
 /// Creates `final_path` (which must not exist) as a verified zip.
 /// `before_finalize` runs once the zip is known to be whole and may still
 /// refuse it (the completeness check).
@@ -609,7 +566,6 @@ pub(crate) fn write_verified(
             .iter()
             .map(|(_, data)| data.len() as u64)
             .sum::<u64>();
-
     let local = staging.and_then(|staging| {
         fs::create_dir_all(staging).ok()?;
         let needed = estimate + estimate / 20 + STAGING_MARGIN;
@@ -618,7 +574,6 @@ pub(crate) fn write_verified(
         }
         Some(staging.join(format!("{}.zip", uuid::Uuid::new_v4())))
     });
-
     let result = (|| -> Result<(Written, Content), Failure> {
         if let Some(local) = &local {
             sink.stage(Stage::Zipping);
@@ -673,7 +628,6 @@ pub(crate) fn write_verified(
             Ok((written, content))
         }
     })();
-
     let finished = result.and_then(|(written, content)| {
         sink.stage(Stage::Finishing);
         rename_with_retries(&partial, final_path, sink)?;
@@ -704,7 +658,6 @@ pub(crate) fn write_verified(
         final_check_ok,
     })
 }
-
 /// Whether the zip at `path` can be opened.
 #[cfg(test)]
 pub(crate) fn zip_is_readable(path: &Path) -> bool {
@@ -714,19 +667,16 @@ pub(crate) fn zip_is_readable(path: &Path) -> bool {
             .and_then(|file| ZipArchive::new(BufReader::new(file)).ok())
             .is_some()
 }
-
 pub(crate) fn staging_dir() -> Option<PathBuf> {
     crate::storage::local_dir()
         .ok()
         .map(|dir| dir.join("project-backups-staging"))
 }
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, Ordering};
-
     pub(crate) struct Quiet;
     impl Sink for Quiet {
         fn stage(&self, _stage: Stage) {}
@@ -735,14 +685,12 @@ pub(crate) mod tests {
             false
         }
     }
-
     pub(crate) fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-archive-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     pub(crate) fn source(root: &Path, rel: &str, body: &[u8]) -> SourceFile {
         let abs = root.join(rel);
         fs::create_dir_all(abs.parent().unwrap()).unwrap();
@@ -754,7 +702,6 @@ pub(crate) mod tests {
             modified: Some(SystemTime::now()),
         }
     }
-
     #[test]
     fn a_written_zip_reads_back_whole() {
         let root = temp("write");
@@ -778,7 +725,6 @@ pub(crate) mod tests {
         assert!(verify_zip(&zip, Some(&other), &Quiet).is_err());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn corrupt_and_partial_zips_are_refused() {
         let root = temp("corrupt");
@@ -804,7 +750,6 @@ pub(crate) mod tests {
         assert!(zip_is_readable(&zip));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_stale_view_is_read_again_until_it_matches() {
         let root = temp("stale");
@@ -841,7 +786,6 @@ pub(crate) mod tests {
         assert!(matches!(error, Failure::Message(text) if text.contains("3 tries")));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_verified_zip_is_staged_copied_and_renamed() {
         let root = temp("verified");
@@ -902,7 +846,6 @@ pub(crate) mod tests {
         assert!(again.is_err());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_copy_that_never_settles_is_removed_and_not_named() {
         let root = temp("unsettled");
@@ -931,7 +874,6 @@ pub(crate) mod tests {
         assert!(matches!(error, Failure::Message(text) if text.contains("failed its check")));
         assert!(!final_path.exists());
         assert_eq!(fs::read_dir(&month).unwrap().count(), 0, "partial removed");
-
         // Without staging, a zip broken at the destination is refused too.
         let error = write_verified(
             &final_path,
@@ -950,7 +892,6 @@ pub(crate) mod tests {
         assert!(!final_path.exists());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn the_completeness_check_can_still_refuse_the_zip() {
         let root = temp("refuse");
@@ -974,7 +915,6 @@ pub(crate) mod tests {
         assert!(!final_path.exists());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn cancelling_removes_the_half_written_zip() {
         struct Cancel(AtomicBool);

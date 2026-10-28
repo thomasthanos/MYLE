@@ -1,33 +1,21 @@
-//! Disk Analyzer: what is filling a drive or a folder.
-//!
-//! The page sends one root path to scan, then only node ids this backend
-//! gave it. The finished scan stays here; the page asks for slices of it
-//! (a folder's children, a treemap, the largest files) and never gets the
-//! whole tree. Every id belongs to one scan: an id from an earlier scan is
-//! refused. Moving items to the Recycle Bin goes by id, and the real path is
-//! worked out and checked here, again, just before anything moves.
-
+// ! Disk Analyzer: what is filling a drive or a folder. ! ! The page sends one root path to scan, then only node ids this backend ! gave it. The finished scan stays here; the page asks for slices of it ! (a folder's children, a treemap, the largest files) and never gets the ! whole tree. Every id belongs to one scan: an id from an earlier scan is ! refused. Moving items to the Recycle Bin goes by id, and the real path is ! worked out and checked here, again, just before anything moves.
 mod delete;
 mod elevated;
 mod mft;
 mod protect;
 mod scan;
 mod tree;
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
-
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-
 use crate::apps::Jobs;
 use protect::{Guard, Verdict};
 use tree::{Kind, SizeMode, SortKey, Tree, flag};
-
 /// The most children asked for at once.
 const MAX_CHILDREN: usize = 500;
 const MAX_TOP_FILES: usize = 1000;
@@ -35,13 +23,11 @@ const MAX_TOP_FILES: usize = 1000;
 const TREEMAP_CAP: usize = 20_000;
 /// The most ids in one request (details or the Recycle Bin).
 const MAX_IDS: usize = 10_000;
-
 #[derive(Default)]
 struct Scanned {
     tree: Option<Tree>,
     guard: Option<Guard>,
 }
-
 #[derive(Default)]
 struct Inner {
     /// The running scan's cancel flag.
@@ -49,11 +35,9 @@ struct Inner {
     scanned: Mutex<Scanned>,
     next_id: AtomicU64,
 }
-
 /// The running scan and the last finished one.
 #[derive(Clone, Default)]
 pub struct DiskAnalyzerState(Arc<Inner>);
-
 impl DiskAnalyzerState {
     /// A new scan: the one still running stops, and the last result is let
     /// go now rather than held next to the new one.
@@ -65,7 +49,6 @@ impl DiskAnalyzerState {
         *lock(&self.0.scanned) = Scanned::default();
         (self.0.next_id.fetch_add(1, Ordering::Relaxed) + 1, flag)
     }
-
     /// Keeps a finished scan, unless a newer one started meanwhile.
     fn keep(&self, flag: &Arc<AtomicBool>, tree: Tree, guard: Guard) -> bool {
         let mut running = lock(&self.0.running);
@@ -76,21 +59,18 @@ impl DiskAnalyzerState {
         *lock(&self.0.scanned) = Scanned { tree: Some(tree), guard: Some(guard) };
         true
     }
-
     fn end(&self, flag: &Arc<AtomicBool>) {
         let mut running = lock(&self.0.running);
         if running.as_ref().is_some_and(|f| Arc::ptr_eq(f, flag)) {
             *running = None;
         }
     }
-
     /// Stops the running scan, if any.
     pub fn cancel(&self) {
         if let Some(flag) = lock(&self.0.running).take() {
             flag.store(true, Ordering::Relaxed);
         }
     }
-
     fn with<R>(&self, scan_id: u64, work: impl FnOnce(&mut Tree, &Guard) -> Result<R, String>) -> Result<R, String> {
         let mut scanned = lock(&self.0.scanned);
         let Scanned { tree: Some(tree), guard: Some(guard) } = &mut *scanned else {
@@ -102,18 +82,13 @@ impl DiskAnalyzerState {
         work(tree, guard)
     }
 }
-
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 async fn blocking<R: Send + 'static>(work: impl FnOnce() -> Result<R, String> + Send + 'static) -> Result<R, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
-
-// ---------------------------------------------------------------------------
-// Drives and the folder picker
-
+// --------------------------------------------------------------------------- Drives and the folder picker
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Drive {
@@ -131,7 +106,6 @@ pub struct Drive {
     /// A fixed NTFS drive: the file table could be read directly (not built yet).
     mft_possible: bool,
 }
-
 fn drive(letter: char) -> Option<Drive> {
     use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW};
     const REMOVABLE: u32 = 2;
@@ -188,7 +162,6 @@ fn drive(letter: char) -> Option<Drive> {
         })
     }
 }
-
 /// The drives to offer. Each is asked on its own thread: a network drive
 /// whose server is gone can take long to answer, and is left out.
 #[tauri::command]
@@ -221,7 +194,6 @@ pub async fn disk_analyzer_drives() -> Result<Vec<Drive>, String> {
     })
     .await
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     blocking(move || {
@@ -234,10 +206,7 @@ pub async fn disk_analyzer_pick_folder(app: AppHandle) -> Result<Option<String>,
     })
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Scanning
-
+// --------------------------------------------------------------------------- Scanning
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanDone {
@@ -263,7 +232,6 @@ pub struct ScanDone {
     /// Why a fast scan asked for became a walk.
     fallback: Option<String>,
 }
-
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ScanEvent {
@@ -279,13 +247,11 @@ pub enum ScanEvent {
     Done(ScanDone),
     Cancelled,
 }
-
 impl ScanEvent {
     fn progress(p: &scan::Progress, phase: Option<&'static str>) -> Self {
         ScanEvent::Progress { files: p.files, dirs: p.dirs, bytes: p.bytes, alloc: p.alloc, current: p.current.clone(), phase }
     }
 }
-
 /// The folder to scan, in its `\\?\` form: a folder or drive that is there.
 fn scan_root(root: &str) -> Result<PathBuf, String> {
     let root = root.trim();
@@ -299,12 +265,10 @@ fn scan_root(root: &str) -> Result<PathBuf, String> {
     }
     Ok(tree::long_path(&canonical))
 }
-
 fn same_drive_as_windows(root: &Path) -> bool {
     let windows = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_default();
     protect::parts(root).first() == protect::parts(&windows).first()
 }
-
 /// Scans `root` and keeps the result. `None` when it was cancelled.
 ///
 /// `fast`, for a whole fixed NTFS drive: read its file table through the
@@ -361,7 +325,6 @@ pub async fn disk_analyzer_scan(
     })
     .await
 }
-
 /// Keeps a finished scan's tree and tells the page, unless it was cancelled
 /// or a newer scan started.
 fn finish_scan(
@@ -409,7 +372,6 @@ fn finish_scan(
     let _ = on_event.send(ScanEvent::Done(done.clone()));
     Ok(Some(done))
 }
-
 /// The drive's letter, when `root` is a whole fixed NTFS drive.
 fn fast_drive(root: &Path) -> Option<char> {
     let parts = protect::parts(root);
@@ -423,17 +385,14 @@ fn fast_drive(root: &Path) -> Option<char> {
     }
     drive(letter).filter(|d| d.mft_possible).map(|_| letter)
 }
-
 /// Handles the fast scan's administrator helper before Tauri starts.
 pub fn run_elevated_helper_from_args() -> Option<i32> {
     elevated::run_helper_from_args()
 }
-
 #[tauri::command]
 pub fn disk_analyzer_cancel(state: State<'_, DiskAnalyzerState>) {
     state.cancel();
 }
-
 /// Lets the results go (off the main thread: a big tree takes a moment to free).
 #[tauri::command]
 pub async fn disk_analyzer_clear(state: State<'_, DiskAnalyzerState>) -> Result<(), String> {
@@ -445,10 +404,7 @@ pub async fn disk_analyzer_clear(state: State<'_, DiskAnalyzerState>) -> Result<
     })
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Slices of the result
-
+// --------------------------------------------------------------------------- Slices of the result
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeView {
@@ -473,7 +429,6 @@ pub struct NodeView {
     /// Another name of a file counted under its first name (fast scan only).
     hard_link: bool,
 }
-
 fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
     let node = tree.node(id);
     let verdict = if node.kind == Kind::Link {
@@ -505,7 +460,6 @@ fn view(tree: &Tree, guard: &Guard, id: u32) -> NodeView {
         hard_link: node.flags & flag::HARD_LINK != 0,
     }
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rest {
@@ -513,7 +467,6 @@ pub struct Rest {
     size: u64,
     alloc: u64,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Children {
@@ -522,7 +475,6 @@ pub struct Children {
     /// The children after this page: "N smaller items" and their total.
     rest: Option<Rest>,
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_children(
     state: State<'_, DiskAnalyzerState>,
@@ -548,7 +500,6 @@ pub async fn disk_analyzer_children(
     })
     .await
 }
-
 /// The current details of some items (for the Recycle Bin confirmation).
 #[tauri::command]
 pub async fn disk_analyzer_nodes(state: State<'_, DiskAnalyzerState>, scan_id: u64, node_ids: Vec<u32>) -> Result<Vec<NodeView>, String> {
@@ -557,15 +508,13 @@ pub async fn disk_analyzer_nodes(state: State<'_, DiskAnalyzerState>, scan_id: u
     }
     let state = state.inner().clone();
     blocking(move || {
-        // What runs or is installed now, not when the scan ended: this
-        // answers the question asked before anything moves.
+        // What runs or is installed now, not when the scan ended: this answers the question asked before anything moves.
         let root = state.with(scan_id, |tree, _| Ok(tree.root.clone()))?;
         let guard = Guard::for_this_pc(&root);
         state.with(scan_id, |tree, _| node_ids.iter().map(|&id| tree.check(scan_id, id).map(|()| view(tree, &guard, id))).collect())
     })
     .await
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Crumb {
@@ -574,7 +523,6 @@ pub struct Crumb {
     size: u64,
     alloc: u64,
 }
-
 /// The scanned folder down to `node_id`, for the breadcrumbs.
 #[tauri::command]
 pub async fn disk_analyzer_trail(state: State<'_, DiskAnalyzerState>, scan_id: u64, node_id: u32) -> Result<Vec<Crumb>, String> {
@@ -596,7 +544,6 @@ pub async fn disk_analyzer_trail(state: State<'_, DiskAnalyzerState>, scan_id: u
     })
     .await
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_treemap(
     state: State<'_, DiskAnalyzerState>,
@@ -615,7 +562,6 @@ pub async fn disk_analyzer_treemap(
     })
     .await
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileView {
@@ -626,7 +572,6 @@ pub struct FileView {
     /// Its extension's colour, as in the treemap.
     rank: u8,
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_top_files(
     state: State<'_, DiskAnalyzerState>,
@@ -654,7 +599,6 @@ pub async fn disk_analyzer_top_files(
     })
     .await
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_extensions(
     state: State<'_, DiskAnalyzerState>,
@@ -672,7 +616,6 @@ pub async fn disk_analyzer_extensions(
     })
     .await
 }
-
 #[tauri::command]
 pub async fn disk_analyzer_path(state: State<'_, DiskAnalyzerState>, scan_id: u64, node_id: u32) -> Result<String, String> {
     let state = state.inner().clone();
@@ -684,7 +627,6 @@ pub async fn disk_analyzer_path(state: State<'_, DiskAnalyzerState>, scan_id: u6
     })
     .await
 }
-
 /// Opens Explorer with the item selected (a folder scanned whole: opened).
 #[tauri::command]
 pub async fn disk_analyzer_reveal(state: State<'_, DiskAnalyzerState>, scan_id: u64, node_id: u32) -> Result<(), String> {
@@ -708,10 +650,7 @@ pub async fn disk_analyzer_reveal(state: State<'_, DiskAnalyzerState>, scan_id: 
     })
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Deletion: Recycle Bin by default; permanent deletion is a separate command.
-
+// --------------------------------------------------------------------------- Deletion: Recycle Bin by default; permanent deletion is a separate command.
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum DeleteEvent {
@@ -725,13 +664,11 @@ pub enum DeleteEvent {
         work_total: Option<u32>,
     },
 }
-
 impl DeleteEvent {
     fn progress(done: usize, total: usize, current: String, work: Option<(u32, u32)>) -> Self {
         Self::Progress { done, total, current, work_total: work.map(|(total, _)| total), work_done: work.map(|(_, done)| done) }
     }
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skipped {
@@ -740,7 +677,6 @@ pub struct Skipped {
     reason: String,
     can_delete_permanently: bool,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteOutcome {
@@ -754,14 +690,12 @@ pub struct DeleteOutcome {
     freed_size: u64,
     skipped: Vec<Skipped>,
 }
-
 struct Target {
     id: u32,
     path: PathBuf,
     is_dir: bool,
     link: bool,
 }
-
 /// Moves items of the current scan to the Recycle Bin and takes them out of
 /// the results, so the page shows the new totals without scanning again.
 #[tauri::command]
@@ -774,7 +708,6 @@ pub async fn disk_analyzer_delete(
 ) -> Result<DeleteOutcome, String> {
     remove_items(state, jobs, scan_id, node_ids, on_event, delete::Mode::Recycle).await
 }
-
 /// A distinct action, offered only after the bin refuses an item and after a
 /// second confirmation. It keeps all of the usual protection and path checks.
 #[tauri::command]
@@ -787,7 +720,6 @@ pub async fn disk_analyzer_delete_permanently(
 ) -> Result<DeleteOutcome, String> {
     remove_items(state, jobs, scan_id, node_ids, on_event, delete::Mode::Permanent).await
 }
-
 async fn remove_items(
     state: State<'_, DiskAnalyzerState>,
     jobs: State<'_, Jobs>,
@@ -845,8 +777,7 @@ async fn remove_items(
             let working_on = current.clone();
             let last_update = Mutex::new(Instant::now());
             let progress: delete::OnProgress = Arc::new(move |work_total, work_done| {
-                // Large folders can emit thousands of updates. Keep the UI
-                // responsive without filling its channel with every callback.
+                // Large folders can emit thousands of updates. Keep the UI responsive without filling its channel with every callback.
                 let mut last = last_update.lock().unwrap_or_else(|e| e.into_inner());
                 if last.elapsed() < Duration::from_millis(100) {
                     return;
@@ -896,11 +827,9 @@ async fn remove_items(
     })
     .await
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn a_new_scan_stops_the_old_one_and_only_the_newest_is_kept() {
         let state = DiskAnalyzerState::default();
@@ -920,7 +849,6 @@ mod tests {
         assert!(third.load(Ordering::Relaxed));
         assert!(state.with(second_id, |_, _| Ok(())).is_err(), "a new scan lets the last result go");
     }
-
     #[test]
     fn deleting_waits_for_the_system_cleaner() {
         let jobs = Jobs::default();
@@ -931,7 +859,6 @@ mod tests {
         assert!(jobs.start("disk-analyzer-delete").is_ok(), "installs may run alongside");
         drop(install);
     }
-
     #[test]
     fn only_folders_that_are_there_are_scanned() {
         assert!(scan_root("").is_err());
@@ -942,7 +869,6 @@ mod tests {
         let temp = scan_root(&std::env::temp_dir().to_string_lossy()).unwrap();
         assert!(temp.to_string_lossy().starts_with(r"\\?\"));
     }
-
     #[test]
     fn events_and_views_serialize_for_the_page() {
         let walked = scan::Progress { files: 1, dirs: 2, bytes: 3, alloc: 4, current: "C:\\x".into() };

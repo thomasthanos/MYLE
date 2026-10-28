@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Nothing to commit: what the project can do next (build, release, push),
-  // and the commits since its last release.
+  // Nothing to commit: what the project can do next (build, release, push), and the commits since its last release.
   import { onMount } from "svelte";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";

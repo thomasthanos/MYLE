@@ -1,22 +1,13 @@
-//! What the debloater reads and changes in Windows: registry values,
-//! services, scheduled tasks, the time format, Store apps, and Explorer.
-//! Reading needs no administrator rights; what changes the machine runs in
-//! the administrator helper.
-
+// ! What the debloater reads and changes in Windows: registry values, ! services, scheduled tasks, the time format, Store apps, and Explorer. ! Reading needs no administrator rights; what changes the machine runs in ! the administrator helper.
 use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use winreg::RegKey;
 use winreg::enums::{
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_DWORD,
     REG_EXPAND_SZ, REG_SZ,
 };
-
 use super::catalog::{Data, Hive};
-
-// ---------------------------------------------------------------------------
-// Windows itself
-
+// --------------------------------------------------------------------------- Windows itself
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsInfo {
@@ -25,7 +16,6 @@ pub struct WindowsInfo {
     pub name: String,
     pub windows11: bool,
 }
-
 pub fn windows_info() -> WindowsInfo {
     let key = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey_with_flags(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", KEY_READ | KEY_WOW64_64KEY)
@@ -49,10 +39,7 @@ pub fn windows_info() -> WindowsInfo {
     .replace("  ", " ");
     WindowsInfo { build, name, windows11 }
 }
-
-// ---------------------------------------------------------------------------
-// Registry
-
+// --------------------------------------------------------------------------- Registry
 /// A value as it is, or was.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -63,7 +50,6 @@ pub enum Value {
     /// Some other type, left alone.
     Other,
 }
-
 impl Value {
     pub fn matches(&self, data: Data) -> bool {
         match (self, data) {
@@ -73,14 +59,12 @@ impl Value {
         }
     }
 }
-
 fn root(hive: Hive) -> RegKey {
     RegKey::predef(match hive {
         Hive::User => HKEY_CURRENT_USER,
         Hive::Machine => HKEY_LOCAL_MACHINE,
     })
 }
-
 pub fn read(hive: Hive, path: &str, name: &str) -> Value {
     let Ok(key) = root(hive).open_subkey_with_flags(path, KEY_READ | KEY_WOW64_64KEY) else {
         return Value::Absent;
@@ -108,7 +92,6 @@ pub fn read(hive: Hive, path: &str, name: &str) -> Value {
         _ => Value::Other,
     }
 }
-
 /// The first key of `path` that does not exist yet, which writing a value
 /// there creates (and undo removes again, if it is left empty).
 pub fn first_missing(hive: Hive, path: &str) -> Option<String> {
@@ -125,7 +108,6 @@ pub fn first_missing(hive: Hive, path: &str) -> Option<String> {
     }
     None
 }
-
 pub fn write(hive: Hive, path: &str, name: &str, data: Data) -> Result<(), String> {
     let (key, _) = root(hive)
         .create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)
@@ -136,7 +118,6 @@ pub fn write(hive: Hive, path: &str, name: &str, data: Data) -> Result<(), Strin
     }
     .map_err(|e| format!("{path}\\{name}: {e}"))
 }
-
 /// Puts a value back as it was: its old data, or no value at all. Keys that
 /// applying created are removed again if nothing else is in them.
 pub fn restore(hive: Hive, path: &str, name: &str, before: &Value, created: Option<&str>) -> Result<(), String> {
@@ -160,7 +141,6 @@ pub fn restore(hive: Hive, path: &str, name: &str, before: &Value, created: Opti
     }
     Ok(())
 }
-
 fn write_raw(
     hive: Hive,
     path: &str,
@@ -172,14 +152,12 @@ fn write_raw(
         .map_err(|e| format!("{path}: {e}"))?;
     set(&key).map_err(|e| format!("{path}\\{name}: {e}"))
 }
-
 /// Whether `top` is `path` or one of its parent keys, below the hive's
 /// first level: the only keys undo may remove (and only while empty).
 pub fn key_on_path(path: &str, top: &str) -> bool {
     let (top, path) = (top.to_ascii_lowercase(), path.to_ascii_lowercase());
     top.contains('\\') && (path == top || path.starts_with(&format!("{top}\\")))
 }
-
 /// Deletes `path` and its parents up to `top` while each is empty.
 fn remove_empty_keys(hive: Hive, path: &str, top: &str) {
     if !path.eq_ignore_ascii_case(top) && !path.to_ascii_lowercase().starts_with(&format!("{}\\", top.to_ascii_lowercase())) {
@@ -204,10 +182,7 @@ fn remove_empty_keys(hive: Hive, path: &str, top: &str) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Services
-
+// --------------------------------------------------------------------------- Services
 mod services {
     use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SERVICE_DOES_NOT_EXIST, GetLastError};
     use windows_sys::Win32::System::Services::{
@@ -217,22 +192,17 @@ mod services {
         SERVICE_DELAYED_AUTO_START_INFO, SERVICE_DEMAND_START, SERVICE_DISABLED, SERVICE_NO_CHANGE,
         SERVICE_QUERY_CONFIG,
     };
-
     use super::super::catalog::Start;
-
     struct Handle(SC_HANDLE);
-
     impl Drop for Handle {
         fn drop(&mut self) {
             // SAFETY: a handle this module opened and still owns.
             unsafe { CloseServiceHandle(self.0) };
         }
     }
-
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(Some(0)).collect()
     }
-
     /// `Ok(None)`: the service does not exist here.
     fn open(name: &str, access: u32) -> Result<Option<Handle>, String> {
         // SAFETY: plain calls; handles are closed by `Handle`.
@@ -254,7 +224,6 @@ mod services {
             Ok(Some(Handle(service)))
         }
     }
-
     /// The start type, or `None` when the service is not on this PC (or
     /// starts with the system, which is never touched).
     pub fn start_type(name: &str) -> Result<Option<Start>, String> {
@@ -292,7 +261,6 @@ mod services {
             })
         }
     }
-
     /// Needs administrator rights.
     pub fn set_start_type(name: &str, start: Start) -> Result<(), String> {
         let Some(service) = open(name, SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG)? else {
@@ -335,18 +303,13 @@ mod services {
         Ok(())
     }
 }
-
 pub use services::{set_start_type, start_type};
-
-// ---------------------------------------------------------------------------
-// Scheduled tasks
-
+// --------------------------------------------------------------------------- Scheduled tasks
 mod tasks {
     use windows::Win32::Foundation::{VARIANT_FALSE, VARIANT_TRUE};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoIncrementMTAUsage, CoInitializeEx, CoUninitialize,
     };
-
     /// Keeps COM's multithreaded apartment up for the rest of the process.
     /// Without it, the `CoUninitialize` below can be the last one and tear
     /// the apartment down while another thread (Shell calls, which use it
@@ -361,16 +324,13 @@ mod tasks {
     use windows::Win32::System::TaskScheduler::{IRegisteredTask, ITaskService, TaskScheduler};
     use windows::Win32::System::Variant::VARIANT;
     use windows::core::BSTR;
-
     /// `Ok(None)` when the task is not on this PC.
     fn with_task<T>(
         folder: &str,
         name: &str,
         act: impl FnOnce(&IRegisteredTask) -> windows::core::Result<T>,
     ) -> Result<Option<T>, String> {
-        // SAFETY: COM is initialized for this thread for the duration, and
-        // every interface is dropped before it is uninitialized: the error's
-        // own error info too, which is read and let go inside the match.
+        // SAFETY: COM is initialized for this thread for the duration, and every interface is dropped before it is uninitialized: the error's own error info too, which is read and let go inside the match.
         keep_mta();
         unsafe {
             let initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
@@ -393,12 +353,10 @@ mod tasks {
             result
         }
     }
-
     pub fn task_enabled(folder: &str, name: &str) -> Result<Option<bool>, String> {
         // SAFETY: a live interface from `with_task`.
         with_task(folder, name, |task| unsafe { task.Enabled() }.map(|on| on.as_bool()))
     }
-
     /// Needs administrator rights for the tasks of Windows.
     pub fn set_task_enabled(folder: &str, name: &str, enabled: bool) -> Result<(), String> {
         let flag = if enabled { VARIANT_TRUE } else { VARIANT_FALSE };
@@ -406,17 +364,12 @@ mod tasks {
         with_task(folder, name, |task| unsafe { task.SetEnabled(flag) }).map(|_| ())
     }
 }
-
 pub use tasks::{set_task_enabled, task_enabled};
-
-// ---------------------------------------------------------------------------
-// The time format
-
+// --------------------------------------------------------------------------- The time format
 mod clock {
     use windows_sys::Win32::Globalization::{
         GetLocaleInfoW, LOCALE_SSHORTTIME, LOCALE_STIMEFORMAT, LOCALE_USER_DEFAULT, SetLocaleInfoW,
     };
-
     fn get(kind: u32) -> Result<String, String> {
         let mut buffer = [0u16; 128];
         // SAFETY: the buffer's length is passed with it.
@@ -426,7 +379,6 @@ mod clock {
         }
         Ok(String::from_utf16_lossy(&buffer[..(length as usize).saturating_sub(1)]))
     }
-
     fn set(kind: u32, value: &str) -> Result<(), String> {
         let wide: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
         // SAFETY: `wide` is NUL-terminated and outlives the call.
@@ -435,25 +387,20 @@ mod clock {
         }
         Ok(())
     }
-
     /// The user's short and long time formats: "h:mm tt", "h:mm:ss tt".
     pub fn time_formats() -> Result<(String, String), String> {
         Ok((get(LOCALE_SSHORTTIME)?, get(LOCALE_STIMEFORMAT)?))
     }
-
     pub fn set_time_formats(short: &str, long: &str) -> Result<(), String> {
         set(LOCALE_STIMEFORMAT, long)?;
         set(LOCALE_SSHORTTIME, short)
     }
 }
-
 pub use clock::{set_time_formats, time_formats};
-
 /// Whether a time format shows 24 hours: no 12-hour `h`, no AM/PM `t`.
 pub fn is_24h(format: &str) -> bool {
     !unquoted(format).any(|c| c == 'h' || c == 't')
 }
-
 /// The characters of a format outside its 'quoted literals'.
 fn unquoted(format: &str) -> impl Iterator<Item = char> + '_ {
     let mut quoted = false;
@@ -465,7 +412,6 @@ fn unquoted(format: &str) -> impl Iterator<Item = char> + '_ {
         !quoted
     })
 }
-
 /// The same format with 24 hours: "h:mm tt" → "HH:mm", "tt h:mm" → "HH:mm".
 pub fn to_24h(format: &str) -> String {
     if format.contains('\'') {
@@ -492,7 +438,6 @@ pub fn to_24h(format: &str) -> String {
     }
     out.trim().to_string()
 }
-
 /// The same format with 12 hours: "HH:mm" → "h:mm tt", "HH:mm:ss" → "h:mm:ss tt".
 pub fn to_12h(format: &str) -> String {
     if !is_24h(format) {
@@ -516,10 +461,7 @@ pub fn to_12h(format: &str) -> String {
     }
     format!("{} tt", out.trim())
 }
-
-// ---------------------------------------------------------------------------
-// Store apps and Edge
-
+// --------------------------------------------------------------------------- Store apps and Edge
 /// Names of the Store packages installed for this user (from the registry,
 /// which answers in milliseconds where PowerShell takes seconds).
 pub fn installed_packages() -> Vec<String> {
@@ -537,7 +479,6 @@ pub fn installed_packages() -> Vec<String> {
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     names
 }
-
 /// Whether a part of Windows (a Feature on Demand) is installed, from the
 /// servicing store, which any user may read: `None` when this Windows has
 /// no such package at all. `package` is the start of its package names
@@ -562,16 +503,13 @@ pub fn capability_installed(package: &str) -> Option<bool> {
     }
     seen.then_some(false)
 }
-
 pub fn program_files_x86() -> PathBuf {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFilesX86)
         .unwrap_or_else(|| PathBuf::from(r"C:\Program Files (x86)"))
 }
-
 pub fn windows_dir() -> PathBuf {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Windows).unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
 }
-
 pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
@@ -595,16 +533,12 @@ pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     unsafe { CoTaskMemFree(raw.cast()) };
     Some(path)
 }
-
 pub fn edge_installed() -> bool {
     program_files_x86()
         .join(r"Microsoft\Edge\Application\msedge.exe")
         .is_file()
 }
-
-// ---------------------------------------------------------------------------
-// Telling Windows
-
+// --------------------------------------------------------------------------- Telling Windows
 /// Tells running programs that settings changed (`area`: "intl",
 /// "TraySettings", "Policy", ...).
 pub fn broadcast_setting_change(area: &str) {
@@ -625,7 +559,6 @@ pub fn broadcast_setting_change(area: &str) {
         );
     }
 }
-
 /// Restarts the user's Explorer (the taskbar and desktop), as the user: it
 /// must never be started from the administrator helper.
 pub fn restart_explorer() -> Result<(), String> {
@@ -648,7 +581,6 @@ pub fn restart_explorer() -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Explorer could not be started again: {e}"))
 }
-
 fn explorer_running() -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -680,11 +612,9 @@ fn explorer_running() -> bool {
         found
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Read as the user, and fast enough for the page: the servicing store
     /// has thousands of packages.
     #[test]
@@ -701,10 +631,8 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
         println!("{:?}", started.elapsed());
     }
-
     /// A key of this test's own under HKCU, removed afterwards.
     struct TestKey(String);
-
     impl TestKey {
         fn new() -> Self {
             let path = format!(r"Software\ThomasThanos\MYLE-tests\{}", uuid::Uuid::new_v4().simple());
@@ -712,7 +640,6 @@ mod tests {
             Self(path)
         }
     }
-
     impl Drop for TestKey {
         fn drop(&mut self) {
             let user = RegKey::predef(HKEY_CURRENT_USER);
@@ -721,7 +648,6 @@ mod tests {
             let _ = user.delete_subkey(r"Software\ThomasThanos\MYLE-tests");
         }
     }
-
     #[test]
     fn values_are_read_written_and_put_back_exactly() {
         let key = TestKey::new();
@@ -729,20 +655,17 @@ mod tests {
         assert_eq!(read(Hive::User, &path, "Level"), Value::Absent);
         let created = first_missing(Hive::User, &path);
         assert_eq!(created, Some(format!(r"{}\Policies", key.0)));
-
         write(Hive::User, &path, "Level", Data::Dword(0)).unwrap();
         assert!(read(Hive::User, &path, "Level").matches(Data::Dword(0)));
         restore(Hive::User, &path, "Level", &Value::Absent, created.as_deref()).unwrap();
         assert_eq!(read(Hive::User, &path, "Level"), Value::Absent);
         assert!(first_missing(Hive::User, &path).is_some(), "the keys made for it are gone");
-
         write(Hive::User, &path, "Mode", Data::Sz("Allow")).unwrap();
         let before = read(Hive::User, &path, "Mode");
         write(Hive::User, &path, "Mode", Data::Sz("Deny")).unwrap();
         restore(Hive::User, &path, "Mode", &before, None).unwrap();
         assert_eq!(read(Hive::User, &path, "Mode"), Value::Sz { value: "Allow".into() });
     }
-
     #[test]
     fn a_default_value_and_its_keys_come_and_go() {
         let key = TestKey::new();
@@ -753,7 +676,6 @@ mod tests {
         restore(Hive::User, &path, "", &Value::Absent, created.as_deref()).unwrap();
         assert!(first_missing(Hive::User, &path).is_some());
     }
-
     #[test]
     fn undo_removes_only_keys_on_the_way_to_the_value() {
         let path = r"Software\Policies\Microsoft\Windows\Explorer";
@@ -763,7 +685,6 @@ mod tests {
         assert!(!key_on_path(path, r"Software\Policies\Micro"), "whole key names only");
         assert!(!key_on_path(path, r"Software\Classes"));
     }
-
     #[test]
     fn time_formats_turn_to_24_hours() {
         assert_eq!(to_24h("h:mm tt"), "HH:mm");
@@ -774,7 +695,6 @@ mod tests {
         assert!(!is_24h("h:mm tt"));
         assert!(is_24h("HH'h'mm"), "a quoted h is a literal");
     }
-
     #[test]
     fn this_pc_answers() {
         let info = windows_info();

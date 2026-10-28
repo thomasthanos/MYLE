@@ -1,28 +1,12 @@
-//! "What's new": the notes of the versions an update brought, shown once on
-//! the first start of a new version (and on request, from Settings).
-//!
-//! The notes are the GitHub release bodies, asked for without a sign-in
-//! (the web view may only talk to the app, so Rust asks) and cached. Offline
-//! or rate-limited, the cache and then this version's notes bundled at build
-//! time (`docs/release-notes/<version>.md`) stand in; with neither, the
-//! dialog says which version this is and links to its release page.
-//!
-//! The last version shown is kept in `whats-new.json` in the settings
-//! folder. Versions before 9.9.0 never wrote it: when it is missing but
-//! MYLE ran on this PC before (its settings or web view profile exist), this
-//! version's notes are shown; on a first install nothing is.
-
+// ! "What's new": the notes of the versions an update brought, shown once on ! the first start of a new version (and on request, from Settings). ! ! The notes are the GitHub release bodies, asked for without a sign-in ! (the web view may only talk to the app, so Rust asks) and cached. Offline ! or rate-limited, the cache and then this version's notes bundled at build ! time (`docs/release-notes/<version>.md`) stand in; with neither, the ! dialog says which version this is and links to its release page. ! ! The last version shown is kept in `whats-new.json` in the settings ! folder. Versions before 9.9.0 never wrote it: when it is missing but ! MYLE ran on this PC before (its settings or web view profile exist), this ! version's notes are shown; on a first install nothing is.
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
-
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-
 use crate::updater::GITHUB_REPO;
-
 const STATE_FILE: &str = "whats-new.json";
 const CACHE_FILE: &str = "whats-new-cache.json";
 const BUNDLED: &str = include_str!(concat!(env!("OUT_DIR"), "/release-notes.md"));
@@ -32,15 +16,12 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_VERSIONS: usize = 12;
 /// The most versions the cache keeps.
 const MAX_CACHED: usize = 40;
-
 static PREVIOUS_INSTALL: OnceLock<bool> = OnceLock::new();
-
 /// Called once at startup, before any window makes the web view profile:
 /// whether MYLE ran on this PC before.
 pub fn note_previous_install() {
     let _ = PREVIOUS_INSTALL.set(detect_previous_install());
 }
-
 fn detect_previous_install() -> bool {
     if std::env::args().any(|arg| arg == "--just-updated") {
         return true;
@@ -56,13 +37,11 @@ fn detect_previous_install() -> bool {
             entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() != STATE_FILE))
         })
 }
-
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SeenState {
     last_seen: Option<String>,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Cached {
@@ -70,7 +49,6 @@ struct Cached {
     #[serde(default)]
     date: Option<String>,
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VersionNotes {
@@ -82,7 +60,6 @@ pub struct VersionNotes {
     pub url: String,
     pub date: Option<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WhatsNew {
@@ -94,7 +71,6 @@ pub struct WhatsNew {
     /// GitHub couldn't be asked (offline, or its limit was reached).
     pub offline: bool,
 }
-
 #[derive(Deserialize)]
 struct GhRelease {
     tag_name: String,
@@ -107,22 +83,18 @@ struct GhRelease {
     #[serde(default)]
     published_at: Option<String>,
 }
-
 fn state_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(STATE_FILE))
 }
-
 fn cache_path() -> Result<PathBuf, String> {
     crate::storage::local_dir().map(|dir| dir.join(CACHE_FILE))
 }
-
 fn read_json<T: for<'de> Deserialize<'de> + Default>(path: Result<PathBuf, String>) -> T {
     path.ok()
         .and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
-
 fn write_json<T: Serialize>(path: Result<PathBuf, String>, value: &T) -> Result<(), String> {
     let path = path?;
     let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
@@ -130,16 +102,13 @@ fn write_json<T: Serialize>(path: Result<PathBuf, String>, value: &T) -> Result<
     std::fs::write(&temp, bytes).map_err(crate::download::err)?;
     std::fs::rename(&temp, &path).map_err(crate::download::err)
 }
-
 /// `v9.9.0` or `9.9.0` as a version.
 fn version_of(tag: &str) -> Option<Version> {
     Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
 }
-
 fn release_url(version: &Version) -> String {
     format!("https://github.com/{GITHUB_REPO}/releases/tag/v{version}")
 }
-
 /// What to show on this start: nothing when this version was shown already
 /// (or is a first install), else the versions after the last one shown, up
 /// to this one.
@@ -152,7 +121,6 @@ enum Pending {
         after: Option<Version>,
     },
 }
-
 fn pending(last_seen: Option<&str>, current: &Version, previous_install: bool) -> Pending {
     match last_seen.and_then(version_of) {
         Some(seen) if &seen == current => Pending::Nothing,
@@ -163,7 +131,6 @@ fn pending(last_seen: Option<&str>, current: &Version, previous_install: bool) -
         None => Pending::Remember,
     }
 }
-
 /// The releases to show, newest first: after `after` up to `current`, or
 /// only `current` without `after`. Drafts never; pre-releases only when it
 /// is the running version.
@@ -189,7 +156,6 @@ fn pick(
     picked.truncate(MAX_VERSIONS);
     picked
 }
-
 async fn fetch(after: Option<&Version>, current: &Version) -> Result<Vec<GhRelease>, String> {
     let client = crate::download::http_client(USER_AGENT)?;
     let url = match after {
@@ -214,7 +180,6 @@ async fn fetch(after: Option<&Version>, current: &Version) -> Result<Vec<GhRelea
         Ok(vec![response.json().await.map_err(crate::download::err)?])
     }
 }
-
 /// The notes of the versions after `after` up to `current` (or of `current`
 /// alone), from GitHub, else the cache, else the bundled notes.
 fn assemble(
@@ -266,8 +231,7 @@ fn assemble(
             date: value.date,
         }));
     }
-    // This version always has an entry: GitHub's, the cache's, the bundled
-    // notes, or a line with a link.
+    // This version always has an entry: GitHub's, the cache's, the bundled notes, or a line with a link.
     if !versions.iter().any(|v| v.version == current.to_string()) {
         let cached = cache.get(&current.to_string()).cloned();
         let entry = match (cached, bundled.trim().is_empty()) {
@@ -311,7 +275,6 @@ fn assemble(
     }
     versions
 }
-
 async fn collect(after: Option<Version>, current: &Version) -> WhatsNew {
     let fetched = fetch(after.as_ref(), current).await.ok();
     let offline = fetched.is_none();
@@ -328,11 +291,9 @@ async fn collect(after: Option<Version>, current: &Version) -> WhatsNew {
         offline,
     }
 }
-
 fn current_version(app: &AppHandle) -> Version {
     app.package_info().version.clone()
 }
-
 /// What's new since the version last shown, once per version; `None` when
 /// there is nothing to show (shown already, or a first install).
 #[tauri::command]
@@ -349,7 +310,6 @@ pub async fn whats_new_pending(app: AppHandle) -> Result<Option<WhatsNew>, Strin
         Pending::Show { after } => Ok(Some(collect(after, &current).await)),
     }
 }
-
 fn remember(version: &Version) -> Result<(), String> {
     write_json(
         state_path(),
@@ -358,27 +318,22 @@ fn remember(version: &Version) -> Result<(), String> {
         },
     )
 }
-
 /// The dialog was shown: not again for this version.
 #[tauri::command]
 pub fn whats_new_seen(app: AppHandle) -> Result<(), String> {
     remember(&current_version(&app))
 }
-
 /// This version's notes, for Settings.
 #[tauri::command]
 pub async fn whats_new_current(app: AppHandle) -> Result<WhatsNew, String> {
     Ok(collect(None, &current_version(&app)).await)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn v(text: &str) -> Version {
         Version::parse(text).unwrap()
     }
-
     fn release(tag: &str, body: &str) -> GhRelease {
         GhRelease {
             tag_name: tag.into(),
@@ -388,7 +343,6 @@ mod tests {
             published_at: Some("2026-10-08T18:12:40Z".into()),
         }
     }
-
     #[test]
     fn it_shows_once_per_version_and_never_on_a_first_install() {
         let current = v("9.9.0");
@@ -405,7 +359,6 @@ mod tests {
         assert_eq!(pending(None, &current, false), Pending::Remember);
         assert_eq!(pending(Some("garbage"), &current, false), Pending::Remember);
     }
-
     #[test]
     fn skipped_versions_are_all_shown_newest_first() {
         let releases = vec![
@@ -429,7 +382,6 @@ mod tests {
             .collect();
         assert_eq!(picked, ["9.9.0", "9.8.0"]);
     }
-
     #[test]
     fn offline_the_cache_then_the_bundled_notes_then_a_link() {
         let current = v("9.9.0");
@@ -457,7 +409,6 @@ mod tests {
             "https://github.com/thomasthanos/MYLE/releases/tag/v9.9.0"
         );
     }
-
     #[test]
     fn online_notes_are_cached_and_an_empty_body_falls_back() {
         let current = v("9.9.0");

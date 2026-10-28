@@ -1,13 +1,6 @@
-//! Everything the System Maintenance page can run, fixed at compile time.
-//!
-//! The page sends an action id and nothing else: no command, no arguments, no
-//! path. Programs are named by file name only and resolved under the real
-//! `%SystemRoot%\System32`, so nothing on `PATH` can stand in for them.
-
+// ! Everything the System Maintenance page can run, fixed at compile time. ! ! The page sends an action id and nothing else: no command, no arguments, no ! path. Programs are named by file name only and resolved under the real ! `%SystemRoot%\System32`, so nothing on `PATH` can stand in for them.
 use std::path::PathBuf;
-
 use serde::Serialize;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Section {
@@ -15,7 +8,6 @@ pub enum Section {
     Health,
     Software,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Elevation {
     No,
@@ -23,7 +15,6 @@ pub enum Elevation {
     IfNeeded,
     Yes,
 }
-
 pub struct Step {
     /// File name inside System32, never a path.
     pub exe: &'static str,
@@ -32,7 +23,6 @@ pub struct Step {
     /// A non-zero exit here does not fail the action.
     pub allow_failure: bool,
 }
-
 pub enum Run {
     /// Runs the steps in order; when elevated, all of them share one UAC prompt.
     Batch(&'static [Step]),
@@ -43,7 +33,6 @@ pub enum Run {
     /// `winget upgrade --all`, which runs without elevation.
     WingetUpgradeAll,
 }
-
 pub struct Action {
     pub id: &'static str,
     pub label: &'static str,
@@ -56,7 +45,6 @@ pub struct Action {
     /// Success always means "restart to finish".
     pub reboot: bool,
 }
-
 pub struct Card {
     pub id: &'static str,
     pub section: Section,
@@ -69,13 +57,11 @@ pub struct Card {
     pub console: bool,
     pub actions: &'static [Action],
 }
-
 impl Card {
     pub fn needs_admin(&self) -> bool {
         self.elevation == Elevation::Yes
     }
 }
-
 const NO_ACTION_EXTRAS: Action = Action {
     id: "",
     label: "",
@@ -85,7 +71,6 @@ const NO_ACTION_EXTRAS: Action = Action {
     cancel_confirm: None,
     reboot: false,
 };
-
 pub const CARDS: &[Card] = &[
     // -- Network & connectivity ---------------------------------------------
     Card {
@@ -257,8 +242,7 @@ pub const CARDS: &[Card] = &[
             id: "chkdsk",
             label: "Check",
             run: Run::DiskScan,
-            // The Storage service owns the scan: killing its PowerShell
-            // client does not reliably cancel it, so retain the task lock.
+            // The Storage service owns the scan: killing its PowerShell client does not reliably cancel it, so retain the task lock.
             ..NO_ACTION_EXTRAS
         }],
     },
@@ -319,26 +303,21 @@ pub const CARDS: &[Card] = &[
         }],
     },
 ];
-
 pub fn find(id: &str) -> Option<(&'static Card, &'static Action)> {
     CARDS
         .iter()
         .flat_map(|card| card.actions.iter().map(move |action| (card, action)))
         .find(|(_, action)| action.id == id)
 }
-
 /// `%SystemRoot%\System32\<exe>`, never resolved through `PATH`.
 pub fn system32(exe: &str) -> PathBuf {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-    // A 32-bit build would be redirected to SysWOW64, where sfc and chkdsk do
-    // not exist; `Sysnative` would be the escape hatch. We only ship x64.
+    // A 32-bit build would be redirected to SysWOW64, where sfc and chkdsk do not exist; `Sysnative` would be the escape hatch. We only ship x64.
     PathBuf::from(root).join("System32").join(exe)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn steps(action: &Action) -> Vec<&Step> {
         match &action.run {
             Run::Batch(list) => list.iter().collect(),
@@ -346,20 +325,17 @@ mod tests {
             Run::DiskScan | Run::WingetUpgradeAll => Vec::new(),
         }
     }
-
     fn actions() -> impl Iterator<Item = (&'static Card, &'static Action)> {
         CARDS
             .iter()
             .flat_map(|card| card.actions.iter().map(move |action| (card, action)))
     }
-
     fn all_distinct(ids: &[&str]) -> bool {
         let mut unique = ids.to_vec();
         unique.sort_unstable();
         unique.dedup();
         unique.len() == ids.len()
     }
-
     #[test]
     fn every_card_and_action_is_described_and_uniquely_named() {
         for card in CARDS {
@@ -374,8 +350,7 @@ mod tests {
         for (_, action) in actions() {
             assert!(!action.label.is_empty(), "{}", action.id);
         }
-        // A one-action card shares its id with that action on purpose; what
-        // must not repeat is an id within either list.
+        // A one-action card shares its id with that action on purpose; what must not repeat is an id within either list.
         assert!(all_distinct(
             &CARDS.iter().map(|c| c.id).collect::<Vec<_>>()
         ));
@@ -383,7 +358,6 @@ mod tests {
             &actions().map(|(_, a)| a.id).collect::<Vec<_>>()
         ));
     }
-
     /// The reason the argument tails can be passed through verbatim: nothing in
     /// the table can end a quoted string or start a new command.
     #[test]
@@ -410,7 +384,6 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn every_program_exists_on_this_machine() {
         for (_, action) in actions() {
@@ -420,7 +393,6 @@ mod tests {
             }
         }
     }
-
     /// The Storage scan must keep its lane until the service has returned.
     #[test]
     fn check_disk_uses_the_online_scan_and_does_not_offer_false_cancellation() {
@@ -429,7 +401,6 @@ mod tests {
         assert!(!action.cancellable);
         assert!(!action.reboot);
     }
-
     #[test]
     fn only_streaming_actions_get_a_console() {
         for card in CARDS.iter().filter(|c| c.console) {
@@ -449,7 +420,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn the_disruptive_actions_ask_first() {
         for id in ["net-reset", "ip-renew", "audio-restart", "update-apps"] {
@@ -464,14 +434,12 @@ mod tests {
             "harmless, no dialog"
         );
     }
-
     #[test]
     fn unknown_ids_are_dropped_rather_than_guessed() {
         assert!(find("nope").is_none());
         assert!(find(r"..\..\Windows").is_none());
         assert!(find("").is_none(), "the empty id must not match");
     }
-
     #[test]
     fn network_reset_is_the_only_one_that_always_needs_a_restart() {
         let reboot: Vec<&str> = actions()

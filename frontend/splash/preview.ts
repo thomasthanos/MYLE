@@ -1,15 +1,10 @@
-// Dev-only stand-in for the Rust updater, so the splash can be worked on in a
-// browser: `npx vite`, then open /splash.html?demo=update (or =offline,
-// =latest). Inside the app, `MYLE_UPDATER_DEMO` does the same for real.
+// Dev-only stand-in for the Rust updater, so the splash can be worked on in a browser: `npx vite`, then open /splash.html?demo=update (or =offline, =latest). Inside the app, `MYLE_UPDATER_DEMO` does the same for real.
 import type { DownloadEvent, UpdateAsset, UpdateCheck } from "../lib/updater";
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
 export function previewUpdater(mode: string) {
   const current = "7.0.1";
   return {
     version: current,
-
     async checkForUpdate(): Promise<UpdateCheck> {
       await sleep(900);
       if (mode === "offline") throw new Error("error sending request for url (https://downloads.thomast.uk/latest.json)");
@@ -22,7 +17,6 @@ export function previewUpdater(mode: string) {
         asset: { name: "MYLE.exe", version: "7.1.0", url: "", size: 13_606_875, digest: null },
       };
     },
-
     async installUpdate(asset: UpdateAsset, onEvent: (e: DownloadEvent) => void): Promise<void> {
       const total = asset.size;
       onEvent({ event: "started", data: { total } });
@@ -38,7 +32,6 @@ export function previewUpdater(mode: string) {
       onEvent({ event: "installing" });
       await sleep(1400);
     },
-
     async finishStartup(): Promise<void> {},
   };
 }

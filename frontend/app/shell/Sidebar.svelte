@@ -12,8 +12,7 @@
   const topSections = $derived(sections(shown));
   const bottomPages = $derived(shown.filter((p) => p.group === "bottom"));
 
-  /** Shown after a pause while the labels are visible; at once when collapsed
-   *  (the tooltip is then the only place the name is) or on keyboard focus. */
+  /* Shown after a pause while the labels are visible; at once when collapsed (the tooltip is then the only place the name is) or on keyboard focus. */
   const TIP_DELAY_MS = 550;
   const OWNER_NOTE = "Only visible to the owner account.";
   const COLLAPSE = "collapse";

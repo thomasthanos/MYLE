@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 const source = await readFile(new URL("../../extension/passkeys.js", import.meta.url), "utf8");
-
-// Run the real routing code in separate page/frame realms. The browser boundary
-// returns its exact request so fallback context, options and signal are observable.
+// Run the real routing code in separate page/frame realms. The browser boundary returns its exact request so fallback context, options and signal are observable.
 function page({ top, ancestor, policy, load = true } = {}) {
   const posted = [];
   const window = new EventTarget();
@@ -45,13 +42,11 @@ function page({ top, ancestor, policy, load = true } = {}) {
   if (load) vm.runInContext(source, context);
   return { window, context, posted };
 }
-
 const createOptions = () => ({ publicKey: {
   challenge: new Uint8Array([1]), rp: { id: "example.com", name: "Example" },
   user: { id: new Uint8Array([2]), name: "user", displayName: "User" },
   pubKeyCredParams: [{ type: "public-key", alg: -7 }],
 } });
-
 test("a cross-platform creation stays with the original browser and signal", async () => {
   const { context, posted, window } = page();
   const options = createOptions();
@@ -65,7 +60,6 @@ test("a cross-platform creation stays with the original browser and signal", asy
   assert.equal(result.options, options);
   assert.equal(result.options.signal, options.signal);
 });
-
 for (const [kind, extensions] of [
   ["create", { prf: {} }], ["get", { prf: { eval: { first: new Uint8Array([1]) } } }],
   ["create", { largeBlob: { support: "required" } }], ["get", { largeBlob: { read: true } }],
@@ -85,7 +79,6 @@ for (const [kind, extensions] of [
     assert.equal(result.options, options);
   });
 }
-
 test("unsupported extensions in conditional get start only the browser request", async () => {
   const { context, posted, window } = page();
   const options = { ...createOptions(), mediation: "conditional", signal: new AbortController().signal };
@@ -96,7 +89,6 @@ test("unsupported extensions in conditional get start only the browser request",
   window.nativeResolve({ native: "conditional" });
   assert.equal((await pending).native, "conditional");
 });
-
 for (const route of ["delegated", "adopted"]) {
   for (const [label, setup] of [
     ["denied policy", { policy: { allowsFeature: () => false } }],
@@ -120,7 +112,6 @@ for (const route of ["delegated", "adopted"]) {
     }
   }
 }
-
 test("a denied top-level policy leaves validation to the original browser", async () => {
   const { context, posted } = page({ policy: { allowsFeature: () => false } });
   for (const kind of ["get", "create"]) {
@@ -129,7 +120,6 @@ test("a denied top-level policy leaves validation to the original browser", asyn
     assert.equal((await pending).native, kind);
   }
 });
-
 test("the cross-platform attachment constraint follows Web IDL string conversion", async () => {
   const { context, posted } = page();
   const options = createOptions();
@@ -138,7 +128,6 @@ test("the cross-platform attachment constraint follows Web IDL string conversion
   assert.equal(posted.length, 0);
   assert.equal((await pending).native, "create");
 });
-
 for (const kind of ["get", "create"]) {
   test(`native ${kind} fallback preserves an already-aborted signal and reason`, async () => {
     const { context, posted } = page();
@@ -152,7 +141,6 @@ for (const kind of ["get", "create"]) {
     assert.equal(posted.length, 0);
   });
 }
-
 test("native conditional fallback preserves later cancellation", async () => {
   const { context, posted, window } = page();
   const controller = new AbortController();
@@ -165,14 +153,12 @@ test("native conditional fallback preserves later cancellation", async () => {
   await assert.rejects(pending, (error) => error === reason);
   assert.equal(posted.length, 0);
 });
-
 function answer(page, reply) {
   const message = page.posted.findLast((message) => message.kind !== "abort");
   const event = new Event("message");
   Object.assign(event, { source: page.window, data: { source: "myle-passkeys/extension", id: message.id, ...reply } });
   page.window.dispatchEvent(event);
 }
-
 test("an allowed nested same-origin frame can delegate and rechecks policy at call time", async () => {
   let allowGet = false;
   const top = page();
@@ -194,7 +180,6 @@ test("an allowed nested same-origin frame can delegate and rechecks policy at ca
   allowGet = false;
   assert.equal((await frame.context.navigator.credentials.get(options)).window, frame.window);
 });
-
 test("an adopted same-origin frame supports the legacy featurePolicy API", async () => {
   const top = page();
   const frame = page({ top, load: false });
@@ -206,7 +191,6 @@ test("an adopted same-origin frame supports the legacy featurePolicy API", async
   await signingIn;
   assert.equal((await frame.context.navigator.credentials.create(createOptions())).window, frame.window);
 });
-
 for (const route of ["delegated", "adopted"]) {
   test(`a ${route} allowed frame keeps unsupported requirements with its original browser`, async () => {
     const top = page();
@@ -220,7 +204,6 @@ for (const route of ["delegated", "adopted"]) {
     assert.equal(top.posted.length, 0);
   });
 }
-
 test("non-enumerable and inherited unsupported dictionary inputs stay native", async () => {
   for (const extensions of [
     Object.defineProperty({}, "uvm", { value: true }),
@@ -233,7 +216,6 @@ test("non-enumerable and inherited unsupported dictionary inputs stay native", a
     assert.equal(posted.length, 0);
   }
 });
-
 test("supported conditional get cancels the MYLE question when the browser wins", async () => {
   const top = page();
   const pending = top.context.navigator.credentials.get({ ...createOptions(), mediation: "conditional" });
@@ -248,7 +230,6 @@ test("supported conditional get cancels the MYLE question when the browser wins"
   answer(top, { result: "error", name: "NotAllowedError" });
   assert.equal(top.posted.filter((message) => message.kind === "abort").length, 1);
 });
-
 test("supported conditional get carries outer cancellation to both racers", async () => {
   const top = page();
   const controller = new AbortController();
@@ -261,7 +242,6 @@ test("supported conditional get carries outer cancellation to both racers", asyn
   assert.equal(browserSignal.reason, reason);
   assert.equal(top.posted.at(-1).kind, "abort");
 });
-
 test("explicit platform attachment remains available through MYLE", async () => {
   const top = page();
   const options = createOptions();

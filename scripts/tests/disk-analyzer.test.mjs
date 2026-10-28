@@ -5,9 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { compileModule } from "svelte/compiler";
-
-// The same setup as the System Cleaner tests: the real page state, with only
-// the native calls and the browser bits Node does not have replaced.
+// The same setup as the System Cleaner tests: the real page state, with only the native calls and the browser bits Node does not have replaced.
 const storage = new Map();
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
@@ -17,7 +15,6 @@ Object.defineProperty(globalThis, "localStorage", {
   },
 });
 Object.defineProperty(globalThis, "isTauri", { configurable: true, value: true });
-
 const hooks = registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "svelte/reactivity") {
@@ -43,7 +40,6 @@ const hooks = registerHooks({
     };
   },
 });
-
 const { squarify, worstRatio, layoutTreemap, hitTest, DEFAULT_LAYOUT } = await import("../../frontend/app/pages/disk-analyzer/treemap.ts");
 const { CATEGORIES, categoryOf, categoryColor, extensionOf } = await import("../../frontend/app/pages/disk-analyzer/palette.ts");
 const { flatten, visibleRange } = await import("../../frontend/app/pages/disk-analyzer/rows.ts");
@@ -52,17 +48,12 @@ const { diskApi, deletionShare } = await import("../../frontend/app/pages/disk-a
 const { confirmState } = await import("../../frontend/lib/confirm.svelte.ts");
 const { toast } = await import("../../frontend/lib/toast.svelte.ts");
 hooks.deregister();
-
-// ---------------------------------------------------------------------------
-// The squarified layout
-
+// --------------------------------------------------------------------------- The squarified layout
 const area = (r) => r.w * r.h;
 const EPS = 1e-6;
-
 function overlaps(a, b) {
   return a.x + a.w > b.x + EPS && b.x + b.w > a.x + EPS && a.y + a.h > b.y + EPS && b.y + b.h > a.y + EPS;
 }
-
 /** The baseline: every item a full-height strip side by side. */
 function sliceAndDice(values, rect) {
   const total = values.reduce((s, v) => s + v, 0);
@@ -74,7 +65,6 @@ function sliceAndDice(values, rect) {
     return r;
   });
 }
-
 test("squarify fills the rectangle exactly, without overlaps, inside its bounds", () => {
   const rect = { x: 10, y: 20, w: 600, h: 400 };
   const values = [500, 433, 78, 25, 25, 7, 3, 3, 2, 1, 1, 1, 0.5];
@@ -90,7 +80,6 @@ test("squarify fills the rectangle exactly, without overlaps, inside its bounds"
     for (let j = i + 1; j < rects.length; j++) assert.ok(!overlaps(r, rects[j]), `${i} and ${j} overlap`);
   });
 });
-
 test("squarify gives squarer rectangles than slice-and-dice", () => {
   // The paper's example: 6, 6, 4, 3, 2, 2, 1 in a 6 × 4 rectangle.
   const values = [6, 6, 4, 3, 2, 2, 1];
@@ -100,7 +89,6 @@ test("squarify gives squarer rectangles than slice-and-dice", () => {
   assert.ok(squarified < sliced, `${squarified} < ${sliced}`);
   assert.ok(squarified < 3, `close to square: ${squarified}`);
 });
-
 test("squarify handles zero sizes, empty space and is deterministic", () => {
   const rect = { x: 0, y: 0, w: 100, h: 50 };
   const rects = squarify([0, 10, 0, 10, -3], rect);
@@ -113,7 +101,6 @@ test("squarify handles zero sizes, empty space and is deterministic", () => {
   const ties = squarify([3, 3, 3], rect);
   assert.ok(ties[0].x <= ties[1].x && ties[0].y <= ties[1].y);
 });
-
 test("the nested layout keeps children inside their folder and the hit test finds the deepest", () => {
   // 0 root: 1 folder (3 file, 4 file), 2 file
   const data = { parent: [-1, 0, 0, 1, 1], size: [100, 60, 40, 30, 30], kind: [0, 0, 1, 1, 1] };
@@ -135,7 +122,6 @@ test("the nested layout keeps children inside their folder and the hit test find
   assert.equal(tiny.rects[2 * 4 + 2], 0);
   assert.ok(!Array.from(tiny.order).includes(2));
 });
-
 test("tiles keep a gap between them and a frame from the edge", () => {
   const sizes = [100, 30, 25, 20, 15, 10];
   const data = { parent: [-1, 0, 0, 0, 0, 0], size: sizes, kind: [0, 1, 1, 1, 1, 1] };
@@ -159,7 +145,6 @@ test("tiles keep a gap between them and a frame from the edge", () => {
     }
   }
 });
-
 test("each extension has one calm colour per kind, in both themes", () => {
   assert.equal(categoryOf("MP4"), "video");
   assert.equal(categoryOf("png"), "image");
@@ -180,7 +165,6 @@ test("each extension has one calm colour per kind, in both themes", () => {
     assert.equal(new Set(colors).size, colors.length, "no two kinds share a colour");
   }
 });
-
 test("rows follow what is open, with loading and 'smaller items' rows", () => {
   const node = (id, kind = "dir", size = 10) => ({ id, name: `n${id}`, kind, size, alloc: size, files: 0, dirs: 0, hasChildren: kind === "dir" });
   const root = node(0, "dir", 100);
@@ -191,10 +175,7 @@ test("rows follow what is open, with loading and 'smaller items' rows", () => {
   assert.equal(rows[1].parentSize, 100);
   assert.deepEqual(visibleRange(300, 600, 30, 100_000, 8), { first: 2, last: 38 });
 });
-
-// ---------------------------------------------------------------------------
-// The page state, with the backend replaced
-
+// --------------------------------------------------------------------------- The page state, with the backend replaced
 const view = (id, name, kind, size, alloc, more = {}) => ({
   id,
   name,
@@ -212,12 +193,10 @@ const view = (id, name, kind, size, alloc, more = {}) => ({
   inaccessible: false,
   ...more,
 });
-
 let nodes;
 let children;
 const calls = [];
 const original = { ...diskApi };
-
 function backend() {
   nodes = {
     0: view(0, "D:\\", "dir", 1000, 2000, { files: 3, dirs: 1, protected: true, reason: "This is the folder you scanned." }),
@@ -261,10 +240,8 @@ function backend() {
     return [];
   };
 }
-
 const done = { scanId: 3, rootId: 0, root: "D:\\", files: 3, dirs: 1, bytes: 1000, alloc: 2000, inaccessible: 0, inaccessiblePaths: [], elapsedMs: 1200, windowsDrive: false, memory: 1000, method: "mft", fallback: null };
 const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function scanned() {
   backend();
   diskApi.scan = async (root, fast, onEvent) => {
@@ -277,7 +254,6 @@ async function scanned() {
   await state.scan();
   await settle();
 }
-
 test.beforeEach(() => {
   storage.clear();
   Object.assign(diskApi, original);
@@ -294,7 +270,6 @@ test.afterEach(() => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   if (confirmState.current) confirmState.answer(false);
 });
-
 test("a scan shows its progress, then the results of the drive picked", async () => {
   backend();
   await state.load();
@@ -321,7 +296,6 @@ test("a scan shows its progress, then the results of the drive picked", async ()
   assert.equal(map.args[3], Math.max(1, Math.floor((2000 * 9) / (800 * 500))), "small blocks merge below about 9 pixels");
   assert.equal(map.args[4], "alloc", "size on disk is the default");
 });
-
 test("the fast scan is asked for on a whole NTFS drive only, and the choice is kept", async () => {
   backend();
   const asked = [];
@@ -341,7 +315,6 @@ test("the fast scan is asked for on a whole NTFS drive only, and the choice is k
   assert.deepEqual(asked, [["D:\\", true], ["E:\\Photos", false], ["D:\\", false]]);
   assert.equal(storage.get(KEY.fast), "false");
 });
-
 test("cancelling a scan stops it and leaves nothing half-shown", async () => {
   backend();
   let release;
@@ -357,7 +330,6 @@ test("cancelling a scan stops it and leaves nothing half-shown", async () => {
   assert.equal(state.done, null);
   assert.equal(toast.visible[0].message, "Scan cancelled.");
 });
-
 test("the size toggle reloads the list and the treemap in the other size, and is kept", async () => {
   await scanned();
   calls.length = 0;
@@ -367,7 +339,6 @@ test("the size toggle reloads the list and the treemap in the other size, and is
   assert.ok(calls.some((c) => c.name === "treemap" && c.args[4] === "size"));
   assert.equal(state.rows[0].parentSize, 1000, "shares follow the size picked");
 });
-
 test("zooming in and out moves the treemap and its breadcrumbs", async () => {
   await scanned();
   calls.length = 0;
@@ -380,7 +351,6 @@ test("zooming in and out moves the treemap and its breadcrumbs", async () => {
   assert.equal(state.current, 0);
   assert.deepEqual(state.trail.map((c) => c.id), [0]);
 });
-
 test("selecting: one, Ctrl adds, Shift takes the rows in between", async () => {
   await scanned();
   state.select(1);
@@ -397,7 +367,6 @@ test("selecting: one, Ctrl adds, Shift takes the rows in between", async () => {
   state.select(4294967295);
   assert.deepEqual([...state.selection].sort(), [2, 3], "a 'smaller items' block is not an item");
 });
-
 test("moving to the Recycle Bin asks first, in danger style, then shows the new totals", async () => {
   await scanned();
   state.select(1);
@@ -435,7 +404,6 @@ test("moving to the Recycle Bin asks first, in danger style, then shows the new 
   assert.equal(state.skipped.length, 1);
   assert.match(toast.visible[0].message, /^Moved 1 item to the Recycle Bin · 1\.6 KB freed\.$/);
 });
-
 test("declining keeps everything, and protected items are never offered", async () => {
   await scanned();
   let moved = false;
@@ -454,7 +422,6 @@ test("declining keeps everything, and protected items are never offered", async 
   assert.equal(moved, false);
   assert.match(toast.visible.at(-1).message, /stays where it is/);
 });
-
 test("the question says plainly when a lot would move", () => {
   const big = view(9, "Videos", "dir", 12 * 1024 ** 3, 12 * 1024 ** 3, { files: 4321, caution: "Save games of Skyrim. Back them up in Game Saves first." });
   const cloud = view(10, "doc.pdf", "cloud", 10, 0);
@@ -470,7 +437,6 @@ test("the question says plainly when a lot would move", () => {
   const one = recycleQuestion([view(3, "a.txt", "file", 50, 4096)], 0, "alloc");
   assert.equal(one.message, "1 item, 4.0 KB. You can restore it from the Recycle Bin.");
 });
-
 test("a failed recycle never falls back automatically; permanent deletion needs its own confirmation", async () => {
   await scanned();
   let deleted = 0;
@@ -489,7 +455,6 @@ test("a failed recycle never falls back automatically; permanent deletion needs 
   await recycle;
   assert.equal(deleted, 0);
   assert.equal(confirmState.current, null, "the retry is a separate user action");
-
   const cancel = state.deletePermanently([2]);
   await settle(10);
   assert.equal(confirmState.current.title, "Delete permanently?");
@@ -503,7 +468,6 @@ test("a failed recycle never falls back automatically; permanent deletion needs 
   await cancel;
   assert.equal(deleted, 0);
   assert.equal(state.skipped.length, 1);
-
   state.skipped = [...state.skipped, { id: 3, path: "D:\\a.txt", reason: "Open in another program.", canDeletePermanently: false }];
   const retry = state.deletePermanently([2]);
   await settle(10);
@@ -515,7 +479,6 @@ test("a failed recycle never falls back automatically; permanent deletion needs 
   assert.ok(!state.rows.some((row) => row.node?.id === 2));
   assert.ok(toast.visible.some((item) => /permanently deleted/i.test(item.message)));
 });
-
 test("permanent deletion refuses protected items and a confirmation for an older scan", async () => {
   await scanned();
   let called = false;
@@ -529,7 +492,6 @@ test("permanent deletion refuses protected items and a confirmation for an older
   await pending;
   assert.equal(called, false);
 });
-
 test("deletion progress follows work inside a folder and stays indeterminate until Windows provides an estimate", () => {
   assert.equal(deletionShare(null), null);
   assert.equal(deletionShare({ done: 0, total: 1, current: "Backup" }), null);
@@ -538,7 +500,6 @@ test("deletion progress follows work inside a folder and stays indeterminate unt
   assert.equal(deletionShare({ done: 1, total: 2, current: "Backup", workTotal: 100, workDone: 50 }), 0.75);
   assert.equal(deletionShare({ done: 0, total: 1, current: "Backup", workTotal: 100, workDone: 120 }), 1);
 });
-
 test("permanent confirmation reports the data being lost even for online-only files", () => {
   const cloud = view(10, "large-backup.zip", "cloud", 72 * 1024 ** 3, 0);
   const question = recycleQuestion([cloud], 0, "alloc", true);
@@ -546,7 +507,6 @@ test("permanent confirmation reports the data being lost even for online-only fi
   assert.match(question.message, /more than 10 GB/);
   assert.match(question.message, /Cloud files are removed from your cloud storage too/);
 });
-
 test("tabs load their lists when first opened and the view is kept", async () => {
   await scanned();
   state.setView("files");

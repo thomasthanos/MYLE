@@ -1,7 +1,4 @@
-// A small Markdown reader for release notes. It turns the text into plain
-// data that components render as text nodes: nothing from the notes ever
-// becomes HTML, raw HTML in the notes is reduced to its text, and links are
-// kept only when they go to http(s) addresses.
+// A small Markdown reader for release notes. It turns the text into plain data that components render as text nodes: nothing from the notes ever becomes HTML, raw HTML in the notes is reduced to its text, and links are kept only when they go to http(s) addresses.
 export type Inline =
   | { t: "text"; v: string }
   | { t: "strong"; c: Inline[] }

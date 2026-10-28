@@ -50,8 +50,7 @@
   /** After this long the engine is still at it: say why that can happen. */
   const SLOW_AFTER_S = 20;
 
-  // The engine reports nothing while it scans or copies, so show that time
-  // passes: seconds so far, and a hint once it gets slow.
+  // The engine reports nothing while it scans or copies, so show that time passes: seconds so far, and a hint once it gets slow.
   let now = $state(0);
   $effect(() => {
     const operation = gameSaves.operation;
@@ -325,8 +324,7 @@
 
   .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-grad); transition: width var(--dur-med) var(--ease-out); }
 
-  /* The engine gives no count while it scans: a moving band, not a bar
-     frozen at zero. */
+  /* The engine gives no count while it scans: a moving band, not a bar frozen at zero. */
   .progress.indeterminate > span { width: 30%; animation: sweep 1.3s var(--ease-in-out) infinite; }
 
   @keyframes sweep {

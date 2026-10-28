@@ -96,7 +96,6 @@ fn invalid_configuration_disarms_f6_instead_of_reusing_an_old_profile() {
     assert!(state.configure(Some(invalid)).is_err());
     assert!(state.0.run.lock().unwrap().prepared.is_none());
 }
-
 #[test]
 fn stop_preserves_exact_click_count_even_between_throttled_events() {
     struct StopAfterThree {
@@ -134,7 +133,6 @@ fn stop_preserves_exact_click_count_even_between_throttled_events() {
         .unwrap();
     assert_eq!(settle(&state).completed, 3);
 }
-
 #[test]
 fn configuration_delivered_during_a_run_is_used_for_the_next_f6_start() {
     let state = AutoClickerState::default();
@@ -152,7 +150,6 @@ fn configuration_delivered_during_a_run_is_used_for_the_next_f6_start() {
     state.stop();
     settle(&state);
 }
-
 #[test]
 fn a_cancelled_pick_request_cannot_install_a_hook_when_its_handler_starts_late() {
     let state = AutoClickerState::default();
@@ -161,7 +158,6 @@ fn a_cancelled_pick_request_cannot_install_a_hook_when_its_handler_starts_late()
     assert!(state.begin_pick_request(Some(request)).unwrap().is_none());
     assert!(!state.status().busy());
 }
-
 #[test]
 fn picking_clears_execution_progress_from_an_earlier_run() {
     let state = AutoClickerState::default();

@@ -1,13 +1,8 @@
-//! Import/export of the selected-apps list through native file dialogs.
-//! The dialogs run on the Rust side, so the webview needs no file access.
-
+// ! Import/export of the selected-apps list through native file dialogs. ! The dialogs run on the Rust side, so the webview needs no file access.
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
-
 use crate::download::err;
-
 const MAX_IMPORT_BYTES: u64 = 1024 * 1024;
-
 /// Asks where to save and writes `json` there. Returns false if cancelled.
 #[tauri::command]
 pub async fn apps_export_list(app: AppHandle, json: String) -> Result<bool, String> {
@@ -27,7 +22,6 @@ pub async fn apps_export_list(app: AppHandle, json: String) -> Result<bool, Stri
         .map_err(err)?;
     Ok(true)
 }
-
 /// Asks for a file and returns its text (the page validates it), or None if
 /// cancelled.
 #[tauri::command]

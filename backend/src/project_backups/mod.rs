@@ -1,13 +1,4 @@
-//! Project Backups: zips of project folders kept in Google Drive or Dropbox,
-//! in the same folders and with the same names as backup_projects, so the two
-//! apps add to one history:
-//! `<cloud>\Projects Backup\<AppName>\<YYYY-MM Month>\<AppName>_D<day>_V<n>.zip`.
-//!
-//! Each backup is built and checked locally, compared once more with the
-//! project folder, then copied, re-read until it matches and only then given
-//! its name (`archive`). Backups can be compared with each other or with the
-//! project folder (`compare`).
-
+// ! Project Backups: zips of project folders kept in Google Drive or Dropbox, ! in the same folders and with the same names as backup_projects, so the two ! apps add to one history: ! `<cloud>\Projects Backup\<AppName>\<YYYY-MM Month>\<AppName>_D<day>_V<n>.zip`. ! ! Each backup is built and checked locally, compared once more with the ! project folder, then copied, re-read until it matches and only then given ! its name (`archive`). Backups can be compared with each other or with the ! project folder (`compare`).
 mod archive;
 pub(crate) mod changes;
 pub mod commands;
@@ -21,15 +12,10 @@ mod rules;
 mod state;
 mod store;
 mod walk;
-
 use std::path::PathBuf;
-
 use serde::Serialize;
-
 pub use state::ProjectBackupsState;
-
 pub(crate) const CANCELLED: &str = "Cancelled.";
-
 /// The steps of a backup, as shown on the page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,14 +31,12 @@ pub enum Stage {
     VerifyingCopy,
     Finishing,
 }
-
 /// Where a running backup reports to, and asks whether to stop.
 pub(crate) trait Sink {
     fn stage(&self, stage: Stage);
     fn progress(&self, done_bytes: u64, total_bytes: u64, done_files: u64, total_files: u64);
     fn cancelled(&self) -> bool;
 }
-
 #[derive(Debug)]
 pub(crate) enum Failure {
     Cancelled,
@@ -66,7 +50,6 @@ pub(crate) enum Failure {
     /// `CLOUD_NOT_INSTALLED`, …), with its message.
     Coded(&'static str, String),
 }
-
 impl Failure {
     pub(crate) fn context(self, prefix: &str) -> Failure {
         match self {
@@ -74,7 +57,6 @@ impl Failure {
             other => other,
         }
     }
-
     pub(crate) fn text(&self) -> String {
         match self {
             Failure::Cancelled => CANCELLED.into(),
@@ -87,7 +69,6 @@ impl Failure {
         }
     }
 }
-
 impl From<String> for Failure {
     fn from(text: String) -> Self {
         if text == CANCELLED { Failure::Cancelled } else { Failure::Message(text) }

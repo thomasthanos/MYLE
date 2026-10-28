@@ -1,10 +1,6 @@
-//! The paths git tracks in a project, read straight from `.git/index`
-//! (versions 2–4), so a `build` folder can be told apart from build output
-//! without running git.
-
+// ! The paths git tracks in a project, read straight from `.git/index` ! (versions 2–4), so a `build` folder can be told apart from build output ! without running git.
 use std::fs;
 use std::path::{Path, PathBuf};
-
 /// The tracked paths of the repository whose work tree is `root`, with `/`
 /// separators, or `None` when `root` is not a git work tree (or its index
 /// can't be read).
@@ -13,7 +9,6 @@ pub(crate) fn tracked_paths(root: &Path) -> Option<Vec<String>> {
     let bytes = fs::read(git_dir.join("index")).ok()?;
     parse_index(&bytes, hash_size(&git_dir))
 }
-
 /// `.git` is a folder, or (worktrees, submodules) a file naming one.
 fn git_dir(root: &Path) -> Option<PathBuf> {
     let dot_git = root.join(".git");
@@ -34,7 +29,6 @@ fn git_dir(root: &Path) -> Option<PathBuf> {
     };
     dir.is_dir().then_some(dir)
 }
-
 /// SHA-256 repositories say so in their config.
 fn hash_size(git_dir: &Path) -> usize {
     let config = fs::read_to_string(git_dir.join("config")).unwrap_or_default();
@@ -44,7 +38,6 @@ fn hash_size(git_dir: &Path) -> usize {
     });
     if sha256 { 32 } else { 20 }
 }
-
 pub(crate) fn parse_index(bytes: &[u8], hash_size: usize) -> Option<Vec<String>> {
     if bytes.len() < 12 || &bytes[..4] != b"DIRC" {
         return None;
@@ -88,7 +81,6 @@ pub(crate) fn parse_index(bytes: &[u8], hash_size: usize) -> Option<Vec<String>>
     }
     Some(paths)
 }
-
 /// Git's variable-length offset (`varint.c`).
 fn read_offset(bytes: &[u8]) -> Option<(usize, usize)> {
     let mut used = 0;
@@ -102,11 +94,9 @@ fn read_offset(bytes: &[u8]) -> Option<(usize, usize)> {
     }
     Some((value, used))
 }
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-
     /// A version 2 index with these paths (no extended flags), as git writes it.
     pub(crate) fn index_v2(paths: &[&str]) -> Vec<u8> {
         let mut out = b"DIRC".to_vec();
@@ -125,7 +115,6 @@ pub(crate) mod tests {
         out.extend_from_slice(&[0u8; 20]); // the checksum (not read)
         out
     }
-
     fn index_v4(paths: &[&str]) -> Vec<u8> {
         let mut out = b"DIRC".to_vec();
         out.extend_from_slice(&4u32.to_be_bytes());
@@ -149,7 +138,6 @@ pub(crate) mod tests {
         }
         out
     }
-
     #[test]
     fn version_two_and_four_indexes_are_read() {
         let paths = [
@@ -165,7 +153,6 @@ pub(crate) mod tests {
         let full = index_v2(&paths);
         assert_eq!(parse_index(&full[..40], 20), None);
     }
-
     #[test]
     fn a_git_file_pointing_elsewhere_is_followed() {
         let root = std::env::temp_dir().join(format!("myle-gitfile-{}", std::process::id()));

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Everything chosen, in one list, before any of it happens. Unticking a
-  // line leaves it out of this run (and out of the choices).
+  // Everything chosen, in one list, before any of it happens. Unticking a line leaves it out of this run (and out of the choices).
   import { onMount } from "svelte";
   import Info from "@lucide/svelte/icons/info";
   import Sparkles from "@lucide/svelte/icons/sparkles";

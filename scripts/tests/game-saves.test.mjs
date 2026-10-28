@@ -5,15 +5,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { compileModule } from "svelte/compiler";
-
 const storage = new Map();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
   getItem: (key) => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 } });
-
-// Exercise the actual client state, with only native IPC replaced. Compile
-// Svelte runes just as the frontend does; no Windows files are touched.
+// Exercise the actual client state, with only native IPC replaced. Compile Svelte runes just as the frontend does; no Windows files are touched.
 const hooks = registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "svelte/reactivity") {
@@ -40,7 +37,6 @@ const { gameSavesApi: api } = await import("../../frontend/app/pages/game-saves/
 const { confirmState } = await import("../../frontend/lib/confirm.svelte.ts");
 const { toast } = await import("../../frontend/lib/toast.svelte.ts");
 hooks.deregister();
-
 const original = { ...api };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const settings = clone(state.page.settings);
@@ -48,7 +44,6 @@ const entry = (id, extra = {}) => ({ id, title: id, status: "notBackedUp", platf
 const scan = (extra = {}) => ({ generatedAt: Date.now(), backupFolder: state.page.settings.backupFolder, stats: { localGames: 2, backupGames: 1, totalBytes: 4096, databaseGames: 100 }, onThisPc: [entry("a"), entry("b")], inBackup: [entry("a", { hasBackup: true, status: "backedUp", snapshots: [{ id: "latest", timestamp: "2026-09-01", bytes: 2048, label: null, isSafety: false }] })], fullScanAt: Date.now(), quick: false, discoveryDue: false, ...extra });
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-
 test.beforeEach(() => {
   storage.clear();
   Object.assign(api, original);
@@ -63,7 +58,6 @@ test.afterEach(async () => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   if (confirmState.current) confirmState.answer(false);
 });
-
 test("a quick refresh starts discovery after releasing its operation", async () => {
   const calls = [];
   api.scan = async (mode) => { calls.push(mode); return scan({ discoveryDue: mode === "quick" }); };
@@ -71,7 +65,6 @@ test("a quick refresh starts discovery after releasing its operation", async () 
   assert.deepEqual(calls, ["quick", "full"]);
   assert.equal(state.busy, false);
 });
-
 test("automatic backup saves are serialized without blocking list selection", async () => {
   const wait = deferred(); const calls = [];
   api.setGameAutoBackup = (id, enabled) => { calls.push([id, enabled]); return calls.length === 1 ? wait.promise : Promise.resolve({ ...state.page.settings, autoBackupExcludedGameIds: ["a", "b"] }); };
@@ -90,7 +83,6 @@ test("automatic backup saves are serialized without blocking list selection", as
   assert.equal(state.scanResult.onThisPc[1].autoBackup, false);
   assert.equal(state.locked, false);
 });
-
 test("switch spam saves the final choice without refreshing or replacing unrelated state", async () => {
   const wait = deferred(); const calls = [];
   const settingsObject = state.page.settings; const scanObject = state.scanResult; const untouched = state.games[1];
@@ -111,7 +103,6 @@ test("switch spam saves the final choice without refreshing or replacing unrelat
   assert.equal(state.games[1], untouched);
   assert.equal(state.autoBackupPending.size, 0);
 });
-
 test("a rejected automatic backup change restores both tabs and unlocks", async () => {
   api.setGameAutoBackup = async () => { throw new Error("IPC unavailable"); };
   await state.setAutoBackup(state.games[0], false);
@@ -119,7 +110,6 @@ test("a rejected automatic backup change restores both tabs and unlocks", async 
   assert.equal(state.scanResult.inBackup[0].autoBackup, true);
   assert.equal(state.settingsBusy, null);
 });
-
 test("changing backup folder drops old snapshots and refreshes the new folder", async () => {
   state.tab = "backup"; state.selected.add("a"); state.snapshotChoices = { a: "latest" };
   api.pickBackupFolder = async () => ({ ...state.page.settings, backupFolder: "E:\\Other" });
@@ -132,7 +122,6 @@ test("changing backup folder drops old snapshots and refreshes the new folder", 
   assert.equal(state.page.settings.backupFolder, "E:\\Other");
   assert.equal(state.busy, false);
 });
-
 test("an account recovered backup folder reloads real history before counting first backups", async () => {
   state.selected.add("a"); state.snapshotChoices = { a: "stale" };
   const wait = deferred(); const calls = [];
@@ -154,7 +143,6 @@ test("an account recovered backup folder reloads real history before counting fi
   assert.equal(state.protectedGames, 1, "unknown comparisons are never called clean");
   assert.equal(state.scanResult.inBackup[0].snapshots[0].id, "latest");
 });
-
 test("preload never trusts legacy history after startup recovered the same account folder", async () => {
   state.scanResult = null;
   const recovered = { ...state.page.settings, backupFolder: "G:\\My Drive\\Game Saves Backups" };
@@ -169,7 +157,6 @@ test("preload never trusts legacy history after startup recovered the same accou
   assert.deepEqual(calls, ["quick"], "the same settings folder does not prove a legacy cache was scanned there");
   assert.equal(state.games[0].status, "backedUp");
 });
-
 test("preload strips restore choices cached for another backup folder", async () => {
   state.scanResult = null;
   state.snapshotChoices = { a: "old.zip" };
@@ -182,7 +169,6 @@ test("preload strips restore choices cached for another backup folder", async ()
   assert.deepEqual(state.games[0].snapshots, []);
   assert.deepEqual(state.snapshotChoices, {});
 });
-
 test("a fresh engine result remains authoritative when startup recovery changed its destination", async () => {
   const recovered = { ...state.page.settings, backupFolder: "G:\\Recovered backups" };
   api.scan = async () => scan({ backupFolder: recovered.backupFolder, onThisPc: [entry("a", { status: "backedUp", hasBackup: true })] });
@@ -191,7 +177,6 @@ test("a fresh engine result remains authoritative when startup recovery changed 
   assert.equal(state.games[0].status, "backedUp", "a fresh engine comparison is not a stale cache");
   assert.equal(state.scanResult.backupFolder, recovered.backupFolder);
 });
-
 for (const origin of ["account recovery", "folder picker"]) {
   test(`a failed inventory after ${origin} leaves backup status unknown and reports the failure`, async () => {
     state.scanResult.onThisPc = [
@@ -217,7 +202,6 @@ for (const origin of ["account recovery", "folder picker"]) {
     assert.equal(confirmState.current, null, "no automatic first-backup selection follows a failed inventory");
   });
 }
-
 test("selection skips missing snapshots and survives search and filters", () => {
   state.tab = "backup";
   state.scanResult.inBackup.push(entry("broken", { hasBackup: true, hasLocalData: false, status: "error" }));
@@ -227,7 +211,6 @@ test("selection skips missing snapshots and survives search and filters", () => 
   assert.equal(state.visibleGames.length, 0);
   assert.deepEqual(state.selectedGames.map((game) => game.id), ["a"]);
 });
-
 test("restore location picker holds the lock until the mapping is saved", async () => {
   const picking = deferred(); const writes = [];
   api.pickFolder = () => picking.promise;
@@ -238,7 +221,6 @@ test("restore location picker holds the lock until the mapping is saved", async 
   assert.deepEqual(writes, [{ gameId: "a", source: "C:\\Saves\\a", target: "E:\\Saves" }]);
   assert.equal(state.locked, false);
 });
-
 test("a game with saves in two folders needs a place for each, and keeps its place after a scan", () => {
   const documents = "C:\\Users\\Old\\Documents\\A"; const roaming = "C:\\Users\\Old\\AppData\\Roaming\\A";
   const game = entry("a", { status: "needsLocation", paths: [documents, roaming], unmappedPaths: [documents, roaming] });
@@ -253,7 +235,6 @@ test("a game with saves in two folders needs a place for each, and keeps its pla
   assert.equal(state.mappingFor(restored)?.target, "E:\\Restored\\A", "still shown, found by the game");
   assert.equal(state.lacksLocation(restored), false);
 });
-
 test("a scan from before every folder was reported still asks for one place", () => {
   const game = entry("a", { status: "needsLocation" });
   assert.equal(state.lacksLocation(game), true);
@@ -261,7 +242,6 @@ test("a scan from before every folder was reported still asks for one place", ()
   assert.equal(state.lacksLocation(game), false);
   assert.equal(state.lacksLocation(entry("b")), false, "a game with a place on this PC needs none");
 });
-
 test("the Documents OneDrive moved is offered, and used for the folder that lacks a place", async () => {
   const writes = []; const old = "C:\\Users\\Me\\Documents\\My Games\\A"; const moved = "C:\\Users\\Me\\OneDrive\\Documents\\My Games\\A";
   api.setPathMapping = async (mapping) => { writes.push(mapping); return { ...state.page.settings, pathMappings: [mapping] }; };
@@ -271,7 +251,6 @@ test("the Documents OneDrive moved is offered, and used for the folder that lack
   assert.equal(state.lacksLocation(game), false);
   assert.equal(state.locked, false);
 });
-
 test("backup uses selected IDs even when their rows are filtered out", async () => {
   state.selected.add("b"); state.setQuery("a"); const calls = [];
   api.backup = async (ids) => { calls.push(ids); return { kind: "backup", processedGames: 1, failedGames: [], failures: [] }; };
@@ -279,12 +258,10 @@ test("backup uses selected IDs even when their rows are filtered out", async () 
   const backingUp = state.backupSelected(); confirmState.answer(true); await backingUp;
   assert.deepEqual(calls, [["b"]]);
 });
-
 test("Windows folder comparisons handle separators and trailing slashes", () => {
   assert.equal(samePath("C:\\Games\\Saves\\", "c:/games/saves"), true);
   assert.equal(samePath("C:\\Games\\Saves", "C:\\Games\\Other"), false);
 });
-
 test("a late scan settings response cannot overwrite a newer preference", async () => {
   const wait = deferred();
   api.getState = () => wait.promise;
@@ -296,7 +273,6 @@ test("a late scan settings response cannot overwrite a newer preference", async 
   wait.resolve(old); await settle();
   assert.equal(state.page.settings.schedule, "daily");
 });
-
 test("a refresh refused while the scheduled backup runs waits for it, then shows what it backed up", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let running = true; const scans = [];
@@ -317,7 +293,6 @@ test("a refresh refused while the scheduled backup runs waits for it, then shows
   assert.deepEqual(state.games.map((game) => game.status), ["backedUp", "backedUp"]);
   assert.equal(state.error, null);
 });
-
 test("a background check that finds the scheduled backup running shows it, quietly", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   api.scan = async () => { throw new Error("Another Game Saves operation is already running."); };
@@ -330,14 +305,12 @@ test("a background check that finds the scheduled backup running shows it, quiet
   t.mock.timers.tick(2000); for (let i = 0; i < 5; i++) await settle();
   assert.equal(state.operation, null);
 });
-
 test("a refresh that fails for another reason stays an error", async () => {
   api.scan = async () => { throw new Error("The engine stopped"); };
   await state.refresh(); await settle(); await settle();
   assert.equal(state.operation, null);
   assert.match(state.error, /Refresh failed: The engine stopped/);
 });
-
 test("a pending folder picker prevents starting scans or backup", async () => {
   const wait = deferred(); const calls = [];
   api.pickFolder = () => wait.promise;
@@ -351,7 +324,6 @@ test("a pending folder picker prevents starting scans or backup", async () => {
   wait.resolve(null); await picking;
   assert.equal(state.locked, false);
 });
-
 test("partially failed backups keep failed games selected for a retry", async () => {
   state.selected.add("a"); state.selected.add("b");
   api.backup = async () => ({ kind: "backup", processedGames: 1, failedGames: ["b"], failures: [{ game: "b", reason: "File is locked" }] });
@@ -360,7 +332,6 @@ test("partially failed backups keep failed games selected for a retry", async ()
   assert.deepEqual([...state.selected], ["b"]);
   assert.deepEqual(clone(state.failures.items), [{ game: "b", reason: "File is locked" }]);
 });
-
 test("restore sends each chosen snapshot ID and uses its size", async () => {
   state.tab = "backup"; state.selected.add("a");
   state.scanResult.inBackup[0].snapshots.push({ id: "older", timestamp: "2026-08-01", bytes: 8192, label: null, isSafety: false });
@@ -373,7 +344,6 @@ test("restore sends each chosen snapshot ID and uses its size", async () => {
   confirmState.answer(true); await restoring;
   assert.deepEqual(calls, [[{ gameId: "a", snapshotId: "older" }]]);
 });
-
 test("restore refuses a snapshot that is no longer in the scan", async () => {
   state.tab = "backup"; state.selected.add("a"); const calls = [];
   api.restore = async (choices) => { calls.push(choices); };
@@ -381,7 +351,6 @@ test("restore refuses a snapshot that is no longer in the scan", async () => {
   assert.deepEqual(calls, []);
   assert.equal(confirmState.current, null);
 });
-
 test("one click backs up the new, the changed, or both, whatever is selected", async () => {
   state.scanResult = scan({ onThisPc: [entry("new"), entry("changed", { status: "changedSinceBackup", hasBackup: true }), entry("fine", { status: "backedUp", hasBackup: true }), entry("gone", { hasLocalData: false })] });
   state.selected.add("fine");
@@ -395,7 +364,6 @@ test("one click backs up the new, the changed, or both, whatever is selected", a
   }
   assert.deepEqual(calls, [["new"], ["changed"], ["new", "changed"]]);
 });
-
 test("the filters count their games, and a partly ticked list says so", () => {
   state.scanResult = scan({ onThisPc: [entry("a"), entry("b", { status: "changedSinceBackup" }), entry("c", { status: "backedUp" }), entry("d", { status: "error" })] });
   assert.deepEqual({ ...state.statusCounts }, { all: 4, changed: 1, notBackedUp: 1, backedUp: 1, problems: 1 });
@@ -405,7 +373,6 @@ test("the filters count their games, and a partly ticked list says so", () => {
   assert.equal(state.allVisibleSelected, true);
   assert.equal(state.someVisibleSelected, false);
 });
-
 test("covers are asked once per game, and from Steam only when allowed", async () => {
   state.scanResult = scan({ onThisPc: [entry("x", { steamId: 900001 }), entry("y", { steamId: 900002 }), entry("z")], inBackup: [entry("x", { steamId: 900001, hasBackup: true })] });
   state.covers = {}; state.steamCovers = false;
@@ -422,7 +389,6 @@ test("covers are asked once per game, and from Steam only when allowed", async (
   await state.loadCovers();
   assert.equal(state.covers[900003], undefined, "a failure leaves the monogram");
 });
-
 test("the preload shows the saved list without running the engine, and its covers come after", async () => {
   state.scanResult = null;
   const calls = [];
@@ -440,7 +406,6 @@ test("the preload shows the saved list without running the engine, and its cover
   await state.loadCovers();
   assert.equal(calls.length, 1, "once is enough");
 });
-
 test("undoing a restore names the games and says the current saves are kept first", async () => {
   state.page = { ...state.page, undoRestore: { id: "restore-1", createdAt: 1_790_000_000, expiresAt: 1_790_604_800, games: ["Elden Ring", "Hades"] } };
   let undone = false;
@@ -453,7 +418,6 @@ test("undoing a restore names the games and says the current saves are kept firs
   await undoing;
   assert.equal(undone, false, "nothing happens without the user's yes");
 });
-
 test("a game put back after a restore that did not finish is said plainly", async () => {
   state.selected.add("a");
   state.tab = "backup";

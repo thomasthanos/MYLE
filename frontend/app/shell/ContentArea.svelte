@@ -4,18 +4,14 @@
   import { account } from "../account/account.svelte";
   import { canOpen, pages } from "../pages/registry";
 
-  // An owner-only page someone else lands on (a link, a sign-out while it
-  // is open) gives way to the first page. Before the first answer about the
-  // account is in, the first page shows without forgetting where to go.
+  // An owner-only page someone else lands on (a link, a sign-out while it is open) gives way to the first page. Before the first answer about the account is in, the first page shows without forgetting where to go.
   const asked = $derived(pages.find((p) => p.id === nav.current));
   const allowed = $derived(!!asked && canOpen(asked, account.owner));
   const def = $derived(allowed && asked ? asked : pages[0]);
   $effect(() => {
     if (!allowed && account.accessKnown) nav.go(pages[0].id);
   });
-  // The owner-only pages load the first time they are needed: fetched while
-  // idle once the owner is known, so they still open at once for the owner,
-  // and never fetched for anyone else.
+  // The owner-only pages load the first time they are needed: fetched while idle once the owner is known, so they still open at once for the owner, and never fetched for anyone else.
   let loaded = $state.raw<Record<string, Component>>({});
   let loadError = $state<string | null>(null);
   function load(id: string, module: NonNullable<(typeof pages)[number]["load"]>) {
@@ -99,8 +95,7 @@
     contain: strict;
   }
 
-  /* A page that fills the height: its own parts scroll; the page scrolls
-     only when the window is too short for them. */
+  /* A page that fills the height: its own parts scroll; the page scrolls only when the window is too short for them. */
   .page.fill {
     display: flex;
     flex-direction: column;

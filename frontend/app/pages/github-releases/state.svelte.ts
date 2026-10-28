@@ -1,6 +1,4 @@
-// The GitHub Releases page's state: the projects, their status, and the
-// builds and releases running on them (kept while the page is left, so a
-// build goes on and its log is still there on the way back).
+// The GitHub Releases page's state: the projects, their status, and the builds and releases running on them (kept while the page is left, so a build goes on and its log is still there on the way back).
 import { SvelteMap } from "svelte/reactivity";
 import { badges } from "../../../lib/badges.svelte";
 import { notifyChange, readJson, writeJson } from "../../../lib/storage";
@@ -54,8 +52,7 @@ export const buildKindLabels: Record<BuildKind, string> = {
   flutter: "Flutter",
   extension: "Extension",
 };
-/** A project in the list: an app of a repository, or the repository itself
- *  while its status loads (or when it can't be read). */
+/* A project in the list: an app of a repository, or the repository itself while its status loads (or when it can't be read). */
 export interface ListItem {
   id: string;
   repo: RepoBrief;
@@ -223,8 +220,7 @@ export class ReleaseSession {
         this.jobs = event.data.jobs;
         break;
       case "failure": {
-        // A later report (the same run once it ended, or another workflow on
-        // the tag) updates and adds to what is shown, never wipes it.
+        // A later report (the same run once it ended, or another workflow on the tag) updates and adds to what is shown, never wipes it.
         const fresh = new Map(event.data.jobs.map((job) => [failureKey(job), job]));
         const known = new Set(this.failures.map(failureKey));
         this.failures = [
@@ -315,8 +311,7 @@ class GithubReleasesState {
   });
   selected = $derived.by<ListItem | null>(() => {
     const id = this.selectedId;
-    // Nothing chosen yet (or it was removed): the first project, so the
-    // panel never opens empty.
+    // Nothing chosen yet (or it was removed): the first project, so the panel never opens empty.
     if (!id) return this.items[0] ?? null;
     return (
       this.items.find((item) => item.id === id) ??
@@ -361,8 +356,7 @@ class GithubReleasesState {
   async applySyncedProjects(page: PageState) {
     this.#projectsRevision++;
     const previous = new Map(this.repos.map((repo) => [repo.id, repo]));
-    // The native import returns paths without probing folders or credentials.
-    // Keep this PC's live tool/account metadata until its ordinary refresh.
+    // The native import returns paths without probing folders or credentials. Keep this PC's live tool/account metadata until its ordinary refresh.
     this.page = this.page ? { ...this.page, repos: page.repos.map((repo) => ({ ...repo, exists: previous.get(repo.id)?.exists ?? false })) } : page;
     const retained = new Set(this.repos.map((repo) => repo.id));
     for (const id of Object.keys(this.statuses)) if (!retained.has(id)) delete this.statuses[id];
@@ -627,8 +621,7 @@ class GithubReleasesState {
     toast.error(problem.message, action);
   }
   // ─── AI ────────────────────────────────────────────────────────────────
-  /** Runs an AI request; when a provider fails and another is set up, the
-   *  error offers it (nothing is sent to another provider unasked). */
+  /* Runs an AI request; when a provider fails and another is set up, the error offers it (nothing is sent to another provider unasked). */
   async ai<T>(options: {
     run: (provider: ProviderId | null) => Promise<T>;
     apply: (value: T) => void;

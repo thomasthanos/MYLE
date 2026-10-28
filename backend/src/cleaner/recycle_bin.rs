@@ -1,11 +1,8 @@
-//! Recycle Bin size and emptying, through the Windows shell API.
-//! Neither call needs administrator rights.
-
+// ! Recycle Bin size and emptying, through the Windows shell API. ! Neither call needs administrator rights.
 use windows_sys::Win32::UI::Shell::{
     SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHEmptyRecycleBinW, SHQUERYRBINFO,
     SHQueryRecycleBinW,
 };
-
 /// (bytes, items) across every drive.
 pub fn query() -> Option<(u64, u64)> {
     let mut info = SHQUERYRBINFO {
@@ -17,7 +14,6 @@ pub fn query() -> Option<(u64, u64)> {
     let hr = unsafe { SHQueryRecycleBinW(std::ptr::null(), &mut info) };
     (hr == 0).then(|| (info.i64Size.max(0) as u64, info.i64NumItems.max(0) as u64))
 }
-
 /// Empties it without the shell's own confirmation, progress or sound.
 pub fn empty() -> Result<(), String> {
     let flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
@@ -31,11 +27,9 @@ pub fn empty() -> Result<(), String> {
         )),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn querying_the_recycle_bin_works() {
         // Reads only: any machine answers, even with an empty bin.

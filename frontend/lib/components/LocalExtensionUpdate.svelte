@@ -1,7 +1,5 @@
 <script lang="ts">
-  // "Local extension update available": the side-loaded (unpacked) copy is
-  // older than the extension this MYLE carries. One click copies the new
-  // files into its folder; reloading the extension picks them up.
+  // "Local extension update available": the side-loaded (unpacked) copy is older than the extension this MYLE carries. One click copies the new files into its folder; reloading the extension picks them up.
   import { onMount } from "svelte";
   import { isTauri } from "@tauri-apps/api/core";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";

@@ -1,7 +1,5 @@
 <script lang="ts">
-  /**
-   * Colored window controls with quiet depth, shared by both title bars.
-   */
+  /* Colored window controls with quiet depth, shared by both title bars. */
   type Kind = "minimize" | "maximize" | "close";
 
   let {

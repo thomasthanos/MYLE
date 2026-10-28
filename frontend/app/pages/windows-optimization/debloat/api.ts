@@ -1,5 +1,4 @@
-// Typed bridge to the debloater (backend/src/debloat). The page sends only
-// ids of the backend's fixed tables.
+// Typed bridge to the debloater (backend/src/debloat). The page sends only ids of the backend's fixed tables.
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 export type Category = "privacy" | "taskbar" | "explorer" | "ai" | "system" | "apps" | "features";
 export type Risk = "safe" | "caution";

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The Windows program the hotkey was pressed in: the logins linked to it
-  // and what to type into it, or linking a login to it.
+  // The Windows program the hotkey was pressed in: the logins linked to it and what to type into it, or linking a login to it.
   import AppWindow from "@lucide/svelte/icons/app-window";
   import Copy from "@lucide/svelte/icons/copy";
   import Link from "@lucide/svelte/icons/link";

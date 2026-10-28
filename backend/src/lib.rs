@@ -200,8 +200,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
     };
     if !main.is_visible()? {
         window_sizing::fit_to_screen(&main)?;
-        // Launched by the Startup shortcut: stay out of the way, unless the user chose to have it open at sign-in.
-        // With the tray icon, out of the way means there; otherwise minimized in the taskbar.
+        // Launched by the Startup shortcut: stay out of the way, unless the user chose to have it open at sign-in. With the tray icon, out of the way means there; otherwise minimized in the taskbar.
         let quietly = startup::launched_at_sign_in() && startup::start_minimized();
         if quietly && tray::keep_running() {
             let _ = tray::ensure(app);
@@ -224,8 +223,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 pub fn run() {
-    // SAFETY: a valid string, copied by Windows. The process and installed
-    // shortcuts share the same identity for taskbar grouping and pinning.
+    // SAFETY: a valid string, copied by Windows. The process and installed shortcuts share the same identity for taskbar grouping and pinning.
     unsafe {
         let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
             &windows::core::HSTRING::from(shell_identity::APP_ID),
@@ -255,8 +253,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         // Must be registered first. A second launch focuses the running app.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Still starting: the splash. Otherwise the main window, also
-            // when it waits in the tray.
+            // Still starting: the splash. Otherwise the main window, also when it waits in the tray.
             let splash = app
                 .get_webview_window("splash")
                 .filter(|w| w.is_visible().unwrap_or(false));
@@ -305,13 +302,11 @@ pub fn run() {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || passwords::refresh_local_extension(&handle));
                 }
-                // Sweeps anything a previous run could not delete. Off the main
-                // thread: a locked file costs a retry delay.
+                // Sweeps anything a previous run could not delete. Off the main thread: a locked file costs a retry delay.
                 if let Ok(dir) = storage::roaming_dir() {
                     std::thread::spawn(move || cleanup.init(dir.join("pending-cleanup.json")));
                 }
-                // The installer of the last update, if any. This runs before the splash can start a new download into
-                // the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
+                // The installer of the last update, if any. This runs before the splash can start a new download into the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
                 let _ = std::fs::remove_dir_all(updater::update_dir());
                 updater::sweep_leftovers_later();
                 // If the splash never gets to call finish_startup (a failed update check, a broken page), show the window anyway.
@@ -319,8 +314,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(12)).await;
-                        // A slow update check (feed, then GitHub) or an update
-                        // download legitimately keeps the splash up.
+                        // A slow update check (feed, then GitHub) or an update download legitimately keeps the splash up.
                         if updater::is_checking() || updater::is_updating() {
                             continue;
                         }
@@ -339,8 +333,7 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
-            // Out of sight (minimized), WebView2 keeps less in memory; back
-            // in use (restored, focused from the tray), as much as it needs.
+            // Out of sight (minimized), WebView2 keeps less in memory; back in use (restored, focused from the tray), as much as it needs.
             if window.label() == "main"
                 && let Some(main) = window.app_handle().get_webview_window("main")
             {
@@ -354,11 +347,9 @@ pub fn run() {
                 return;
             };
             match window.label() {
-                // Closing the splash (Alt+F4) before the main window is shown
-                // would leave a hidden, running app behind, so quit instead.
+                // Closing the splash (Alt+F4) before the main window is shown would leave a hidden, running app behind, so quit instead.
                 "splash" => window.app_handle().exit(0),
-                // "Keep running in the tray" on: the app stays next to the
-                // clock, so Ctrl+Shift+L and browser filling keep working.
+                // "Keep running in the tray" on: the app stays next to the clock, so Ctrl+Shift+L and browser filling keep working.
                 "main" if tray::keep_running() => {
                     api.prevent_close();
                     let _ = tray::ensure(window.app_handle());
@@ -623,8 +614,7 @@ pub fn run() {
     app.run(move |_app, event| {
         // Downloaded packages are removed once the app is closed.
         if matches!(event, tauri::RunEvent::Exit) {
-            // An elevated scan runs in its own process, so it has to be told
-            // to stop rather than dying with the window.
+            // An elevated scan runs in its own process, so it has to be told to stop rather than dying with the window.
             running.stop_all();
             game_saves_state.cancel();
             spotify_hub_state.cancel_all();

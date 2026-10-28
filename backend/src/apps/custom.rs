@@ -1,21 +1,13 @@
-//! Apps that are not in winget. They download straight from the vendor, and a
-//! resolver finds the newest download URL (cached for 6 hours).
-//!
-//! The catalog is compiled into the binary (`catalog/custom-apps.json`) and the
-//! page only ever sends an app id, so the webview cannot make the app download
-//! or run anything that is not listed there.
-
+// ! Apps that are not in winget. They download straight from the vendor, and a ! resolver finds the newest download URL (cached for 6 hours). ! ! The catalog is compiled into the binary (`catalog/custom-apps.json`) and the ! page only ever sends an app id, so the webview cannot make the app download ! or run anything that is not listed there.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::LazyLock;
-
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 use tauri::State;
 use tauri::ipc::Channel;
-
 use super::jobs::{JobHandle, Jobs};
 use super::process::{
     ERROR_CANCELLED, ERROR_ELEVATION_REQUIRED, encode_command, hidden, run_elevated,
@@ -23,12 +15,10 @@ use super::process::{
 use super::resolver::{self, Resolved, Resolver};
 use super::{JobEvent, JobOutcome, Stage};
 use crate::download::{self, CANCELLED, err, parse_sha256_digest};
-
 const CATALOG_JSON: &str = include_str!("../../catalog/custom-apps.json");
 const USER_AGENT: &str = "MakeYourLifeEasier-Apps";
 /// Written next to portable/zip installs to remember the installed version.
 const VERSION_MARKER: &str = ".myle-version";
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CustomApp {
@@ -49,7 +39,6 @@ struct CustomApp {
     detect: Detect,
     activate: Option<Activate>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum InstallKind {
@@ -65,7 +54,6 @@ enum InstallKind {
     /// Extracts to `%LOCALAPPDATA%\Programs\<dir>`, then optionally runs `run`.
     Zip { dir: String, run: Option<String> },
 }
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Detect {
@@ -74,7 +62,6 @@ struct Detect {
     /// File whose existence means "installed" (`%VAR%` expanded).
     path: Option<String>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Activate {
@@ -88,7 +75,6 @@ struct Activate {
     #[serde(default)]
     after_install: bool,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ActivateAction {
@@ -100,21 +86,16 @@ enum ActivateAction {
         args: Vec<String>,
     },
 }
-
 static CATALOG: LazyLock<Vec<CustomApp>> = LazyLock::new(|| {
     serde_json::from_str(CATALOG_JSON).expect("catalog/custom-apps.json is invalid")
 });
-
 fn find(id: &str) -> Result<&'static CustomApp, String> {
     CATALOG
         .iter()
         .find(|a| a.id == id)
         .ok_or_else(|| format!("unknown custom app: {id}"))
 }
-
-// ---------------------------------------------------------------------------
-// Catalog and status for the page
-
+// --------------------------------------------------------------------------- Catalog and status for the page
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomAppInfo {
@@ -128,7 +109,6 @@ pub struct CustomAppInfo {
     activate_label: Option<String>,
     activate_after_install: bool,
 }
-
 #[tauri::command]
 pub fn apps_custom_catalog() -> Vec<CustomAppInfo> {
     CATALOG
@@ -146,7 +126,6 @@ pub fn apps_custom_catalog() -> Vec<CustomAppInfo> {
         })
         .collect()
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomStatus {
@@ -156,10 +135,8 @@ pub struct CustomStatus {
     available: Option<String>,
     activated: bool,
 }
-
 pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
-    // Registry and file checks run once for the whole catalog, off the async
-    // workers: reading every Uninstall key again for each app added up.
+    // Registry and file checks run once for the whole catalog, off the async workers: reading every Uninstall key again for each app added up.
     let local = tauri::async_runtime::spawn_blocking(|| {
         let registered = uninstall_entries();
         CATALOG
@@ -172,9 +149,7 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
     })
     .await
     .unwrap_or_default();
-
-    // Only look for updates when we know what is installed. The lookups go
-    // out together rather than one after another.
+    // Only look for updates when we know what is installed. The lookups go out together rather than one after another.
     let lookups = CATALOG
         .iter()
         .zip(&local)
@@ -191,7 +166,6 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
             }
         });
     let available = futures_util::future::join_all(lookups).await;
-
     CATALOG
         .iter()
         .zip(local)
@@ -207,7 +181,6 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
         )
         .collect()
 }
-
 fn detect(entry: &CustomApp, registered: &[Registered]) -> (bool, Option<String>) {
     let pattern = entry
         .detect
@@ -230,14 +203,12 @@ fn detect(entry: &CustomApp, registered: &[Registered]) -> (bool, Option<String>
     // Activated by other means (e.g. a Discord mod installed by hand).
     (activation_in_effect(entry), None)
 }
-
 fn activation_in_effect(entry: &CustomApp) -> bool {
     entry
         .activate
         .as_ref()
         .is_some_and(|a| !a.done.is_empty() && a.done.iter().all(|p| resolve_path(p).is_some()))
 }
-
 /// Expands `%VAR%`s and resolves `*` segments to their newest existing match
 /// ("app-1.0.9259" beats "app-1.0.9258"). None if the path does not exist.
 fn resolve_path(pattern: &str) -> Option<PathBuf> {
@@ -267,13 +238,11 @@ fn resolve_path(pattern: &str) -> Option<PathBuf> {
     }
     current.exists().then_some(current)
 }
-
 /// An installed program as the Uninstall keys list it.
 struct Registered {
     name: String,
     version: Option<String>,
 }
-
 /// Every DisplayName (and DisplayVersion) under the Uninstall keys: machine
 /// 64-bit, machine 32-bit, then the user, which is the order matches win in.
 fn uninstall_entries() -> Vec<Registered> {
@@ -282,7 +251,6 @@ fn uninstall_entries() -> Vec<Registered> {
         HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
     };
     const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
-
     let views = [
         (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
         (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY),
@@ -308,7 +276,6 @@ fn uninstall_entries() -> Vec<Registered> {
     }
     out
 }
-
 fn is_activated(entry: &CustomApp) -> bool {
     match entry.activate.as_ref().map(|a| &a.action) {
         Some(ActivateAction::Shortcut) => shortcut_path(entry).exists(),
@@ -316,7 +283,6 @@ fn is_activated(entry: &CustomApp) -> bool {
         None => false,
     }
 }
-
 /// Dotted numeric comparison ("11.0.10" > "11.0.9"); non-numeric parts count as 0.
 fn is_newer(latest: &str, current: &str) -> bool {
     let parts = |v: &str| -> Vec<u64> {
@@ -342,10 +308,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
     false
 }
-
-// ---------------------------------------------------------------------------
-// Installing
-
+// --------------------------------------------------------------------------- Installing
 #[tauri::command]
 pub async fn apps_install_custom(
     app: AppHandle,
@@ -360,7 +323,6 @@ pub async fn apps_install_custom(
         other => other,
     }
 }
-
 async fn install(
     app: &AppHandle,
     job: &JobHandle,
@@ -372,7 +334,6 @@ async fn install(
     });
     let resolved = resolver::resolve(app, &entry.id, &entry.resolver).await?;
     let integrity = integrity_requirement(entry, &resolved)?;
-
     let _ = on_event.send(JobEvent::Stage {
         stage: Stage::Downloading,
     });
@@ -402,10 +363,7 @@ async fn install(
         || job.is_cancelled(),
     )
     .await?;
-
-    // Pin every directory in the temporary namespace plus the executable
-    // itself until the installer exits. Neither the checked file nor a parent
-    // can be renamed and replaced between verification and CreateProcess.
+    // Pin every directory in the temporary namespace plus the executable itself until the installer exits. Neither the checked file nor a parent can be renamed and replaced between verification and CreateProcess.
     let installer_guard = if matches!(&entry.install, InstallKind::Installer { .. }) {
         Some(lock_installer(&file)?)
     } else {
@@ -449,7 +407,6 @@ async fn install(
             return Err(error);
         }
     }
-
     let _ = on_event.send(JobEvent::Stage {
         stage: Stage::Installing,
     });
@@ -484,11 +441,9 @@ async fn install(
     }
     .await;
     drop(installer_guard);
-    // The download is only needed until it has been installed, whether that
-    // worked or not; a failed install used to leave it in %TEMP%.
+    // The download is only needed until it has been installed, whether that worked or not; a failed install used to leave it in %TEMP%.
     let _ = tokio::fs::remove_file(&file).await;
     let note = installed?;
-
     if let Some(activate) = entry.activate.as_ref().filter(|a| a.after_install) {
         let _ = on_event.send(JobEvent::Note {
             text: format!("{}…", activate.label),
@@ -499,7 +454,6 @@ async fn install(
     }
     Ok(JobOutcome::Done { note })
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum IntegrityRequirement {
     Sha256(String),
@@ -507,7 +461,6 @@ enum IntegrityRequirement {
     Sha256AndAuthenticode(String, String),
     None,
 }
-
 /// Selects a fail-closed authenticity check before any downloaded installer
 /// can run. Portable/zip tools retain their existing optional SHA-256 policy.
 fn integrity_requirement(
@@ -547,12 +500,10 @@ fn integrity_requirement(
         _ => Ok(IntegrityRequirement::None),
     }
 }
-
 struct InstallerGuard {
     file: std::fs::File,
     _directories: Vec<std::fs::File>,
 }
-
 /// Opens the temporary root and every descendant directory without delete
 /// sharing, then opens the installer without write/delete sharing. Holding
 /// only the leaf is insufficient: an attacker could rename a parent and put a
@@ -560,7 +511,6 @@ struct InstallerGuard {
 fn lock_installer(path: &Path) -> Result<InstallerGuard, String> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
-
     let temp = std::env::temp_dir();
     let parent = path
         .parent()
@@ -587,7 +537,6 @@ fn lock_installer(path: &Path) -> Result<InstallerGuard, String> {
         _directories: directories,
     })
 }
-
 fn lock_directory(path: &Path) -> Result<std::fs::File, String> {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
@@ -598,7 +547,6 @@ fn lock_directory(path: &Path) -> Result<std::fs::File, String> {
         FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle,
         OPEN_EXISTING,
     };
-
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
     let handle = unsafe {
         CreateFileW(
@@ -631,10 +579,8 @@ fn lock_directory(path: &Path) -> Result<std::fs::File, String> {
     }
     Ok(file)
 }
-
 async fn hash_open_file(file: &std::fs::File) -> Result<String, String> {
     use std::io::{Read, Seek};
-
     let mut file = file.try_clone().map_err(err)?;
     tauri::async_runtime::spawn_blocking(move || {
         file.rewind().map_err(err)?;
@@ -652,7 +598,6 @@ async fn hash_open_file(file: &std::fs::File) -> Result<String, String> {
     .await
     .map_err(err)?
 }
-
 /// Uses Windows' Authenticode trust evaluation and pins the leaf certificate's
 /// simple name. `Valid` includes chain and revocation-policy evaluation by the
 /// local Windows trust provider.
@@ -690,7 +635,6 @@ async fn verify_authenticode(path: &Path, publisher: &str) -> Result<(), String>
         )),
     }
 }
-
 /// Runs an installer and waits. Falls back to a UAC prompt when the installer
 /// demands elevation. Exit codes 3010/1641 mean "done, restart needed".
 pub(super) async fn run_installer(
@@ -713,7 +657,6 @@ pub(super) async fn run_installer(
     } else {
         (file.display().to_string(), args.to_vec())
     };
-
     let code = match hidden(&program).args(&args).stdin(Stdio::null()).spawn() {
         Ok(mut child) => {
             job.set_pid(child.id());
@@ -739,17 +682,14 @@ pub(super) async fn run_installer(
         other => Err(format!("The installer exited with code {other}.")),
     }
 }
-
 fn programs_dir(dir: &str) -> PathBuf {
     PathBuf::from(expand_env("%LOCALAPPDATA%\\Programs")).join(dir)
 }
-
 fn write_version_marker(dir: &Path, version: Option<&str>) {
     if let Some(version) = version {
         let _ = std::fs::write(dir.join(VERSION_MARKER), version);
     }
 }
-
 /// Extracts a single entry by its path inside the archive, and returns where it
 /// landed. Much faster than unpacking a big archive for one installer.
 /// `on_progress(done, total)` is called while the file is copied.
@@ -770,7 +710,6 @@ pub(super) fn extract_zip_entry(
                 .is_some_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted))
         })
         .ok_or_else(|| not_in_package(&mut archive, entry_name))?;
-
     let mut entry = match password {
         Some(pw) => archive
             .by_index_decrypt(index, pw.as_bytes())
@@ -789,7 +728,6 @@ pub(super) fn extract_zip_entry(
     copy_with_progress(&mut entry, &mut target, total, &mut on_progress)?;
     Ok(out)
 }
-
 /// A "no such file" message that also shows what the package does contain, so a
 /// typo in the configured name is easy to spot.
 fn not_in_package<R: std::io::Read + std::io::Seek>(
@@ -820,7 +758,6 @@ fn not_in_package<R: std::io::Read + std::io::Seek>(
         shown.join(", ")
     )
 }
-
 fn copy_with_progress(
     reader: &mut impl std::io::Read,
     writer: &mut impl std::io::Write,
@@ -840,7 +777,6 @@ fn copy_with_progress(
     }
     Ok(())
 }
-
 /// Extracts every entry, refusing paths that would escape `dest` (zip-slip).
 /// `password` is needed for encrypted archives, and `on_progress(done, total)`
 /// counts uncompressed bytes.
@@ -881,10 +817,7 @@ pub(super) fn extract_zip(
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Activate
-
+// --------------------------------------------------------------------------- Activate
 #[tauri::command]
 pub async fn apps_activate(id: String) -> Result<(), String> {
     let entry = find(&id)?;
@@ -894,7 +827,6 @@ pub async fn apps_activate(id: String) -> Result<(), String> {
         .ok_or("this app has no activation step")?;
     run_activation(entry, activate).await
 }
-
 async fn run_activation(entry: &CustomApp, activate: &Activate) -> Result<(), String> {
     match &activate.action {
         ActivateAction::Shortcut => {
@@ -928,7 +860,6 @@ async fn run_activation(entry: &CustomApp, activate: &Activate) -> Result<(), St
         }
     }
 }
-
 fn installed_exe(entry: &CustomApp) -> Option<PathBuf> {
     let path = match &entry.install {
         InstallKind::Portable { dir, exe } => programs_dir(dir).join(exe),
@@ -940,7 +871,6 @@ fn installed_exe(entry: &CustomApp) -> Option<PathBuf> {
     };
     path.exists().then_some(path)
 }
-
 fn shortcut_path(entry: &CustomApp) -> PathBuf {
     PathBuf::from(expand_env(
         "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs",
@@ -950,7 +880,6 @@ fn shortcut_path(entry: &CustomApp) -> PathBuf {
         download::file_name_from(&entry.name, "App")
     ))
 }
-
 /// Expands `%VAR%` references using the current environment.
 pub(crate) fn expand_env(input: &str) -> String {
     static VAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%([A-Za-z0-9_]+)%").unwrap());
@@ -959,11 +888,9 @@ pub(crate) fn expand_env(input: &str) -> String {
     })
     .into_owned()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn resolved_with_digest(digest: Option<&str>) -> Resolved {
         Resolved {
             url: "https://example.invalid/setup.exe".into(),
@@ -974,7 +901,6 @@ mod tests {
             fetched_at: 0,
         }
     }
-
     #[test]
     fn bundled_catalog_parses_and_patterns_compile() {
         assert!(!CATALOG.is_empty());
@@ -1001,7 +927,6 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn nvidia_requires_its_pinned_authenticode_publisher_without_a_digest() {
         let nvidia = CATALOG
@@ -1013,7 +938,6 @@ mod tests {
             IntegrityRequirement::Authenticode("NVIDIA Corporation".into())
         );
     }
-
     #[test]
     fn a_malformed_vendor_digest_blocks_the_install_instead_of_falling_back() {
         let nvidia = CATALOG
@@ -1024,7 +948,6 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("invalid SHA-256"), "{error}");
     }
-
     #[test]
     fn nvidia_keeps_its_publisher_pin_even_when_a_digest_exists() {
         let nvidia = CATALOG
@@ -1044,7 +967,6 @@ mod tests {
             )
         );
     }
-
     #[test]
     fn installer_guard_pins_the_file_and_its_namespace() {
         let root = std::env::temp_dir().join(format!(
@@ -1056,7 +978,6 @@ mod tests {
         std::fs::create_dir_all(&apps).unwrap();
         let installer = apps.join("setup.exe");
         std::fs::write(&installer, b"signed bytes would be here").unwrap();
-
         let guard = lock_installer(&installer).unwrap();
         assert!(
             std::fs::rename(&root, root.with_extension("swapped")).is_err(),
@@ -1066,11 +987,9 @@ mod tests {
             std::fs::write(&installer, b"replacement").is_err(),
             "the verified leaf must not be writable through another handle"
         );
-
         drop(guard);
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn version_comparison() {
         assert!(is_newer("11.0.9.251", "11.0.8.299"));
@@ -1080,7 +999,6 @@ mod tests {
         assert!(is_newer("2.0", "1.9.9.9"));
         assert!(!is_newer("1.0", "1.0.0"));
     }
-
     #[test]
     fn wildcard_paths_resolve_to_the_newest_match() {
         let root = std::env::temp_dir().join(format!("myle-glob-test-{}", std::process::id()));
@@ -1112,7 +1030,6 @@ mod tests {
         assert_eq!(resolve_path(&format!("{}\\nope-*", root.display())), None);
         let _ = std::fs::remove_dir_all(&root);
     }
-
     #[test]
     fn conflicting_apps_reference_each_other() {
         for app in CATALOG.iter() {
@@ -1130,20 +1047,17 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn env_expansion() {
         let windir = std::env::var("WINDIR").unwrap();
         assert_eq!(expand_env("%WINDIR%\\x"), format!("{windir}\\x"));
         assert_eq!(expand_env("%NOPE_NOT_SET%"), "%NOPE_NOT_SET%");
     }
-
     #[test]
     fn single_entries_come_out_of_encrypted_archives() {
         use std::io::Write;
         use zip::AesMode;
         use zip::write::SimpleFileOptions;
-
         let dir = std::env::temp_dir().join(format!("myle-aes-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1160,7 +1074,6 @@ mod tests {
             w.finish().unwrap();
         }
         let dest = dir.join("out");
-
         // Only the requested entry is unpacked, and a Windows-style path works.
         let mut seen = (0u64, 0u64);
         let picked = extract_zip_entry(
@@ -1175,12 +1088,10 @@ mod tests {
         assert_eq!(std::fs::read(&picked).unwrap(), b"MZ-installer");
         assert_eq!(seen, (12, 12)); // progress ran to the end
         assert!(!dest.join("node_modules").exists());
-
         // A wrong name says what the package actually holds.
         let message =
             extract_zip_entry(&zip_path, "setup.exe", &dest, Some("123"), |_, _| {}).unwrap_err();
         assert!(message.contains("release/App 2.0.0.exe"), "{message}");
-
         assert!(
             extract_zip_entry(
                 &zip_path,
@@ -1198,12 +1109,10 @@ mod tests {
         assert!(all.join("node_modules").join("big.js").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
-
     #[test]
     fn zip_extraction_refuses_path_traversal() {
         use std::io::Write;
         use zip::write::SimpleFileOptions;
-
         let dir = std::env::temp_dir().join(format!("myle-zip-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

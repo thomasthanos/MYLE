@@ -1,17 +1,10 @@
-//! The administrator half of the cleaner.
-//!
-//! The elevated helper opens each configured root without following reparse
-//! points and traverses its descendants by Windows file ID. Descendant paths
-//! are never used for deletion, so replacing a checked folder with a junction
-//! cannot redirect the cleaner elsewhere.
-
+// ! The administrator half of the cleaner. ! ! The elevated helper opens each configured root without following reparse ! points and traverses its descendants by Windows file ID. Descendant paths ! are never used for deletion, so replacing a checked folder with a junction ! cannot redirect the cleaner elsewhere.
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
-
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_NO_MORE_FILES, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
@@ -30,10 +23,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-
 use super::targets::{self, Category, Target};
 use crate::elevated_pipe::{self, Helper, Session};
-
 /// `\\.\pipe\myle-cleaner-<32 hex digits>`, created by the app.
 const HELPER: Helper = Helper {
     flag: "--cleaner-elevated-helper",
@@ -42,14 +33,12 @@ const HELPER: Helper = Helper {
 };
 const MAX_DEPTH: usize = 128;
 const SHARE_WITHOUT_RENAME: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     Measure,
     Clean,
 }
-
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Totals {
     #[serde(default)]
@@ -62,7 +51,6 @@ pub struct Totals {
     #[serde(default)]
     pub skipped_bytes: u64,
 }
-
 impl Totals {
     /// Files that could not be removed: those in use, and the ones this
     /// process decided not to touch. Their size is kept for the page.
@@ -71,7 +59,6 @@ impl Totals {
         self.skipped_bytes += bytes;
     }
 }
-
 /// One request to the helper: an action over the admin-only folders of
 /// these category ids.
 #[derive(Debug, Deserialize, Serialize)]
@@ -79,18 +66,15 @@ struct Request {
     action: Action,
     ids: Vec<String>,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum Response {
     Ok(HashMap<String, Totals>),
     Error(String),
 }
-
 /// The running helper: one UAC prompt, then every scan and clean of this app
 /// session goes through it.
 static SESSION: tokio::sync::Mutex<Option<Session>> = tokio::sync::Mutex::const_new(None);
-
 /// Runs `action` over the admin-only folders of `categories` and returns the
 /// totals per category id. The first call asks for administrator approval;
 /// later ones reuse the running helper without asking again.
@@ -107,7 +91,6 @@ pub async fn run(
         return Ok(HashMap::new());
     }
     let request = Request { action, ids };
-
     let mut session = SESSION.lock().await;
     if let Some(open) = session.as_mut() {
         match open.ask(&request).await {
@@ -124,19 +107,16 @@ pub async fn run(
     *session = Some(fresh);
     answer(response)
 }
-
 /// Whether a helper is running, so the next scan or clean will not ask.
 pub async fn is_running() -> bool {
     SESSION.lock().await.is_some()
 }
-
 fn answer(response: Response) -> Result<HashMap<String, Totals>, String> {
     match response {
         Response::Ok(totals) => Ok(totals),
         Response::Error(error) => Err(error),
     }
 }
-
 /// Called before Tauri starts. Returns `None` for a normal launch and an exit
 /// code for the tightly scoped elevated helper mode.
 pub fn run_helper_from_args() -> Option<i32> {
@@ -145,14 +125,12 @@ pub fn run_helper_from_args() -> Option<i32> {
     Some(match served {
         Ok(()) => 0,
         Err(error) => {
-            // Release builds have no console, but this remains useful in tests
-            // and when the executable is launched from a diagnostic terminal.
+            // Release builds have no console, but this remains useful in tests and when the executable is launched from a diagnostic terminal.
             eprintln!("Elevated cleaner: {error}");
             2
         }
     })
 }
-
 fn serve(pipe: &str, app_pid: u32) -> Result<(), String> {
     elevated_pipe::serve(
         &HELPER,
@@ -165,7 +143,6 @@ fn serve(pipe: &str, app_pid: u32) -> Result<(), String> {
         || Response::Error("Invalid cleaner request.".into()),
     )
 }
-
 fn handle(request: &Request) -> Result<HashMap<String, Totals>, String> {
     let mut result = HashMap::new();
     for id in &request.ids {
@@ -183,7 +160,6 @@ fn handle(request: &Request) -> Result<HashMap<String, Totals>, String> {
     }
     Ok(result)
 }
-
 fn visit_target(target: &Target, action: Action) -> Result<Totals, String> {
     let root_path = elevated_target_path(target)?;
     let root = match OwnedHandle::open_root(&root_path) {
@@ -204,7 +180,6 @@ fn visit_target(target: &Target, action: Action) -> Result<Totals, String> {
     visit_directory(&root, &root_path, target.patterns, action, 0, &mut totals)?;
     Ok(totals)
 }
-
 /// The elevated process must not trust inherited environment variables for
 /// administrator-only roots. `%PROGRAMDATA%` is resolved through Windows'
 /// Known Folders API; every other admin target is a compiled absolute path.
@@ -217,7 +192,6 @@ fn elevated_target_path(target: &Target) -> Result<PathBuf, String> {
     }
     Ok(PathBuf::from(target.dir))
 }
-
 fn known_program_data() -> Result<PathBuf, String> {
     let mut raw = null_mut();
     let status = unsafe {
@@ -246,7 +220,6 @@ fn known_program_data() -> Result<PathBuf, String> {
     unsafe { CoTaskMemFree(raw.cast()) };
     Ok(path)
 }
-
 fn visit_directory(
     directory: &OwnedHandle,
     root_path: &str,
@@ -259,11 +232,9 @@ fn visit_directory(
         totals.skip(0);
         return Ok(());
     }
-
     let mut restart = true;
     loop {
-        // usize gives the variable-length directory records their required
-        // alignment. The API marks the final record with NextEntryOffset = 0.
+        // usize gives the variable-length directory records their required alignment. The API marks the final record with NextEntryOffset = 0.
         let mut buffer = [0usize; 8192];
         let class = if restart {
             FileIdBothDirectoryRestartInfo
@@ -286,7 +257,6 @@ fn visit_directory(
             }
             return Err(std::io::Error::from_raw_os_error(code as i32).to_string());
         }
-
         let bytes = size_of_val(&buffer);
         let base = buffer.as_ptr().cast::<u8>();
         let mut offset = 0usize;
@@ -309,7 +279,6 @@ fn visit_directory(
                     directory, root_path, patterns, action, depth, entry, &name, totals,
                 );
             }
-
             if entry.NextEntryOffset == 0 {
                 break;
             }
@@ -322,7 +291,6 @@ fn visit_directory(
     }
     Ok(())
 }
-
 #[allow(clippy::too_many_arguments)]
 fn visit_entry(
     parent: &OwnedHandle,
@@ -377,15 +345,11 @@ fn visit_entry(
         return;
     };
     if !is_below(root_path, &final_path) {
-        // The entry moved outside the allowed root after enumeration and must
-        // not be touched. The identity check below closes the remaining race
-        // between this observation and acquiring the pinned path handle.
+        // The entry moved outside the allowed root after enumeration and must not be touched. The identity check below closes the remaining race between this observation and acquiring the pinned path handle.
         totals.skip(listed_bytes);
         return;
     }
-    // Open the discovered name without delete sharing and prove it still
-    // names the same volume/file ID. This second handle pins the name against
-    // rename and is the exact handle later passed to the delete API.
+    // Open the discovered name without delete sharing and prove it still names the same volume/file ID. This second handle pins the name against rename and is the exact handle later passed to the delete API.
     let Ok(pinned) = OwnedHandle::open_path(Path::new(&final_path), access) else {
         totals.skip(listed_bytes);
         return;
@@ -403,7 +367,6 @@ fn visit_entry(
     drop(child);
     let child = pinned;
     let info = pinned_info;
-
     if is_directory {
         if patterns.is_empty() {
             if visit_directory(&child, root_path, patterns, action, depth + 1, totals).is_err() {
@@ -415,7 +378,6 @@ fn visit_entry(
         }
         return;
     }
-
     let actual_name = Path::new(&final_path)
         .file_name()
         .and_then(|name| name.to_str())
@@ -430,8 +392,7 @@ fn visit_entry(
             totals.files += 1;
         }
         Action::Clean if info.nNumberOfLinks > 1 => {
-            // OpenFileById does not identify which hard-link name will be
-            // removed. Never let an outside link make that choice ambiguous.
+            // OpenFileById does not identify which hard-link name will be removed. Never let an outside link make that choice ambiguous.
             totals.skip(size);
         }
         Action::Clean => match child.delete() {
@@ -447,7 +408,6 @@ fn visit_entry(
         },
     }
 }
-
 /// The size a handle reports. For a folder it is meaningless, and 0 keeps the
 /// "still in use" figure about files only.
 fn size_of_entry(info: &BY_HANDLE_FILE_INFORMATION) -> u64 {
@@ -456,19 +416,16 @@ fn size_of_entry(info: &BY_HANDLE_FILE_INFORMATION) -> u64 {
     }
     ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64
 }
-
 fn is_below(root: &str, candidate: &str) -> bool {
     candidate.len() > root.len()
         && candidate.starts_with(root)
         && candidate.as_bytes().get(root.len()) == Some(&b'\\')
 }
-
 fn same_file(left: &BY_HANDLE_FILE_INFORMATION, right: &BY_HANDLE_FILE_INFORMATION) -> bool {
     left.dwVolumeSerialNumber == right.dwVolumeSerialNumber
         && left.nFileIndexHigh == right.nFileIndexHigh
         && left.nFileIndexLow == right.nFileIndexLow
 }
-
 fn normalized_final_path(handle: HANDLE) -> Result<String, String> {
     let needed = unsafe { GetFinalPathNameByHandleW(handle, null_mut(), 0, 0) };
     if needed == 0 {
@@ -485,14 +442,11 @@ fn normalized_final_path(handle: HANDLE) -> Result<String, String> {
         .trim_end_matches('\\')
         .to_ascii_lowercase())
 }
-
 struct OwnedHandle(HANDLE);
-
 impl OwnedHandle {
     fn open_root(path: &Path) -> std::io::Result<Self> {
         Self::open_path(path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
     }
-
     fn open_path(path: &Path, access: u32) -> std::io::Result<Self> {
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
         let handle = unsafe {
@@ -508,7 +462,6 @@ impl OwnedHandle {
         };
         Self::from_raw(handle)
     }
-
     fn open_id(volume_hint: HANDLE, id: i64, access: u32) -> std::io::Result<Self> {
         let descriptor = FILE_ID_DESCRIPTOR {
             dwSize: size_of::<FILE_ID_DESCRIPTOR>() as u32,
@@ -527,7 +480,6 @@ impl OwnedHandle {
         };
         Self::from_raw(handle)
     }
-
     fn from_raw(handle: HANDLE) -> std::io::Result<Self> {
         if handle == INVALID_HANDLE_VALUE {
             Err(std::io::Error::last_os_error())
@@ -535,7 +487,6 @@ impl OwnedHandle {
             Ok(Self(handle))
         }
     }
-
     fn info(&self) -> Result<BY_HANDLE_FILE_INFORMATION, String> {
         let mut info = unsafe { zeroed::<BY_HANDLE_FILE_INFORMATION>() };
         if unsafe { GetFileInformationByHandle(self.0, &mut info) } == 0 {
@@ -544,7 +495,6 @@ impl OwnedHandle {
             Ok(info)
         }
     }
-
     fn delete(&self) -> std::io::Result<()> {
         let extended = FILE_DISPOSITION_INFO_EX {
             Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
@@ -560,7 +510,6 @@ impl OwnedHandle {
         {
             return Ok(());
         }
-
         // Older file systems may not implement FileDispositionInfoEx.
         let legacy = FILE_DISPOSITION_INFO { DeleteFile: true };
         if unsafe {
@@ -578,7 +527,6 @@ impl OwnedHandle {
         }
     }
 }
-
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
         unsafe {
@@ -586,14 +534,12 @@ impl Drop for OwnedHandle {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::elevated_pipe::tests::{connect_to, runtime};
     use std::time::Duration;
     use tokio::net::windows::named_pipe::ServerOptions;
-
     fn temp_target(label: &str) -> (PathBuf, Target) {
         let root = std::env::temp_dir().join(format!(
             "myle-elevated-{label}-{}-{}",
@@ -611,14 +557,12 @@ mod tests {
             },
         )
     }
-
     #[test]
     fn handle_walk_measures_and_deletes_normal_descendants() {
         let (root, target) = temp_target("normal");
         std::fs::create_dir_all(root.join("nested")).unwrap();
         std::fs::write(root.join("a.tmp"), vec![1; 20]).unwrap();
         std::fs::write(root.join("nested").join("b.tmp"), vec![2; 30]).unwrap();
-
         assert_eq!(
             visit_target(&target, Action::Measure).unwrap(),
             Totals {
@@ -634,11 +578,9 @@ mod tests {
         assert!(std::fs::read_dir(&root).unwrap().next().is_none());
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn handle_walk_does_not_follow_a_junction() {
         use std::os::windows::process::CommandExt;
-
         let (root, target) = temp_target("junction-root");
         let (outside, _) = temp_target("junction-outside");
         let sentinel = outside.join("keep.txt");
@@ -664,7 +606,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
     }
-
     #[test]
     fn the_helper_answers_the_app_over_its_pipe() {
         runtime().block_on(async {
@@ -679,7 +620,6 @@ mod tests {
                 std::thread::spawn(move || serve(&name, std::process::id()))
             };
             let mut session = connect_to(server).await;
-
             let empty = Request {
                 action: Action::Measure,
                 ids: Vec::new(),
@@ -692,9 +632,7 @@ mod tests {
             };
             let answer: Response = session.ask(&unknown).await.unwrap();
             assert!(matches!(answer, Response::Error(_)));
-
-            // Closing the pipe (the app exiting) ends the helper. The runtime
-            // has to keep running meanwhile: it finishes closing the pipe.
+            // Closing the pipe (the app exiting) ends the helper. The runtime has to keep running meanwhile: it finishes closing the pipe.
             drop(session);
             let ended = tokio::task::spawn_blocking(move || helper.join().unwrap());
             let ended = tokio::time::timeout(Duration::from_secs(20), ended)
@@ -704,7 +642,6 @@ mod tests {
             assert!(ended.is_ok());
         });
     }
-
     #[test]
     fn the_helper_refuses_a_pipe_the_app_does_not_serve() {
         runtime().block_on(async {
@@ -718,14 +655,12 @@ mod tests {
             assert!(helper.join().unwrap().is_err());
         });
     }
-
     #[test]
     fn containment_requires_a_real_path_boundary() {
         assert!(is_below(r"\\?\c:\temp", r"\\?\c:\temp\a.txt"));
         assert!(!is_below(r"\\?\c:\temp", r"\\?\c:\temporary\a.txt"));
         assert!(!is_below(r"\\?\c:\temp", r"\\?\c:\temp"));
     }
-
     #[test]
     fn elevated_targets_do_not_depend_on_inherited_environment_paths() {
         for target in targets::CATEGORIES

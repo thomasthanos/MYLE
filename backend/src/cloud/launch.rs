@@ -1,17 +1,7 @@
-//! Starting a cloud app that is installed but not running.
-//!
-//! - Google Drive for desktop shows its files on a drive of its own (`G:`),
-//!   which only exists while `GoogleDriveFS.exe` runs: nothing can be written
-//!   there before it starts. Each update installs into a new version folder,
-//!   so the newest one is started.
-//! - Dropbox's folder is an ordinary folder, writable without the app; the app
-//!   is started so that a backup syncs (and online-only files can be read).
-
+// ! Starting a cloud app that is installed but not running. ! ! - Google Drive for desktop shows its files on a drive of its own (`G:`), ! which only exists while `GoogleDriveFS.exe` runs: nothing can be written ! there before it starts. Each update installs into a new version folder, ! so the newest one is started. ! - Dropbox's folder is an ordinary folder, writable without the app; the app ! is started so that a backup syncs (and online-only files can be read).
 use std::path::{Path, PathBuf};
-
 const GOOGLE_DRIVE_EXE: &str = "GoogleDriveFS.exe";
 const DROPBOX_EXE: &str = "Dropbox.exe";
-
 /// What happened when the app was asked for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Started {
@@ -19,7 +9,6 @@ pub(crate) enum Started {
     Launched,
     NotInstalled,
 }
-
 /// Starts Google Drive for desktop unless it already runs.
 pub(crate) fn start_google_drive() -> Result<Started, String> {
     if process_running(GOOGLE_DRIVE_EXE) {
@@ -30,7 +19,6 @@ pub(crate) fn start_google_drive() -> Result<Started, String> {
     };
     spawn(&exe, &[]).map(|_| Started::Launched)
 }
-
 /// Starts Dropbox unless it already runs, the way Windows starts it at sign-in
 /// (in the tray, without opening its window).
 pub(crate) fn start_dropbox() -> Result<Started, String> {
@@ -42,7 +30,6 @@ pub(crate) fn start_dropbox() -> Result<Started, String> {
     };
     spawn(&exe, &["/systemstartup"]).map(|_| Started::Launched)
 }
-
 /// Starts `exe` on its own: not a child of MYLE's console or job, so it keeps
 /// running when MYLE closes (or is updated).
 fn spawn(exe: &Path, args: &[&str]) -> Result<(), String> {
@@ -70,7 +57,6 @@ fn spawn(exe: &Path, args: &[&str]) -> Result<(), String> {
         .map(|_| ())
         .map_err(|error| format!("{} could not be started: {error}", exe.display()))
 }
-
 /// `<Program Files>\Google\Drive File Stream\<newest version>\GoogleDriveFS.exe`.
 pub(crate) fn google_drive_exe() -> Option<PathBuf> {
     program_files()
@@ -79,7 +65,6 @@ pub(crate) fn google_drive_exe() -> Option<PathBuf> {
         .filter_map(|root| newest_version_with(&root, GOOGLE_DRIVE_EXE))
         .next()
 }
-
 fn dropbox_exe() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = program_files()
         .into_iter()
@@ -103,7 +88,6 @@ fn dropbox_exe() -> Option<PathBuf> {
     }
     candidates.into_iter().find(|exe| exe.is_file())
 }
-
 fn program_files() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for variable in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
@@ -116,7 +100,6 @@ fn program_files() -> Vec<PathBuf> {
     }
     roots
 }
-
 /// The highest version folder (`112.0.1.0`) inside `root` that holds `exe`.
 pub(crate) fn newest_version_with(root: &Path, exe: &str) -> Option<PathBuf> {
     let mut versions: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(root)
@@ -135,7 +118,6 @@ pub(crate) fn newest_version_with(root: &Path, exe: &str) -> Option<PathBuf> {
     versions.sort();
     versions.pop().map(|(_, exe)| exe)
 }
-
 /// Whether a program with this file name runs in this user's session.
 pub(crate) fn process_running(name: &str) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -145,8 +127,7 @@ pub(crate) fn process_running(name: &str) -> bool {
     };
     use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
     let mut mine = 0u32;
-    // SAFETY: plain calls on a zeroed entry with its size set; the snapshot
-    // handle is closed below.
+    // SAFETY: plain calls on a zeroed entry with its size set; the snapshot handle is closed below.
     unsafe {
         ProcessIdToSessionId(std::process::id(), &mut mine);
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -174,11 +155,9 @@ pub(crate) fn process_running(name: &str) -> bool {
         found
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn the_newest_google_drive_version_folder_wins() {
         let root = std::env::temp_dir().join(format!("myle-drivefs-{}", std::process::id()));
@@ -199,7 +178,6 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn this_program_is_seen_running() {
         let me = std::env::current_exe().unwrap();

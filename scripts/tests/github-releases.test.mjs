@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { compileModule } from "svelte/compiler";
 import { stageIsStep, stepReached } from "../../frontend/app/pages/github-releases/pipeline.ts";
-
 const storage = new Map();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
   getItem: (key) => storage.get(key) ?? null,
@@ -38,7 +37,6 @@ const { ReleaseSession, failureKey, githubReleases } = await import("../../front
 const { githubReleasesApi } = await import("../../frontend/app/pages/github-releases/api.ts");
 const { onStorageChange } = await import("../../frontend/lib/storage.ts");
 hooks.deregister();
-
 test("adding and removing project paths notify account sync only after persistence succeeds", async () => {
   const original = { addRepos: githubReleasesApi.addRepos, removeRepo: githubReleasesApi.removeRepo, refresh: githubReleases.refresh };
   const changes = []; onStorageChange(key => changes.push(key));
@@ -59,7 +57,6 @@ test("adding and removing project paths notify account sync only after persisten
     onStorageChange(() => {});
   }
 });
-
 test("an older page-load reply cannot overwrite project paths restored while loading", async () => {
   const original = githubReleasesApi.getState;
   let reply;
@@ -74,7 +71,6 @@ test("an older page-load reply cannot overwrite project paths restored while loa
     assert.equal(githubReleases.page.git, "git");
   } finally { githubReleasesApi.getState = original; }
 });
-
 test("a later failure report adds to the failures shown and never wipes them", () => {
   const session = new ReleaseSession();
   const job = (name, url, errors = []) => ({ job: name, step: "Build", errors, logTail: "", url });
@@ -92,7 +88,6 @@ test("a later failure report adds to the failures shown and never wipes them", (
   session.start();
   assert.deepEqual(session.failures, [], "a new release starts with none");
 });
-
 test("a build stage is a pipeline step by its words, with a version after it but not more words", () => {
   assert.ok(stageIsStep("App 9.7.2", "App"));
   assert.ok(stageIsStep("Setup window", "Setup window"));
@@ -101,7 +96,6 @@ test("a build stage is a pipeline step by its words, with a version after it but
   assert.ok(!stageIsStep("Compiling Rust: serde (3 crates)", "App"));
   assert.ok(!stageIsStep("App", ""));
 });
-
 test("the pipeline follows MYLE's build-setup.ps1 markers in order, never back", () => {
   const titles = ["App", "Setup window", "Uninstaller", "Payload", "Setup"];
   assert.equal(stepReached([], titles), -1);

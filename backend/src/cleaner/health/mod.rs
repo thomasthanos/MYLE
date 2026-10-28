@@ -1,29 +1,15 @@
-//! System Cleaner's Software Health: eight scans of what installed
-//! software leaves, starts, may use and shows, and the reversible changes
-//! offered for each finding.
-//!
-//! The page sends finding ids only. What a finding points at (a folder, a
-//! registry key, a service) stays here, from the scan that found it, so a
-//! change can only ever touch what a scan listed. Every change is
-//! non-destructive: files go to the Recycle Bin, a registry key is exported
-//! to a .reg file before it is deleted, and every switch is written to the
-//! restore list with the value it had.
-
+// ! System Cleaner's Software Health: eight scans of what installed ! software leaves, starts, may use and shows, and the reversible changes ! offered for each finding. ! ! The page sends finding ids only. What a finding points at (a folder, a ! registry key, a service) stays here, from the scan that found it, so a ! change can only ever touch what a scan listed. Every change is ! non-destructive: files go to the Recycle Bin, a registry key is exported ! to a .reg file before it is deleted, and every switch is written to the ! restore list with the value it had.
 mod scans;
 mod sys;
-
 pub(crate) use scans::install_locations;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use winreg::RegValue;
 use winreg::enums::{KEY_ALL_ACCESS, KEY_WOW64_64KEY, RegType};
-
 /// The eight modules, in page order.
 pub const MODULES: [&str; 8] = [
     "leftovers",
@@ -35,7 +21,6 @@ pub const MODULES: [&str; 8] = [
     "installers",
     "suspicious",
 ];
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
@@ -58,7 +43,6 @@ pub struct Finding {
     pub recommended: bool,
     pub review_reason: Option<String>,
 }
-
 /// What a finding points at; never leaves the backend.
 #[derive(Clone, Debug)]
 pub enum Target {
@@ -104,7 +88,6 @@ pub enum Target {
     },
     Info,
 }
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Undo {
@@ -152,7 +135,6 @@ pub enum Undo {
         paths: Vec<String>,
     },
 }
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreEntry {
@@ -163,7 +145,6 @@ pub struct RestoreEntry {
     pub title: String,
     pub undo: Undo,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleReport {
@@ -171,7 +152,6 @@ pub struct ModuleReport {
     pub findings: Vec<Finding>,
     pub error: Option<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum HealthEvent {
@@ -182,7 +162,6 @@ pub enum HealthEvent {
     /// A module finished: its findings, straight away.
     Result { report: ModuleReport },
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyResult {
@@ -190,10 +169,8 @@ pub struct ApplyResult {
     pub ok: bool,
     pub message: Option<String>,
 }
-
 static FOUND: LazyLock<Mutex<HashMap<String, (Finding, Target)>>> = LazyLock::new(Default::default);
 static OPERATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 /// Target identity is independent of the scan, display name and switch state.
 fn target_identity(target: &Target) -> String {
     let lower = |s: &str| s.replace('/', "\\").to_lowercase();
@@ -231,7 +208,6 @@ fn target_identity(target: &Target) -> String {
         Target::Info => "info".into(),
     }
 }
-
 fn prepare_finding(f: &mut Finding, target: &Target) {
     let identity = if matches!(target, Target::Info) {
         format!("info:{}:{:?}", f.title, f.path)
@@ -253,14 +229,12 @@ fn prepare_finding(f: &mut Finding, target: &Target) {
             Some("Review before cleaning; this may still belong to software you use.".into());
     }
 }
-
 /// One finding per id (the first): the page keys its list by id, and a
 /// repeated one stops the list from showing at all.
 fn keep_first_of_each_id(items: &mut Vec<(Finding, Target)>) {
     let mut ids = std::collections::HashSet::new();
     items.retain(|(finding, _)| ids.insert(finding.id.clone()));
 }
-
 fn target_claims(target: &Target) -> Vec<String> {
     match target {
         Target::Paths(paths) => paths
@@ -278,18 +252,15 @@ fn target_claims(target: &Target) -> Vec<String> {
         _ => vec![target_identity(target)],
     }
 }
-
 #[cfg(test)]
 fn claim_target(target: &Target, seen: &mut std::collections::HashSet<String>) -> bool {
     claim_keys(&target_claims(target), seen)
 }
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct BatchItem {
     pub id: String,
     pub action: String,
 }
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchProgress {
@@ -297,11 +268,9 @@ pub struct BatchProgress {
     pub total: usize,
     pub current: String,
 }
-
 #[cfg(test)]
 mod identity_tests {
     use super::*;
-
     #[test]
     fn a_repeated_finding_is_listed_once() {
         // Three processes of one program, as the hibernation scan once sent.
@@ -329,7 +298,6 @@ mod identity_tests {
         let kept: Vec<_> = items.iter().map(|(f, _)| f.detail.as_str()).collect();
         assert_eq!(kept, ["first", "other"]);
     }
-
     #[test]
     fn target_identity_is_stable_and_windows_paths_ignore_case() {
         assert_eq!(
@@ -345,7 +313,6 @@ mod identity_tests {
             })
         );
     }
-
     #[test]
     fn batch_rejects_duplicate_and_conflicting_targets_before_execution() {
         let target = Target::Paths(vec![PathBuf::from(r"C:\Cache")]);
@@ -355,7 +322,6 @@ mod identity_tests {
         let nested = Target::Paths(vec![PathBuf::from(r"C:\Cache\child")]);
         assert!(!claim_target(&nested, &mut seen));
     }
-
     #[test]
     fn overlap_does_not_discard_unprocessed_folders_or_registry_keys() {
         let covered = std::collections::HashSet::from(["path:c:\\cache".to_string()]);
@@ -388,7 +354,6 @@ mod identity_tests {
             .is_some()
         );
     }
-
     #[test]
     fn recommendation_never_uses_confidence_as_automatic_permission() {
         let mut f = Finding {
@@ -425,7 +390,6 @@ mod identity_tests {
         assert_eq!(f.cleanup_action, Some("deleteKey"));
         assert!(!f.recommended);
     }
-
     #[tokio::test]
     async fn native_commands_refuse_concurrent_changes_and_stale_ids() {
         let guard = OPERATION.lock().await;
@@ -455,7 +419,6 @@ mod identity_tests {
         assert!(!results[0].ok);
         assert!(results[0].message.as_ref().unwrap().contains("Scan again"));
     }
-
     #[test]
     fn conflicting_actions_are_rejected_without_touching_targets() {
         let target = Target::UninstallKey {
@@ -500,7 +463,6 @@ mod identity_tests {
                 .contains("different actions")
         );
     }
-
     #[tokio::test]
     async fn exported_registry_fixture_can_be_restored() {
         let path = format!("Software\\MYLE-Health-Test-{}", uuid::Uuid::new_v4());
@@ -526,23 +488,19 @@ mod identity_tests {
         std::fs::remove_file(file).unwrap();
     }
 }
-
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
 }
-
 fn health_dir() -> Result<PathBuf, String> {
     let dir = crate::storage::roaming_dir()?.join("software-health");
     std::fs::create_dir_all(dir.join("backups")).map_err(|e| e.to_string())?;
     Ok(dir)
 }
-
 fn journal_path() -> Result<PathBuf, String> {
     Ok(health_dir()?.join("restore.json"))
 }
-
 fn read_journal() -> Vec<RestoreEntry> {
     journal_path()
         .ok()
@@ -550,12 +508,10 @@ fn read_journal() -> Vec<RestoreEntry> {
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
 }
-
 fn write_journal(list: &[RestoreEntry]) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(list).map_err(|e| e.to_string())?;
     crate::game_saves::atomic::write(&journal_path()?, &bytes)
 }
-
 fn remember(module: &str, title: &str, undo: Undo) -> Result<(), String> {
     let mut list = read_journal();
     list.insert(
@@ -571,9 +527,7 @@ fn remember(module: &str, title: &str, undo: Undo) -> Result<(), String> {
     list.truncate(500);
     write_journal(&list)
 }
-
 // ─── Commands ──────────────────────────────────────────────────────────────
-
 /// Scans `modules` (all when empty), reporting each as it starts and ends.
 #[tauri::command]
 pub async fn cleaner_health_scan(
@@ -589,8 +543,7 @@ pub async fn cleaner_health_scan(
         .filter(|m| modules.is_empty() || modules.iter().any(|w| w == m))
         .collect();
     tauri::async_runtime::spawn_blocking(move || {
-        // Every module at once: they read different places, and the slow
-        // ones (PowerShell, folder sizes) no longer hold the others back.
+        // Every module at once: they read different places, and the slow ones (PowerShell, folder sizes) no longer hold the others back.
         let reports = Mutex::new(Vec::new());
         std::thread::scope(|scope| {
             for module in wanted.iter().copied() {
@@ -637,7 +590,6 @@ pub async fn cleaner_health_scan(
     .await
     .map_err(|e| e.to_string())
 }
-
 /// Does `action` to the findings `ids` of the last scan.
 #[tauri::command]
 pub async fn cleaner_health_apply(
@@ -655,7 +607,6 @@ pub async fn cleaner_health_apply(
     )
     .await
 }
-
 #[tauri::command]
 pub async fn cleaner_health_apply_batch(
     items: Vec<BatchItem>,
@@ -663,7 +614,6 @@ pub async fn cleaner_health_apply_batch(
 ) -> Result<Vec<ApplyResult>, String> {
     apply_batch(items, Some(on_event)).await
 }
-
 async fn apply_batch(
     items: Vec<BatchItem>,
     on_event: Option<Channel<BatchProgress>>,
@@ -686,8 +636,7 @@ async fn apply_batch(
             .collect()
     };
     validate_batch(&items)?;
-    // Cover parents before their children so overlapping folder selections
-    // never skip an unprocessed part of a parent directory.
+    // Cover parents before their children so overlapping folder selections never skip an unprocessed part of a parent directory.
     items.sort_by_key(|(request, found)| {
         found.as_ref().map_or(usize::MAX, |(_, target)| {
             action_claims(target, &request.action)
@@ -784,9 +733,7 @@ async fn apply_batch(
     }
     Ok(results)
 }
-
 type ScannedRequest = (BatchItem, Option<(Finding, Target)>);
-
 fn validate_batch(items: &[ScannedRequest]) -> Result<(), String> {
     let mut actions = HashMap::new();
     for (request, found) in items {
@@ -807,7 +754,6 @@ fn validate_batch(items: &[ScannedRequest]) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn action_claims(target: &Target, action: &str) -> Vec<String> {
     let mut claims = target_claims(target);
     if action == "forceClean"
@@ -817,14 +763,12 @@ fn action_claims(target: &Target, action: &str) -> Vec<String> {
     }
     claims
 }
-
 fn overlaps(a: &str, b: &str) -> bool {
     a == b
         || a.starts_with("path:")
             && b.starts_with("path:")
             && (a.starts_with(&format!("{b}\\")) || b.starts_with(&format!("{a}\\")))
 }
-
 fn uncovered_target(
     target: &Target,
     action: &str,
@@ -862,7 +806,6 @@ fn uncovered_target(
         _ => (!seen.contains(&target_identity(target))).then(|| target.clone()),
     }
 }
-
 #[cfg(test)]
 fn claim_keys(claims: &[String], seen: &mut std::collections::HashSet<String>) -> bool {
     if claims
@@ -874,12 +817,10 @@ fn claim_keys(claims: &[String], seen: &mut std::collections::HashSet<String>) -
     seen.extend(claims.iter().cloned());
     true
 }
-
 #[tauri::command]
 pub fn cleaner_health_restore_list() -> Vec<RestoreEntry> {
     read_journal()
 }
-
 /// Puts back what a restore entry changed, and drops it from the list.
 #[tauri::command]
 pub async fn cleaner_health_restore(id: String) -> Result<(), String> {
@@ -896,16 +837,13 @@ pub async fn cleaner_health_restore(id: String) -> Result<(), String> {
     let rest: Vec<RestoreEntry> = list.into_iter().filter(|e| e.id != id).collect();
     write_journal(&rest)
 }
-
 // ─── Changes ───────────────────────────────────────────────────────────────
-
 fn writable(hive: &str, path: &str) -> Result<winreg::RegKey, String> {
     sys::root(hive)
         .create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)
         .map(|(key, _)| key)
         .map_err(|e| denied(hive, e))
 }
-
 fn denied(hive: &str, error: std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::PermissionDenied && hive == "HKLM" {
         "Needs administrator: run MYLE as administrator for this one.".into()
@@ -913,7 +851,6 @@ fn denied(hive: &str, error: std::io::Error) -> String {
         error.to_string()
     }
 }
-
 /// Before a browser file is edited: the browser must be closed.
 fn closed(exe: &str) -> Result<(), String> {
     if sys::running(exe) {
@@ -925,7 +862,6 @@ fn closed(exe: &str) -> Result<(), String> {
         Ok(())
     }
 }
-
 async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(), String> {
     let module = finding.module;
     let title = &finding.title;
@@ -954,8 +890,7 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 now_ms()
             ));
             sys::export_key(hive, path, &file)?;
-            // Persist the backup before any removal, including a partially
-            // completed force-clean. A failed journal write leaves data intact.
+            // Persist the backup before any removal, including a partially completed force-clean. A failed journal write leaves data intact.
             remember(
                 module,
                 title,
@@ -1153,7 +1088,6 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
         _ => Err("Not offered for this item.".into()),
     }
 }
-
 fn task_error(error: &str) -> String {
     if error.to_lowercase().contains("denied") {
         "Needs administrator: run MYLE as administrator for this task.".into()
@@ -1161,7 +1095,6 @@ fn task_error(error: &str) -> String {
         error.to_string()
     }
 }
-
 fn set_dwords(
     module: &str,
     title: &str,
@@ -1188,7 +1121,6 @@ fn set_dwords(
     }
     Ok(())
 }
-
 /// `sc config <name> start= <kind>` through a UAC prompt.
 async fn set_service_start(name: &str, kind: &str) -> Result<(), String> {
     let args = vec![
@@ -1204,7 +1136,6 @@ async fn set_service_start(name: &str, kind: &str) -> Result<(), String> {
         other => Err(format!("sc.exe ended with {other}.")),
     }
 }
-
 async fn undo(undo: &Undo) -> Result<(), String> {
     match undo {
         Undo::RegImport { file } => {

@@ -1,13 +1,4 @@
-// MYLE Passwords: passkeys. This part runs in the page's own world, before
-// the page's scripts, so the site's navigator.credentials calls come here.
-// They go on to MYLE's part of the page (content.js), where the user decides
-// in MYLE's prompt; MYLE (the app) makes the answer for this page's own
-// address. "Another device", or MYLE having nothing for this site, leaves
-// the call to the browser as before (Windows Hello, a phone, a security key).
-//
-// The page's scripts can reach everything here, so nothing here is trusted:
-// a page can only ask, as it always could; the user's click on MYLE's prompt
-// and the address the browser reports decide the rest.
+// MYLE Passwords: passkeys. This part runs in the page's own world, before the page's scripts, so the site's navigator.credentials calls come here. They go on to MYLE's part of the page (content.js), where the user decides in MYLE's prompt; MYLE (the app) makes the answer for this page's own address. "Another device", or MYLE having nothing for this site, leaves the call to the browser as before (Windows Hello, a phone, a security key). The page's scripts can reach everything here, so nothing here is trusted: a page can only ask, as it always could; the user's click on MYLE's prompt and the address the browser reports decide the rest.
 (() => {
   if (typeof CredentialsContainer !== "function" || typeof PublicKeyCredential !== "function") return;
   const PAGE = "myle-passkeys/page";
@@ -19,14 +10,10 @@
   const nativeToString = Function.prototype.toString;
   const later = typeof setTimeout === "function" ? setTimeout : null;
   const cancelLater = typeof clearTimeout === "function" ? clearTimeout : () => {};
-  /** Our wrappers, each with the browser's own function it stands for: they
-   *  read as that one ("function get() { [native code] }"), as other
-   *  password managers' do, so a page that checks for tampering still
-   *  hands its call to them. */
+  /* Our wrappers, each with the browser's own function it stands for: they read as that one ("function get() { [native code] }"), as other password managers' do, so a page that checks for tampering still hands its call to them. */
   const disguised = new WeakMap();
 
-  /** A step, for MYLE's debug log (shown only with "Debug log" on in the
-   *  toolbar popup): never a challenge, a key or a user name. */
+  /* A step, for MYLE's debug log (shown only with "Debug log" on in the toolbar popup): never a challenge, a key or a user name. */
   // Steps before MYLE's part of the page started, written once it has.
   const earlyTraces = [];
   let keepTraces = true;
@@ -45,8 +32,7 @@
     return wrapper;
   }
 
-  /** MYLE only answers inputs it implements. Keep the full original request
-   *  for the browser when a site needs another authenticator or extension. */
+  /* MYLE only answers inputs it implements. Keep the full original request for the browser when a site needs another authenticator or extension. */
   function supportedRequest(publicKey, kind) {
     if (kind === "create" && String(publicKey.authenticatorSelection?.authenticatorAttachment) === "cross-platform") return false;
     const extensions = publicKey.extensions;
@@ -65,9 +51,7 @@
     return true;
   }
 
-  /** A frame can borrow the top page only with its own policy permission
-   *  and an entirely same-origin ancestor chain. Missing policy data in a
-   *  frame is ambiguous, so its original browser method handles the call. */
+  /* A frame can borrow the top page only with its own policy permission and an entirely same-origin ancestor chain. Missing policy data in a frame is ambiguous, so its original browser method handles the call. */
   function permitted(win, kind) {
     try {
       const framed = win !== win.top;
@@ -100,10 +84,7 @@
   }
 
   if (window !== window.top) {
-    // A frame of the page's own origin (an empty helper frame a sign-in page
-    // makes, as Google's does) asks the page itself, so MYLE answers there
-    // too. Frames of any other origin keep the browser's own passkeys (and
-    // only say so in the debug log).
+    // A frame of the page's own origin (an empty helper frame a sign-in page makes, as Google's does) asks the page itself, so MYLE answers there too. Frames of any other origin keep the browser's own passkeys (and only say so in the debug log).
     if (!delegateToTop()) watchOnly();
     return;
   }
@@ -119,17 +100,13 @@
   // Questions asked before MYLE's part of the page said hello.
   let bridged = false;
   const early = new Map();
-  // MYLE's part of the page says it heard each question (newer copies do):
-  // a question it never hears (its extension was updated or turned off) goes
-  // to the browser's own passkeys instead of waiting forever.
+  // MYLE's part of the page says it heard each question (newer copies do): a question it never hears (its extension was updated or turned off) goes to the browser's own passkeys instead of waiting forever.
   let acks = false;
   /** How long MYLE's part of the page has to say it heard a question. */
   const HEARD_WITHIN = 2000;
-  /** How long a question asked before MYLE's part of the page started waits
-   *  for it to start. */
+  /* How long a question asked before MYLE's part of the page started waits for it to start. */
   const START_WITHIN = 10_000;
-  /** A modal request's deadline: the page's own timeout, within sane bounds,
-   *  as the browser does. */
+  /* A modal request's deadline: the page's own timeout, within sane bounds, as the browser does. */
   const deadlineOf = (publicKey) => Math.min(Math.max(Number(publicKey.timeout) || 300_000, 30_000), 600_000);
 
   // Buffers can come from another frame's realm, where instanceof fails.
@@ -157,9 +134,7 @@
   listen.call(window, "message", (event) => {
     if (event.source !== window || event.data?.source !== EXTENSION) return;
     if (event.data.kind === "hello") {
-      // MYLE's part of the page starts only once the page has loaded; a
-      // sign-in that asked before that (as Google's passkey step does) is
-      // asked again now, instead of the question going unheard.
+      // MYLE's part of the page starts only once the page has loaded; a sign-in that asked before that (as Google's passkey step does) is asked again now, instead of the question going unheard.
       bridged = true;
       acks = event.data.acks === true;
       for (const message of earlyTraces.splice(0)) post({ ...message, event: `${message.event} (early)` }, origin);
@@ -193,9 +168,7 @@
     }
   });
 
-  // Put in the back/forward cache, the page cannot see MYLE's prompt any more,
-  // and MYLE has cancelled it: a modal request is refused, as the browser's own
-  // would be, rather than found still waiting when the user comes back.
+  // Put in the back/forward cache, the page cannot see MYLE's prompt any more, and MYLE has cancelled it: a modal request is refused, as the browser's own would be, rather than found still waiting when the user comes back.
   listen.call(window, "pagehide", (event) => {
     if (!event.persisted) return;
     for (const question of [...waiting.values()]) {
@@ -203,9 +176,7 @@
     }
   });
 
-  /** Asks MYLE's part of the page; `signal` withdraws the question, and a
-   *  modal request ends at `deadline` ms like the browser's own. A question
-   *  that is never heard answers "native": the browser's own passkeys. */
+  /* Asks MYLE's part of the page; `signal` withdraws the question, and a modal request ends at `deadline` ms like the browser's own. A question that is never heard answers "native": the browser's own passkeys. */
   function ask(kind, options, signal, deadline = 0) {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(aborted(signal));
@@ -258,8 +229,7 @@
       } else {
         early.set(id, message);
         post(message, origin);
-        // MYLE's part of the page never starts (turned off, or this is a
-        // page it does not run in): the browser's own passkeys answer.
+        // MYLE's part of the page never starts (turned off, or this is a page it does not run in): the browser's own passkeys answer.
         if (later) heardTimer = later(() => !bridged && unheard(), START_WITHIN);
       }
       if (deadline && later) {
@@ -295,8 +265,7 @@
       allow: Array.isArray(publicKey.allowCredentials) ?
         publicKey.allowCredentials.filter((item) => isBuffer(item?.id)).map((item) => b64(item.id)) : [],
       userVerification: String(publicKey.userVerification ?? "preferred"),
-      // A site that still knows its old U2F keys asks for them by "appid":
-      // a MYLE passkey never is one, which the answer says, as browsers do.
+      // A site that still knows its old U2F keys asks for them by "appid": a MYLE passkey never is one, which the answer says, as browsers do.
       appid: typeof publicKey.extensions?.appid === "string",
     };
   }
@@ -364,8 +333,7 @@
     });
   }
 
-  /** MYLE's answer as the page expects it: a credential, an error, or the
-   *  browser's own passkeys. */
+  /* MYLE's answer as the page expects it: a credential, an error, or the browser's own passkeys. */
   function settle(answer, kind, extensionsAsked, native) {
     if (answer?.result === "credential") return credential(answer.credential, kind, extensionsAsked);
     if (answer?.result === "error") {
@@ -374,9 +342,7 @@
     return native();
   }
 
-  /** A sign-in form offering passkeys as the user types (mediation:
-   *  "conditional"): MYLE's show in its menu on the user name field, next to
-   *  the browser's own; whichever the user picks answers. */
+  /* A sign-in form offering passkeys as the user types (mediation: "conditional"): MYLE's show in its menu on the user name field, next to the browser's own; whichever the user picks answers. */
   async function conditional(options, callNative) {
     const controller = new AbortController();
     const outer = options.signal;
@@ -403,8 +369,7 @@
     const wrapped = {
       [name](options) {
         const publicKey = options?.publicKey;
-        // The page's own container, whatever it was called on (as other
-        // password managers do): a bound or borrowed method counts too.
+        // The page's own container, whatever it was called on (as other password managers do): a bound or borrowed method counts too.
         const container = this instanceof CredentialsContainer ? this : navigator.credentials;
         if (!publicKey || typeof publicKey !== "object") return native.call(container, options);
         const callNative = (given = options) => native.call(container, given);
@@ -417,8 +382,7 @@
           mediation: options.mediation ?? "",
         });
         if (kind === "get" && options.mediation === "conditional") return conditional(options, callNative);
-        // Making a passkey without asking (conditional create) is the
-        // browser's own business.
+        // Making a passkey without asking (conditional create) is the browser's own business.
         if (kind === "create" && options.mediation === "conditional") return callNative();
         return ask(kind, details, options.signal, deadlineOf(publicKey)).then((answer) => {
           trace("answer", { kind, result: answer?.result ?? "none", name: answer?.name ?? "" });
@@ -433,9 +397,7 @@
 
   wrap("create", nativeCreate, "create");
   wrap("get", nativeGet, "get");
-  // The container itself too, as Bitwarden does: a page that reads the
-  // method off navigator.credentials gets ours even if the prototype is
-  // swapped later.
+  // The container itself too, as Bitwarden does: a page that reads the method off navigator.credentials gets ours even if the prototype is swapped later.
   try {
     const container = navigator.credentials;
     for (const name of ["create", "get"]) {
@@ -445,8 +407,7 @@
     // No container (an insecure page): nothing to wrap.
   }
 
-  // MYLE can answer as this PC's own authenticator, so a site that asks
-  // whether there is one (before offering "Use your passkey") hears yes.
+  // MYLE can answer as this PC's own authenticator, so a site that asks whether there is one (before offering "Use your passkey") hears yes.
   const nativeAvailable = PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable;
   if (typeof nativeAvailable === "function") {
     const available = {
@@ -460,8 +421,7 @@
     });
   }
 
-  // A same-origin frame the page made and reached at once (before its own
-  // copy of this script could run there): its passkey calls come here too.
+  // A same-origin frame the page made and reached at once (before its own copy of this script could run there): its passkey calls come here too.
   for (const property of typeof HTMLIFrameElement === "function" ? ["contentWindow", "contentDocument"] : []) {
     const type = HTMLIFrameElement;
     const descriptor = Object.getOwnPropertyDescriptor(type.prototype, property);
@@ -504,8 +464,7 @@
     }
   }
 
-  /** In a same-origin frame: navigator.credentials calls with publicKey go
-   *  to the top page's (which MYLE wraps); everything else stays native. */
+  /* In a same-origin frame: navigator.credentials calls with publicKey go to the top page's (which MYLE wraps); everything else stays native. */
   function delegateToTop() {
     let top;
     try {
@@ -534,8 +493,7 @@
     return true;
   }
 
-  /** A frame of another origin: the browser's own passkeys, as always; the
-   *  debug log only notes that the site asked from there. */
+  /* A frame of another origin: the browser's own passkeys, as always; the debug log only notes that the site asked from there. */
   function watchOnly() {
     if (Object.prototype.hasOwnProperty.call(window, "__mylePasskeys")) return;
     Object.defineProperty(window, "__mylePasskeys", { value: true });

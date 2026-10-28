@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The folder tree. Only the rows on screen (and a few more) are drawn, so a
-  // folder with 100,000 entries scrolls like one with ten.
+  // The folder tree. Only the rows on screen (and a few more) are drawn, so a folder with 100,000 entries scrolls like one with ten.
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Cloud from "@lucide/svelte/icons/cloud";
   import File from "@lucide/svelte/icons/file";
@@ -35,8 +34,7 @@
     { key: "modified", label: "Modified" },
   ];
 
-  // Brings a row asked for (from the treemap, say) into view once it is
-  // listed, then lets the request go, so later changes don't scroll back.
+  // Brings a row asked for (from the treemap, say) into view once it is listed, then lets the request go, so later changes don't scroll back.
   $effect(() => {
     const wanted = d.scrollTo;
     if (!wanted || !viewport) return;

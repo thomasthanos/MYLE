@@ -1,6 +1,5 @@
 import { checkForUpdate, formatBytes, installUpdate, type UpdateAsset } from "./updater";
 import { toast } from "./toast.svelte";
-
 type UpdateView =
   | { state: "idle" }
   | { state: "checking" }
@@ -11,13 +10,10 @@ type UpdateView =
   | { state: "installing" }
   | { state: "restarting"; version: string }
   | { state: "error"; message: string };
-
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-
 class SettingsUpdater {
   view = $state<UpdateView>({ state: "idle" });
   #busy = false;
-
   async check() {
     if (this.#busy) return;
     this.#busy = true;
@@ -34,7 +30,6 @@ class SettingsUpdater {
       this.#busy = false;
     }
   }
-
   async install(latest: string, asset: UpdateAsset) {
     if (this.#busy) return;
     this.#busy = true;
@@ -66,7 +61,5 @@ class SettingsUpdater {
     }
   }
 }
-
-// The native operation survives navigation away from Settings. Its view must
-// survive too, so a remounted page can show progress and avoid starting it twice.
+// The native operation survives navigation away from Settings. Its view must survive too, so a remounted page can show progress and avoid starting it twice.
 export const settingsUpdater = new SettingsUpdater();

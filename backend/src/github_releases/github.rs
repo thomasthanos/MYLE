@@ -1,24 +1,16 @@
-//! The GitHub REST API: the signed-in account, releases and their files,
-//! and Actions runs. The token only ever goes into an `Authorization`
-//! header of a request to api.github.com / uploads.github.com.
-
+// ! The GitHub REST API: the signed-in account, releases and their files, ! and Actions runs. The token only ever goes into an `Authorization` ! header of a request to api.github.com / uploads.github.com.
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-
 use super::{CANCELLED, Problem};
-
 const API: &str = "https://api.github.com";
 const USER_AGENT: &str = "MYLE-GitHub-Releases";
-
 pub(crate) fn client() -> Result<reqwest::Client, String> {
     crate::download::http_client(USER_AGENT)
 }
-
 fn request(
     client: &reqwest::Client,
     method: reqwest::Method,
@@ -31,7 +23,6 @@ fn request(
         .header("X-GitHub-Api-Version", "2022-11-28")
         .bearer_auth(token)
 }
-
 /// A failed request as a problem the page can act on.
 pub(crate) fn api_problem(
     status: u16,
@@ -126,7 +117,6 @@ pub(crate) fn api_problem(
     };
     problem.with_details(body.chars().take(2000).collect::<String>())
 }
-
 async fn send(
     builder: reqwest::RequestBuilder,
 ) -> Result<(reqwest::header::HeaderMap, String), String> {
@@ -148,22 +138,18 @@ async fn send(
         Err(api_problem(status, &headers, &body).into())
     }
 }
-
 async fn get_json<T: for<'de> Deserialize<'de>>(token: &str, url: &str) -> Result<T, String> {
     let (_, body) = send(request(&client()?, reqwest::Method::GET, url, token)).await?;
     serde_json::from_str(&body)
         .map_err(|error| format!("GitHub's answer was not understood: {error}"))
 }
-
 // ─── Account ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Deserialize)]
 struct User {
     login: String,
     name: Option<String>,
     avatar_url: Option<String>,
 }
-
 /// The account `token` belongs to, and its scopes (classic tokens and gh;
 /// empty for fine-grained tokens, which have none to list).
 pub(crate) async fn whoami(token: &str) -> Result<super::store::Account, String> {
@@ -194,9 +180,7 @@ pub(crate) async fn whoami(token: &str) -> Result<super::store::Account, String>
         scopes,
     })
 }
-
 // ─── Releases ──────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
@@ -208,7 +192,6 @@ pub struct Asset {
     #[serde(alias = "browser_download_url")]
     pub browser_download_url: String,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
@@ -232,7 +215,6 @@ pub struct Release {
     #[serde(default)]
     pub assets: Vec<Asset>,
 }
-
 pub(crate) async fn releases(
     token: &str,
     owner: &str,
@@ -248,7 +230,6 @@ pub(crate) async fn releases(
     )
     .await
 }
-
 /// Every release of the repository, drafts too, newest first (all pages).
 pub(crate) async fn all_releases(
     token: &str,
@@ -270,7 +251,6 @@ pub(crate) async fn all_releases(
     }
     Err("The repository has too many releases to list.".into())
 }
-
 /// One release, as GitHub has it now.
 pub(crate) async fn release(
     token: &str,
@@ -280,7 +260,6 @@ pub(crate) async fn release(
 ) -> Result<Release, String> {
     get_json(token, &format!("{API}/repos/{owner}/{repo}/releases/{id}")).await
 }
-
 /// Whether GitHub has the tag `tag` (an exact name: `git/ref`, unlike
 /// `git/refs`, does not match prefixes).
 pub(crate) async fn tag_exists(
@@ -296,12 +275,10 @@ pub(crate) async fn tag_exists(
         Err(error) => Err(error),
     }
 }
-
 /// A failed tag delete that only found the tag gone already.
 pub(crate) fn tag_was_gone(error: &str) -> bool {
     error.contains("\"NOT_FOUND\"") || error.contains("Reference does not exist")
 }
-
 /// The tag of every release of the repository, drafts too (all pages, so
 /// a tag is never taken for one without a release because its release was
 /// further down the list).
@@ -329,7 +306,6 @@ pub(crate) async fn release_tags(
     }
     Err("The repository has too many releases to list.".into())
 }
-
 /// The repository's tags on GitHub (all pages).
 pub(crate) async fn remote_tags(
     token: &str,
@@ -355,7 +331,6 @@ pub(crate) async fn remote_tags(
     }
     Err("The repository has too many tags to list.".into())
 }
-
 pub(crate) async fn release_by_tag(
     token: &str,
     owner: &str,
@@ -369,7 +344,6 @@ pub(crate) async fn release_by_tag(
         Err(error) => Err(error),
     }
 }
-
 /// Percent-encodes one path segment.
 pub(crate) fn encode(text: &str) -> String {
     text.bytes()
@@ -381,7 +355,6 @@ pub(crate) fn encode(text: &str) -> String {
         })
         .collect()
 }
-
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewRelease {
@@ -394,7 +367,6 @@ pub struct NewRelease {
     pub prerelease: bool,
     pub make_latest: bool,
 }
-
 pub(crate) fn release_body(new: &NewRelease) -> Value {
     let mut body = json!({
         "tag_name": new.tag,
@@ -409,7 +381,6 @@ pub(crate) fn release_body(new: &NewRelease) -> Value {
     }
     body
 }
-
 pub(crate) async fn create_release(
     token: &str,
     owner: &str,
@@ -428,7 +399,6 @@ pub(crate) async fn create_release(
     .await?;
     serde_json::from_str(&body).map_err(|error| error.to_string())
 }
-
 /// Changes a release: `patch` holds the fields to set (`name`, `body`,
 /// `draft`, `prerelease`, `make_latest`).
 pub(crate) async fn update_release(
@@ -450,7 +420,6 @@ pub(crate) async fn update_release(
     .await?;
     serde_json::from_str(&body).map_err(|error| error.to_string())
 }
-
 pub(crate) async fn delete_release(
     token: &str,
     owner: &str,
@@ -466,7 +435,6 @@ pub(crate) async fn delete_release(
     .await
     .map(|_| ())
 }
-
 /// Deletes the tag `tag` on GitHub.
 pub(crate) async fn delete_tag(
     token: &str,
@@ -483,7 +451,6 @@ pub(crate) async fn delete_tag(
     .await
     .map(|_| ())
 }
-
 pub(crate) async fn delete_asset(
     token: &str,
     owner: &str,
@@ -499,18 +466,15 @@ pub(crate) async fn delete_asset(
     .await
     .map(|_| ())
 }
-
 /// The upload address of a release, without its `{?name,label}` template.
 pub(crate) fn upload_base(upload_url: &str) -> &str {
     upload_url.split('{').next().unwrap_or(upload_url)
 }
-
 /// The token only ever goes to GitHub's own upload host, whatever address a
 /// release record (from the API, or saved for a resumed release) carries.
 fn is_github_upload(url: &str) -> bool {
     url.starts_with("https://uploads.github.com/")
 }
-
 fn content_type(name: &str) -> &'static str {
     let lower = name.to_lowercase();
     if lower.ends_with(".zip") {
@@ -529,7 +493,6 @@ fn content_type(name: &str) -> &'static str {
         "application/octet-stream"
     }
 }
-
 /// Uploads `path` as the file `name` of a release, reporting
 /// `(sent, total)` bytes, until done or `cancel` is set.
 pub(crate) async fn upload_asset(
@@ -592,7 +555,6 @@ pub(crate) async fn upload_asset(
     let (_, body) = result?;
     serde_json::from_str(&body).map_err(|error| error.to_string())
 }
-
 /// A file read in 256 KiB chunks, as a stream.
 fn file_stream(
     file: tokio::fs::File,
@@ -611,9 +573,7 @@ fn file_stream(
         }
     })
 }
-
 // ─── Actions ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
@@ -641,12 +601,10 @@ pub struct Run {
     #[serde(default)]
     pub path: Option<String>,
 }
-
 #[derive(Deserialize)]
 struct Runs {
     workflow_runs: Vec<Run>,
 }
-
 /// The newest runs, of `branch` when given.
 pub(crate) async fn runs(
     token: &str,
@@ -661,7 +619,6 @@ pub(crate) async fn runs(
     }
     Ok(get_json::<Runs>(token, &url).await?.workflow_runs)
 }
-
 /// The runs a push of `sha` started.
 pub(crate) async fn runs_for_commit(
     token: &str,
@@ -672,7 +629,6 @@ pub(crate) async fn runs_for_commit(
     let url = format!("{API}/repos/{owner}/{repo}/actions/runs?per_page=20&head_sha={sha}");
     Ok(get_json::<Runs>(token, &url).await?.workflow_runs)
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
@@ -681,7 +637,6 @@ pub struct Step {
     pub conclusion: Option<String>,
     pub number: u32,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -694,12 +649,10 @@ pub struct Job {
     #[serde(default)]
     pub steps: Vec<Step>,
 }
-
 #[derive(Deserialize)]
 struct Jobs {
     jobs: Vec<Job>,
 }
-
 pub(crate) async fn run_jobs(
     token: &str,
     owner: &str,
@@ -709,14 +662,12 @@ pub(crate) async fn run_jobs(
     let url = format!("{API}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs?per_page=50");
     Ok(get_json::<Jobs>(token, &url).await?.jobs)
 }
-
 /// A job's whole log (plain text; GitHub redirects to a signed address).
 pub(crate) async fn job_log(token: &str, owner: &str, repo: &str, job_id: u64) -> Result<String, String> {
     let url = format!("{API}/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
     let (_, body) = send(request(&client()?, reqwest::Method::GET, &url, token)).await?;
     Ok(body)
 }
-
 #[derive(Deserialize)]
 struct Annotation {
     #[serde(default)]
@@ -726,7 +677,6 @@ struct Annotation {
     #[serde(default)]
     title: Option<String>,
 }
-
 /// The error annotations of a job (its check run): `::error::` lines and
 /// the "Process completed with exit code" one.
 pub(crate) async fn job_annotations(token: &str, owner: &str, repo: &str, job_id: u64) -> Result<Vec<String>, String> {
@@ -741,7 +691,6 @@ pub(crate) async fn job_annotations(token: &str, owner: &str, repo: &str, job_id
         })
         .collect())
 }
-
 pub(crate) async fn run(token: &str, owner: &str, repo: &str, run_id: u64) -> Result<Run, String> {
     get_json(
         token,
@@ -749,7 +698,6 @@ pub(crate) async fn run(token: &str, owner: &str, repo: &str, run_id: u64) -> Re
     )
     .await
 }
-
 /// Cancels a running workflow run on GitHub.
 pub(crate) async fn cancel_run(
     token: &str,
@@ -766,11 +714,9 @@ pub(crate) async fn cancel_run(
         Err(error) => Err(error),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn failures_get_codes_and_the_upload_url_its_base() {
         let headers = reqwest::header::HeaderMap::new();
@@ -810,7 +756,6 @@ mod tests {
         assert_eq!(encode("backup_projects-v2.0.7"), "backup_projects-v2.0.7");
         assert_eq!(encode("My App 1.0.exe"), "My%20App%201.0.exe");
     }
-
     #[test]
     fn a_new_release_targets_its_commit() {
         let body = release_body(&NewRelease {

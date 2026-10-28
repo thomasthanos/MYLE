@@ -1,14 +1,9 @@
-//! The folders Windows lists as cloud sync roots: OneDrive, Dropbox, iCloud,
-//! Box, Nextcloud, Proton Drive, and any other app built on the Windows cloud
-//! files API. Their files are made online-only the same way, whatever the app.
-
+// ! The folders Windows lists as cloud sync roots: OneDrive, Dropbox, iCloud, ! Box, Nextcloud, Proton Drive, and any other app built on the Windows cloud ! files API. Their files are made online-only the same way, whatever the app.
 use std::path::PathBuf;
-
 use windows::Storage::IStorageItem;
 use windows::Storage::Provider::StorageProviderSyncRootManager;
 use windows::Win32::UI::Shell::SHLoadIndirectString;
 use windows::core::{HSTRING, Interface};
-
 /// A folder a cloud app registered with Windows.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SyncRoot {
@@ -18,7 +13,6 @@ pub(crate) struct SyncRoot {
     pub name: String,
     pub path: PathBuf,
 }
-
 /// The sync roots of this user. Empty when Windows can't list them.
 pub(crate) fn sync_roots() -> Vec<SyncRoot> {
     let Ok(roots) = StorageProviderSyncRootManager::GetCurrentSyncRoots() else {
@@ -48,7 +42,6 @@ pub(crate) fn sync_roots() -> Vec<SyncRoot> {
         })
         .collect()
 }
-
 /// A display name as given, or read from the app's resources (`@file,-id`).
 fn display_name(raw: &HSTRING) -> String {
     let text = raw.to_string_lossy();

@@ -1,15 +1,4 @@
-//! The debloater: one-click Debloat, tweaks one by one, and Store app
-//! removal, with a real Undo.
-//!
-//! - `catalog.rs`: every tweak and app, fixed at compile time. The page
-//!   sends only ids.
-//! - `detect.rs`: where each tweak stands, read without administrator
-//!   rights.
-//! - `undo.rs`: what each change replaced, so Undo puts it back exactly.
-//! - The user's own settings (HKCU, the time format) are changed here, as
-//!   the user; everything machine-wide goes through the administrator helper
-//!   (`helper.rs`), started once per session with one UAC prompt.
-
+// ! The debloater: one-click Debloat, tweaks one by one, and Store app ! removal, with a real Undo. ! ! - `catalog.rs`: every tweak and app, fixed at compile time. The page ! sends only ids. ! - `detect.rs`: where each tweak stands, read without administrator ! rights. ! - `undo.rs`: what each change replaced, so Undo puts it back exactly. ! - The user's own settings (HKCU, the time format) are changed here, as ! the user; everything machine-wide goes through the administrator helper ! (`helper.rs`), started once per session with one UAC prompt.
 mod catalog;
 mod detect;
 mod helper;
@@ -18,25 +7,20 @@ mod sandbox_tests;
 mod start_menu;
 pub(crate) mod system;
 mod undo;
-
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
 use uuid::Uuid;
-
 use crate::apps::Jobs;
 use crate::download;
 use crate::elevated_pipe::{self, Session};
 use catalog::{Hive, Op, Tweak};
 use helper::{HELPER, Reply, Request, RestorePoint};
 use undo::{Before, Saved, Store};
-
 pub use helper::run_helper_from_args as run_elevated_helper_from_args;
-
 /// The running administrator helper: one UAC prompt, then every change of
 /// this app session goes through it.
 static SESSION: tokio::sync::Mutex<Option<Session>> = tokio::sync::Mutex::const_new(None);
-
 async fn ask(request: &Request) -> Result<Reply, String> {
     let mut session = SESSION.lock().await;
     if let Some(open) = session.as_mut() {
@@ -54,10 +38,7 @@ async fn ask(request: &Request) -> Result<Reply, String> {
     *session = Some(fresh);
     Ok(reply)
 }
-
-// ---------------------------------------------------------------------------
-// Status
-
+// --------------------------------------------------------------------------- Status
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebloatStatus {
@@ -68,7 +49,6 @@ pub struct DebloatStatus {
     /// The administrator helper is running: no prompt before the next change.
     admin_ready: bool,
 }
-
 #[tauri::command]
 pub async fn debloat_status() -> Result<DebloatStatus, String> {
     // A change in progress holds the session: it is running, then.
@@ -88,10 +68,7 @@ pub async fn debloat_status() -> Result<DebloatStatus, String> {
     .await
     .map_err(download::err)
 }
-
-// ---------------------------------------------------------------------------
-// Restore point
-
+// --------------------------------------------------------------------------- Restore point
 #[tauri::command]
 pub async fn debloat_restore_point(turn_on: bool) -> Result<RestorePoint, String> {
     let reply = ask(&Request::RestorePoint { turn_on }).await?;
@@ -99,10 +76,7 @@ pub async fn debloat_restore_point(turn_on: bool) -> Result<RestorePoint, String
         .restore_point
         .ok_or_else(|| reply.errors.join(" "))
 }
-
-// ---------------------------------------------------------------------------
-// Running
-
+// --------------------------------------------------------------------------- Running
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StepState {
@@ -112,7 +86,6 @@ pub enum StepState {
     Unchanged,
     Failed,
 }
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DebloatEvent {
@@ -123,7 +96,6 @@ pub enum DebloatEvent {
         detail: Option<String>,
     },
 }
-
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebloatOutcome {
@@ -135,18 +107,15 @@ pub struct DebloatOutcome {
     /// Administrator approval was declined: nothing machine-wide was done.
     needs_admin: bool,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Failure {
     label: String,
     message: String,
 }
-
 struct Progress<'a> {
     channel: &'a Channel<DebloatEvent>,
 }
-
 impl Progress<'_> {
     fn step(&self, id: &str, label: &str, state: StepState, detail: Option<String>) {
         let _ = self.channel.send(DebloatEvent::Step {
@@ -157,7 +126,6 @@ impl Progress<'_> {
         });
     }
 }
-
 /// The user's own part of a tweak: HKCU values and the time format.
 fn apply_user(tweak: &'static Tweak) -> (Vec<Saved>, Vec<String>) {
     let mut saved = Vec::new();
@@ -191,7 +159,6 @@ fn apply_user(tweak: &'static Tweak) -> (Vec<Saved>, Vec<String>) {
     }
     (saved, errors)
 }
-
 /// What turning a tweak off puts back: exactly what MYLE kept when it
 /// applied it, and nothing else (a part that was on before MYLE ran stays
 /// on). Only when MYLE kept nothing, the tweak being on before MYLE ever
@@ -208,7 +175,6 @@ fn undo_records(tweak: &Tweak, saved: Vec<Saved>, packages: &[String]) -> Vec<Sa
         .filter_map(|(index, op)| detect::default_before(op).map(|before| Saved { op: index, before }))
         .collect()
 }
-
 /// The user's own part of Undo; returns the operations put back.
 fn undo_user(tweak: &'static Tweak, saved: &[Saved]) -> (Vec<usize>, Vec<String>) {
     let mut undone = Vec::new();
@@ -230,7 +196,6 @@ fn undo_user(tweak: &'static Tweak, saved: &[Saved]) -> (Vec<usize>, Vec<String>
     }
     (undone, errors)
 }
-
 /// After Edge is gone: the user's own shortcuts and its autostart entries.
 fn edge_user_cleanup() {
     use winreg::RegKey;
@@ -264,7 +229,6 @@ fn edge_user_cleanup() {
         let _ = std::fs::remove_file(profile.join(r"Desktop\Microsoft Edge.lnk"));
     }
 }
-
 /// The tweaks asked for, in the catalog's order, that apply here.
 fn chosen(ids: &[String], build: u32) -> Vec<&'static Tweak> {
     catalog::TWEAKS
@@ -272,7 +236,6 @@ fn chosen(ids: &[String], build: u32) -> Vec<&'static Tweak> {
         .filter(|tweak| ids.iter().any(|id| id == tweak.id) && tweak.builds.contains(build))
         .collect()
 }
-
 #[tauri::command]
 pub async fn debloat_run(
     jobs: State<'_, Jobs>,
@@ -299,12 +262,10 @@ pub async fn debloat_run(
         })
         .filter(|(_, installed)| !installed.is_empty())
         .collect();
-
     let mut store = Store::load();
     let mut outcome = DebloatOutcome::default();
     let mut restart_explorer = false;
     let mut clock = false;
-
     for tweak in tweaks {
         progress.step(tweak.id, tweak.title, StepState::Running, None);
         let (saved, mut errors) = tauri::async_runtime::spawn_blocking(move || apply_user(tweak))
@@ -352,7 +313,6 @@ pub async fn debloat_run(
         }
         progress.step(tweak.id, tweak.title, state, (!errors.is_empty()).then(|| errors.join(" ")));
     }
-
     for (app, packages) in removals {
         let id = format!("app:{}", app.id);
         let label = format!("Remove {}", app.title);
@@ -381,11 +341,9 @@ pub async fn debloat_run(
         }
         store.save()?;
     }
-
     finish(&progress, clock, restart_explorer).await;
     Ok(outcome)
 }
-
 /// Tells Windows what changed, and restarts Explorer when a tweak needs it.
 async fn finish(progress: &Progress<'_>, clock: bool, restart_explorer: bool) {
     let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -409,10 +367,7 @@ async fn finish(progress: &Progress<'_>, clock: bool, restart_explorer: bool) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Undo
-
+// --------------------------------------------------------------------------- Undo
 async fn reinstall_edge() -> Result<(), String> {
     let status = crate::apps::process::hidden("winget")
         .args([
@@ -431,7 +386,6 @@ async fn reinstall_edge() -> Result<(), String> {
         Err(format!("Edge could not be installed again (winget {}). Get it from microsoft.com/edge.", status.code().unwrap_or(-1)))
     }
 }
-
 #[tauri::command]
 pub async fn debloat_undo(
     jobs: State<'_, Jobs>,
@@ -448,7 +402,6 @@ pub async fn debloat_undo(
     let mut restart_explorer = false;
     let mut clock = false;
     let chosen = chosen(&tweaks, build);
-
     for tweak in chosen {
         let label = format!("Undo: {}", tweak.title);
         progress.step(tweak.id, &label, StepState::Running, None);
@@ -462,7 +415,6 @@ pub async fn debloat_undo(
         .await
         .map_err(download::err)?;
         clock |= saved.iter().any(|record| matches!(record.before, Before::Clock { .. }) && undone.contains(&record.op));
-
         let for_helper: Vec<Saved> = saved
             .iter()
             .filter(|record| !undone.contains(&record.op) && !matches!(record.before, Before::Edge | Before::Clock { .. }))
@@ -504,10 +456,7 @@ pub async fn debloat_undo(
     finish(&progress, clock, restart_explorer).await;
     Ok(outcome)
 }
-
-// ---------------------------------------------------------------------------
-// Apps back from the Store
-
+// --------------------------------------------------------------------------- Apps back from the Store
 /// Opens the app's page in the Microsoft Store, to install it again.
 #[tauri::command]
 pub fn debloat_open_store(app: String) -> Result<(), String> {
@@ -521,7 +470,6 @@ pub fn debloat_open_store(app: String) -> Result<(), String> {
     };
     open(&url)
 }
-
 fn open(url: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -533,10 +481,7 @@ fn open(url: &str) -> Result<(), String> {
     };
     if result as isize > 32 { Ok(()) } else { Err("The Microsoft Store could not be opened.".into()) }
 }
-
-// ---------------------------------------------------------------------------
-// Start Menu customization
-
+// --------------------------------------------------------------------------- Start Menu customization
 #[tauri::command]
 pub async fn debloat_start_menu_set(update: start_menu::StartMenuUpdate) -> Result<start_menu::StartMenuStatus, String> {
     start_menu::ensure_supported()?;
@@ -544,7 +489,6 @@ pub async fn debloat_start_menu_set(update: start_menu::StartMenuUpdate) -> Resu
         .await
         .map_err(download::err)?
 }
-
 #[tauri::command]
 pub async fn debloat_start_menu_hide_recommended(hide: bool) -> Result<start_menu::StartMenuStatus, String> {
     start_menu::ensure_supported()?;
@@ -563,7 +507,6 @@ pub async fn debloat_start_menu_hide_recommended(hide: bool) -> Result<start_men
     .await
     .map_err(download::err)
 }
-
 #[tauri::command]
 pub async fn debloat_start_menu_apply_pins(pins: Vec<String>) -> Result<start_menu::StartMenuStatus, String> {
     start_menu::ensure_supported()?;
@@ -587,7 +530,6 @@ pub async fn debloat_start_menu_apply_pins(pins: Vec<String>) -> Result<start_me
         .await
         .map_err(download::err)
 }
-
 #[tauri::command]
 pub async fn debloat_start_menu_restore_pins() -> Result<start_menu::StartMenuStatus, String> {
     if SESSION.try_lock().map(|s| s.is_some()).unwrap_or(false) {
@@ -600,11 +542,9 @@ pub async fn debloat_start_menu_restore_pins() -> Result<start_menu::StartMenuSt
     .await
     .map_err(download::err)?
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn undo_puts_back_only_what_myle_kept() {
         // Whatever else of the tweak is on stays on: it was so before MYLE.
@@ -612,7 +552,6 @@ mod tests {
         let kept = vec![Saved { op: 0, before: Before::Reg { value: system::Value::Absent, created: None } }];
         assert_eq!(undo_records(tweak, kept.clone(), &[]), kept);
     }
-
     #[test]
     fn events_and_outcomes_keep_their_shape() {
         let event = DebloatEvent::Step { id: "telemetry".into(), label: "Turn off telemetry".into(), state: StepState::Done, detail: None };
@@ -623,7 +562,6 @@ mod tests {
         let outcome = DebloatOutcome { changed: 2, failed: Vec::new(), reboot: true, needs_admin: false };
         assert_eq!(serde_json::to_string(&outcome).unwrap(), r#"{"changed":2,"failed":[],"reboot":true,"needsAdmin":false}"#);
     }
-
     #[test]
     fn only_catalog_tweaks_for_this_windows_are_chosen() {
         let picked = chosen(&["bing".into(), "nope".into(), "classic-context-menu".into(), "telemetry".into()], 26100);

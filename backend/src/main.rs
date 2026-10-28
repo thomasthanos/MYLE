@@ -1,9 +1,7 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 fn main() {
-    // Before anything else: a browser starting us as the password
-    // extension's host talks on stdin/stdout and never shows a window.
+    // Before anything else: a browser starting us as the password extension's host talks on stdin/stdout and never shows a window.
     if let Some(exit_code) = myle_lib::run_passwords_native_host() {
         std::process::exit(exit_code);
     }
@@ -26,8 +24,7 @@ fn main() {
     if let Some(exit_code) = myle_lib::run_game_saves_notice() {
         std::process::exit(exit_code);
     }
-    // Existing updaters and scheduled tasks may still start the old file.
-    // The installer keeps a copy there; ordinary launches switch to MYLE.exe.
+    // Existing updaters and scheduled tasks may still start the old file. The installer keeps a copy there; ordinary launches switch to MYLE.exe.
     if let Ok(current) = std::env::current_exe()
         && current.file_name().is_some_and(|name| name.eq_ignore_ascii_case("MakeYourLifeEasier.exe"))
     {

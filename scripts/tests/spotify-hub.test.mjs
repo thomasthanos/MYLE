@@ -6,7 +6,6 @@ import vm from "node:vm";
 import { compileModule } from "svelte/compiler";
 import { compareVersions } from "../../frontend/installer/versions.ts";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
-
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL("../../frontend/app/pages/spotify-hub/state.svelte.ts", import.meta.url), "utf8")
   .replace(/^import[\s\S]*?;\r?\n/gm, "").replace("export const spotifyHubState", "const spotifyHubState");
@@ -25,7 +24,6 @@ const snapshot = (overrides = {}) => ({
   activeJob: null, lastOutcome: null, ...overrides,
 });
 const latest = { cli: "2.45.3", marketplace: "1.0.11" };
-
 function harness(api = {}) {
   let runs = 0, checks = 0, locked = false;
   const context = vm.createContext({
@@ -44,7 +42,6 @@ function harness(api = {}) {
   vm.runInContext(executable, context);
   return { hub: context.hub, get runs() { return runs; }, get checks() { return checks; } };
 }
-
 test("a current Spicetify and Marketplace do not offer another update or run an installer", async () => {
   const h = harness();
   await h.hub.load();
@@ -52,13 +49,11 @@ test("a current Spicetify and Marketplace do not offer another update or run an 
   await h.hub.install();
   assert.equal(h.runs, 0);
 });
-
 test("Marketplace updates are offered even when the CLI is current", async () => {
   const h = harness({ getState: async () => snapshot({ marketplace: { installed: true, version: "1.0.10" } }) });
   await h.hub.load();
   assert.equal(h.hub.installLabel(), "Update");
 });
-
 test("newer installed versions stay current and unknown Marketplace versions offer verification through repair", async () => {
   const h = harness({ getState: async () => snapshot({ spicetify: { installed: true, version: "2.46.0", healthy: true, applied: true } }) });
   await h.hub.load();
@@ -69,7 +64,6 @@ test("newer installed versions stay current and unknown Marketplace versions off
   await unknown.hub.install();
   assert.equal(unknown.runs, 1);
 });
-
 test("successful installation refreshes detection and stops offering the same update", async () => {
   let installed = false;
   const h = harness({
@@ -83,7 +77,6 @@ test("successful installation refreshes detection and stops offering the same up
   assert.equal(h.hub.consoles.installSpicetify.lines[0], "Update requested.");
   assert.equal(h.hub.consoles.installSpicetify.open, false);
 });
-
 test("a failed installation keeps its console and offers one repair action", async () => {
   const h = harness({ run: async () => { throw Error("setup failed"); } });
   await h.hub.load();
@@ -91,7 +84,6 @@ test("a failed installation keeps its console and offers one repair action", asy
   assert.equal(h.hub.consoles.installSpicetify.open, true);
   assert.equal(h.hub.installLabel(), "Repair");
 });
-
 test("failed release checks remain retryable without reinstalling", async () => {
   let failed = true;
   const h = harness({ checkUpdates: async () => { if (failed) throw Error("offline"); return latest; } });
@@ -102,7 +94,6 @@ test("failed release checks remain retryable without reinstalling", async () => 
   assert.equal(h.hub.installLabel(), "Up to date");
   assert.equal(h.runs, 0);
 });
-
 test("first installation and a missing Marketplace keep their install and repair actions", async () => {
   const fresh = harness({ getState: async () => snapshot({ spicetify: { installed: false, version: null, healthy: false, applied: false } }) });
   await fresh.hub.load();
@@ -115,7 +106,6 @@ test("first installation and a missing Marketplace keep their install and repair
   await broken.hub.install();
   assert.equal(broken.runs, 1);
 });
-
 test("a Spotify self-update exposes repair even with the latest CLI and Marketplace", async () => {
   const h = harness({ getState: async () => snapshot({ spicetify: { installed: true, version: "2.45.3", healthy: true, applied: false } }) });
   await h.hub.load();
@@ -123,7 +113,6 @@ test("a Spotify self-update exposes repair even with the latest CLI and Marketpl
   await h.hub.install();
   assert.equal(h.runs, 1);
 });
-
 test("an old check cannot overwrite the check after a completed repair", async () => {
   let resolveOld, calls = 0;
   const h = harness({ checkUpdates: () => ++calls === 1 ? new Promise(resolve => { resolveOld = resolve; }) : Promise.resolve(latest) });

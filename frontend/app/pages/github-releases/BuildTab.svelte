@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Building a project: the detected commands (or a typed one), a live log,
-  // and a Problems panel whose items open in VS Code.
+  // Building a project: the detected commands (or a typed one), a live log, and a Problems panel whose items open in VS Code.
   import { onMount, untrack } from "svelte";
   import Circle from "@lucide/svelte/icons/circle";
   import CircleCheck from "@lucide/svelte/icons/circle-check";

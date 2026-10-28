@@ -2,15 +2,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::Deserialize;
-
 use super::detection::{same_title, stable_id};
 use super::models::{
     GameSaveEntry, GameSaveSnapshot, GameSaveStatus, GameSavesScan, GameSavesSettings,
     GameSavesStats,
 };
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiOutput {
@@ -21,7 +18,6 @@ pub(crate) struct ApiOutput {
     #[serde(default)]
     pub errors: Option<ApiErrors>,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiErrors {
@@ -32,14 +28,12 @@ pub(crate) struct ApiErrors {
     #[serde(default)]
     pub unknown_games: Vec<String>,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OperationStatus {
     #[serde(default)]
     pub processed_bytes: u64,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiGame {
@@ -56,7 +50,6 @@ pub(crate) struct ApiGame {
     #[serde(default)]
     pub backups: Vec<ApiBackup>,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiFile {
@@ -74,7 +67,6 @@ pub(crate) struct ApiFile {
     #[serde(default)]
     pub change: Option<String>,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiRegistry {
@@ -85,12 +77,10 @@ pub(crate) struct ApiRegistry {
     #[serde(default)]
     pub error: Option<ApiError>,
 }
-
 #[derive(Debug, Deserialize)]
 pub(crate) struct ApiError {
     pub message: String,
 }
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ApiBackup {
@@ -101,7 +91,6 @@ pub(crate) struct ApiBackup {
     #[serde(default)]
     pub comment: Option<String>,
 }
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ManifestMetadata {
     pub supported_games: u64,
@@ -110,7 +99,6 @@ pub(crate) struct ManifestMetadata {
     /// the metadata, and there are some 50 000.
     pub steam_ids: std::sync::Arc<HashMap<String, u32>>,
 }
-
 pub(crate) fn parse_api(text: &str) -> Result<ApiOutput, String> {
     if text.trim().is_empty() {
         return Err("The Game Saves engine returned no data.".into());
@@ -118,7 +106,6 @@ pub(crate) fn parse_api(text: &str) -> Result<ApiOutput, String> {
     serde_json::from_str(text)
         .map_err(|e| format!("The Game Saves engine returned invalid data: {e}"))
 }
-
 /// Parses only the stable, shallow fields needed by our UI. This deliberately
 /// does not deserialize the 16+ MB YAML document and remains forward compatible
 /// when the manifest adds fields.
@@ -130,7 +117,6 @@ pub(crate) fn parse_manifest_metadata(yaml: &str) -> ManifestMetadata {
     let mut in_cloud = false;
     let mut in_steam = false;
     let mut steam_ids = HashMap::<String, u32>::new();
-
     let finish = |title: &mut Option<String>,
                   supported: &mut bool,
                   badges: &mut Vec<String>,
@@ -148,7 +134,6 @@ pub(crate) fn parse_manifest_metadata(yaml: &str) -> ManifestMetadata {
         *supported = false;
         badges.clear();
     };
-
     for line in yaml.lines() {
         if line.is_empty() || line.starts_with('#') || line == "---" {
             continue;
@@ -201,7 +186,6 @@ pub(crate) fn parse_manifest_metadata(yaml: &str) -> ManifestMetadata {
     result.steam_ids = std::sync::Arc::new(steam_ids);
     result
 }
-
 fn yaml_key(raw: &str) -> String {
     let raw = raw.trim();
     if raw.starts_with('\'') && raw.ends_with('\'') && raw.len() >= 2 {
@@ -214,7 +198,6 @@ fn yaml_key(raw: &str) -> String {
         raw.to_string()
     }
 }
-
 pub(crate) fn build_scan(
     local: ApiOutput,
     restore: ApiOutput,
@@ -228,7 +211,6 @@ pub(crate) fn build_scan(
     let mut restore_games: HashMap<_, _> = restore.games.into_iter()
         .map(|(title, game)| (stable_id("game", &title), game)).collect();
     let mut local_rows = Vec::new();
-
     for (title, game) in local.games {
         if game.files.values().all(|file| file.ignored)
             && game.registry.values().all(|entry| entry.ignored)
@@ -240,7 +222,6 @@ pub(crate) fn build_scan(
             &title, &game, history, true, true, metadata, settings,
         ));
     }
-
     let local_ids: HashSet<String> = local_rows
         .iter()
         .map(|game| game.id.clone())
@@ -259,7 +240,6 @@ pub(crate) fn build_scan(
             settings,
         ));
     }
-
     local_rows.sort_by_key(|game| game.title.to_lowercase());
     backup_rows.sort_by_key(|game| game.title.to_lowercase());
     let total_bytes = local_rows.iter().map(|game| game.total_bytes).sum();
@@ -277,7 +257,6 @@ pub(crate) fn build_scan(
         ..Default::default()
     }
 }
-
 fn entry_from(
     title: &str,
     game: &ApiGame,
@@ -326,7 +305,6 @@ fn entry_from(
         Unknown::default()
     };
     let needs_location = unknown.needs_location;
-
     let status = if failed || error.is_some() {
         GameSaveStatus::Error
     } else if needs_location {
@@ -342,7 +320,6 @@ fn entry_from(
             _ => GameSaveStatus::Unknown,
         }
     };
-
     let mut platform_badges = metadata.badges.get(title).cloned().unwrap_or_default();
     if settings.custom_games.iter().any(|game| same_title(&game.name, title)) {
         platform_badges.push("Added by you".into());
@@ -355,7 +332,6 @@ fn entry_from(
             .iter()
             .find(|game| same_title(&game.name, title))
             .is_none_or(|game| game.auto_backup);
-
     GameSaveEntry {
         id,
         title: title.into(),
@@ -376,7 +352,6 @@ fn entry_from(
         suggested_target: unknown.suggested_target,
     }
 }
-
 /// This PC's own folders, as Windows names them (injected in tests).
 pub(crate) struct Here {
     pub profile: Option<PathBuf>,
@@ -386,7 +361,6 @@ pub(crate) struct Here {
     /// `C:\Users\Public`: shared by every user, the same on every PC.
     pub public: Option<PathBuf>,
 }
-
 impl Here {
     pub(crate) fn current() -> Here {
         use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, FOLDERID_Public};
@@ -397,7 +371,6 @@ impl Here {
         }
     }
 }
-
 /// What a backup-only game's restore lacks on this PC.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Unknown {
@@ -407,7 +380,6 @@ pub(crate) struct Unknown {
     /// For a folder under another Documents: the same place in this PC's.
     pub suggested_target: Option<String>,
 }
-
 /// Where a backed-up path in Documents goes on this PC, when Documents moved
 /// (OneDrive's folder backup on one side and not the other, or another
 /// user): `<profile>\Documents\…` or `<profile>\OneDrive…\Documents\…`
@@ -418,8 +390,7 @@ fn moved_documents(normalized: &str, raw: &str, here: &Here) -> Option<String> {
     if within(normalized, &current) {
         return None;
     }
-    // `c:\users\<name>\[onedrive…\]documents\rest`
-    // Empty parts dropped on both sides, so the two line up.
+    // `c:\users\<name>\[onedrive…\]documents\rest` Empty parts dropped on both sides, so the two line up.
     let parts: Vec<&str> = normalized.split('\\').filter(|part| !part.is_empty()).collect();
     let users = parts.iter().position(|part| *part == "users")?;
     let after = &parts[users + 2..];
@@ -434,7 +405,6 @@ fn moved_documents(normalized: &str, raw: &str, here: &Here) -> Option<String> {
     target.extend(rest);
     Some(target.to_string_lossy().into_owned())
 }
-
 pub(crate) fn restore_destination_unknown(
     game_id: &str,
     paths: &[String],
@@ -451,7 +421,6 @@ pub(crate) fn restore_destination_unknown(
     if paths.is_empty() {
         return Unknown { needs_location: !has_registry && mappings.is_empty(), ..Unknown::default() };
     }
-
     let profiles_root = here.profile.as_deref().and_then(Path::parent).map(normalized_path);
     let current_profile = here.profile.as_deref().map(normalized_path);
     // Folders every user shares: the same on any PC.
@@ -461,7 +430,6 @@ pub(crate) fn restore_destination_unknown(
         .map(|public| normalized_path(public))
         .chain(profiles_root.iter().flat_map(|root| [format!("{root}\\default"), format!("{root}\\all users")]))
         .collect();
-
     let mut unknown = Unknown::default();
     for raw in paths {
         let path = Path::new(raw);
@@ -493,26 +461,22 @@ pub(crate) fn restore_destination_unknown(
     unknown.needs_location = !unknown.paths.is_empty();
     unknown
 }
-
 /// Whether a restore-location mapping from `source` covers `path`.
 pub(crate) fn covered_by(path: &str, source: &str) -> bool {
     within(&normalized_path(Path::new(path)), &normalized_path(Path::new(source)))
 }
-
 fn normalized_path(path: &Path) -> String {
     path.to_string_lossy()
         .trim_end_matches(['\\', '/'])
         .replace('/', "\\")
         .to_ascii_lowercase()
 }
-
 fn within(path: &str, parent: &str) -> bool {
     path == parent
         || path
             .strip_prefix(parent)
             .is_some_and(|rest| rest.starts_with('\\'))
 }
-
 fn snapshots(history: Option<&ApiGame>) -> Vec<GameSaveSnapshot> {
     let Some(history) = history else {
         return Vec::new();
@@ -534,7 +498,6 @@ fn snapshots(history: Option<&ApiGame>) -> Vec<GameSaveSnapshot> {
         })
         .collect()
 }
-
 fn path_size(path: &Path, depth: u8) -> u64 {
     if depth > 32 {
         return 0;
@@ -553,7 +516,6 @@ fn path_size(path: &Path, depth: u8) -> u64 {
         .map(|entry| path_size(&entry.path(), depth + 1))
         .sum()
 }
-
 fn display_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut parents = Vec::<String>::new();
     let mut seen = HashSet::new();
@@ -576,22 +538,18 @@ fn display_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Vec<String> {
     }
     parents
 }
-
 fn system_time(time: SystemTime) -> Option<u64> {
     time.duration_since(UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_secs())
 }
-
 pub(crate) fn now() -> u64 {
     system_time(SystemTime::now()).unwrap_or(0)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game_saves::models::RestorePathMapping;
-
     fn here(documents: &str) -> Here {
         Here {
             profile: Some(PathBuf::from(r"C:\Users\P")),
@@ -599,7 +557,6 @@ mod tests {
             public: Some(PathBuf::from(r"C:\Users\Public")),
         }
     }
-
     fn unknown_for(paths: &[&str], mappings: &[(&str, &str)], documents: &str) -> Unknown {
         let settings = GameSavesSettings {
             path_mappings: mappings
@@ -611,7 +568,6 @@ mod tests {
         let paths: Vec<String> = paths.iter().map(|path| path.to_string()).collect();
         restore_destination_unknown("g", &paths, false, &settings, &here(documents))
     }
-
     #[test]
     fn saves_from_before_onedrive_moved_documents_need_their_new_place() {
         let moved = unknown_for(&["C:/Users/P/Documents/My Games/X"], &[], r"C:\Users\P\OneDrive\Documents");
@@ -624,7 +580,6 @@ mod tests {
         // Where this PC keeps Documents: nothing to choose.
         assert!(!unknown_for(&["C:/Users/P/Documents/My Games/X"], &[], r"C:\Users\P\Documents").needs_location);
     }
-
     #[test]
     fn another_users_documents_are_offered_this_users() {
         let other = unknown_for(&["C:/Users/Old/Documents/My Games/X"], &[], r"C:\Users\P\Documents");
@@ -632,12 +587,10 @@ mod tests {
         assert_eq!(other.suggested_target.as_deref(), Some(r"C:\Users\P\Documents\My Games\X"));
         assert!(unknown_for(&["C:/Users/Old/AppData/Local/X"], &[], r"C:\Users\P\Documents").needs_location);
     }
-
     #[test]
     fn saves_in_the_shared_public_folder_need_no_place() {
         assert!(!unknown_for(&["C:/Users/Public/Documents/Game"], &[], r"C:\Users\P\Documents").needs_location);
     }
-
     #[test]
     fn every_save_folder_of_a_game_needs_its_place() {
         let paths = ["C:/Users/Other/AppData/Local/G", "C:/Users/Other/Saved Games/G"];
@@ -649,7 +602,6 @@ mod tests {
         assert!(covered_by("C:/Users/Other/Saved Games/G", r"C:\Users\Other"));
         assert!(!covered_by(r"C:\Users\Others\G", r"C:\Users\Other"));
     }
-
     #[test]
     fn manifest_count_only_includes_entries_with_backup_definitions() {
         let yaml = r#"
@@ -680,19 +632,16 @@ Registry Game:
         assert_eq!(metadata.steam_ids.get("No paths"), Some(&1));
         assert_eq!(metadata.steam_ids.get("Registry Game"), None);
     }
-
     #[test]
     fn pinned_manifest_supported_count_is_current_when_resource_is_present() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/ludusavi/manifest.yaml");
-        // The pinned manifest is tens of megabytes; a build without the
-        // downloaded resources has only a small stand-in, which says nothing.
+        // The pinned manifest is tens of megabytes; a build without the downloaded resources has only a small stand-in, which says nothing.
         if let Ok(text) = fs::read_to_string(path)
             && text.len() > 1_000_000
         {
             assert_eq!(parse_manifest_metadata(&text).supported_games, 22_976);
         }
     }
-
     /// The engine may spell a custom game's title with other capitals than
     /// the user did: it is still the user's game, with the user's choices.
     #[test]
@@ -722,7 +671,6 @@ Registry Game:
         assert!(game.platform_badges.iter().any(|badge| badge == "Added by you"));
         assert!(!game.auto_backup);
     }
-
     #[test]
     fn partial_failures_are_not_reported_as_backed_up() {
         let local = parse_api(
@@ -743,12 +691,9 @@ Registry Game:
         assert_eq!(scan.on_this_pc[0].status, GameSaveStatus::Error);
         assert_eq!(scan.on_this_pc[0].error.as_deref(), Some("locked"));
     }
-
     #[test]
     fn reinstall_scan_pairs_existing_history_by_game_identity_without_hiding_changes() {
-        // A fresh scan has no app cache. Its inventory is the source of real
-        // snapshot ids and timestamps, including titles whose case differs
-        // from today's manifest. Equal sizes alone never prove equal saves.
+        // A fresh scan has no app cache. Its inventory is the source of real snapshot ids and timestamps, including titles whose case differs from today's manifest. Equal sizes alone never prove equal saves.
         for (change, expected) in [
             ("Same", GameSaveStatus::BackedUp),
             ("Different", GameSaveStatus::ChangedSinceBackup),
@@ -772,7 +717,6 @@ Registry Game:
             assert_eq!(scan.in_backup[0].id, game.id);
         }
     }
-
     #[test]
     fn reinstall_unicode_titles_have_the_same_local_presence_as_their_history() {
         let local = parse_api(r#"{"games":{" Ä Game ":{"change":"Same","decision":"Processed","files":{"C:/Saves/save.dat":{"bytes":5,"failed":false,"ignored":false}},"registry":{}}}}"#).unwrap();

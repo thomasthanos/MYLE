@@ -1,10 +1,6 @@
-// Points docs/sidestore.json at a release's IPA, with its notes as SideStore's
-// "what is new" (the same text as the downloads.thomast.uk source). Run by
-// .github/workflows/mobile.yml:
-//   VERSION=10.0.2 TAG=v10.0.2 node scripts/update-sidestore.mjs <ipa size in bytes>
+// Points docs/sidestore.json at a release's IPA, with its notes as SideStore's "what is new" (the same text as the downloads.thomast.uk source). Run by .github/workflows/mobile.yml: VERSION=10.0.2 TAG=v10.0.2 node scripts/update-sidestore.mjs <ipa size in bytes>
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { notesFileFor, plainNotes } from "./mobile-feeds.mjs";
-
 const { VERSION: version, TAG: tag } = process.env;
 const file = "docs/sidestore.json";
 const source = JSON.parse(readFileSync(file, "utf8"));

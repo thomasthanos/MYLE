@@ -1,28 +1,16 @@
-// The treemap's layout, as pure functions (no DOM), so Node can test it.
-//
-// `squarify` is the squarified treemap of Bruls, Huijsen and van Wijk
-// (2000): items go largest first into rows along the shorter side of the
-// space left, and a row is closed as soon as adding the next item would make
-// its worst aspect ratio worse. `layoutTreemap` nests it: each folder's
-// children share the folder's rectangle, less a thin frame and, when it is
-// big enough to label, a header strip, and every tile gives up a small gap so
-// the background shows between neighbours.
-
+// The treemap's layout, as pure functions (no DOM), so Node can test it. `squarify` is the squarified treemap of Bruls, Huijsen and van Wijk (2000): items go largest first into rows along the shorter side of the space left, and a row is closed as soon as adding the next item would make its worst aspect ratio worse. `layoutTreemap` nests it: each folder's children share the folder's rectangle, less a thin frame and, when it is big enough to label, a header strip, and every tile gives up a small gap so the background shows between neighbours.
 export interface Rect {
   x: number;
   y: number;
   w: number;
   h: number;
 }
-
-/** The worst aspect ratio of a row of `sum` total area, `min` and `max` its
- *  smallest and largest item, laid along a side of length `side`. */
+/* The worst aspect ratio of a row of `sum` total area, `min` and `max` its smallest and largest item, laid along a side of length `side`. */
 function worst(sum: number, min: number, max: number, side: number): number {
   const s2 = sum * sum;
   const w2 = side * side;
   return Math.max((w2 * max) / s2, s2 / (w2 * min));
 }
-
 /** Lays one finished row along the shorter side of `free`; returns what is left. */
 function placeRow(row: number[], areas: number[], rowArea: number, free: Rect, out: Rect[]): Rect {
   if (free.w >= free.h) {
@@ -46,10 +34,7 @@ function placeRow(row: number[], areas: number[], rowArea: number, free: Rect, o
   }
   return { x: free.x, y: free.y + height, w: free.w, h: Math.max(0, free.h - height) };
 }
-
-/** One rectangle per value, in the order given, filling `rect` in
- *  proportion to the values. Zero and negative values get an empty
- *  rectangle at the corner. The same input always gives the same output. */
+/* One rectangle per value, in the order given, filling `rect` in proportion to the values. Zero and negative values get an empty rectangle at the corner. The same input always gives the same output. */
 export function squarify(values: readonly number[], rect: Rect): Rect[] {
   const out: Rect[] = values.map(() => ({ x: rect.x, y: rect.y, w: 0, h: 0 }));
   const total = values.reduce((sum, v) => sum + (v > 0 ? v : 0), 0);
@@ -90,7 +75,6 @@ export function squarify(values: readonly number[], rect: Rect): Rect[] {
   if (row.length) placeRow(row, areas, rowArea, free, out);
   return out;
 }
-
 /** The worst aspect ratio (≥ 1) among rectangles with an area. */
 export function worstRatio(rects: readonly Rect[]): number {
   let worstSoFar = 1;
@@ -100,17 +84,14 @@ export function worstRatio(rects: readonly Rect[]): number {
   }
   return worstSoFar;
 }
-
 /** What the layout needs of a treemap payload (see api.ts). */
 export interface TreeData {
   parent: readonly number[];
   size: readonly number[];
   kind: readonly number[];
 }
-
 export const FOLDER = 0;
 export const SMALLER = 4;
-
 export interface LayoutOptions {
   /** The frame around a folder's children (and around the whole map). */
   frame: number;
@@ -123,9 +104,7 @@ export interface LayoutOptions {
   /** Rectangles narrower or lower than this are not drawn. */
   minSide: number;
 }
-
 export const DEFAULT_LAYOUT: LayoutOptions = { frame: 3, gap: 2, header: 20, labelW: 72, labelH: 44, minSide: 5 };
-
 export interface Layout {
   /** x, y, w, h for each payload index; w = 0 when it is not drawn. */
   rects: Float32Array;
@@ -136,9 +115,7 @@ export interface Layout {
   /** Drawn indexes, every folder before what is inside it. */
   order: Int32Array;
 }
-
-/** Nests the payload into `width` × `height`. Index 0, the folder shown,
- *  fills the whole area, with no header of its own. */
+/* Nests the payload into `width` × `height`. Index 0, the folder shown, fills the whole area, with no header of its own. */
 export function layoutTreemap(data: TreeData, width: number, height: number, options: LayoutOptions = DEFAULT_LAYOUT): Layout {
   const count = data.parent.length;
   const rects = new Float32Array(count * 4);
@@ -163,8 +140,7 @@ export function layoutTreemap(data: TreeData, width: number, height: number, opt
     if (i === 0) {
       inner = { x: x + options.frame, y: y + options.frame, w: w - options.frame * 2, h: h - options.frame * 2 };
     } else {
-      // Don't draw a header strip if this folder has only 1 child and that child is also a folder.
-      // That prevents cascades of 8 stacked headers for deep single-directory corridors.
+      // Don't draw a header strip if this folder has only 1 child and that child is also a folder. That prevents cascades of 8 stacked headers for deep single-directory corridors.
       const isPassThrough = kids.length === 1 && data.kind[kids[0]] === FOLDER;
       const strip = w >= options.labelW && h >= options.labelH && !isPassThrough ? options.header : 0;
       header[i] = strip;
@@ -187,7 +163,6 @@ export function layoutTreemap(data: TreeData, width: number, height: number, opt
   }
   return { rects, header, depth, order: Int32Array.from(order) };
 }
-
 /** The deepest drawn item under (x, y), or -1. */
 export function hitTest(layout: Layout, x: number, y: number): number {
   const { rects, order } = layout;

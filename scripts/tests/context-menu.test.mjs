@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { textActions, menuPosition } from "../../frontend/lib/context-menu.ts";
-
 const field = { editable: true, disabled: false, readOnly: false, sensitive: false, noCopy: false, selectedText: "selected", hasText: true };
 test("normal fields allow editing, while an empty selection cannot be cut or copied", () => {
   assert.deepEqual(textActions(field), { copy: true, cut: true, paste: true, selectAll: true });

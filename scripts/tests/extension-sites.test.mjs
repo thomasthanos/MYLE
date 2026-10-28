@@ -1,12 +1,9 @@
-// The extension's idea of one site (background.js), run in a stand-in for the
-// browser: `node --test scripts/tests/`.
+// The extension's idea of one site (background.js), run in a stand-in for the browser: `node --test scripts/tests/`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 const extension = new URL("../../extension/", import.meta.url);
-
 async function background() {
   const listener = { addListener() {} };
   const context = vm.createContext({
@@ -25,7 +22,6 @@ async function background() {
   }
   return context;
 }
-
 test("hosts of one owner are one site", async () => {
   const { sameSite } = await background();
   assert.equal(sameSite("https://login.example.com/a", "https://example.com/b"), true);
@@ -33,7 +29,6 @@ test("hosts of one owner are one site", async () => {
   assert.equal(sameSite("https://a.b.example.co.uk/", "https://example.co.uk/"), true);
   assert.equal(sameSite("http://localhost:3000/", "http://localhost:5173/"), true);
 });
-
 test("names on a shared suffix are not one site", async () => {
   const { sameSite } = await background();
   assert.equal(sameSite("https://attacker.github.io/", "https://github.io/"), false);
@@ -43,7 +38,6 @@ test("names on a shared suffix are not one site", async () => {
   assert.equal(sameSite("https://a.example.com/", "https://example.org/"), false);
   assert.equal(sameSite("https://127.0.0.1/", "https://0.0.1/"), false);
 });
-
 test("wildcard and exception rules are followed", async () => {
   const { siteOf } = await background();
   assert.equal(siteOf("foo.bar.ck"), "foo.bar.ck");
@@ -51,7 +45,6 @@ test("wildcard and exception rules are followed", async () => {
   assert.equal(siteOf("shop.city.kawasaki.jp"), "city.kawasaki.jp");
   assert.equal(siteOf("xn--80ak6aa92e.xn--p1ai"), "xn--80ak6aa92e.xn--p1ai");
 });
-
 test("why the browser could not reach MYLE is told apart", async () => {
   const { hostProblem } = await background();
   // Chromium's messages, then Firefox's.
@@ -63,10 +56,7 @@ test("why the browser could not reach MYLE is told apart", async () => {
   assert.equal(hostProblem("An unexpected error occurred"), "hostExited");
   assert.equal(hostProblem("Something new"), "noHost");
 });
-
-/** background.js with a tab of two frames, recording what reaches MYLE. Our
- *  script in each frame answers the popup's census with a message of its own,
- *  as content.js does; `frames` says what each one sees. */
+/* background.js with a tab of two frames, recording what reaches MYLE. Our script in each frame answers the popup's census with a message of its own, as content.js does; `frames` says what each one sees. */
 async function backgroundWithTab(reply = { ok: true }, scheduling = {}, frames = defaultFrames(), storage = undefined) {
   const asked = [];
   const applied = [];
@@ -137,23 +127,19 @@ async function backgroundWithTab(reply = { ok: true }, scheduling = {}, frames =
   };
   return { context, asked, applied, connect, tab };
 }
-
 function defaultFrames() {
   return [
     { frameId: 0, url: "https://example.com/login", documentId: "top-doc", sees: { fields: true, password: true } },
     { frameId: 3, url: "https://auth.other.com/frame", documentId: "frame-doc", sees: { fields: true, password: true } },
   ];
 }
-
 const popup = { url: "chrome-extension://test/popup.html", id: "test" };
-
 test("the popup's Copy asks MYLE with the frame's own address, and gets no text back", async () => {
   const { context, asked } = await backgroundWithTab();
   const answer = await context.handle({ type: "copyTab", tabId: 7, frameId: 3, id: "abc", field: "password" }, popup);
   assert.equal(JSON.stringify(answer), JSON.stringify({ ok: true }));
   assert.deepEqual(asked, [JSON.stringify({ type: "copy", id: "abc", url: "https://auth.other.com/frame", field: "password", extVersion: "" })]);
 });
-
 test("Copy refuses other fields, a frame that is gone, and pages asking for it", async () => {
   const { context, asked } = await backgroundWithTab();
   const bad = await context.handle({ type: "copyTab", tabId: 7, frameId: 0, id: "abc", field: "notes" }, popup);
@@ -165,17 +151,13 @@ test("Copy refuses other fields, a frame that is gone, and pages asking for it",
   assert.equal(fromPage.ok, false);
   assert.deepEqual(asked, []);
 });
-
 test("an older MYLE that does not know Copy is told apart", async () => {
   const { context } = await backgroundWithTab({ ok: false, error: "badRequest" });
   const answer = await context.handle({ type: "copyTab", tabId: 7, frameId: 0, id: "abc", field: "totp" }, popup);
   assert.equal(answer.error, "oldApp");
 });
-
-// A page's prompt waits on this one; a copy of MYLE the extension cannot read
-// must not leave it polling for two minutes and then blaming the vault.
+// A page's prompt waits on this one; a copy of MYLE the extension cannot read must not leave it polling for two minutes and then blaming the vault.
 const page = { url: "https://accounts.google.com/signin", id: "test", tab: { id: 7, active: true }, frameId: 0 };
-
 test("a status reply with no vault state ends the wait at once, not in two minutes", async () => {
   // What MYLE answered in the field: a status, but no "state" it understands.
   const { context, asked } = await backgroundWithTab({ ok: true, enabled: true, vault: "unlocked" });
@@ -188,14 +170,12 @@ test("a status reply with no vault state ends the wait at once, not in two minut
   assert.equal(answer.state, "noState");
   assert.equal(asked.length, 1, "one status is enough to know");
 });
-
 test("an open vault carries the page on", async () => {
   const { context } = await backgroundWithTab({ ok: true, enabled: true, state: "unlocked" });
   const answer = await context.handle({ type: "waitUnlocked", seconds: 30 }, page);
   assert.equal(answer.unlocked, true);
   assert.equal(answer.state, "unlocked");
 });
-
 test("browser filling off in MYLE is said, not waited out", async () => {
   const { context } = await backgroundWithTab({ ok: false, error: "disabled" });
   const answer = await Promise.race([
@@ -206,9 +186,7 @@ test("browser filling off in MYLE is said, not waited out", async () => {
   assert.equal(answer.state, "disabled");
   assert.equal(answer.unlocked, false);
 });
-
-// These answers must terminate without polling. A fixed clock avoids losing
-// the 1 ms window before the first status request on a busy test runner.
+// These answers must terminate without polling. A fixed clock avoids losing the 1 ms window before the first status request on a busy test runner.
 const terminalStatusScheduling = {
   Date: class extends Date { static now() { return 1_000; } },
   setTimeout(callback, milliseconds, ...args) {
@@ -216,7 +194,6 @@ const terminalStatusScheduling = {
     return setTimeout(callback, milliseconds, ...args);
   },
 };
-
 for (const state of ["locked", "unlocked"]) {
   test(`native status with browser filling off and ${state} vault ends the wait`, async () => {
     const { context, asked } = await backgroundWithTab({ ok: true, enabled: false, state }, terminalStatusScheduling);
@@ -226,7 +203,6 @@ for (const state of ["locked", "unlocked"]) {
     assert.equal(asked.length, 1);
   });
 }
-
 for (const enabled of [true, false]) {
   test(`the native new vault state with filling ${enabled ? "on" : "off"} is reported as noVault without polling`, async () => {
     const { context, asked } = await backgroundWithTab({ ok: true, enabled, state: "new" }, terminalStatusScheduling);
@@ -235,7 +211,6 @@ for (const enabled of [true, false]) {
     assert.equal(asked.length, 1);
   });
 }
-
 test("withdrawing an unlock wait while its status is in flight prevents resuming", async () => {
   let release;
   const { context } = await backgroundWithTab(() => new Promise((resolve) => { release = resolve; }));
@@ -244,7 +219,6 @@ test("withdrawing an unlock wait while its status is in flight prevents resuming
   release({ ok: true, enabled: true, state: "unlocked" });
   assert.equal((await waiting).unlocked, false);
 });
-
 async function pendingOffer(reply) {
   const { context, asked } = await backgroundWithTab(reply);
   const pending = {
@@ -258,7 +232,6 @@ async function pendingOffer(reply) {
   };
   return { context, asked, pending };
 }
-
 test("dismissing a locked Save prevents the deferred save after unlock", async () => {
   let releaseStatus;
   let statusStarted;
@@ -280,7 +253,6 @@ test("dismissing a locked Save prevents the deferred save after unlock", async (
   assert.equal((await saving).error, "expired");
   assert.equal(saves, 1, "only the initial locked attempt reached MYLE");
 });
-
 test("dismissing while the unlocked Save checks the existing login prevents its retry", async () => {
   let releaseKnown;
   let knownStarted;
@@ -302,7 +274,6 @@ test("dismissing while the unlocked Save checks the existing login prevents its 
   assert.equal((await saving).error, "expired");
   assert.equal(saves, 1);
 });
-
 test("a locked Save still completes once when its offer is retained", async () => {
   let saves = 0;
   const { context, pending } = await pendingOffer((message) => {
@@ -317,7 +288,6 @@ test("a locked Save still completes once when its offer is retained", async () =
   assert.equal(saves, 2);
   assert.equal(pending["pending:7"], undefined);
 });
-
 test("native replies release their deadline timer, including transport failures", async () => {
   for (const reply of [() => ({ ok: true }), () => { throw new Error("host exited"); }]) {
     const pending = new Set();
@@ -329,7 +299,6 @@ test("native replies release their deadline timer, including transport failures"
     assert.equal(pending.size, 0);
   }
 });
-
 test("a native call that never answers still times out and releases its deadline", async () => {
   let fire;
   const pending = new Set();
@@ -348,7 +317,6 @@ test("a native call that never answers still times out and releases its deadline
   assert.equal((await answer).error, "noHost");
   assert.equal(pending.size, 0);
 });
-
 test("passkey cancellation targets only the requesting tab's native operation", async () => {
   const releases = [];
   const { context, asked } = await backgroundWithTab((message) => {
@@ -369,7 +337,6 @@ test("passkey cancellation targets only the requesting tab's native operation", 
   for (const release of releases) release({ ok: false, error: "cancelled" });
   await Promise.all([first, other]);
 });
-
 test("passkey verification gets a long deadline and its timeout sends native cancellation", async () => {
   let fire;
   const { context, asked } = await backgroundWithTab((message) =>
@@ -388,7 +355,6 @@ test("passkey verification gets a long deadline and its timeout sends native can
   assert.equal(messages[1].type, "passkeyCancel");
   assert.equal(messages[1].operationId, messages[0].operationId);
 });
-
 test("a replacement document cannot cancel the previous document's passkey operation", async () => {
   let release;
   const { context, asked } = await backgroundWithTab((message) =>
@@ -403,8 +369,6 @@ test("a replacement document cannot cancel the previous document's passkey opera
   release({ ok: false, error: "cancelled" });
   await waiting;
 });
-
-
 test("closing a passkey prompt propagates cancellation for its request", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf("  function closePrompt() {");
@@ -417,7 +381,6 @@ test("closing a passkey prompt propagates cancellation for its request", async (
   close();
   assert.equal(sent.some((message) => message.type === "passkeyCancel" && message.requestId === "request"), true);
 });
-
 test("a save offer the passkey prompt covered comes back when the prompt closes", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf("  function closePrompt() {");
@@ -431,7 +394,6 @@ test("a save offer the passkey prompt covered comes back when the prompt closes"
   assert.equal(shown, 1);
   assert.equal(context.displacedOffer, null);
 });
-
 test("a page abort of a conditional request also cancels native verification", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf('    addEventListener("message", (event) => {', content.indexOf("  if (window === window.top)"));
@@ -449,7 +411,6 @@ test("a page abort of a conditional request also cancels native verification", a
   assert.equal(sent[0].type, "passkeyCancel");
   assert.equal(sent[0].requestId, "request");
 });
-
 test("a question from the page is acknowledged, so the page knows MYLE heard it", async () => {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf('    addEventListener("message", (event) => {', content.indexOf("  if (window === window.top)"));
@@ -466,7 +427,6 @@ test("a question from the page is acknowledged, so the page knows MYLE heard it"
   listener({ source: window, data: { source: "myle-passkeys/page", id: "q1", kind: "conditional", options: {} } });
   assert.equal(JSON.stringify(posted), JSON.stringify([{ source: "myle-passkeys/extension", kind: "ack", id: "q1" }]));
 });
-
 async function pagehide() {
   const content = (await readFile(new URL("content.js", extension), "utf8")).replace(/\r\n/g, "\n");
   const start = content.indexOf('  addEventListener("pagehide", (event) => {');
@@ -482,7 +442,6 @@ async function pagehide() {
   vm.runInContext(content.slice(start, end), context);
   return { context, sent, leaving: (event) => leaving(event) };
 }
-
 test("the actual pagehide handler cancels prompted and conditional passkey requests", async () => {
   const { context, sent, leaving } = await pagehide();
   leaving({ persisted: false });
@@ -490,16 +449,13 @@ test("the actual pagehide handler cancels prompted and conditional passkey reque
   assert.equal(context.prompted, null);
   assert.equal(context.waitingPasskey, null);
 });
-
 test("a page kept in the back/forward cache keeps its waiting sign-in form", async () => {
   const { context, sent, leaving } = await pagehide();
   leaving({ persisted: true });
   assert.deepEqual(sent.filter((message) => message.type === "passkeyCancel").map((message) => message.requestId), ["prompt"]);
   assert.equal(context.waitingPasskey.id, "conditional");
 });
-
 // --- The frames of a tab, without webNavigation -------------------------------------
-
 test("the census takes each frame's address from the browser, never from what it says", async () => {
   const frames = [
     ...defaultFrames(),
@@ -512,7 +468,6 @@ test("the census takes each frame's address from the browser, never from what it
   const urls = asked.map((message) => JSON.parse(message).url);
   assert.deepEqual(urls, ["https://example.com/login", "https://auth.other.com/frame", "https://ads.example.net/"]);
 });
-
 test("a census answer for another tab or an old round is ignored", async () => {
   const { context } = await backgroundWithTab();
   // No census is being taken: nothing to add to.
@@ -520,7 +475,6 @@ test("a census answer for another tab or an old round is ignored", async () => {
     { id: "test", url: "https://example.com/", frameId: 0, tab: { id: 7, active: true } });
   assert.equal(stray.ok, true);
 });
-
 test("Fill goes to the very document the vault was asked about", async () => {
   const { context, asked, applied } = await backgroundWithTab({ ok: true, username: "me", password: "pw" });
   const answer = await context.handle({ type: "fillTab", tabId: 7, frameId: 3, id: "abc" }, popup);
@@ -529,7 +483,6 @@ test("Fill goes to the very document the vault was asked about", async () => {
   assert.equal(JSON.stringify(applied[0].options), JSON.stringify({ documentId: "frame-doc" }));
   assert.equal(applied[0].message.origin, "https://auth.other.com");
 });
-
 test("without document ids (older Firefox) Fill checks the frame again and sends to its number", async () => {
   const frames = defaultFrames().map(({ documentId, ...frame }) => frame);
   const { context, applied } = await backgroundWithTab({ ok: true, username: "me", password: "pw" }, {}, frames);
@@ -537,14 +490,12 @@ test("without document ids (older Firefox) Fill checks the frame again and sends
   assert.equal(answer.applied, true);
   assert.equal(JSON.stringify(applied[0].options), JSON.stringify({ frameId: 0 }));
 });
-
 test("a page whose script is not running (opened before an update) says reload, and asks MYLE nothing", async () => {
   const { context, asked } = await backgroundWithTab({ ok: true }, {}, []);
   const answer = await context.handle({ type: "fillTab", tabId: 7, frameId: 0, id: "abc" }, popup);
   assert.equal(answer.error, "noContent");
   assert.deepEqual(asked, []);
 });
-
 test("one login in the page and in a sign-in frame of the same site is one row, for the better frame", async () => {
   const frames = [
     { frameId: 0, url: "https://example.com/", documentId: "top", sees: { fields: true } },
@@ -556,7 +507,6 @@ test("one login in the page and in a sign-in frame of the same site is one row, 
   assert.equal(answer.logins[0].frameId, 4);
   assert.equal(answer.logins[0].embedded, false);
 });
-
 test("a frame of another site inside the page is told apart by the tab's own address", async () => {
   const { context, asked } = await backgroundWithTab({ ok: true, logins: [] });
   const sender = (tabUrl) => ({ id: "test", url: "https://auth.other.com/frame", frameId: 3, tab: { id: 7, active: true, url: tabUrl } });
@@ -569,11 +519,8 @@ test("a frame of another site inside the page is told apart by the tab's own add
   assert.equal(sameSite.ok, true);
   assert.equal(asked.filter((message) => JSON.parse(message).type === "logins").length, 1);
 });
-
 // --- Passkeys on a port --------------------------------------------------------------
-
 const passkeyGet = { type: "passkeyGet", requestId: "request", challenge: "Y2g", credentialId: "a" };
-
 test("a passkey request on a port is answered there, then the port closes", async () => {
   const { connect } = await backgroundWithTab((message) =>
     message.type === "passkeyGet" ? { ok: true, credential: { id: "x" } } : { ok: true });
@@ -583,7 +530,6 @@ test("a passkey request on a port is answered there, then the port closes", asyn
   assert.equal(port.posted[0].credential.id, "x");
   assert.equal(port.closed, true);
 });
-
 test("the page leaving (its port closed) cancels its passkey operation in MYLE", async () => {
   let release;
   const { connect, asked } = await backgroundWithTab((message) =>
@@ -598,7 +544,6 @@ test("the page leaving (its port closed) cancels its passkey operation in MYLE",
   assert.equal(messages[1].url, page.url);
   release({ ok: false, error: "cancelled" });
 });
-
 test("a port closed after its answer cancels nothing", async () => {
   const { connect, asked } = await backgroundWithTab((message) =>
     message.type === "passkeyGet" ? { ok: false, error: "notVerified" } : { ok: true });
@@ -608,7 +553,6 @@ test("a port closed after its answer cancels nothing", async () => {
   port.gone();
   assert.equal(asked.length, 1);
 });
-
 test("a passkey port from the popup, or from another extension, is refused", async () => {
   const { connect, asked } = await backgroundWithTab();
   const fromPopup = connect(popup);
@@ -617,7 +561,6 @@ test("a passkey port from the popup, or from another extension, is refused", asy
   assert.equal(fromOther.closed, true);
   assert.equal(asked.length, 0);
 });
-
 test("a cancel from a tab the user moved away from still reaches MYLE", async () => {
   let release;
   const { context, asked } = await backgroundWithTab((message) =>
@@ -632,7 +575,6 @@ test("a cancel from a tab the user moved away from still reaches MYLE", async ()
   release({ ok: false, error: "cancelled" });
   await waiting;
 });
-
 test("the same request asked twice while MYLE works on it is not a failure", async () => {
   let release;
   const { context } = await backgroundWithTab((message) =>
@@ -643,7 +585,6 @@ test("the same request asked twice while MYLE works on it is not a failure", asy
   release({ ok: false, error: "cancelled" });
   await first;
 });
-
 test("operations left by a worker that stopped are cancelled when it starts again", async () => {
   const stored = { "passkeyOp:left": { id: "left", url: "https://accounts.google.com/signin" }, other: 1 };
   const storage = {
@@ -661,9 +602,7 @@ test("operations left by a worker that stopped are cancelled when it starts agai
   assert.equal(stored["passkeyOp:left"], undefined);
   assert.equal(stored.other, 1);
 });
-
 // --- Limits, retries, salt --------------------------------------------------------------
-
 test("only the page itself scans pictures for a 2FA code, a few times a minute", async () => {
   const { context, asked } = await backgroundWithTab({ ok: false, error: "noQr" });
   const pixels = { type: "qrPixels", width: 1, height: 1, pixels: "AA" };
@@ -673,7 +612,6 @@ test("only the page itself scans pictures for a 2FA code, a few times a minute",
   assert.equal((await context.handle(pixels, page)).error, "busy");
   assert.equal(asked.length, 10);
 });
-
 test("a read is asked once more when MYLE is starting; a save never is", async () => {
   let calls = 0;
   const { context } = await backgroundWithTab((message) => {
@@ -689,7 +627,6 @@ test("a read is asked once more when MYLE is starting; a save never is", async (
   assert.equal(save.error, "notRunning");
   assert.equal(calls, 1);
 });
-
 test("passkey sites made at the same time share one salt", async () => {
   const local = {};
   let saltWrites = 0;
@@ -704,16 +641,13 @@ test("passkey sites made at the same time share one salt", async () => {
   assert.equal(a, b);
   assert.equal(saltWrites, 1);
 });
-
 test("asking to open MYLE twice within two seconds says nothing new happened", async () => {
   const { context, asked } = await backgroundWithTab();
   assert.equal((await context.handle({ type: "open" }, popup)).throttled, undefined);
   assert.equal((await context.handle({ type: "open" }, popup)).throttled, true);
   assert.equal(asked.length, 1);
 });
-
 // --- 2FA right after signing in --------------------------------------------------------
-
 test("a password filled or sent makes the site's next page watch for its 2FA field, for five minutes", async () => {
   const stored = {};
   const storage = {
@@ -735,7 +669,6 @@ test("a password filled or sent makes the site's next page watch for its 2FA fie
   stored["signedIn:7"].at -= 6 * 60_000;
   assert.equal(await recent(page), false, "after five minutes, no longer");
 });
-
 test("without session storage, a fill still works and nothing is watched for", async () => {
   const { context } = await backgroundWithTab({ ok: true, username: "ana", password: "pw" });
   assert.equal((await context.handle({ type: "recentSignIn" }, page)).recent, false);

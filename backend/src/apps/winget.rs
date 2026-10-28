@@ -1,28 +1,18 @@
-//! winget CLI integration: output-table parsing, installed/search queries and
-//! installs with progress, retries and cancellation.
-//!
-//! winget has no JSON output for `list`/`search`, but when stdout is piped it
-//! prints full-width, untruncated tables whose columns start where the header
-//! words start (measured in display cells), so the tables parse reliably.
-
+// ! winget CLI integration: output-table parsing, installed/search queries and ! installs with progress, retries and cancellation. ! ! winget has no JSON output for `list`/`search`, but when stdout is piped it ! prints full-width, untruncated tables whose columns start where the header ! words start (measured in display cells), so the tables parse reliably.
 use std::process::Stdio;
 use std::sync::LazyLock;
-
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri::ipc::Channel;
 use tokio::io::AsyncReadExt;
 use unicode_width::UnicodeWidthChar;
-
 use super::jobs::{JobHandle, Jobs};
 use super::process::{ERROR_CANCELLED, hidden, run_elevated};
 use super::{JobEvent, JobOutcome, Stage};
 use crate::console::{Line, LineSplitter};
 use crate::download::err;
-
 const COMMON_ARGS: [&str; 2] = ["--accept-source-agreements", "--disable-interactivity"];
-
 // winget exit codes (HRESULTs, as the process exit code).
 const DOWNLOAD_FAILED: i32 = 0x8A15_0008_u32 as i32;
 const HASH_MISMATCH: i32 = 0x8A15_0011_u32 as i32;
@@ -37,7 +27,6 @@ const DISK_FULL: i32 = 0x8A15_0105_u32 as i32;
 const NO_NETWORK: i32 = 0x8A15_0107_u32 as i32;
 const CANCELLED_BY_USER: i32 = 0x8A15_010C_u32 as i32;
 const BLOCKED_BY_POLICY: i32 = 0x8A15_010F_u32 as i32;
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledPackage {
@@ -47,7 +36,6 @@ pub struct InstalledPackage {
     /// Newer version offered by winget, if any.
     pub available: Option<String>,
 }
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
@@ -55,14 +43,12 @@ pub struct SearchHit {
     pub name: String,
     pub version: String,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Install,
     Upgrade,
 }
-
 impl Mode {
     fn verb(self) -> &'static str {
         match self {
@@ -71,10 +57,7 @@ impl Mode {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Commands
-
+// --------------------------------------------------------------------------- Commands
 #[tauri::command]
 pub async fn apps_search(query: String) -> Result<Vec<SearchHit>, String> {
     let query = query.trim().trim_start_matches('-');
@@ -90,7 +73,6 @@ pub async fn apps_search(query: String) -> Result<Vec<SearchHit>, String> {
     }
     Ok(parse_search(&out))
 }
-
 /// Where a package lives on the web, for catalog results (which carry no
 /// site): the page to open and the domain to take its favicon from.
 #[derive(Debug, Default, PartialEq, Serialize)]
@@ -99,14 +81,12 @@ pub struct PackageLinks {
     pub homepage: Option<String>,
     pub icon_domain: Option<String>,
 }
-
 #[tauri::command]
 pub async fn apps_package_links(id: String) -> Result<PackageLinks, String> {
     validate_id(&id)?;
     let (_, out) = capture(&["show", "--id", &id, "--exact", "--source", "winget"]).await?;
     Ok(parse_links(&out))
 }
-
 #[tauri::command]
 pub async fn apps_install_winget(
     jobs: State<'_, Jobs>,
@@ -118,7 +98,6 @@ pub async fn apps_install_winget(
     let job = jobs.start(&id)?;
     install_with_retries(&job, &id, mode, &on_event).await
 }
-
 /// Only called after the user confirmed it. Runs one elevated script (a single
 /// UAC prompt) that temporarily enables winget's `InstallerHashOverride`
 /// admin setting, installs with `--ignore-security-hash`, then turns the
@@ -138,8 +117,7 @@ pub async fn apps_install_ignoring_hash(
     let _ = on_event.send(JobEvent::Note {
         text: "Waiting for administrator approval…".into(),
     });
-    // This process cannot stop an elevated one: Cancel leaves this file, and
-    // the elevated script stops winget when it sees it.
+    // This process cannot stop an elevated one: Cancel leaves this file, and the elevated script stops winget when it sees it.
     let stop = StopFile::new()?;
     let script = hash_override_script(mode.verb(), &id, &stop.path);
     let args: Vec<String> = [
@@ -178,14 +156,12 @@ pub async fn apps_install_ignoring_hash(
         Classified::Fatal(msg) | Classified::Retry(msg) => Err(msg),
     }
 }
-
 /// The file that asks an elevated script to stop, in a folder of its own that
 /// goes when this is dropped.
 struct StopFile {
     folder: std::path::PathBuf,
     path: std::path::PathBuf,
 }
-
 impl StopFile {
     fn new() -> Result<Self, String> {
         let folder = std::env::temp_dir().join(format!("myle-winget-{}", uuid::Uuid::new_v4().simple()));
@@ -193,14 +169,12 @@ impl StopFile {
         Ok(Self { path: folder.join("stop"), folder })
     }
 }
-
 impl Drop for StopFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
         let _ = std::fs::remove_dir(&self.folder);
     }
 }
-
 /// Installs with the hash check off, watching `stop`; the setting is turned
 /// back off however winget ends, stopped or failed.
 fn hash_override_script(verb: &str, id: &str, stop: &std::path::Path) -> String {
@@ -227,10 +201,7 @@ fn hash_override_script(verb: &str, id: &str, stop: &std::path::Path) -> String 
          exit $code\n"
     )
 }
-
-// ---------------------------------------------------------------------------
-// Queries
-
+// --------------------------------------------------------------------------- Queries
 pub async fn list_installed() -> Result<Vec<InstalledPackage>, String> {
     let (code, out) = capture(&["list", "--source", "winget"]).await?;
     if code != 0 && code != NO_PACKAGES_FOUND {
@@ -238,7 +209,6 @@ pub async fn list_installed() -> Result<Vec<InstalledPackage>, String> {
     }
     Ok(parse_installed(&out))
 }
-
 /// Runs winget hidden and returns (exit code, stdout).
 async fn capture(args: &[&str]) -> Result<(i32, String), String> {
     let output = hidden("winget")
@@ -254,7 +224,6 @@ async fn capture(args: &[&str]) -> Result<(i32, String), String> {
         String::from_utf8_lossy(&output.stdout).into_owned(),
     ))
 }
-
 fn spawn_error(e: std::io::Error) -> String {
     if e.kind() == std::io::ErrorKind::NotFound {
         "winget is not available on this PC. Install \"App Installer\" from the Microsoft Store."
@@ -263,7 +232,6 @@ fn spawn_error(e: std::io::Error) -> String {
         e.to_string()
     }
 }
-
 /// Package IDs are passed as arguments, so only allow plain identifiers.
 pub fn validate_id(id: &str) -> Result<(), String> {
     static ID: LazyLock<Regex> =
@@ -274,16 +242,12 @@ pub fn validate_id(id: &str) -> Result<(), String> {
         Err(format!("invalid package id: {id:?}"))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Table parsing
-
+// --------------------------------------------------------------------------- Table parsing
 #[derive(Debug, PartialEq)]
 pub struct Table {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
 }
-
 impl Table {
     /// Column index by English header name, else by position (localized winget).
     fn column(&self, name: &str, position: usize) -> Option<usize> {
@@ -293,7 +257,6 @@ impl Table {
             .or((position < self.headers.len()).then_some(position))
     }
 }
-
 /// Parses the first table in winget output: a header line, a line of dashes,
 /// then rows. Columns are cut at the display-cell offsets of the header words.
 pub fn parse_table(text: &str) -> Option<Table> {
@@ -306,7 +269,6 @@ pub fn parse_table(text: &str) -> Option<Table> {
         .iter()
         .position(|l| l.len() >= 10 && l.trim_end().chars().all(|c| c == '-'))?;
     let header = *lines.get(dashes.checked_sub(1)?)?;
-
     let mut starts = Vec::new();
     let mut headers = Vec::new();
     let mut col = 0usize;
@@ -326,7 +288,6 @@ pub fn parse_table(text: &str) -> Option<Table> {
     if starts.len() < 2 {
         return None;
     }
-
     let mut rows = Vec::new();
     for line in &lines[dashes + 1..] {
         if line.trim().is_empty() {
@@ -343,7 +304,6 @@ pub fn parse_table(text: &str) -> Option<Table> {
     }
     Some(Table { headers, rows })
 }
-
 pub fn parse_installed(out: &str) -> Vec<InstalledPackage> {
     let Some(table) = parse_table(out) else {
         return Vec::new();
@@ -372,7 +332,6 @@ pub fn parse_installed(out: &str) -> Vec<InstalledPackage> {
         })
         .collect()
 }
-
 pub fn parse_search(out: &str) -> Vec<SearchHit> {
     let Some(table) = parse_table(out) else {
         return Vec::new();
@@ -395,7 +354,6 @@ pub fn parse_search(out: &str) -> Vec<SearchHit> {
         })
         .collect()
 }
-
 /// Reads `winget show` output. Prefers the manifest's Homepage / Publisher
 /// URLs; many manifests have neither, so it falls back to the site root of
 /// any other URL (docs, then the installer: a GitHub repo page, if hosted there).
@@ -410,7 +368,6 @@ pub fn parse_links(out: &str) -> PackageLinks {
         })
         .collect();
     let field = |name: &str| urls.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-
     if let Some(url) = field("homepage")
         .or_else(|| field("publisher url"))
         .or_else(|| field("publisher support url"))
@@ -420,7 +377,6 @@ pub fn parse_links(out: &str) -> PackageLinks {
             homepage: Some(url),
         };
     }
-
     const NOT_A_SITE: [&str; 5] = [
         "installer url",
         "license url",
@@ -442,7 +398,6 @@ pub fn parse_links(out: &str) -> PackageLinks {
         homepage,
     }
 }
-
 fn host(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
     let host = rest
@@ -451,7 +406,6 @@ fn host(url: &str) -> Option<String> {
         .to_ascii_lowercase();
     (!host.is_empty()).then_some(host)
 }
-
 /// The registrable domain: "docs.blender.org" -> "blender.org",
 /// "shop.example.co.uk" -> "example.co.uk".
 fn site_domain(url: &str) -> Option<String> {
@@ -465,7 +419,6 @@ fn site_domain(url: &str) -> Option<String> {
     let keep = if country_second_level { 3 } else { 2 };
     Some(labels[n.saturating_sub(keep)..].join("."))
 }
-
 /// "https://github.com/owner/repo/releases/…" -> "https://github.com/owner/repo"
 fn github_repo(url: &str) -> Option<String> {
     let path = url.strip_prefix("https://github.com/")?;
@@ -473,16 +426,12 @@ fn github_repo(url: &str) -> Option<String> {
     let (owner, repo) = (parts.next()?, parts.next()?);
     (!owner.is_empty() && !repo.is_empty()).then(|| format!("https://github.com/{owner}/{repo}"))
 }
-
-// ---------------------------------------------------------------------------
-// Installing
-
+// --------------------------------------------------------------------------- Installing
 struct Attempt {
     silent: bool,
     user_scope: bool,
     note: Option<&'static str>,
 }
-
 /// Tried in order until one succeeds.
 const ATTEMPTS: [Attempt; 3] = [
     Attempt {
@@ -501,7 +450,6 @@ const ATTEMPTS: [Attempt; 3] = [
         note: Some("Retrying for the current user only…"),
     },
 ];
-
 fn install_args(id: &str, mode: Mode, attempt: &Attempt) -> Vec<String> {
     let mut args: Vec<String> = [
         mode.verb(),
@@ -523,7 +471,6 @@ fn install_args(id: &str, mode: Mode, attempt: &Attempt) -> Vec<String> {
     }
     args
 }
-
 async fn install_with_retries(
     job: &JobHandle,
     id: &str,
@@ -556,7 +503,6 @@ async fn install_with_retries(
     }
     Err(last_error)
 }
-
 #[derive(Debug, PartialEq)]
 enum Classified {
     Success(Option<String>),
@@ -568,7 +514,6 @@ enum Classified {
     Fatal(String),
     Retry(String),
 }
-
 fn classify(code: i32, mode: Mode) -> Classified {
     match code {
         0 => Classified::Success(None),
@@ -584,7 +529,6 @@ fn classify(code: i32, mode: Mode) -> Classified {
         _ => Classified::Retry(describe(code)),
     }
 }
-
 fn describe(code: i32) -> String {
     match code {
         DOWNLOAD_FAILED => "Downloading the installer failed.".into(),
@@ -600,7 +544,6 @@ fn describe(code: i32) -> String {
         _ => format!("winget failed with code 0x{:08X}.", code as u32),
     }
 }
-
 /// Upgrades every package winget can, streaming its output line by line.
 /// `--include-unknown` covers packages whose installed version it cannot read.
 pub(crate) async fn upgrade_all(
@@ -619,7 +562,6 @@ pub(crate) async fn upgrade_all(
     .collect();
     run_streaming(job, &args, on_line).await
 }
-
 /// Runs winget, handing each finished line to `on_line` as it appears.
 async fn run_streaming(
     job: &JobHandle,
@@ -635,7 +577,6 @@ async fn run_streaming(
         .spawn()
         .map_err(spawn_error)?;
     job.set_pid(child.id());
-
     let mut stdout = child
         .stdout
         .take()
@@ -658,14 +599,12 @@ async fn run_streaming(
     job.set_pid(None);
     Ok(status.code().unwrap_or(-1))
 }
-
 /// Turns winget's console output into stage and progress events.
 #[derive(Default)]
 pub struct ProgressParser {
     stage: Option<Stage>,
     last_fraction: Option<f64>,
 }
-
 impl ProgressParser {
     pub fn feed(&mut self, line: &str) -> Vec<JobEvent> {
         let mut events = Vec::new();
@@ -700,14 +639,12 @@ impl ProgressParser {
         events
     }
 }
-
 /// "12.5 MB / 50.0 MB" or "42%" -> 0.0..=1.0
 pub fn parse_fraction(line: &str) -> Option<f64> {
     static SIZES: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)\s*/\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)").unwrap()
     });
     static PERCENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d{1,3})\s*%").unwrap());
-
     fn bytes(value: &str, unit: &str) -> Option<f64> {
         let scale = match unit {
             "B" => 1.0,
@@ -717,7 +654,6 @@ pub fn parse_fraction(line: &str) -> Option<f64> {
         };
         Some(value.parse::<f64>().ok()? * scale)
     }
-
     if let Some(c) = SIZES.captures(line) {
         let done = bytes(&c[1], &c[2])?;
         let total = bytes(&c[3], &c[4])?;
@@ -726,11 +662,9 @@ pub fn parse_fraction(line: &str) -> Option<f64> {
     let pct: f64 = PERCENT.captures(line)?[1].parse().ok()?;
     (pct <= 100.0).then_some(pct / 100.0)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn the_hash_override_is_always_turned_off_and_winget_can_be_stopped() {
         let script = hash_override_script("install", "Some.App", std::path::Path::new(r"C:\Temp\it's\stop"));
@@ -742,7 +676,6 @@ mod tests {
         assert!(script.contains(r"Test-Path -LiteralPath 'C:\Temp\it''s\stop'"));
         assert!(script.contains(r"System32\taskkill.exe"));
         assert!(script.trim_end().ends_with("exit $code"));
-
         // Parsed by PowerShell itself, never run.
         let parse = "$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput(\
                      $env:MYLE_SCRIPT, [ref]$null, [ref]$e); exit $e.Count";
@@ -753,7 +686,6 @@ mod tests {
             .unwrap();
         assert!(status.success(), "{script}");
     }
-
     // Real `winget search --query obs --count 6` output (CJK names are 2 cells wide).
     const SEARCH: &str = "Name           Id                        Version                 Match\r\n\
 -----------------------------------------------------------------------------\r\n\
@@ -762,7 +694,6 @@ OBS Studio     OBSProject.OBSStudio      32.2.2                  Moniker: obs\r\
 N Air 実験版   DWANGO.NAIR.experimental  1.1.20260909-unstable.1 Tag: obs\r\n\
 DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
 <additional entries truncated due to result limit>\r\n";
-
     /// `winget list --source winget` layout (rows taken from real output):
     /// a spinner, then every column padded to its widest value.
     fn list_output() -> String {
@@ -794,7 +725,6 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
         out += "\r\n";
         out
     }
-
     #[test]
     fn search_table_handles_wide_characters_and_footer() {
         let hits = parse_search(SEARCH);
@@ -812,7 +742,6 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
         assert_eq!(hits[2].id, "DWANGO.NAIR.experimental");
         assert_eq!(hits[2].version, "1.1.20260909-unstable.1");
     }
-
     #[test]
     fn installed_table_keeps_versions_with_spaces_and_dedupes() {
         let list = parse_installed(&list_output());
@@ -824,13 +753,11 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
         assert_eq!(list[3].available.as_deref(), Some("140.0.1"));
         assert_eq!(list[4].id, "Microsoft.WindowsAppRuntime.2");
     }
-
     #[test]
     fn no_table_means_no_rows() {
         assert!(parse_installed("No installed package found matching input criteria.").is_empty());
         assert!(parse_search("").is_empty());
     }
-
     #[test]
     fn links_prefer_the_homepage() {
         let show = "Found Bforartists 4 [Bforartists.Bforartists]\nPublisher Url: https://www.bforartists.de/\nHomepage: https://www.bforartists.de/download/\n";
@@ -852,7 +779,6 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
             PackageLinks::default()
         );
     }
-
     #[test]
     fn links_fall_back_to_the_site_of_other_urls() {
         // Real `winget show BlenderFoundation.Blender`: no Homepage/Publisher Url.
@@ -879,7 +805,6 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
             Some("example.com")
         );
     }
-
     #[test]
     fn ids_are_validated() {
         assert!(validate_id("Google.Chrome").is_ok());
@@ -889,7 +814,6 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
         assert!(validate_id("x'; rm").is_err());
         assert!(validate_id("").is_err());
     }
-
     #[test]
     fn progress_fractions() {
         assert_eq!(parse_fraction("  ██████▒▒▒▒  25.0 MB / 100 MB"), Some(0.25));
@@ -897,7 +821,6 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
         assert_eq!(parse_fraction("  ███▒▒▒  42%"), Some(0.42));
         assert_eq!(parse_fraction("Starting package install..."), None);
     }
-
     #[test]
     fn progress_parser_emits_stages_once_and_throttles() {
         let mut p = ProgressParser::default();
@@ -938,7 +861,6 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
         );
         assert!(p.feed("Successfully installed").is_empty());
     }
-
     #[test]
     fn exit_codes_are_classified() {
         assert_eq!(classify(0, Mode::Install), Classified::Success(None));
@@ -993,7 +915,6 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
         }
         assert_eq!(describe(-1), "winget failed with code 0xFFFFFFFF.");
     }
-
     #[test]
     fn install_args_follow_the_attempt() {
         let args = install_args("Git.Git", Mode::Upgrade, &ATTEMPTS[2]);

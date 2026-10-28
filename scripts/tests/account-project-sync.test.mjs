@@ -5,7 +5,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { compileModule } from "svelte/compiler";
-
 const values = new Map();
 globalThis.localStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 globalThis.window = { addEventListener() {} };
@@ -50,35 +49,29 @@ test.beforeEach(() => {
     throw new Error(`Unexpected command ${command}`);
   };
 });
-
 test("owner snapshots export GitHub project paths and announce path changes as synced", async () => {
   const result = await snapshot.collect("2026-10-27T11:00:00.000Z", true);
   assert.deepEqual(result.githubReleases, paths);
   assert.equal(snapshot.isSynced("githubReleases.projects"), true);
 });
-
 test("non-owner snapshots do not request or carry owner-only project paths", async () => {
   const result = await snapshot.collect("2026-10-27T11:00:00.000Z", false);
   assert.ok(!("githubReleases" in result));
 });
-
 test("cloud project paths restore even when no Game Saves section exists", async () => {
   await snapshot.apply(cloud({ githubReleases: paths }), true);
   assert.ok(globalThis.__projectSyncCalls.some(([name]) => name === "applySyncedProjects"));
 });
-
 test("old snapshots leave local projects untouched, while an explicit empty list is restored", async () => {
   await snapshot.apply(cloud(), true);
   assert.ok(!globalThis.__projectSyncCalls.some(([name]) => name === "applySyncedProjects"));
   await snapshot.apply(cloud({ githubReleases: { version: 1, paths: [] } }), true);
   assert.ok(globalThis.__projectSyncCalls.some(([name]) => name === "applySyncedProjects"));
 });
-
 test("export failure is surfaced instead of replacing cloud projects with an empty list", async () => {
   globalThis.__projectSyncInvoke = async command => { if (command.startsWith("github_releases")) throw new Error("Settings locked"); return null; };
   await assert.rejects(snapshot.collect("now", true), /Settings locked/);
 });
-
 test("project import failure remains retryable instead of advancing the cloud timestamp", async () => {
   assert.equal(typeof accountModule.AccountState, "function");
   const account = new accountModule.AccountState();
@@ -91,7 +84,6 @@ test("project import failure remains retryable instead of advancing the cloud ti
   assert.equal(values.get("myle.sync.updatedAt"), "2026-10-26T10:00:00.000Z");
   assert.equal(account.lastSyncedAt, null);
 });
-
 test("existing local project paths are uploaded once when an older cloud snapshot lacks the section", async () => {
   const account = new accountModule.AccountState();
   account.profile = { id: "owner" }; account.owner = true;
@@ -103,7 +95,6 @@ test("existing local project paths are uploaded once when an older cloud snapsho
   assert.deepEqual(pushed[0].githubReleases, paths);
   assert.ok(pushed[0].updatedAt > cloud().updatedAt);
 });
-
 test("newer local theme preferences after reinstall cannot overwrite cloud project paths", async () => {
   const account = new accountModule.AccountState();
   account.profile = { id: "owner" }; account.owner = true;
@@ -117,7 +108,6 @@ test("newer local theme preferences after reinstall cannot overwrite cloud proje
   assert.deepEqual(pushed[0].githubReleases, paths);
   assert.equal(pushed[0].githubReleasesUpdatedAt, "2026-10-27T09:00:00Z");
 });
-
 test("newer cloud preferences do not discard a more recent local project edit", async () => {
   const account = new accountModule.AccountState();
   account.profile = { id: "owner" }; account.owner = true;
@@ -130,7 +120,6 @@ test("newer cloud preferences do not discard a more recent local project edit", 
   assert.deepEqual(pushed[0].githubReleases, paths);
   assert.ok(!globalThis.__projectSyncCalls.some(([name]) => name === "applySyncedProjects"));
 });
-
 test("non-owner account sync never imports an owner-only cloud section", async () => {
   const account = new accountModule.AccountState();
   account.profile = { id: "non-owner" }; account.owner = false;
@@ -139,7 +128,6 @@ test("non-owner account sync never imports an owner-only cloud section", async (
   assert.equal(account.error, null);
   assert.ok(!globalThis.__projectSyncCalls.some(([name]) => name === "applySyncedProjects"));
 });
-
 test("an old account's late cloud reply cannot import paths after the account changes", async () => {
   const account = new accountModule.AccountState();
   account.profile = { id: "old-owner" }; account.owner = true;

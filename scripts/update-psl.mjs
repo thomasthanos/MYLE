@@ -1,14 +1,8 @@
-// Writes extension/psl.js: the Public Suffix List the extension uses to tell
-// sites apart (a.github.io is not github.io's), the same list the app's
-// `psl` crate carries, so both agree on what one site is.
-//
-//   node scripts/update-psl.mjs            (from the version in Cargo.lock; run `cargo fetch` first)
-//   node scripts/update-psl.mjs rules.txt  (from a list you have)
+// Writes extension/psl.js: the Public Suffix List the extension uses to tell sites apart (a.github.io is not github.io's), the same list the app's `psl` crate carries, so both agree on what one site is. node scripts/update-psl.mjs (from the version in Cargo.lock; run `cargo fetch` first) node scripts/update-psl.mjs rules.txt (from a list you have)
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { domainToASCII } from "node:url";
-
 async function crateRules() {
   const lock = await readFile(new URL("../backend/Cargo.lock", import.meta.url), "utf8");
   const version = lock.match(/name = "psl"\r?\nversion = "([^"]+)"/)?.[1];
@@ -24,11 +18,9 @@ async function crateRules() {
   }
   throw new Error(`psl ${version} is not downloaded: run \`cargo fetch\` in backend/`);
 }
-
 const { text, from } = process.argv[2]
   ? { text: await readFile(process.argv[2], "utf8"), from: process.argv[2] }
   : await crateRules();
-
 const rules = new Set();
 for (const line of text.split(/\r?\n/)) {
   const rule = line.trim().split(/\s/)[0];
@@ -39,7 +31,6 @@ for (const line of text.split(/\r?\n/)) {
   if (!ascii) throw new Error(`Not a host name: ${rule}`);
   rules.add(`${mark ?? ""}${ascii}`);
 }
-
 const out = new URL("../extension/psl.js", import.meta.url);
 await writeFile(
   out,

@@ -1,6 +1,4 @@
-// What the page's choices mean, without Svelte: the Quick setup profiles,
-// the pending changes and their upkeep. Tested in
-// scripts/tests/debloat-selection.test.mjs.
+// What the page's choices mean, without Svelte: the Quick setup profiles, the pending changes and their upkeep. Tested in scripts/tests/debloat-selection.test.mjs.
 import type { AppStatus, Level, TweakStatus } from "./api";
 export type Profile = Level;
 export const profiles: readonly Profile[] = ["light", "recommended", "maximum"];
@@ -21,12 +19,7 @@ export function profilePlan<T extends TweakLike, A extends AppLike>(tweaks: read
     apps: apps.filter((app) => app.packages.length > 0 && inProfile(app.level, profile)),
   };
 }
-/**
- * The choices after picking a profile. It decides everything a profile can
- * reach (the tweaks and apps that have a level), and keeps what was picked
- * by hand outside every profile, and every "turn off". It never turns
- * anything off.
- */
+/* The choices after picking a profile. It decides everything a profile can reach (the tweaks and apps that have a level), and keeps what was picked by hand outside every profile, and every "turn off". It never turns anything off. */
 export function withProfile(
   tweaks: readonly TweakLike[],
   apps: readonly AppLike[],
@@ -77,11 +70,7 @@ export function pendingOf<T extends TweakLike>(tweaks: readonly T[], desired: Re
   }
   return { on, off };
 }
-/**
- * The choices that still change something: after a run, or when Windows
- * changed on its own, a choice that is now how things are goes, and so does
- * an app that is no longer installed or a tweak that is no longer known.
- */
+/* The choices that still change something: after a run, or when Windows changed on its own, a choice that is now how things are goes, and so does an app that is no longer installed or a tweak that is no longer known. */
 export function prune(
   tweaks: readonly TweakLike[],
   apps: readonly AppLike[],
@@ -96,8 +85,7 @@ export function prune(
   const nextApps = new Set([...removing].filter((id) => apps.some((app) => app.id === id && app.packages.length > 0)));
   return { desired: nextDesired, apps: nextApps };
 }
-/** Choices saved by an older version: the apps the user ticked by hand are kept; the
- *  tweaks it left out of its one-click run say nothing about what to change. */
+/* Choices saved by an older version: the apps the user ticked by hand are kept; the tweaks it left out of its one-click run say nothing about what to change. */
 export function fromLegacy(savedApps: readonly string[] | null) {
   return { desired: new Map<string, boolean>(), apps: new Set(savedApps ?? []) };
 }

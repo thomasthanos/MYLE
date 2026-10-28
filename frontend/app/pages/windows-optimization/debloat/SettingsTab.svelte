@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Every setting MYLE can change, one line each. A switch only records the
-  // choice; the bar below applies the choices together.
+  // Every setting MYLE can change, one line each. A switch only records the choice; the bar below applies the choices together.
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Star from "@lucide/svelte/icons/star";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";

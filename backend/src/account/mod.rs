@@ -1,34 +1,17 @@
-//! Account: sign in with Discord or Google through Supabase Auth, and keep
-//! this app's settings in the Supabase project the old app used.
-//!
-//! - Sign-in: the browser opens Supabase's authorize page (PKCE); a loopback
-//!   server on `localhost:5252`, the redirect that project already allows,
-//!   receives the code, which is exchanged for a session here.
-//! - The session is kept encrypted with DPAPI (`vault`) and refreshed on use.
-//!   Supabase itself (sign-in, refresh, signed-in requests) is
-//!   `myle_vault::account`, shared with MYLE Passwords for phones.
-//! - Settings live in `user_settings.data` under their own key (`DATA_KEY`),
-//!   next to whatever the old app stored there, which is left untouched.
-//! - The owner-only pages (`owner`) open for a verdict this side gets from
-//!   Supabase about the signed-in user, never for anything the page says.
-
+// ! Account: sign in with Discord or Google through Supabase Auth, and keep ! this app's settings in the Supabase project the old app used. ! ! - Sign-in: the browser opens Supabase's authorize page (PKCE); a loopback ! server on `localhost:5252`, the redirect that project already allows, ! receives the code, which is exchanged for a session here. ! - The session is kept encrypted with DPAPI (`vault`) and refreshed on use. ! Supabase itself (sign-in, refresh, signed-in requests) is ! `myle_vault::account`, shared with MYLE Passwords for phones. ! - Settings live in `user_settings.data` under their own key (`DATA_KEY`), ! next to whatever the old app stored there, which is left untouched. ! - The owner-only pages (`owner`) open for a verdict this side gets from ! Supabase about the signed-in user, never for anything the page says.
 mod oauth;
 mod settings_sync;
 pub(crate) mod owner;
 pub(crate) mod vault;
-
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Notify;
-
 use crate::download::err;
 pub use myle_vault::account::{Cloud, Profile, Provider};
 use myle_vault::account::{SUPABASE_ANON_KEY, SUPABASE_URL, Session, now, renew};
-
 /// Allowed as a redirect URL in the Supabase project (used by the old app).
 const REDIRECT_PORT: u16 = 5252;
 const REDIRECT_URL: &str = "http://localhost:5252";
@@ -42,7 +25,6 @@ const ACCESS_FILE: &str = "account-access.bin";
 pub(crate) const ACCESS_EVENT: &str = "account-access";
 const USER_AGENT: &str = "MakeYourLifeEasier-Account";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
 #[derive(Default)]
 struct Inner {
     session: Option<Session>,
@@ -51,16 +33,13 @@ struct Inner {
     verdict: Option<owner::Verdict>,
     verdict_loaded: bool,
 }
-
 /// The session, and a gate that lets one refresh run at a time.
 #[derive(Clone, Default)]
 pub struct AccountState(Arc<Mutex<Inner>>, Arc<tokio::sync::Mutex<()>>);
-
 impl AccountState {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
-
     /// The session from disk, read once per run.
     fn session(&self, app: &AppHandle) -> Option<Session> {
         let mut inner = self.lock();
@@ -73,7 +52,6 @@ impl AccountState {
         }
         inner.session.clone()
     }
-
     fn store(&self, app: &AppHandle, session: Option<Session>) -> Result<(), String> {
         let path = vault_path(app)?;
         match &session {
@@ -99,7 +77,6 @@ impl AccountState {
         self.announce(app, was_owner);
         Ok(())
     }
-
     /// The saved verdict, read once per run.
     fn verdict(&self) -> Option<owner::Verdict> {
         let mut inner = self.lock();
@@ -112,7 +89,6 @@ impl AccountState {
         }
         inner.verdict.clone()
     }
-
     fn set_verdict(&self, app: &AppHandle, verdict: owner::Verdict) {
         let was_owner = self.is_owner(app);
         if let Ok(path) = access_path()
@@ -127,7 +103,6 @@ impl AccountState {
         }
         self.announce(app, was_owner);
     }
-
     /// Whether the signed-in user is the owner, by the last verdict from
     /// Supabase. No network: the invoke handler asks this for every command.
     pub(crate) fn is_owner(&self, app: &AppHandle) -> bool {
@@ -137,7 +112,6 @@ impl AccountState {
         self.verdict()
             .is_some_and(|verdict| verdict.admits(&session.profile.id, now()))
     }
-
     /// Tells the page when the owner-only pages open or close; on closing,
     /// stops whatever they still run.
     fn announce(&self, app: &AppHandle, was_owner: bool) {
@@ -151,7 +125,6 @@ impl AccountState {
         let _ = app.emit(ACCESS_EVENT, owner);
     }
 }
-
 /// Stops the owner-only pages' builds, releases, backups and comparisons.
 fn stop_owner_only_work(app: &AppHandle) {
     if let Some(state) = app.try_state::<crate::github_releases::GithubReleasesState>() {
@@ -162,26 +135,21 @@ fn stop_owner_only_work(app: &AppHandle) {
         state.cancel_preview();
     }
 }
-
 fn access_path() -> Result<PathBuf, String> {
     Ok(crate::storage::roaming_dir()?.join(ACCESS_FILE))
 }
-
 fn remove_verdict() {
     if let Ok(path) = access_path() {
         vault::remove(&path);
     }
 }
-
 fn vault_path(app: &AppHandle) -> Result<PathBuf, String> {
     let _ = app;
     Ok(crate::storage::roaming_dir()?.join(VAULT_FILE))
 }
-
 fn client() -> Result<reqwest::Client, String> {
     crate::download::http_client(USER_AGENT)
 }
-
 /// `None` when nobody is signed in.
 pub(crate) async fn cloud(app: &AppHandle) -> Result<Option<Cloud>, String> {
     let state = app.state::<AccountState>();
@@ -191,7 +159,6 @@ pub(crate) async fn cloud(app: &AppHandle) -> Result<Option<Cloud>, String> {
     let session = fresh_session(app, &state).await?;
     Ok(Some(Cloud::new(&session, client()?)))
 }
-
 /// Asks Supabase who the session's user is and keeps the verdict. When
 /// Supabase can't be reached, the last verdict stands (within its grace).
 async fn check_owner(app: &AppHandle, state: &AccountState, force: bool) -> bool {
@@ -235,7 +202,6 @@ async fn check_owner(app: &AppHandle, state: &AccountState, force: bool) -> bool
     }
     state.is_owner(app)
 }
-
 /// Supabase's user object for the session (`Ok(None)`: the token was
 /// refused). Supabase checks the token; nothing here is taken on trust.
 async fn fetch_user(session: &Session) -> Result<Option<Value>, String> {
@@ -256,10 +222,7 @@ async fn fetch_user(session: &Session) -> Result<Option<Value>, String> {
     }
     response.json().await.map(Some).map_err(err)
 }
-
-// ---------------------------------------------------------------------------
-// Commands
-
+// --------------------------------------------------------------------------- Commands
 /// Whether the owner-only pages are open. Checks with Supabase again when
 /// the last check is more than a few minutes old (or `recheck`).
 #[tauri::command]
@@ -270,13 +233,11 @@ pub async fn account_access(
 ) -> Result<bool, String> {
     Ok(check_owner(&app, &state, recheck.unwrap_or(false)).await)
 }
-
 /// The signed-in profile, if any. Reads the saved session; no network.
 #[tauri::command(async)]
 pub fn account_profile(app: AppHandle, state: State<'_, AccountState>) -> Option<Profile> {
     state.session(&app).map(|session| session.profile)
 }
-
 /// Signs in with the provider in the browser and returns who signed in.
 #[tauri::command]
 pub async fn account_sign_in(
@@ -305,7 +266,6 @@ pub async fn account_sign_in(
     }
     Ok(profile)
 }
-
 /// Stops waiting for the browser (the user closed the tab, changed their mind).
 #[tauri::command]
 pub fn account_cancel_sign_in(state: State<'_, AccountState>) {
@@ -313,7 +273,6 @@ pub fn account_cancel_sign_in(state: State<'_, AccountState>) {
         cancel.notify_one();
     }
 }
-
 #[tauri::command]
 pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>) -> Result<(), String> {
     if let Some(session) = state.session(&app) {
@@ -322,7 +281,6 @@ pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>) ->
     }
     state.store(&app, None)
 }
-
 /// This app's settings from the cloud, or `None` when none are saved yet.
 #[tauri::command]
 pub async fn account_pull(
@@ -333,7 +291,6 @@ pub async fn account_pull(
     let row = read_row(&session).await?;
     Ok(row.and_then(settings_sync::read))
 }
-
 /// Saves this app's settings to the cloud, keeping the rest of the row.
 #[tauri::command]
 pub async fn account_push(
@@ -365,17 +322,13 @@ pub async fn account_push(
         .map_err(|e| format!("The cloud did not accept the settings: {e}"))?;
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Sign-in
-
+// --------------------------------------------------------------------------- Sign-in
 async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String> {
     // Listen before the browser opens, so the redirect cannot arrive first.
     let loopback = oauth::Loopback::bind(REDIRECT_PORT).await?;
     let (verifier, challenge) = myle_vault::account::pkce_pair();
     let authorize = myle_vault::account::authorize_url(provider, REDIRECT_URL, &challenge)?;
     tauri_plugin_opener::open_url(authorize.as_str(), None::<&str>).map_err(err)?;
-
     let callback = tokio::select! {
         callback = loopback.next_callback() => callback,
         _ = cancel.notified() => return Err("Sign-in was cancelled.".into()),
@@ -389,7 +342,6 @@ async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String>
     };
     myle_vault::account::exchange_code(&client()?, &code, &verifier).await
 }
-
 /// A session with at least a minute left, refreshed (and saved) if needed.
 async fn fresh_session(app: &AppHandle, state: &AccountState) -> Result<Session, String> {
     renew(
@@ -403,10 +355,7 @@ async fn fresh_session(app: &AppHandle, state: &AccountState) -> Result<Session,
     )
     .await
 }
-
-// ---------------------------------------------------------------------------
-// user_settings
-
+// --------------------------------------------------------------------------- user_settings
 /// The row's whole `data` object, or `None` when the user has no row yet.
 async fn read_row(session: &Session) -> Result<Option<Value>, String> {
     let url = reqwest::Url::parse_with_params(
@@ -435,7 +384,6 @@ async fn read_row(session: &Session) -> Result<Option<Value>, String> {
         .next()
         .and_then(|mut row| row.get_mut("data").map(Value::take)))
 }
-
 /// `2026-09-27T12:34:56Z` from Unix seconds (UTC), for `updated_at`.
 fn iso8601(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64;
@@ -457,11 +405,9 @@ fn iso8601(seconds: u64) -> String {
         rest % 60
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn timestamps_are_iso_8601_utc() {
         assert_eq!(iso8601(0), "1970-01-01T00:00:00Z");

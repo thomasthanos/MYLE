@@ -1,20 +1,10 @@
-//! User-invoked filling into a Windows program. The hotkey (Ctrl+Shift+L, or
-//! Ctrl+Alt+Shift+L when another program holds that) remembers the program
-//! in front and the field focused in it; the vault page lets the user pick a
-//! linked login and what to type there: the user name, the password, or
-//! both with Tab between.
-//!
-//! A login is linked to a program by its full path, so another program that
-//! takes the same file name never gets it. A program that updates into a new
-//! version folder (Discord's `app-1.0.9172`) stays linked.
-
+// ! User-invoked filling into a Windows program. The hotkey (Ctrl+Shift+L, or ! Ctrl+Alt+Shift+L when another program holds that) remembers the program ! in front and the field focused in it; the vault page lets the user pick a ! linked login and what to type there: the user name, the password, or ! both with Tab between. ! ! A login is linked to a program by its full path, so another program that ! takes the same file name never gets it. A program that updates into a new ! version folder (Discord's `app-1.0.9172`) stays linked.
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM};
@@ -29,9 +19,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IsIconic, IsWindow, MSG, SW_RESTORE, SetForegroundWindow, ShowWindow, WM_HOTKEY,
 };
 use zeroize::Zeroizing;
-
 use super::{PasswordsState, browser};
-
 const HOTKEY_ID: i32 = 0x4d59;
 /// Long enough to unlock the vault first.
 const TARGET_LIFETIME: Duration = Duration::from_secs(180);
@@ -43,20 +31,16 @@ const HOTKEYS: [(u32, &str); 2] = [
     (MOD_CONTROL | MOD_SHIFT, "Ctrl+Shift+L"),
     (MOD_CONTROL | MOD_ALT | MOD_SHIFT, "Ctrl+Alt+Shift+L"),
 ];
-
 const HOTKEY_PENDING: u8 = u8::MAX;
 const HOTKEY_TAKEN: u8 = u8::MAX - 1;
-
 fn linked_exe(value: &str) -> &str {
     value.rsplit(['\\', '/']).next().unwrap_or(value).trim_matches('"')
 }
-
 fn same_path(left: &Path, right: &Path) -> bool {
     let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
     let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
     left.to_string_lossy().eq_ignore_ascii_case(&right.to_string_lossy())
 }
-
 /// A folder named like a version: `1.2.3`, `v2.0`, `app-1.0.9172`.
 fn is_version(segment: &str) -> bool {
     let rest = segment
@@ -66,7 +50,6 @@ fn is_version(segment: &str) -> bool {
     let parts: Vec<&str> = rest.split('.').collect();
     parts.len() >= 2 && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
-
 /// The program's path with its version folders made alike.
 fn program_key(path: &Path) -> String {
     path.components()
@@ -77,13 +60,11 @@ fn program_key(path: &Path) -> String {
         .collect::<Vec<_>>()
         .join("\\")
 }
-
 /// Whether a login's linked program is the program at `path`: the same
 /// file, or the same program in another version folder.
 fn same_program(linked: &Path, path: &Path) -> bool {
     linked.is_absolute() && (same_path(linked, path) || program_key(linked) == program_key(path))
 }
-
 fn focused_control(thread: u32) -> Option<usize> {
     let mut info = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
     if unsafe { GetGUIThreadInfo(thread, &mut info) } == 0 || info.hwndFocus.is_null() {
@@ -91,7 +72,6 @@ fn focused_control(thread: u32) -> Option<usize> {
     }
     Some(info.hwndFocus as usize)
 }
-
 /// Whether `process` runs with administrator rights (None: cannot tell).
 fn elevated(process: HANDLE) -> Option<bool> {
     unsafe {
@@ -112,13 +92,11 @@ fn elevated(process: HANDLE) -> Option<bool> {
         (ok != 0).then_some(elevation.TokenIsElevated != 0)
     }
 }
-
 /// Whether this app runs as administrator: the browsers' hosts (started
 /// without it) then cannot reach it.
 pub(crate) fn this_app_elevated() -> bool {
     elevated(unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() }).unwrap_or(false)
 }
-
 /// Whether `pid` runs with administrator rights (and this app does not):
 /// Windows then drops the keys MYLE would type into it.
 fn runs_above_us(pid: u32) -> bool {
@@ -137,7 +115,6 @@ fn runs_above_us(pid: u32) -> bool {
         theirs
     }
 }
-
 /// A Store app's window belongs to ApplicationFrameHost.exe; the app itself
 /// is the process of a window inside it.
 fn store_app_inside(window: HWND, host: u32) -> Option<(u32, u32)> {
@@ -159,7 +136,6 @@ fn store_app_inside(window: HWND, host: u32) -> Option<(u32, u32)> {
     unsafe { EnumChildWindows(window, Some(visit), (&raw mut search) as LPARAM) };
     search.found
 }
-
 /// The program a window shows: its process, the thread that owns its
 /// focus, and its file.
 fn program_of(window: HWND) -> Option<(u32, u32, PathBuf)> {
@@ -175,7 +151,6 @@ fn program_of(window: HWND) -> Option<(u32, u32, PathBuf)> {
     }
     Some((pid, thread, path))
 }
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsTargetInfo {
@@ -184,7 +159,6 @@ pub struct WindowsTargetInfo {
     /// It runs as administrator: Windows does not let MYLE type into it.
     elevated: bool,
 }
-
 #[derive(Clone)]
 struct Target {
     window: usize,
@@ -196,20 +170,17 @@ struct Target {
     elevated: bool,
     at: Instant,
 }
-
 #[derive(Clone)]
 pub struct WindowsFillState {
     target: Arc<Mutex<Option<Target>>>,
     /// Which of `HOTKEYS` is registered, or pending or taken.
     hotkey: Arc<AtomicU8>,
 }
-
 impl Default for WindowsFillState {
     fn default() -> Self {
         Self { target: Arc::default(), hotkey: Arc::new(AtomicU8::new(HOTKEY_PENDING)) }
     }
 }
-
 impl WindowsFillState {
     fn hotkey_label(&self) -> &'static str {
         HOTKEYS
@@ -217,7 +188,6 @@ impl WindowsFillState {
             .map_or("the hotkey", |(_, label)| label)
     }
 }
-
 pub fn start(app: AppHandle, target: WindowsFillState) {
     std::thread::spawn(move || unsafe {
         let registered = HOTKEYS
@@ -264,7 +234,6 @@ pub fn start(app: AppHandle, target: WindowsFillState) {
         UnregisterHotKey(null_mut(), HOTKEY_ID);
     });
 }
-
 /// The hotkey in use ("Ctrl+Shift+L"), or `None` when other programs hold
 /// both. Waits a moment for a start that is still registering it.
 #[tauri::command(async)]
@@ -276,7 +245,6 @@ pub fn passwords_windows_hotkey_status(target: State<'_, WindowsFillState>) -> O
     let index = usize::from(target.hotkey.load(Ordering::Acquire));
     HOTKEYS.get(index).map(|(_, label)| *label)
 }
-
 /// A login linked to the program the hotkey was pressed in.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -286,7 +254,6 @@ pub struct ProgramMatch {
     /// which is not enough to fill.
     exact: bool,
 }
-
 /// The logins linked to that program.
 #[tauri::command(async)]
 pub fn passwords_windows_matches(
@@ -309,7 +276,6 @@ pub fn passwords_windows_matches(
         })
         .collect())
 }
-
 /// Links login `id` to the program the hotkey was pressed in, by its full
 /// path (in place of a link by file name, or to another copy).
 #[tauri::command(async)]
@@ -327,7 +293,6 @@ pub fn passwords_windows_link(
     let name = selected.path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
     state.with(|vault| vault.link_program(&id, &selected.path.to_string_lossy(), &name))
 }
-
 /// What the page fills: the user name, the password, or both with Tab
 /// between (most sign-in windows: user name, then password).
 #[tauri::command(async)]
@@ -361,9 +326,7 @@ pub fn passwords_windows_fill(
     if selected.elevated {
         return Err("That program runs as administrator, so Windows does not let MYLE type into it. Copy the user name and password instead.".into());
     }
-
-    // The link is checked again now: a stale choice on the page cannot type a
-    // login into another program.
+    // The link is checked again now: a stale choice on the page cannot type a login into another program.
     let (username, password) = state.with(|vault| {
         let entry = vault
             .summaries()?
@@ -391,26 +354,20 @@ pub fn passwords_windows_fill(
         }
         _ => {}
     }
-
     if !bring_forward(window) {
         return Err("Windows could not bring that program forward. Click its field and try again.".into());
     }
-    // A program whose fields Windows can see: still the field it had when the
-    // hotkey was pressed. (Store apps and some others draw their own fields:
-    // then only the window is checked.)
+    // A program whose fields Windows can see: still the field it had when the hotkey was pressed. (Store apps and some others draw their own fields: then only the window is checked.)
     let focus = selected.focus;
     if focus.is_some() && focused_control(selected.thread) != focus {
         return Err(format!("The focused field changed. Click the intended field and press {hotkey} again."));
     }
-    // Each value takes the place of what the field holds (Steam keeps the
-    // last account name in its field: typing after it made a wrong one).
+    // Each value takes the place of what the field holds (Steam keeps the last account name in its field: typing after it made a wrong one).
     let typing = |text: &str, focus: Option<usize>| {
         select_all()?;
         type_text(text, window, selected.thread, focus, hotkey)
     };
-    // Where Windows can tell what the focused field is (UI Automation), it
-    // is used: never a password typed where it shows, and "both" from the
-    // user name field even when the password field was clicked.
+    // Where Windows can tell what the focused field is (UI Automation), it is used: never a password typed where it shows, and "both" from the user name field even when the password field was clicked.
     let password_field = focused_field_is_password();
     match field.as_str() {
         "username" => {
@@ -444,7 +401,6 @@ pub fn passwords_windows_fill(
     *target.target.lock().unwrap_or_else(|p| p.into_inner()) = None;
     Ok(())
 }
-
 /// Brings `window` forward (restored if minimized), as long as it takes.
 fn bring_forward(window: HWND) -> bool {
     unsafe {
@@ -454,8 +410,7 @@ fn bring_forward(window: HWND) -> bool {
         SetForegroundWindow(window);
         for _ in 0..15 {
             if GetForegroundWindow() == window {
-                // Let the program give its field the focus back (web-based
-                // programs like Steam take a moment).
+                // Let the program give its field the focus back (web-based programs like Steam take a moment).
                 std::thread::sleep(Duration::from_millis(150));
                 return true;
             }
@@ -464,25 +419,21 @@ fn bring_forward(window: HWND) -> bool {
     }
     false
 }
-
 fn key(virtual_key: u16, scan: u16, flags: u32) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: virtual_key, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
     }
 }
-
 fn send(inputs: &[INPUT]) -> Result<(), String> {
     if unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) } != inputs.len() as u32 {
         return Err("Windows blocked typing into that program. Copy the field instead.".into());
     }
     Ok(())
 }
-
 fn press(virtual_key: u16) -> Result<(), String> {
     send(&[key(virtual_key, 0, 0), key(virtual_key, 0, KEYEVENTF_KEYUP)])
 }
-
 /// A key with a modifier held (Shift+Tab, Ctrl+A).
 fn press_with(modifier: u16, virtual_key: u16) -> Result<(), String> {
     send(&[
@@ -492,12 +443,10 @@ fn press_with(modifier: u16, virtual_key: u16) -> Result<(), String> {
         key(modifier, 0, KEYEVENTF_KEYUP),
     ])
 }
-
 /// Selects what the focused field holds, so the typing replaces it.
 fn select_all() -> Result<(), String> {
     press_with(VK_CONTROL, VK_A)
 }
-
 /// What UI Automation says the focused field is: `Some(true)` a password
 /// field, `Some(false)` a text field that shows what is typed, `None` when
 /// the program does not say (many draw their own fields).
@@ -514,7 +463,6 @@ fn focused_field_is_password() -> Option<bool> {
         Some(element.CurrentIsPassword().ok()?.as_bool())
     }
 }
-
 fn type_text(text: &str, window: *mut c_void, thread: u32, focus: Option<usize>, hotkey: &str) -> Result<(), String> {
     for unit in text.encode_utf16() {
         if unsafe { GetForegroundWindow() } != window || (focus.is_some() && focused_control(thread) != focus) {
@@ -530,18 +478,15 @@ fn type_text(text: &str, window: *mut c_void, thread: u32, focus: Option<usize>,
     }
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn browsers_use_browser_filling_instead_of_windows_typing() {
         for exe in ["vivaldi.exe", "opera.exe", "zen.exe", "librewolf.exe"] {
             assert!(browser::browser_name(exe).is_some(), "{exe}");
         }
     }
-
     #[test]
     fn a_program_that_updates_into_a_new_folder_stays_linked() {
         let discord = Path::new(r"C:\Users\Me\AppData\Local\Discord\app-1.0.9172\Discord.exe");
@@ -556,7 +501,6 @@ mod tests {
         assert!(!is_version("Discord") && !is_version("2024") && !is_version("v") && !is_version("1..2"));
         assert!(is_version("1.0") && is_version("app-1.0.9172") && is_version("v10.2.3"));
     }
-
     #[test]
     fn this_process_is_not_above_itself() {
         assert!(!runs_above_us(std::process::id()));

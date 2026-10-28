@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const siteRoot = join(root, "site");
 const required = [
@@ -33,16 +32,13 @@ const staleClaims = [
   [/\bportable\b/i, "Portable"],
   [/activation helpers/i, "activation helpers"],
 ];
-
 function fail(message) {
   failures.push(message);
 }
-
 for (const file of required) {
   const full = join(siteRoot, file);
   if (!existsSync(full) || !statSync(full).isFile()) fail(`Missing required site file: ${file}`);
 }
-
 for (const file of checkedTextFiles) {
   const full = join(siteRoot, file);
   if (!existsSync(full)) continue;
@@ -51,13 +47,11 @@ for (const file of checkedTextFiles) {
     if (pattern.test(text)) fail(`${file} still contains stale copy: ${label}`);
   }
 }
-
 for (const file of htmlFiles) {
   const full = join(siteRoot, file);
   if (!existsSync(full)) continue;
   const html = readFileSync(full, "utf8");
   const refs = [...html.matchAll(/(?:href|src)=["']([^"']+)["']/gi)].map((match) => match[1]);
-
   for (const ref of refs) {
     if (/^(?:#|mailto:|tel:)/i.test(ref)) continue;
     if (/^https:\/\//i.test(ref)) {
@@ -69,7 +63,6 @@ for (const file of htmlFiles) {
       fail(`${file} contains unsupported URL scheme: ${ref}`);
       continue;
     }
-
     const clean = ref.split(/[?#]/, 1)[0];
     if (!clean || clean === "/") continue;
     const candidate = clean.startsWith("/")
@@ -81,14 +74,12 @@ for (const file of htmlFiles) {
     }
   }
 }
-
 for (const file of ["index.html", "readme.html"]) {
   const full = join(siteRoot, file);
   if (existsSync(full) && !readFileSync(full, "utf8").includes(expectedInstaller)) {
     fail(`${file} does not contain the canonical R2 installer URL`);
   }
 }
-
 const redirects = existsSync(join(siteRoot, "_redirects"))
   ? readFileSync(join(siteRoot, "_redirects"), "utf8")
   : "";
@@ -98,7 +89,6 @@ for (const legacyPath of ["/installer.html", "/installer"]) {
     fail(`_redirects must permanently redirect ${legacyPath} to /`);
   }
 }
-
 const headers = existsSync(join(siteRoot, "_headers"))
   ? readFileSync(join(siteRoot, "_headers"), "utf8")
   : "";
@@ -110,16 +100,13 @@ for (const header of [
 ]) {
   if (!headers.includes(header)) fail(`_headers is missing ${header}`);
 }
-
 const wrangler = readFileSync(join(root, "wrangler.toml"), "utf8");
 if (!/pages_build_output_dir\s*=\s*"\.\/site"/.test(wrangler)) {
   fail("wrangler.toml must publish ./site");
 }
-
 if (failures.length) {
   console.error(`Site validation failed (${failures.length}):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-
 console.log(`Site validation passed: ${required.length} required files and ${htmlFiles.length} HTML pages.`);

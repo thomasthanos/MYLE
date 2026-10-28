@@ -48,8 +48,7 @@
     if (p.takeHelloOnOpen() && !p.busy) void p.unlockWithHello(true);
   });
 
-  // A website's sign-in waits for the vault: Windows Hello asks at once
-  // (once), as soon as this window can show it; else the password field.
+  // A website's sign-in waits for the vault: Windows Hello asks at once (once), as soon as this window can show it; else the password field.
   $effect(() => {
     if (!p.helloForSite || p.busy || recovering) return;
     if (!p.hello.enabled) {

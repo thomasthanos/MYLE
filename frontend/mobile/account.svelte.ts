@@ -1,5 +1,4 @@
-// The account on the phone: only who is signed in. MYLE's settings are not
-// synced here; the vault syncs through the Password Manager's own state.
+// The account on the phone: only who is signed in. MYLE's settings are not synced here; the vault syncs through the Password Manager's own state.
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { accountApi, type Profile, type Provider } from "../app/account/api";
@@ -13,8 +12,7 @@ function message(error: unknown) {
 }
 /** In a plain browser (`npx vite --mode mobile`): a pretend account. */
 const preview = !isTauri();
-/** Android shows the sign-in page in a Custom Tab over the app; iOS in a
- *  sheet that answers by itself. */
+/* Android shows the sign-in page in a Custom Tab over the app; iOS in a sheet that answers by itself. */
 const android = /Android/i.test(navigator.userAgent);
 /** Back in the app this long without the page coming back: it was closed. */
 const CLOSED_AFTER_MS = 1500;
@@ -34,8 +32,7 @@ class MobileAccount {
       this.loaded = true;
       return;
     }
-    // The browser's return started the app again: the sign-in finished
-    // without anyone waiting for it.
+    // The browser's return started the app again: the sign-in finished without anyone waiting for it.
     await listen<Profile>("account-signed-in", (event) => void this.#signedIn(event.payload, null)).catch(() => {});
     this.profile = await accountApi.profile().catch(() => null);
     this.loaded = true;
@@ -75,8 +72,7 @@ class MobileAccount {
     if (!preview) void accountApi.cancelSignIn();
     this.signingIn = null;
   }
-  /** The app is in front again. On Android, back from the sign-in tab with
-   *  no answer means the user closed it: the sign-in ends as cancelled. */
+  /* The app is in front again. On Android, back from the sign-in tab with no answer means the user closed it: the sign-in ends as cancelled. */
   resumed() {
     if (!android || !this.signingIn) return;
     const waiting = this.signingIn;

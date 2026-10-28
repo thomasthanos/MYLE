@@ -1,6 +1,5 @@
 <script lang="ts">
-  // A login's 2FA code, counting down to the next one. The key stays in the
-  // app; only the code comes here, asked again when it runs out.
+  // A login's 2FA code, counting down to the next one. The key stays in the app; only the code comes here, asked again when it runs out.
   import Check from "@lucide/svelte/icons/check";
   import Copy from "@lucide/svelte/icons/copy";
   import { onDestroy, onMount } from "svelte";

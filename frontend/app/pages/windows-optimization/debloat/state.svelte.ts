@@ -1,9 +1,4 @@
-// The debloater's page state. It lives outside the components so switching
-// tabs or pages keeps the choices and a run's progress.
-//
-// Nothing changes on the PC while the user chooses: a switch or a profile
-// only records what they want (`desired`, `removing`), and "Review & apply"
-// does it all at once, after a restore point.
+// The debloater's page state. It lives outside the components so switching tabs or pages keeps the choices and a run's progress. Nothing changes on the PC while the user chooses: a switch or a profile only records what they want (`desired`, `removing`), and "Review & apply" does it all at once, after a restore point.
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../../lib/confirm.svelte";
 import { operationGate } from "../../../../lib/operation-gate.svelte";
@@ -272,8 +267,7 @@ class DebloatState {
     }
     return wanted;
   }
-  /** Does every pending change: one restore point, then the tweaks and the
-   *  apps, then the tweaks to turn off. */
+  /* Does every pending change: one restore point, then the tweaks and the apps, then the tweaks to turn off. */
   async applyPending() {
     if (this.locked || !this.pendingCount) return;
     const { on, off } = this.pending;

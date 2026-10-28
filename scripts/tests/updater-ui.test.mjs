@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { compileModule } from "svelte/compiler";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
-
 const settingsSource = readFileSync(new URL("../../frontend/app/pages/settings/Settings.svelte", import.meta.url), "utf8");
 const splashSource = readFileSync(new URL("../../frontend/splash/Splash.svelte", import.meta.url), "utf8");
 const stateUrl = new URL("../../frontend/lib/updater-state.svelte.ts", import.meta.url);
@@ -21,7 +20,6 @@ const transpile = (source) => transpileModule(source, {
   compilerOptions: { target: ScriptTarget.ESNext, module: ModuleKind.ESNext },
 }).outputText;
 const require = createRequire(import.meta.url);
-
 let instance = 0;
 async function settingsHarness() {
   const checking = deferred(), installing = deferred();
@@ -53,8 +51,7 @@ async function settingsHarness() {
     hooks.deregister();
   }
   const script = transpile(settingsSource.match(/<script lang="ts">([\s\S]*?)<\/script>/)[1]).replace(/^import[\s\S]*?;\s*$/gm, "");
-  // Compile the page's actual reactive script, with only native calls and
-  // mounting replaced. A second execution models leaving and returning.
+  // Compile the page's actual reactive script, with only native calls and mounting replaced. A second execution models leaving and returning.
   const compiled = compileModule(`${script}\nglobalThis.page={get view(){return update},check,install};`, { filename: "settings-test.svelte.js", generate: "client" }).js.code;
   const executable = transpileModule(compiled, { compilerOptions: { target: ScriptTarget.ESNext, module: ModuleKind.CommonJS } }).outputText;
   const mount = () => {
@@ -65,7 +62,6 @@ async function settingsHarness() {
   };
   return { mount, checking, installing, errors, event: (event) => onEvent(event), get checks() { return checks; }, get installs() { return installs; } };
 }
-
 test("splash respects a total withdrawn after a stale manifest size is exceeded", () => {
   const functionSource = splashSource.slice(splashSource.indexOf("  function onProgress("), splashSource.indexOf("  function timeLeft("));
   const context = { performance: { now: () => 1000 }, sample: { at: 0, bytes: 0 }, speed: 0, lastMeta: 0, assetSize: 100, progress: null, percent: null, transfer: "", rate: "", SPEED_WINDOW_MS: 500, META_EVERY_MS: 250, formatBytes: (bytes) => `${bytes} B`, timeLeft: () => "1s left" };
@@ -81,7 +77,6 @@ test("splash respects a total withdrawn after a stale manifest size is exceeded"
   assert.equal(context.progress, null);
   assert.equal(context.percent, null);
 });
-
 test("settings keeps download progress when the page remounts", async () => {
   const h = await settingsHarness();
   const first = h.mount();
@@ -93,7 +88,6 @@ test("settings keeps download progress when the page remounts", async () => {
   h.installing.resolve();
   await running;
 });
-
 test("settings shows verification instead of a completed download", async () => {
   const h = await settingsHarness();
   const page = h.mount();
@@ -104,7 +98,6 @@ test("settings shows verification instead of a completed download", async () => 
   h.installing.resolve();
   await running;
 });
-
 test("a pending check excludes another check and an install across remounts", async () => {
   const h = await settingsHarness();
   const first = h.mount();
@@ -118,7 +111,6 @@ test("a pending check excludes another check and an install across remounts", as
   await running;
   assert.equal(second.view.state, "available");
 });
-
 test("a pending install excludes another install and check across remounts", async () => {
   const h = await settingsHarness();
   const first = h.mount();
@@ -131,7 +123,6 @@ test("a pending install excludes another install and check across remounts", asy
   h.installing.resolve();
   await running;
 });
-
 test("an update failure survives remounting, reports a toast and permits checking again", async () => {
   const h = await settingsHarness();
   const first = h.mount();
@@ -147,7 +138,6 @@ test("an update failure survives remounting, reports a toast and permits checkin
   await retry;
   assert.equal(second.view.state, "available");
 });
-
 test("settings keeps unknown totals indeterminate and follows installation and restart events", async () => {
   const h = await settingsHarness();
   const page = h.mount();
@@ -165,7 +155,6 @@ test("settings keeps unknown totals indeterminate and follows installation and r
   h.installing.resolve();
   await running;
 });
-
 test("a failed check releases the operation guard so installation can retry", async () => {
   const h = await settingsHarness();
   const page = h.mount();

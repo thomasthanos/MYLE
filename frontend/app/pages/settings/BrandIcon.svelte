@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Official marks for the sign-in buttons (Discord from Simple Icons,
-  // Google's four-colour "G" from its sign-in branding).
+  // Official marks for the sign-in buttons (Discord from Simple Icons, Google's four-colour "G" from its sign-in branding).
   let { brand, size = 18 }: { brand: "discord" | "google"; size?: number } = $props();
 </script>
 

@@ -1,18 +1,7 @@
-//! Removing scan items, using the Recycle Bin by default.
-//!
-//! The shell's IFileOperation does the move, one item per operation. A
-//! progress sink watches each one: when the shell is about to delete an item
-//! without the "recycle if possible" flag (too big for the bin, or a drive
-//! without one), the sink aborts it, so it is skipped and reported instead
-//! of silently deleted for good. A separate, explicitly confirmed command
-//! can request permanent deletion. Every item is checked again right before it
-//! goes: still there, still inside the scanned folder, not a link, not
-//! protected, and still what the scan saw.
-
+// ! Removing scan items, using the Recycle Bin by default. ! ! The shell's IFileOperation does the move, one item per operation. A ! progress sink watches each one: when the shell is about to delete an item ! without the "recycle if possible" flag (too big for the bin, or a drive ! without one), the sink aborts it, so it is skipped and reported instead ! of silently deleted for good. A separate, explicitly confirmed command ! can request permanent deletion. Every item is checked again right before it ! goes: still there, still inside the scanned folder, not a link, not ! protected, and still what the scan saw.
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-
 use windows::Win32::Foundation::{E_ABORT, E_ACCESSDENIED};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx, CoUninitialize, IBindCtx,
@@ -25,10 +14,8 @@ use windows::Win32::UI::Shell::{
     TSF_DELETE_RECYCLE_IF_POSSIBLE,
 };
 use windows::core::{HRESULT, PCWSTR, Ref, implement};
-
 use super::protect::{self, Guard, Verdict};
 use super::tree::{display_path, long_path};
-
 pub const OUTSIDE: &str = "It is not inside the scanned folder.";
 pub const GONE: &str = "It is no longer there.";
 pub const LINK: &str = "A link: MYLE never removes links.";
@@ -37,19 +24,15 @@ pub const NO_BIN: &str =
     "Windows cannot put this item in the Recycle Bin. It may exceed the bin's size limit, or this drive may not support recycling.";
 pub const ADMIN: &str = "Needs administrator.";
 pub const IN_USE: &str = "Open in another program.";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Recycle,
     Permanent,
 }
-
 /// The shell reports estimated work points: total first, completed second.
 pub type OnProgress = Arc<dyn Fn(u32, u32) + Send + Sync>;
-
 /// COM for this thread, apartment-threaded, as the shell wants.
 pub struct Com(bool);
-
 impl Com {
     pub fn init() -> Self {
         // SAFETY: paired with CoUninitialize in Drop when it succeeded.
@@ -57,7 +40,6 @@ impl Com {
         Self(hr.is_ok())
     }
 }
-
 impl Drop for Com {
     fn drop(&mut self) {
         if self.0 {
@@ -66,7 +48,6 @@ impl Drop for Com {
         }
     }
 }
-
 #[derive(Default)]
 struct Watch {
     /// The shell wanted to delete something for good.
@@ -74,7 +55,6 @@ struct Watch {
     /// The failure the shell reported for the item, if any.
     failed: AtomicI32,
 }
-
 /// Normal deletion cannot fall back to permanent deletion. Only the separate
 /// permanently-delete command, after its own confirmation, selects that mode.
 #[implement(IFileOperationProgressSink)]
@@ -83,7 +63,6 @@ struct RemovalSink {
     mode: Mode,
     progress: Option<OnProgress>,
 }
-
 impl IFileOperationProgressSink_Impl for RemovalSink_Impl {
     fn StartOperations(&self) -> windows::core::Result<()> {
         Ok(())
@@ -173,7 +152,6 @@ impl IFileOperationProgressSink_Impl for RemovalSink_Impl {
         Ok(())
     }
 }
-
 fn describe(hr: HRESULT) -> String {
     match hr {
         h if h == E_ACCESSDENIED || h == COPYENGINE_E_ACCESS_DENIED_SRC || h == COPYENGINE_E_REQUIRES_ELEVATION => ADMIN.into(),
@@ -188,7 +166,6 @@ fn describe(hr: HRESULT) -> String {
         h => format!("Windows could not remove this item (0x{:08X}).", h.0 as u32),
     }
 }
-
 /// Checks an item again right before it goes. `was_dir`: what the scan saw.
 pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result<(), String> {
     let (item, root) = (protect::parts(path), protect::parts(root));
@@ -210,19 +187,16 @@ pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result
         Verdict::Allowed | Verdict::Caution(_) => Ok(()),
     }
 }
-
 /// Moves one item to the Recycle Bin. COM must be initialised on this thread
 /// (`Com::init`). An item the bin cannot take stays where it is.
 pub fn recycle(path: &Path, progress: Option<OnProgress>) -> Result<(), String> {
     remove(path, Mode::Recycle, progress)
 }
-
 /// Only called by the distinct permanently-delete command. Its caller applies
 /// exactly the same scanned-path and protection checks as the Recycle Bin flow.
 pub fn permanently_delete(path: &Path, progress: Option<OnProgress>) -> Result<(), String> {
     remove(path, Mode::Permanent, progress)
 }
-
 fn remove(path: &Path, mode: Mode, progress: Option<OnProgress>) -> Result<(), String> {
     let shown = display_path(path);
     // The shell takes the usual form; `\\?\` only past MAX_PATH.
@@ -275,15 +249,12 @@ fn remove(path: &Path, mode: Mode, progress: Option<OnProgress>) -> Result<(), S
     }
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::super::protect::Places;
     use super::*;
     use std::path::PathBuf;
-
     struct Temp(PathBuf);
-
     impl Temp {
         /// A test folder by its full, long name (the Recycle Bin records it so).
         fn new(name: &str) -> Self {
@@ -293,17 +264,14 @@ mod tests {
             Self(display_path(&std::fs::canonicalize(&path).unwrap()))
         }
     }
-
     impl Drop for Temp {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-
     fn guard(root: &Path) -> Guard {
         Guard::new(root, &Places::default())
     }
-
     /// Removes what a test put in the Recycle Bin: `$I…` names the original
     /// path, `$R…` (same suffix) is the item itself.
     fn purge_from_bin(original: &Path) {
@@ -333,7 +301,6 @@ mod tests {
             }
         }
     }
-
     /// Needs the Windows shell and a Recycle Bin on the temp folder's drive.
     /// Either the item went to the bin (and is cleaned out of it here), or
     /// the bin could not take it and it is still on disk: never gone for good.
@@ -360,7 +327,6 @@ mod tests {
             }
         }
     }
-
     /// Run by hand (`cargo test … -- --ignored`): it maps a drive letter for a
     /// moment. A `subst` drive has no Recycle Bin, so the shell would delete
     /// the file for good: the guard must stop it and leave the file.
@@ -389,7 +355,6 @@ mod tests {
         assert_eq!(result.unwrap_err(), NO_BIN);
         assert_eq!(std::fs::read(temp.0.join("keep.me")).unwrap(), b"precious");
     }
-
     #[test]
     fn a_path_outside_the_scanned_folder_is_refused() {
         let temp = Temp::new("outside");
@@ -402,7 +367,6 @@ mod tests {
         assert_eq!(recheck(&sneaky, false, &temp.0, &guard(&temp.0)).unwrap_err(), OUTSIDE);
         assert_eq!(recheck(&temp.0, true, &temp.0, &guard(&temp.0)).unwrap_err(), OUTSIDE, "the root itself");
     }
-
     #[test]
     fn a_protected_path_is_refused() {
         let temp = Temp::new("protected");
@@ -413,7 +377,6 @@ mod tests {
         assert!(recheck(&keep, true, &temp.0, &guard).is_err());
         assert!(recheck(&keep.join("inside"), true, &temp.0, &guard).is_err());
     }
-
     #[test]
     fn a_link_is_refused_and_what_it_points_at_stays() {
         let temp = Temp::new("link");
@@ -433,7 +396,6 @@ mod tests {
         assert_eq!(recheck(&link, true, &temp.0, &guard(&temp.0)).unwrap_err(), LINK);
         assert!(target.0.join("precious.txt").exists());
     }
-
     #[test]
     fn a_path_that_changed_since_the_scan_is_refused() {
         let temp = Temp::new("changed");
@@ -444,7 +406,6 @@ mod tests {
         std::fs::remove_file(&item).unwrap();
         assert_eq!(recheck(&item, false, &temp.0, &guard(&temp.0)).unwrap_err(), GONE);
     }
-
     #[test]
     fn shell_failures_read_plainly() {
         assert_eq!(describe(E_ACCESSDENIED), ADMIN);
@@ -452,14 +413,12 @@ mod tests {
         assert_eq!(describe(COPYENGINE_E_RECYCLE_BIN_NOT_FOUND), NO_BIN);
         assert!(describe(HRESULT(0x8000_4005u32 as i32)).contains("0x80004005"));
     }
-
     #[test]
     fn items_too_large_for_the_bin_have_an_actionable_reason() {
         use windows::Win32::UI::Shell::{COPYENGINE_E_RECYCLE_FORCE_NUKE, COPYENGINE_E_RECYCLE_SIZE_TOO_BIG};
         assert_eq!(describe(COPYENGINE_E_RECYCLE_SIZE_TOO_BIG), NO_BIN);
         assert_eq!(describe(COPYENGINE_E_RECYCLE_FORCE_NUKE), NO_BIN);
     }
-
     #[test]
     fn explicit_permanent_deletion_removes_its_test_file_and_folder() {
         let temp = Temp::new("permanent");
@@ -477,7 +436,6 @@ mod tests {
         }
         assert!(temp.0.exists(), "the scanned root stays in place");
     }
-
     #[test]
     fn progress_sink_forwards_windows_work_estimates_in_the_correct_order() {
         let updates = Arc::new(std::sync::Mutex::new(Vec::new()));

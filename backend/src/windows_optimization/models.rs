@@ -1,12 +1,10 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsOptimizationSnapshot {
     pub auto_logon: AutoLogonSnapshot,
     pub firmware_restart: FirmwareRestartSnapshot,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FirmwareType {
@@ -14,7 +12,6 @@ pub enum FirmwareType {
     LegacyBios,
     Unknown,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareRestartSnapshot {
@@ -23,7 +20,6 @@ pub struct FirmwareRestartSnapshot {
     pub blocked_reason: Option<String>,
     pub active: bool,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FirmwareRestartResult {
@@ -32,14 +28,12 @@ pub enum FirmwareRestartResult {
     NeedsAdmin,
     Unsupported,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareRestartOutcome {
     pub result: FirmwareRestartResult,
     pub note: Option<String>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AutoLogonStatus {
@@ -49,7 +43,6 @@ pub enum AutoLogonStatus {
     Unavailable,
     Working,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AutoLogonAccountType {
@@ -59,14 +52,12 @@ pub enum AutoLogonAccountType {
     Entra,
     Unknown,
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AutoLogonOperation {
     Enable,
     Disable,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoLogonSnapshot {
@@ -79,7 +70,6 @@ pub struct AutoLogonSnapshot {
     pub owned_by_app: bool,
     pub active_operation: Option<AutoLogonOperation>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AutoLogonSetResult {
@@ -90,7 +80,6 @@ pub enum AutoLogonSetResult {
     Conflict,
     Unsupported,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoLogonOutcome {

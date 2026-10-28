@@ -1,17 +1,12 @@
-//! Narrow wrapper around `ShellExecuteExW("runas")` for backend-owned
-//! executables and arguments. Nothing from the webview is passed here.
-
+// ! Narrow wrapper around `ShellExecuteExW("runas")` for backend-owned ! executables and arguments. Nothing from the webview is passed here.
 use std::path::{Path, PathBuf};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ElevatedProcessOutcome {
     Exited(u32),
     Cancelled,
     NeedsAdmin,
 }
-
 struct ProcessHandle(windows_sys::Win32::Foundation::HANDLE);
-
 impl Drop for ProcessHandle {
     fn drop(&mut self) {
         if !self.0.is_null() {
@@ -20,7 +15,6 @@ impl Drop for ProcessHandle {
         }
     }
 }
-
 pub(crate) async fn run(
     executable: PathBuf,
     arguments: Vec<String>,
@@ -29,7 +23,6 @@ pub(crate) async fn run(
         .await
         .map_err(|error| format!("The administrator process task failed: {error}"))?
 }
-
 pub(crate) fn run_sync(
     executable: &Path,
     arguments: &[String],
@@ -45,7 +38,6 @@ pub(crate) fn run_sync(
         SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
         ShellExecuteExW,
     };
-
     let executable = wide_null(executable.as_os_str());
     let verb = wide_null(std::ffi::OsStr::new("runas"));
     let parameters = wide_null(std::ffi::OsStr::new(
@@ -64,8 +56,7 @@ pub(crate) fn run_sync(
         nShow: 0,
         ..Default::default()
     };
-    // SAFETY: all pointers reference live NUL-terminated buffers for the call;
-    // the returned process handle is closed below on every successful launch.
+    // SAFETY: all pointers reference live NUL-terminated buffers for the call; the returned process handle is closed below on every successful launch.
     if unsafe { ShellExecuteExW(&mut execute) } == 0 {
         let error = unsafe { GetLastError() };
         return match error {
@@ -105,7 +96,6 @@ pub(crate) fn run_sync(
     }
     Ok(ElevatedProcessOutcome::Exited(code))
 }
-
 fn quote_windows_argument(argument: &str) -> String {
     if !argument.is_empty()
         && !argument
@@ -133,16 +123,13 @@ fn quote_windows_argument(argument: &str) -> String {
     quoted.push('"');
     quoted
 }
-
 fn wide_null(value: &std::ffi::OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     value.encode_wide().chain(Some(0)).collect()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn windows_arguments_are_quoted_without_command_interpretation() {
         assert_eq!(quote_windows_argument("plain"), "plain");

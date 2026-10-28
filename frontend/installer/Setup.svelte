@@ -49,8 +49,7 @@
     { label: "Finishing up", stages: ["finishing"], from: 96, to: 100 },
   ];
 
-  /** Passive mode: how long "Updated to …" shows, then how long the setup
-   *  stays once the app's window is on screen (`launch` waits for it). */
+  /* Passive mode: how long "Updated to …" shows, then how long the setup stays once the app's window is on screen (`launch` waits for it). */
   const PASSIVE_SHOW_MS = 250;
   const PASSIVE_HANDOVER_MS = 300;
 
@@ -235,8 +234,7 @@
     if (state.passive) void start();
   }
 
-  /** "Try again": the install (or uninstall) again, or the first question
-   *  to the setup when even that failed. */
+  /* "Try again": the install (or uninstall) again, or the first question to the setup when even that failed. */
   function retry() {
     if (info) {
       void start();
@@ -314,9 +312,7 @@
     await api.exit();
   }
 
-  /** Passive (`/P`, the in-app updater): show the result for a moment, open
-   *  the app, and close half a second after its window is up, so something
-   *  is always on screen. */
+  /* Passive (`/P`, the in-app updater): show the result for a moment, open the app, and close half a second after its window is up, so something is always on screen. */
   async function finishPassive() {
     await sleep(PASSIVE_SHOW_MS);
     if (!api || !info || finishing) return;

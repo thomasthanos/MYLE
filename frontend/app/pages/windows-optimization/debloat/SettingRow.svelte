@@ -1,7 +1,5 @@
 <script lang="ts">
-  // One choice on one line: its switch (or checkbox), its name and short
-  // tags. What it does, and what to know first, show on hover over the
-  // arrow, or under the line once the arrow is clicked.
+  // One choice on one line: its switch (or checkbox), its name and short tags. What it does, and what to know first, show on hover over the arrow, or under the line once the arrow is clicked.
   import type { Snippet } from "svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";

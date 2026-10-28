@@ -1,7 +1,4 @@
-// Typed bridge to the GitHub Releases commands in backend/src/github_releases/.
-// Projects are addressed by id (`<repo id>` or `<repo id>/<app folder>`),
-// files by their path in the repository's status; the backend checks every
-// path. The GitHub token and AI keys never come back here.
+// Typed bridge to the GitHub Releases commands in backend/src/github_releases/. Projects are addressed by id (`<repo id>` or `<repo id>/<app folder>`), files by their path in the repository's status; the backend checks every path. The GitHub token and AI keys never come back here.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { FileDiff } from "../project-backups/api";
 export type { FileDiff };

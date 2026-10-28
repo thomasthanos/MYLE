@@ -1,28 +1,21 @@
-//! Comparing two backups (zips, older folder backups, or the project folder
-//! itself) file by file, and two versions of one text file line by line.
-
+// ! Comparing two backups (zips, older folder backups, or the project folder ! itself) file by file, and two versions of one text file line by line.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-
 use icu_normalizer::ComposingNormalizerBorrowed;
 use serde::Serialize;
 use similar::{DiffTag, TextDiff};
 use zip::ZipArchive;
-
 use super::rules::{BACKUP_INFO_FILE, Rules, TreeListing};
 use super::walk;
-
 /// Text files larger than this are compared by size only.
 const MAX_DIFF_BYTES: u64 = 2 * 1024 * 1024;
-
 #[derive(Clone, Debug)]
 pub(crate) enum Side {
     Zip(PathBuf),
     Folder(PathBuf),
 }
-
 #[derive(Clone, Debug)]
 pub(crate) struct FileInfo {
     /// The name as stored, to read the file again.
@@ -32,7 +25,6 @@ pub(crate) struct FileInfo {
     /// When the file was last written, as the backup recorded it.
     pub recorded: Option<Recorded>,
 }
-
 /// A backup's record of when one of its files was last written.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Recorded {
@@ -41,7 +33,6 @@ pub(crate) enum Recorded {
     /// The date of a folder backup's file.
     Time(std::time::SystemTime),
 }
-
 /// `\` → `/`, Unicode NFC, no empty or `.` parts: the same file under any
 /// tool's naming.
 pub(crate) fn normalize_name(name: &str) -> String {
@@ -52,7 +43,6 @@ pub(crate) fn normalize_name(name: &str) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
-
 /// Every file of a backup, by normalized name.
 pub(crate) fn list_files(
     side: &Side,
@@ -113,7 +103,6 @@ pub(crate) fn list_files(
     }
     Ok(files)
 }
-
 /// The one folder every name is under, if there is one.
 fn single_root(keys: &[&String]) -> Option<String> {
     let mut root: Option<&str> = None;
@@ -127,7 +116,6 @@ fn single_root(keys: &[&String]) -> Option<String> {
     }
     root.map(str::to_string)
 }
-
 /// `key` without its first folder (every key is under it when `prefix` is set).
 fn strip<'a>(key: &'a str, prefix: &str) -> &'a str {
     if prefix.is_empty() {
@@ -136,13 +124,11 @@ fn strip<'a>(key: &'a str, prefix: &str) -> &'a str {
         key.split_once('/').map(|(_, rest)| rest).unwrap_or(key)
     }
 }
-
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Pair {
     pub old: Option<String>,
     pub new: Option<String>,
 }
-
 /// Pairs the files of two backups by name, ignoring case and, when one side
 /// has everything inside a single folder (a zip made by another tool:
 /// `steam-idler/package.json`), that folder if it pairs more files.
@@ -185,7 +171,6 @@ pub(crate) fn match_files<T>(
         }
     }
     let (old_strip, new_strip) = best;
-
     let mut pairs: BTreeMap<String, Pair> = BTreeMap::new();
     let mut by_fold: HashMap<String, String> = HashMap::new();
     for key in &new_keys {
@@ -222,7 +207,6 @@ pub(crate) fn match_files<T>(
     }
     pairs
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
@@ -230,7 +214,6 @@ pub enum Status {
     Modified,
     Added,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Change {
@@ -246,7 +229,6 @@ pub struct Change {
     /// is the one missing it.
     pub still_in_source: bool,
 }
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Comparison {
@@ -256,7 +238,6 @@ pub struct Comparison {
     pub deleted: usize,
     pub unchanged: usize,
 }
-
 /// A file inside `root` by its relative name, refusing names that leave it.
 pub(crate) fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let mut path = root.to_path_buf();
@@ -271,7 +252,6 @@ pub(crate) fn folder_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-
 fn folder_crc(side: &Side, info: &FileInfo, cancelled: &dyn Fn() -> bool) -> Result<u32, String> {
     let Side::Folder(root) = side else {
         return info.crc.ok_or_else(|| "Missing CRC".to_string());
@@ -294,7 +274,6 @@ fn folder_crc(side: &Side, info: &FileInfo, cancelled: &dyn Fn() -> bool) -> Res
     }
     Ok(hasher.finalize())
 }
-
 /// The changes from `old` to `new`. Files `rules` leaves out of backups are
 /// left out here too; `source` (the project folder) marks deleted files that
 /// are still there. `progress` gets the files compared so far and in all.
@@ -309,8 +288,7 @@ pub(crate) fn compare(
     let old_files = list_files(old, cancelled)?;
     let new_files = list_files(new, cancelled)?;
     let pairs = match_files(&old_files, &new_files);
-    // What the folders hold on either side tells build output from sources
-    // (a `Cargo.toml` next to `target`), as it did for the backup.
+    // What the folders hold on either side tells build output from sources (a `Cargo.toml` next to `target`), as it did for the backup.
     let listing = TreeListing::from_paths(pairs.keys().map(String::as_str));
     let mut result = Comparison::default();
     let total = pairs.len() as u64;
@@ -365,7 +343,6 @@ pub(crate) fn compare(
     });
     Ok(result)
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RowKind {
@@ -376,7 +353,6 @@ pub enum RowKind {
     /// Unchanged lines left out.
     Gap,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Row {
@@ -386,7 +362,6 @@ pub struct Row {
     pub new_line: Option<usize>,
     pub new_text: Option<String>,
 }
-
 /// How a changed file can be shown, from its name (the content decides in
 /// the end: a "text" file with NUL bytes is shown as binary).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -396,7 +371,6 @@ pub enum FileKind {
     Image,
     Binary,
 }
-
 const IMAGE_TYPES: &[(&str, &str)] = &[
     ("png", "image/png"),
     ("jpg", "image/jpeg"),
@@ -408,7 +382,6 @@ const IMAGE_TYPES: &[(&str, &str)] = &[
     ("avif", "image/avif"),
     ("svg", "image/svg+xml"),
 ];
-
 const BINARY_TYPES: &[&str] = &[
     "exe", "dll", "so", "dylib", "lib", "a", "bin", "dat", "db", "sqlite", "sqlite3", "pdf",
     "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "avi", "mov",
@@ -416,14 +389,12 @@ const BINARY_TYPES: &[&str] = &[
     "iso", "msi", "nupkg", "docx", "xlsx", "pptx", "icns", "tga", "tif", "tiff", "dds", "jks",
     "keystore", "pfx", "p12",
 ];
-
 fn extension(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.rsplit_once('.')
         .map(|(_, ext)| ext.to_lowercase())
         .unwrap_or_default()
 }
-
 fn image_type(path: &str) -> Option<&'static str> {
     let ext = extension(path);
     IMAGE_TYPES
@@ -431,7 +402,6 @@ fn image_type(path: &str) -> Option<&'static str> {
         .find(|(known, _)| *known == ext)
         .map(|(_, mime)| *mime)
 }
-
 impl FileKind {
     pub(crate) fn of(path: &str) -> FileKind {
         if image_type(path).is_some() {
@@ -443,7 +413,6 @@ impl FileKind {
         }
     }
 }
-
 /// One side of a file shown as binary.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -452,7 +421,6 @@ pub struct SideInfo {
     /// Hex SHA-256, for files up to `MAX_HASH_BYTES`.
     pub sha256: Option<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(
     rename_all = "camelCase",
@@ -489,14 +457,12 @@ pub enum FileDiff {
         too_large: bool,
     },
 }
-
 /// Images larger than this are described, not shown.
 const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
 /// Files larger than this get no SHA-256 (reading them takes too long).
 const MAX_HASH_BYTES: u64 = 512 * 1024 * 1024;
 /// Rows of a diff sent to the page at most.
 const MAX_ROWS: usize = 20_000;
-
 /// Runs `read` on the file `stored` of `side`.
 fn with_reader<T>(
     side: &Side,
@@ -521,7 +487,6 @@ fn with_reader<T>(
         }
     }
 }
-
 fn read_stored(side: &Side, stored: &str, limit: u64) -> Result<Vec<u8>, String> {
     with_reader(side, stored, |reader| {
         let mut bytes = Vec::new();
@@ -532,11 +497,9 @@ fn read_stored(side: &Side, stored: &str, limit: u64) -> Result<Vec<u8>, String>
         Ok(bytes)
     })
 }
-
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
-
 /// Size and SHA-256 of the file `stored`, read to its end.
 fn side_info(side: &Side, stored: &str, size: Option<u64>) -> Result<SideInfo, String> {
     use sha2::{Digest, Sha256};
@@ -566,7 +529,6 @@ fn side_info(side: &Side, stored: &str, size: Option<u64>) -> Result<SideInfo, S
         })
     })
 }
-
 fn info_of(bytes: &[u8]) -> SideInfo {
     use sha2::{Digest, Sha256};
     SideInfo {
@@ -574,7 +536,6 @@ fn info_of(bytes: &[u8]) -> SideInfo {
         sha256: Some(hex(&Sha256::digest(bytes))),
     }
 }
-
 /// The text of a file, or `None` for binary content. UTF-8 (with or
 /// without a byte order mark) and UTF-16 with one; anything else that has no
 /// NUL byte is read as UTF-8, replacing what is not.
@@ -608,7 +569,6 @@ pub(crate) fn decode_text(bytes: &[u8]) -> Option<(String, Option<&'static str>)
     }
     Some((String::from_utf8_lossy(bytes).into_owned(), None))
 }
-
 fn data_url(mime: &str, bytes: &[u8]) -> String {
     use base64::Engine;
     format!(
@@ -616,7 +576,6 @@ fn data_url(mime: &str, bytes: &[u8]) -> String {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     )
 }
-
 /// What changed in one file of two backups (either name may be missing: an
 /// added or deleted file), read from the zips or folders as far as the
 /// limits allow: a line diff for text, both pictures for images, size and
@@ -702,7 +661,6 @@ pub(crate) fn file_diff(
     }
     Ok(diff)
 }
-
 /// The same preview as `file_diff`, for two versions already in memory
 /// (GitHub Releases: the committed file and the one in the folder). A side
 /// is `None` when the file is missing there; `Err(size)` when it was too
@@ -767,13 +725,11 @@ pub(crate) fn bytes_diff(
     }
     diff
 }
-
 /// The most of a file `bytes_diff` needs: larger files are compared by
 /// size and SHA-256 only.
 pub(crate) fn preview_limit(path: &str) -> u64 {
     if image_type(path).is_some() { MAX_IMAGE_BYTES } else { MAX_DIFF_BYTES }
 }
-
 fn binary(
     old: &Side,
     old_name: Option<&str>,
@@ -791,11 +747,9 @@ fn binary(
         too_large,
     })
 }
-
 fn line_text(line: &str) -> String {
     line.trim_end_matches(['\n', '\r']).to_string()
 }
-
 /// A side-by-side line diff of two texts, with three lines of context
 /// around each change. Line endings alone don't make lines differ.
 pub(crate) fn text_diff(old: &str, new: &str) -> FileDiff {
@@ -903,7 +857,6 @@ pub(crate) fn text_diff(old: &str, new: &str) -> FileDiff {
         encoding: None,
     }
 }
-
 /// Whether `path` is a folder (an older folder backup) or a file.
 pub(crate) fn side_for(path: &Path) -> Result<Side, String> {
     let meta = fs::metadata(path)
@@ -914,21 +867,18 @@ pub(crate) fn side_for(path: &Path) -> Result<Side, String> {
         Side::Zip(path.to_path_buf())
     })
 }
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::project_backups::rules::{DEFAULT_PATTERNS, RuleInput};
     use std::io::Write;
     use zip::write::SimpleFileOptions;
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-compare-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     pub(crate) fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let mut zip = zip::ZipWriter::new(File::create(path).unwrap());
         for (name, body) in entries {
@@ -942,7 +892,6 @@ pub(crate) mod tests {
         }
         zip.finish().unwrap();
     }
-
     fn defaults() -> Rules {
         Rules::compile(
             &RuleInput {
@@ -953,7 +902,6 @@ pub(crate) mod tests {
         )
         .unwrap()
     }
-
     #[test]
     fn names_are_normalized() {
         assert_eq!(normalize_name("src\\lib\\./a.rs"), "src/lib/a.rs");
@@ -961,7 +909,6 @@ pub(crate) mod tests {
         // "ά" written as α + combining accent equals the composed letter.
         assert_eq!(normalize_name("\u{3b1}\u{301}.txt"), "\u{3ac}.txt");
     }
-
     #[test]
     fn a_wrapper_folder_is_ignored_when_it_pairs_more_files() {
         let mut old = BTreeMap::new();
@@ -983,14 +930,12 @@ pub(crate) mod tests {
             Some("steam-idler/src/main.js")
         );
         assert!(pairs["README.md"].old.is_none());
-
         // A project with one real top folder keeps it.
         let mut one = BTreeMap::new();
         one.insert("src/a.rs".to_string(), ());
         let pairs = match_files(&one, &one.clone());
         assert!(pairs.contains_key("src/a.rs"));
     }
-
     #[test]
     fn zips_and_folders_compare_alike() {
         let root = temp("zips");
@@ -1050,7 +995,6 @@ pub(crate) mod tests {
             ),
             (1, 1, 1, 1)
         );
-
         // The same files as a folder: nothing changed.
         let folder = root.join("folder");
         fs::create_dir_all(folder.join("src")).unwrap();
@@ -1082,7 +1026,6 @@ pub(crate) mod tests {
         assert_eq!(result.modified, 1);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn text_diffs_are_side_by_side_and_binaries_are_not() {
         let old: String = (1..=20).map(|n| format!("line {n}\n")).collect();
@@ -1115,7 +1058,6 @@ pub(crate) mod tests {
             panic!()
         };
         assert!(identical && rows.is_empty());
-
         let root = temp("binary");
         let zip = root.join("b.zip");
         make_zip(
@@ -1167,7 +1109,6 @@ pub(crate) mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn images_are_shown_and_texts_are_decoded() {
         let root = temp("images");
@@ -1221,7 +1162,6 @@ pub(crate) mod tests {
         assert_eq!(FileKind::of("a/B.PNG"), FileKind::Image);
         assert_eq!(FileKind::of("app.exe"), FileKind::Binary);
         assert_eq!(FileKind::of("src/main.rs"), FileKind::Text);
-
         // UTF-16 with a byte order mark (.reg, some .rc files) is text.
         let utf16: Vec<u8> = [0xFF, 0xFE]
             .into_iter()
@@ -1264,11 +1204,9 @@ pub(crate) mod tests {
         assert!(truncated && rows.len() == MAX_ROWS);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn exclusions_in_a_comparison_follow_the_markers_in_the_backup() {
-        // A Rust project: target/ beside Cargo.toml is output on both sides,
-        // a game's "target" sprites folder is not.
+        // A Rust project: target/ beside Cargo.toml is output on both sides, a game's "target" sprites folder is not.
         let root = temp("markers");
         let old = root.join("old.zip");
         make_zip(

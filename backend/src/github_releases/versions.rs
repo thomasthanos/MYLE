@@ -1,14 +1,6 @@
-//! The version of a project, in every file that states it: package.json and
-//! its lock file, Cargo.toml (and Cargo.lock), tauri.conf.json, pyproject.toml,
-//! a .csproj, a browser extension's manifest.json.
-//!
-//! Files are changed by replacing the version text alone, so their layout,
-//! comments and key order stay exactly as they were.
-
+// ! The version of a project, in every file that states it: package.json and ! its lock file, Cargo.toml (and Cargo.lock), tauri.conf.json, pyproject.toml, ! a .csproj, a browser extension's manifest.json. ! ! Files are changed by replacing the version text alone, so their layout, ! comments and key order stay exactly as they were.
 use std::path::{Path, PathBuf};
-
 use serde::Serialize;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileKind {
@@ -20,7 +12,6 @@ pub enum FileKind {
     Csproj,
     ExtensionManifest,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VersionFile {
@@ -31,7 +22,6 @@ pub struct VersionFile {
     /// Left out of bumps by the user.
     pub skipped: bool,
 }
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Versions {
@@ -42,9 +32,7 @@ pub struct Versions {
     /// Files (not skipped) that disagree with `current`.
     pub mismatched: Vec<String>,
 }
-
 // ─── Reading ───────────────────────────────────────────────────────────────
-
 /// The byte range of the string value at `path` (`["packages", "", "version"]`)
 /// in JSON `text`, without its quotes.
 pub(crate) fn json_string_range(text: &str, path: &[&str]) -> Option<(usize, usize)> {
@@ -116,11 +104,9 @@ pub(crate) fn json_string_range(text: &str, path: &[&str]) -> Option<(usize, usi
     }
     None
 }
-
 fn json_version(text: &str, path: &[&str]) -> Option<String> {
     json_string_range(text, path).map(|(a, b)| text[a..b].to_string())
 }
-
 /// A TOML `version = "…"` in `[section]` (`package`, `workspace.package`,
 /// `project`, `tool.poetry`): the byte range of the version text.
 pub(crate) fn toml_version_range(text: &str, section: &str) -> Option<(usize, usize)> {
@@ -155,11 +141,9 @@ pub(crate) fn toml_version_range(text: &str, section: &str) -> Option<(usize, us
     }
     None
 }
-
 fn toml_version(text: &str, section: &str) -> Option<String> {
     toml_version_range(text, section).map(|(a, b)| text[a..b].to_string())
 }
-
 fn toml_name(text: &str) -> Option<String> {
     let mut inside = false;
     for line in text.lines() {
@@ -175,13 +159,11 @@ fn toml_name(text: &str) -> Option<String> {
     }
     None
 }
-
 pub(crate) fn csproj_version_range(text: &str) -> Option<(usize, usize)> {
     let start = text.find("<Version>")? + "<Version>".len();
     let len = text[start..].find("</Version>")?;
     Some((start, start + len))
 }
-
 /// What looks like a version (`1.2.3`, `1.2.3-beta.1`, `1.2`) rather than a
 /// path (`../package.json`) or a placeholder.
 fn looks_like_version(value: &str) -> bool {
@@ -191,7 +173,6 @@ fn looks_like_version(value: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || ".-+".contains(c))
 }
-
 fn read_text(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     Some(
@@ -200,7 +181,6 @@ fn read_text(path: &Path) -> Option<String> {
             .unwrap_or(text),
     )
 }
-
 /// The version stated by `file` of kind `kind`.
 pub(crate) fn read_version(path: &Path, kind: FileKind) -> Option<String> {
     let text = read_text(path)?;
@@ -220,7 +200,6 @@ pub(crate) fn read_version(path: &Path, kind: FileKind) -> Option<String> {
     }?;
     looks_like_version(&version).then_some(version)
 }
-
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -237,7 +216,6 @@ const SKIP_DIRS: &[&str] = &[
     "gen",
     "coverage",
 ];
-
 /// The folders where an app's own version files live: the project folder
 /// and the folders right inside it that hold a tauri.conf.json (Tauri's
 /// `src-tauri`, MYLE's `backend`). Other folders (a mobile app, a helper
@@ -260,7 +238,6 @@ fn version_dirs(dir: &Path) -> Vec<PathBuf> {
     }
     dirs
 }
-
 fn rel(base: &Path, path: &Path) -> String {
     path.strip_prefix(base)
         .unwrap_or(path)
@@ -268,7 +245,6 @@ fn rel(base: &Path, path: &Path) -> String {
         .to_string()
         .replace('\\', "/")
 }
-
 /// Every version file of the project in `dir`.
 pub(crate) fn detect(dir: &Path, skip: &[String]) -> Versions {
     let mut files = Vec::new();
@@ -327,7 +303,6 @@ pub(crate) fn detect(dir: &Path, skip: &[String]) -> Versions {
         mismatched,
     }
 }
-
 fn main_version(files: &[VersionFile]) -> Option<String> {
     let counted: Vec<&VersionFile> = files.iter().filter(|f| !f.skipped).collect();
     let mut best: Option<(&str, usize, bool)> = None;
@@ -344,9 +319,7 @@ fn main_version(files: &[VersionFile]) -> Option<String> {
     }
     best.map(|(version, _, _)| version.to_string())
 }
-
 // ─── Bumping ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Bump {
@@ -354,7 +327,6 @@ pub enum Bump {
     Minor,
     Major,
 }
-
 /// The next version: `1.2.3` → `1.2.4` / `1.3.0` / `2.0.0`. A pre-release
 /// (`1.3.0-beta.2`) becomes its release on a patch bump (`1.3.0`).
 pub(crate) fn bump(current: &str, kind: Bump) -> Result<String, String> {
@@ -377,7 +349,6 @@ pub(crate) fn bump(current: &str, kind: Bump) -> Result<String, String> {
     }
     Ok(version.to_string())
 }
-
 /// A version, also a short one (`1.2` = `1.2.0`).
 pub(crate) fn parse(text: &str) -> Result<semver::Version, String> {
     let text = text.trim().trim_start_matches('v');
@@ -385,7 +356,6 @@ pub(crate) fn parse(text: &str) -> Result<semver::Version, String> {
         .or_else(|_| semver::Version::parse(&format!("{text}.0")))
         .map_err(|_| format!("\"{text}\" is not a version like 1.2.3."))
 }
-
 /// A version the user typed: `1.2.3`, `1.2.3-beta.1`.
 pub(crate) fn check_new_version(text: &str) -> Result<String, String> {
     let text = text.trim().trim_start_matches('v');
@@ -393,11 +363,9 @@ pub(crate) fn check_new_version(text: &str) -> Result<String, String> {
         .map(|v| v.to_string())
         .map_err(|_| format!("\"{text}\" is not a version like 1.2.3 or 1.2.3-beta.1."))
 }
-
 fn replace_range(text: &str, (a, b): (usize, usize), with: &str) -> String {
     format!("{}{}{}", &text[..a], with, &text[b..])
 }
-
 /// `text` (a file of `kind`) with its version set to `new`.
 pub(crate) fn set_version(text: &str, kind: FileKind, new: &str) -> Result<String, String> {
     let missing = || "The version was not found in the file.".to_string();
@@ -439,7 +407,6 @@ pub(crate) fn set_version(text: &str, kind: FileKind, new: &str) -> Result<Strin
         }
     })
 }
-
 /// Cargo.lock with the version of the crate `name` set to `new`.
 pub(crate) fn set_lock_version(text: &str, name: &str, old: &str, new: &str) -> Option<String> {
     let needle = format!("name = \"{name}\"\nversion = \"{old}\"");
@@ -460,7 +427,6 @@ pub(crate) fn set_lock_version(text: &str, name: &str, old: &str, new: &str) -> 
         None
     }
 }
-
 /// One file a bump changes, with its old and new text.
 #[derive(Clone, Debug)]
 pub(crate) struct Edit {
@@ -473,7 +439,6 @@ pub(crate) struct Edit {
     /// rather than leaving an empty file behind.
     pub created: bool,
 }
-
 /// The edits that set every (not skipped) version file of the project in
 /// `dir` to `new`, Cargo.lock entries included.
 pub(crate) fn plan(dir: &Path, versions: &Versions, new: &str) -> Result<Vec<Edit>, String> {
@@ -538,7 +503,6 @@ pub(crate) fn plan(dir: &Path, versions: &Versions, new: &str) -> Result<Vec<Edi
     }
     Ok(edits)
 }
-
 /// Writes `edits`; on a failure the files already written are put back.
 pub(crate) fn apply(edits: &[Edit]) -> Result<(), String> {
     for (index, edit) in edits.iter().enumerate() {
@@ -549,7 +513,6 @@ pub(crate) fn apply(edits: &[Edit]) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// Puts the files of `edits` back as they were.
 pub(crate) fn undo(edits: &[Edit]) {
     for edit in edits {
@@ -560,11 +523,9 @@ pub(crate) fn undo(edits: &[Edit]) {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn temp(name: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("myle-gr-versions-{name}-{}", std::process::id()));
@@ -572,7 +533,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
-
     #[test]
     fn json_versions_are_found_at_their_path_only() {
         let lock = r#"{
@@ -602,7 +562,6 @@ mod tests {
             Some("3.1.4")
         );
     }
-
     #[test]
     fn toml_csproj_and_pyproject() {
         let cargo = "[package]\nname = \"my-app\"\nversion = \"0.4.1\" # the app\n\n[dependencies]\nserde = { version = \"1\" }\n";
@@ -631,7 +590,6 @@ mod tests {
         assert!(lock2.contains("name = \"my-app\"\nversion = \"0.5.0\""));
         assert!(lock2.contains("name = \"other\"\nversion = \"0.4.1\""));
     }
-
     #[test]
     fn a_tauri_app_like_myle_and_a_mismatch() {
         let dir = temp("tauri");
@@ -675,7 +633,6 @@ mod tests {
         );
         assert_eq!(versions.current.as_deref(), Some("9.5.0"));
         assert_eq!(versions.mismatched, ["backend/Cargo.toml"]);
-
         let edits = plan(&dir, &versions, "9.6.0").unwrap();
         let rels: Vec<&str> = edits.iter().map(|e| e.rel.as_str()).collect();
         assert_eq!(
@@ -698,14 +655,12 @@ mod tests {
         );
         undo(&edits);
         assert_eq!(detect(&dir, &[]), versions);
-
         // Skipped files neither count nor change.
         let skipped = detect(&dir, &["backend/Cargo.toml".into()]);
         assert!(skipped.mismatched.is_empty());
         assert_eq!(plan(&dir, &skipped, "9.6.0").unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn extensions_csproj_and_bumps() {
         let dir = temp("ext");
@@ -730,7 +685,6 @@ mod tests {
         .unwrap();
         assert_eq!(detect(&dir, &[]).files.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
-
         assert_eq!(bump("1.2.3", Bump::Patch).unwrap(), "1.2.4");
         assert_eq!(bump("1.2.3", Bump::Minor).unwrap(), "1.3.0");
         assert_eq!(bump("1.2.3", Bump::Major).unwrap(), "2.0.0");
@@ -740,7 +694,6 @@ mod tests {
         assert_eq!(check_new_version("v2.0.0-rc.1").unwrap(), "2.0.0-rc.1");
         assert!(check_new_version("2.0").is_err());
     }
-
     #[test]
     fn undoing_a_file_the_release_made_removes_it() {
         let dir = temp("created");

@@ -1,14 +1,7 @@
-//! The one-time import from Github-Build-Release (the Electron app this page
-//! replaces): its last project joins the page and its DeepSeek key moves
-//! into MYLE's sealed storage. The key is then removed from that app's
-//! plain-text settings file, and the page says so.
-
+// ! The one-time import from Github-Build-Release (the Electron app this page ! replaces): its last project joins the page and its DeepSeek key moves ! into MYLE's sealed storage. The key is then removed from that app's ! plain-text settings file, and the page says so.
 use std::path::{Path, PathBuf};
-
 use serde_json::Value;
-
 use super::store::{GbrImport, Settings};
-
 /// `%APPDATA%\ThomasThanos\GithubReleaseManager\grm-config.json`.
 pub(crate) fn config_path() -> Option<PathBuf> {
     let appdata = std::env::var_os("APPDATA")?;
@@ -19,7 +12,6 @@ pub(crate) fn config_path() -> Option<PathBuf> {
             .join("grm-config.json"),
     )
 }
-
 /// The top folder of the git repository `path` is in.
 fn repo_root(path: &Path) -> Option<PathBuf> {
     let mut current = Some(path);
@@ -31,7 +23,6 @@ fn repo_root(path: &Path) -> Option<PathBuf> {
     }
     None
 }
-
 /// Imports from the settings file at `config`. `has_key` tells whether
 /// MYLE has a DeepSeek key already; `save_key` seals one.
 pub(crate) fn import_from(
@@ -89,12 +80,10 @@ pub(crate) fn import_from(
         || report.error.is_some())
     .then_some(report)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
-
     #[test]
     fn the_last_project_and_key_come_over_and_the_plain_key_is_removed() {
         let dir = std::env::temp_dir().join(format!("myle-gr-gbr-{}", std::process::id()));

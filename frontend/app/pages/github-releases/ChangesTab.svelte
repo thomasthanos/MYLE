@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The repository's uncommitted changes: pick what goes in, see each
-  // file's diff, write the message (or let AI), commit and push.
+  // The repository's uncommitted changes: pick what goes in, see each file's diff, write the message (or let AI), commit and push.
   import { onMount, untrack } from "svelte";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -352,8 +351,7 @@
   .notice { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid rgb(127 216 255 / 0.28); border-radius: 10px; background: rgb(127 216 255 / 0.07); color: #9fdcff; font-size: 12.5px; }
   .notice span { flex: 1; color: var(--text-2); }
   .grid { display: grid; flex: 1; grid-template-columns: minmax(290px, 380px) minmax(0, 1fr); gap: 12px; min-height: 0; }
-  /* Too narrow for side by side: the files, then the diff, and the tab
-     scrolls. */
+  /* Too narrow for side by side: the files, then the diff, and the tab scrolls. */
   @container changes (max-width: 760px) {
     .grid {
       display: flex;

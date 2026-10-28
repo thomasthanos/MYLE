@@ -471,8 +471,7 @@
 {/if}
 
 <style>
-  /* Laid out by its own width, not the window's: the sidebar takes a share.
-     It fills the page's height; the list and the entry scroll inside it. */
+  /* Laid out by its own width, not the window's: the sidebar takes a share. It fills the page's height; the list and the entry scroll inside it. */
   .vault { display: flex; flex: 1 1 auto; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; container: vault / inline-size; }
 
   .toolbar { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -511,8 +510,7 @@
 
   .windows-hotkey-error { margin: 0; color: var(--text-3); font-size: 11.5px; }
 
-  /* Whatever height is left: a banner above makes it shorter, never the
-     page longer. */
+  /* Whatever height is left: a banner above makes it shorter, never the page longer. */
   .split { display: grid; flex: 1 1 auto; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 14px; min-height: 300px; }
 
   @container vault (min-width: 1100px) {
@@ -556,8 +554,7 @@
 
   .item-main:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: -2px; }
 
-  /* Copy buttons take the marks' place while the row is pointed at or
-     has the keyboard. */
+  /* Copy buttons take the marks' place while the row is pointed at or has the keyboard. */
   .quick { display: none; flex: none; gap: 2px; padding-right: 8px; }
 
   .item:hover .quick,
@@ -778,8 +775,7 @@
     }
   }
 
-  /* A 1080p screen (and anything short): tighter bars and rows, so more
-     logins show and nothing but the list scrolls. */
+  /* A 1080p screen (and anything short): tighter bars and rows, so more logins show and nothing but the list scrolls. */
   @media (max-height: 1000px) {
     .vault,
     .split {

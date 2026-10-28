@@ -1,5 +1,4 @@
-// Page-level singleton: ContentArea destroys page components when navigating,
-// so scan results and running work live here rather than in GameSaves.svelte.
+// Page-level singleton: ContentArea destroys page components when navigating, so scan results and running work live here rather than in GameSaves.svelte.
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { badges } from "../../../lib/badges.svelte";
@@ -44,8 +43,7 @@ interface OperationView {
   total: number;
   current: string | null;
   note: string | null;
-  /** A check the app started by itself (every ten minutes, on coming back to
-   *  the window): a line in the toolbar, not the progress bar. */
+  /* A check the app started by itself (every ten minutes, on coming back to the window): a line in the toolbar, not the progress bar. */
   background?: boolean;
 }
 const KEY = {
@@ -60,8 +58,7 @@ const SYNCED_SETTINGS = new Set(["schedule", "customGame", "backupFolder"]);
 /** Background check for saves changed by playing, while the app is open. */
 const WATCH_EVERY_MS = 10 * 60 * 1000;
 const WATCH_FIRST_MS = 20 * 1000;
-/** Coming back to the window checks again, but not more often than this:
- *  every Alt+Tab back was one more scan. */
+/* Coming back to the window checks again, but not more often than this: every Alt+Tab back was one more scan. */
 const FOCUS_CHECK_MS = 10 * 60 * 1000;
 const emptySettings = (): GameSavesSettings => ({
   backupFolder: null,
@@ -109,8 +106,7 @@ class GameSavesState {
   scanResult = $state<GameSavesScan | null>(null);
   loading = $state(true);
   error = $state<string | null>(null);
-  /** The games the last backup or restore could not handle, and why. Stays
-   *  on the page until dismissed or the next operation. */
+  /* The games the last backup or restore could not handle, and why. Stays on the page until dismissed or the next operation. */
   failures = $state<{ kind: "backup" | "restore"; items: GameFailure[] } | null>(null);
   settingsOpen = $state(readFlag(KEY.settingsOpen, false));
   /** Covers by Steam app id, as `data:` URLs. */
@@ -217,8 +213,7 @@ class GameSavesState {
       this.loading = false;
     }
   }
-  /** Shows an operation this page did not start: one from before a reload,
-   *  or the scheduled backup, which runs in a process of its own. */
+  /* Shows an operation this page did not start: one from before a reload, or the scheduled backup, which runs in a process of its own. */
   #adopt(kind: OperationKind) {
     const scheduled = kind === "scheduledBackup";
     this.operation = {
@@ -232,9 +227,7 @@ class GameSavesState {
     };
     void this.#waitForAdopted();
   }
-  /** After an action was refused or a refresh failed: when the scheduled
-   *  backup is what holds Game Saves, the page waits for it and then shows
-   *  what it backed up, instead of being left with the error. */
+  /* After an action was refused or a refresh failed: when the scheduled backup is what holds Game Saves, the page waits for it and then shows what it backed up, instead of being left with the error. */
   async #adoptScheduled() {
     try {
       const page = await gameSavesApi.getState();
@@ -245,8 +238,7 @@ class GameSavesState {
       // The error already shown stands.
     }
   }
-  /** The page was reloaded while an operation ran: its result cannot reach this
-   *  page any more, so wait until the backend is idle and rescan. */
+  /* The page was reloaded while an operation ran: its result cannot reach this page any more, so wait until the backend is idle and rescan. */
   async #waitForAdopted() {
     const adopted = this.operation;
     while (this.operation === adopted) {
@@ -273,10 +265,7 @@ class GameSavesState {
     this.tab = readJson(KEY.tab, this.tab, oneOf("pc", "backup"));
     this.filter = readJson(KEY.filter, this.filter, oneOf("all", "changed", "notBackedUp", "backedUp", "problems"));
   }
-  /** For the app's preload: the last saved list, without running the
-   *  engine, so the page opens on it (and the sidebar badge counts changed
-   *  saves from the start). Opening the page still checks. Its covers come
-   *  once the window is open (`loadCovers`). */
+  /* For the app's preload: the last saved list, without running the engine, so the page opens on it (and the sidebar badge counts changed saves from the start). Opening the page still checks. Its covers come once the window is open (`loadCovers`). */
   async preload() {
     if (this.scanResult || this.#initialized) return;
     try {
@@ -289,8 +278,7 @@ class GameSavesState {
       return;
     }
   }
-  /** Asks for the covers of the listed games not asked for yet. Quietly:
-   *  a game without one keeps its monogram. */
+  /* Asks for the covers of the listed games not asked for yet. Quietly: a game without one keeps its monogram. */
   async loadCovers() {
     const online = this.steamCovers;
     const ids = [...(this.scanResult?.onThisPc ?? []), ...(this.scanResult?.inBackup ?? [])]
@@ -378,13 +366,11 @@ class GameSavesState {
     const selected = this.snapshotChoices[game.id];
     return game.snapshots.some((snapshot) => snapshot.id === selected) ? selected : (game.snapshots[0]?.id ?? "");
   }
-  /** The game's restore location. By the game alone: after a restore its
-   *  files show at the new place, and the mapping must stay visible there. */
+  /* The game's restore location. By the game alone: after a restore its files show at the new place, and the mapping must stay visible there. */
   mappingFor(game: GameSaveEntry): PathMapping | undefined {
     return this.page.settings.pathMappings.find((mapping) => mapping.gameId === game.id);
   }
-  /** The game's save folders still without a place on this PC: none of its
-   *  restore locations covers them. */
+  /* The game's save folders still without a place on this PC: none of its restore locations covers them. */
   unmappedLeft(game: GameSaveEntry): string[] {
     const sources = this.page.settings.pathMappings.filter((mapping) => mapping.gameId === game.id).map((mapping) => mapping.source);
     const inside = (path: string, folder: string) => {
@@ -398,8 +384,7 @@ class GameSavesState {
     if (game.status !== "needsLocation") return false;
     return game.unmappedPaths?.length ? this.unmappedLeft(game).length > 0 : !this.mappingFor(game);
   }
-  /** The save folder a new restore location is for: the first one with no
-   *  place on this PC yet (a game may keep saves in several). */
+  /* The save folder a new restore location is for: the first one with no place on this PC yet (a game may keep saves in several). */
   unmappedPathOf(game: GameSaveEntry): string | undefined {
     return this.unmappedLeft(game)[0] ?? game.paths[0];
   }
@@ -452,10 +437,7 @@ class GameSavesState {
     }
     if (discoveryDue) void this.discover();
   }
-  /**
-   * Full scan in the background, for games installed since the last one.
-   * The list stays usable; any action cancels it first.
-   */
+  /* Full scan in the background, for games installed since the last one. The list stays usable; any action cancels it first. */
   discover(): Promise<void> {
     if (this.#discovery) return this.#discovery;
     if (this.locked || this.customDialogOpen || this.restoreDialogOpen || !this.page.engineAvailable) return Promise.resolve();
@@ -487,10 +469,7 @@ class GameSavesState {
     await gameSavesApi.cancel().catch(() => {});
     await running;
   }
-  /**
-   * Starts the background check that notices saves changed by playing: shortly
-   * after launch, every ten minutes, and on coming back to the window.
-   */
+  /* Starts the background check that notices saves changed by playing: shortly after launch, every ten minutes, and on coming back to the window. */
   startWatcher() {
     if (this.#watching || !isTauri()) return;
     this.#watching = true;
@@ -506,9 +485,7 @@ class GameSavesState {
       this.#watching = false;
     };
   }
-  /** Ends the watcher: on a hot reload in development, the old copy of this
-   *  module would otherwise go on scanning next to the new one, one more after
-   *  every reload. */
+  /* Ends the watcher: on a hot reload in development, the old copy of this module would otherwise go on scanning next to the new one, one more after every reload. */
   stopWatcher() {
     this.#stopWatching?.();
     this.#stopWatching = null;
@@ -577,8 +554,7 @@ class GameSavesState {
   async backupSelected() {
     await this.backup(this.selectedGames.map((game) => game.id));
   }
-  /** Backs up, in one go, the games whose saves were never backed up
-   *  ("new"), changed since their backup ("changed"), or both. */
+  /* Backs up, in one go, the games whose saves were never backed up ("new"), changed since their backup ("changed"), or both. */
   async backupPending(which: "both" | "new" | "changed") {
     const games = which === "new" ? this.newGames : which === "changed" ? this.changedGames : this.pendingGames;
     if (!games.length) return;
@@ -713,8 +689,7 @@ class GameSavesState {
     });
     if (changed) await this.refresh();
   }
-  /** Account import may reconnect this install to existing backups. The
-   * previous list describes another folder and must be checked again. */
+  /* Account import may reconnect this install to existing backups. The previous list describes another folder and must be checked again. */
   async applySyncedSettings(settings: GameSavesSettings) {
     this.#settingsRevision++;
     if (this.applyBackupFolder(settings)) await this.refresh();
@@ -733,8 +708,7 @@ class GameSavesState {
   }
   private invalidateBackupHistory() {
     if (!this.scanResult) return;
-    // Old snapshots belong to the old folder. Never offer them for restore
-    // while the new folder is being checked, including when that check fails.
+    // Old snapshots belong to the old folder. Never offer them for restore while the new folder is being checked, including when that check fails.
     this.scanResult.inBackup = [];
     this.scanResult.backupFolder = null;
     this.scanResult.stats.backupGames = 0;
@@ -830,8 +804,7 @@ class GameSavesState {
       this.page.settings = await gameSavesApi.setPathMapping({ gameId: game.id, source, target });
     });
   }
-  /** Restores to where this PC's Documents keeps the game's saves (they were
-   *  backed up from a Documents that OneDrive moved, or not). */
+  /* Restores to where this PC's Documents keeps the game's saves (they were backed up from a Documents that OneDrive moved, or not). */
   async useSuggestedLocation(game: GameSaveEntry) {
     const target = game.suggestedTarget;
     const source = this.unmappedPathOf(game);
@@ -887,16 +860,14 @@ class GameSavesState {
     let saved = false;
     try {
       await this.#stopDiscovery();
-      // One writer for every row. Repeated clicks replace the queued value;
-      // an in-flight write finishes before the most recent choice is saved.
+      // One writer for every row. Repeated clicks replace the queued value; an in-flight write finishes before the most recent choice is saved.
       while (this.#autoBackupDesired.size) {
         const [id, enabled] = this.#autoBackupDesired.entries().next().value!;
         this.#autoBackupDesired.delete(id);
         this.#mirrorAutoBackup(id, enabled);
         try {
           const settings = await gameSavesApi.setGameAutoBackup(id, enabled);
-          // Patch only this preference. Replacing the entire settings/scan
-          // snapshot on each click invalidates unrelated UI and cached rows.
+          // Patch only this preference. Replacing the entire settings/scan snapshot on each click invalidates unrelated UI and cached rows.
           this.page.settings.autoBackupExcludedGameIds = settings.autoBackupExcludedGameIds;
           for (const game of this.page.settings.customGames) {
             const updated = settings.customGames.find((item) => item.id === game.id);
@@ -955,9 +926,7 @@ class GameSavesState {
     if (!this.operation) return;
     if (event.event === "stage") {
       if (this.operation.stage !== event.data.stage) {
-        // A completed count belongs only to the stage that produced it. In
-        // particular, restore preview must not leave the safety-copy stage
-        // looking frozen at 100%.
+        // A completed count belongs only to the stage that produced it. In particular, restore preview must not leave the safety-copy stage looking frozen at 100%.
         this.operation.stage = event.data.stage;
         this.operation.done = 0;
         this.operation.total = 0;
@@ -992,8 +961,7 @@ class GameSavesState {
   }
   private keepFailedSelection(ids: string[], result: GameSavesOperationResult) {
     const failed = new Set(result.failedGames);
-    // IPC returns failure titles, not IDs. Ambiguous duplicate titles stay
-    // selected rather than hiding a failure from the user.
+    // IPC returns failure titles, not IDs. Ambiguous duplicate titles stay selected rather than hiding a failure from the user.
     const games = this.games;
     for (const id of ids) {
       const game = games.find((entry) => entry.id === id);

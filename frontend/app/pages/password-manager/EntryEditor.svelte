@@ -398,8 +398,7 @@
 </form>
 
 <style>
-  /* The same readable width as the entry it edits; two columns when the
-     panel is wide enough, so the whole form shows at 1080p. */
+  /* The same readable width as the entry it edits; two columns when the panel is wide enough, so the whole form shows at 1080p. */
   .editor { display: grid; gap: 14px; width: min(100%, 760px); margin: 0 auto; container: editor / inline-size; }
 
   .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }

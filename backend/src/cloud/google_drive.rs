@@ -1,14 +1,5 @@
-//! Google Drive for desktop keeps its drive (`G:`) in a file system of its
-//! own, outside the Windows cloud files API, and offers one way to make files
-//! online-only: its Explorer menu, "Offline access" > "Online only". This
-//! asks that menu, as a right-click would. Online-only files still fill
-//! Drive's cache, and only Drive's own "Clear cache" button empties it: that
-//! is pressed through UI Automation while Drive's storage window is open.
-//! Google documents none of it, so when either changes, the page says so and
-//! shows Drive's own steps.
-
+// ! Google Drive for desktop keeps its drive (`G:`) in a file system of its ! own, outside the Windows cloud files API, and offers one way to make files ! online-only: its Explorer menu, "Offline access" > "Online only". This ! asks that menu, as a right-click would. Online-only files still fill ! Drive's cache, and only Drive's own "Clear cache" button empties it: that ! is pressed through UI Automation while Drive's storage window is open. ! Google documents none of it, so when either changes, the page says so and ! shows Drive's own steps.
 use std::path::Path;
-
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
     COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
@@ -31,13 +22,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{GUID, HSTRING, Interface, PCSTR, PWSTR};
 use winreg::RegKey;
 use winreg::enums::HKEY_CLASSES_ROOT;
-
 /// The first command id given to Drive's menu.
 const FIRST: u32 = 1;
 /// Drive's own number for "Online only" (counted from its first command),
 /// for when the menu is not in English. "Available offline" is 7.
 const ONLINE_ONLY: u32 = 8;
-
 /// One command of a submenu.
 #[derive(Debug)]
 pub(super) struct Choice {
@@ -46,7 +35,6 @@ pub(super) struct Choice {
     pub text: String,
     pub checked: bool,
 }
-
 /// "Online only" among the menu's submenus: the second of a submenu of
 /// exactly two ("Available offline", "Online only"), named so or numbered as
 /// Drive numbers it. None when the menu no longer looks like that.
@@ -62,10 +50,8 @@ pub(super) fn online_only_choice(submenus: &[Vec<Choice>]) -> Option<&Choice> {
     let choice = found.next()?;
     found.next().is_none().then_some(choice)
 }
-
 /// Drive's "Storage on your computer" window shows this page, in any language.
 const STORAGE_PAGE: &str = "file_stats_dialog.html";
-
 /// What pressing "Clear cache" found.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "state", content = "size")]
@@ -77,7 +63,6 @@ pub(super) enum CacheClear {
     /// Pressed. The cache's size as the window showed it before ("94.4 GB").
     Cleared(Option<String>),
 }
-
 /// "Clear cache" among the storage window's buttons (name and class): by
 /// name, or, in another language, the second of its four dialog buttons
 /// ("Clear offline files", "Clear cache", "Go to cache settings", "Done").
@@ -92,7 +77,6 @@ pub(super) fn clear_cache_button(buttons: &[(String, String)]) -> Option<usize> 
         _ => None,
     }
 }
-
 /// Presses "Clear cache" in Drive's storage window, when it is open. Drive
 /// then removes what it may (files still uploading and files kept offline stay).
 pub(super) fn clear_cache() -> Result<CacheClear, String> {
@@ -137,7 +121,6 @@ pub(super) fn clear_cache() -> Result<CacheClear, String> {
         }
     })
 }
-
 /// The page of Drive's storage window, among Drive's top-level windows.
 unsafe fn storage_page(automation: &IUIAutomation) -> windows::core::Result<Option<IUIAutomationElement>> {
     // SAFETY: (for the whole body) calls on live UI Automation objects.
@@ -160,7 +143,6 @@ unsafe fn storage_page(automation: &IUIAutomation) -> windows::core::Result<Opti
         Ok(None)
     }
 }
-
 /// Whether the process runs `GoogleDriveFS.exe`.
 fn is_google_drive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -183,7 +165,6 @@ fn is_google_drive(pid: u32) -> bool {
         .to_lowercase()
         .ends_with(r"\googledrivefs.exe")
 }
-
 /// Whether "Online only" is on for a folder of Google Drive.
 pub(super) fn is_online_only(path: &Path) -> Result<bool, String> {
     on_shell_thread(|| {
@@ -191,7 +172,6 @@ pub(super) fn is_online_only(path: &Path) -> Result<bool, String> {
         Ok(menu.online_only()?.checked)
     })
 }
-
 /// Turns "Online only" on for a folder of Google Drive. False when it was
 /// on already, and nothing was asked.
 pub(super) fn make_online_only(path: &Path) -> Result<bool, String> {
@@ -213,13 +193,11 @@ pub(super) fn make_online_only(path: &Path) -> Result<bool, String> {
         Ok(true)
     })
 }
-
 /// Runs `work` on a thread of its own with COM set up as the shell wants,
 /// so no other thread's COM state is touched.
 fn on_shell_thread<T: Send>(work: impl FnOnce() -> Result<T, String> + Send) -> Result<T, String> {
     on_com_thread(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE, work)
 }
-
 fn on_com_thread<T: Send>(apartment: COINIT, work: impl FnOnce() -> Result<T, String> + Send) -> Result<T, String> {
     std::thread::scope(|scope| {
         scope
@@ -237,7 +215,6 @@ fn on_com_thread<T: Send>(apartment: COINIT, work: impl FnOnce() -> Result<T, St
             .unwrap_or_else(|_| Err("Google Drive's menu stopped unexpectedly.".into()))
     })
 }
-
 /// Drive's Explorer menu handler (`drivefsext.dll`), under whatever key name
 /// the installed version gave it.
 fn handler() -> Option<GUID> {
@@ -263,19 +240,16 @@ fn handler() -> Option<GUID> {
         GUID::try_from(clsid.trim_matches(['{', '}'])).ok()
     })
 }
-
 /// Drive's menu for one folder, built on this thread.
 struct Menu {
     menu: IContextMenu,
     handle: HMENU,
 }
-
 impl Menu {
     fn open(path: &Path) -> Result<Self, String> {
         let handler = handler().ok_or("Google Drive's Explorer menu isn't installed.")?;
         let failed = |error: windows::core::Error| error.message();
-        // SAFETY: COM is set up on this thread (on_shell_thread); every
-        // pointer passed lives for its call, and the folder's ID list is freed.
+        // SAFETY: COM is set up on this thread (on_shell_thread); every pointer passed lives for its call, and the folder's ID list is freed.
         unsafe {
             let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None).map_err(failed)?;
             let parent = item.GetParent().map_err(failed)?;
@@ -297,7 +271,6 @@ impl Menu {
             Ok(menu)
         }
     }
-
     fn online_only(&self) -> Result<Choice, String> {
         let submenus: Vec<Vec<Choice>> = entries(self.handle)
             .into_iter()
@@ -323,20 +296,17 @@ impl Menu {
         })
     }
 }
-
 impl Drop for Menu {
     fn drop(&mut self) {
         // SAFETY: created by CreatePopupMenu and destroyed only here.
         let _ = unsafe { DestroyMenu(self.handle) };
     }
 }
-
 enum Entry {
     Command(Choice),
     Submenu(HMENU),
     Separator,
 }
-
 fn entries(menu: HMENU) -> Vec<Entry> {
     // SAFETY: a live menu handle.
     let count = unsafe { GetMenuItemCount(Some(menu)) };
@@ -366,17 +336,14 @@ fn entries(menu: HMENU) -> Vec<Entry> {
         })
         .collect()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     #[ignore = "presses Clear cache in Google Drive's storage window when it is open"]
     fn this_pc_s_drive_storage_window() {
         println!("{:?}", clear_cache());
     }
-
     #[test]
     fn clear_cache_is_found_by_name_or_as_the_second_dialog_button_never_guessed() {
         let dialog = "mdc-button dfs-button dfs-dialog-button";
@@ -397,11 +364,9 @@ mod tests {
         twice.push(("Clear cache".into(), dialog.into()));
         assert_eq!(clear_cache_button(&twice), None);
     }
-
     fn choice(id: u32, text: &str) -> Choice {
         Choice { id, text: text.into(), checked: false }
     }
-
     #[test]
     fn online_only_is_found_by_name_or_by_drive_s_number_and_never_guessed() {
         let english = [vec![choice(7, "Available offline"), choice(8, "Online only")]];

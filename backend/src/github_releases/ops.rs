@@ -1,21 +1,11 @@
-//! The git steps the page runs: commit, push, pull and fetch, with the
-//! failures they can have turned into problems the page can act on.
-//!
-//! A push or fetch first uses the user's own git sign-in (Git Credential
-//! Manager, SSH). Only when GitHub refuses it, and the remote is GitHub over
-//! HTTPS, it is tried once more with the connected account's token, handed
-//! to git through its environment for that one run.
-
+// ! The git steps the page runs: commit, push, pull and fetch, with the ! failures they can have turned into problems the page can act on. ! ! A push or fetch first uses the user's own git sign-in (Git Credential ! Manager, SSH). Only when GitHub refuses it, and the remote is GitHub over ! HTTPS, it is tried once more with the connected account's token, handed ! to git through its environment for that one run.
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-
 use serde::Serialize;
-
 use super::git::{self, GitEnv, Output, Remote};
 use super::{Problem, secrets};
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetOutcome {
@@ -27,11 +17,9 @@ pub struct NetOutcome {
     pub used_token: bool,
     pub output: String,
 }
-
 fn https_github(remote: &Remote) -> bool {
     remote.owner.is_some() && !remote.ssh
 }
-
 /// Hooks git would run (`.git/hooks/<name>` or a `core.hooksPath` such as
 /// husky's).
 async fn has_hooks(repo: &Path) -> bool {
@@ -49,7 +37,6 @@ async fn has_hooks(repo: &Path) -> bool {
         .iter()
         .any(|name| dir.join(name).is_file())
 }
-
 /// Runs a network command, retrying once with the token when the user's
 /// own sign-in is refused.
 pub(crate) async fn network(
@@ -66,8 +53,7 @@ pub(crate) async fn network(
     } else {
         None
     };
-    // Background fetches use the token right away when there is one: they
-    // must never pop up a sign-in window.
+    // Background fetches use the token right away when there is one: they must never pop up a sign-in window.
     let first_env = GitEnv {
         token: if quiet { token.clone() } else { None },
         quiet,
@@ -110,7 +96,6 @@ pub(crate) async fn network(
     }
     Ok((output, outcome))
 }
-
 pub(crate) async fn require_remote(repo: &Path) -> Result<Remote, String> {
     git::remote(repo).await?.ok_or_else(|| {
         Problem::new(
@@ -120,7 +105,6 @@ pub(crate) async fn require_remote(repo: &Path) -> Result<Remote, String> {
         .into()
     })
 }
-
 /// Pushes the current branch: to its upstream, or (the first time) to a
 /// branch of the same name that it then tracks.
 pub(crate) async fn push(
@@ -162,7 +146,6 @@ pub(crate) async fn push(
     outcome.set_upstream = set_upstream && outcome.ok;
     Ok(outcome)
 }
-
 /// Pushes one tag.
 pub(crate) async fn push_tag(
     repo: &Path,
@@ -184,7 +167,6 @@ pub(crate) async fn push_tag(
     .await?;
     Ok(outcome)
 }
-
 /// Pulls the upstream's new commits, putting the local ones on top
 /// (`--rebase`, uncommitted changes set aside and back). A conflict undoes
 /// the whole pull, so the repository is left as it was.
@@ -242,7 +224,6 @@ pub(crate) async fn pull(
     }
     Ok(outcome)
 }
-
 /// Fetches the remote's branches and tags. `quiet`: in the background,
 /// without a sign-in window.
 pub(crate) async fn fetch(
@@ -263,7 +244,6 @@ pub(crate) async fn fetch(
     .await?;
     Ok(outcome)
 }
-
 /// Commits what is staged (or, with `paths`, exactly those paths as they
 /// are in the folder) with `message`; the new commit's id.
 pub(crate) async fn commit(

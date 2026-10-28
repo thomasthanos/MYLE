@@ -1,6 +1,4 @@
-// Dev-only stand-in for the setup crate, so the window can be worked on in a
-// browser: `npx vite`, then /installer.html?demo=install (or =update,
-// =uninstall, =running, =error, =shortcut-warning).
+// Dev-only stand-in for the setup crate, so the window can be worked on in a browser: `npx vite`, then /installer.html?demo=install (or =update, =uninstall, =running, =error, =shortcut-warning).
 import type { Progress, SetupApi, SetupState } from "./api";
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export function previewApi(mode: string): SetupApi {

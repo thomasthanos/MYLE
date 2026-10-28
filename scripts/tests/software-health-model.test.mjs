@@ -4,7 +4,6 @@ import { registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
-
 const hooks = registerHooks({
   load(url, context, next) {
     if (!url.endsWith("/health-model.ts")) return next(url, context);

@@ -1,20 +1,14 @@
 use std::path::{Component, Path, PathBuf};
-
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_EXPAND_SZ, REG_SZ};
 use winreg::{RegKey, RegValue};
-
 use crate::download::err;
-
 const USER_ENVIRONMENT: &str = "Environment";
-
 pub fn add_user_path_entry(entry: &Path) -> Result<(), String> {
     update_user_path(entry, true)
 }
-
 pub fn remove_user_path_entry(entry: &Path) -> Result<(), String> {
     update_user_path(entry, false)
 }
-
 fn update_user_path(entry: &Path, add: bool) -> Result<(), String> {
     if !entry.is_absolute() {
         return Err("Refusing a non-absolute PATH entry.".into());
@@ -23,10 +17,7 @@ fn update_user_path(entry: &Path, add: bool) -> Result<(), String> {
     let (key, _) = hkcu
         .create_subkey_with_flags(USER_ENVIRONMENT, KEY_READ | KEY_WRITE)
         .map_err(err)?;
-    // The user PATH is normally REG_EXPAND_SZ with entries such as
-    // `%USERPROFILE%\.dotnet\tools`. Writing it back as a plain string would
-    // stop those from expanding, so the original type is kept. Anything but
-    // "not set yet" is an error: an unreadable PATH must never be replaced.
+    // The user PATH is normally REG_EXPAND_SZ with entries such as `%USERPROFILE%\.dotnet\tools`. Writing it back as a plain string would stop those from expanding, so the original type is kept. Anything but "not set yet" is an error: an unreadable PATH must never be replaced.
     let (before, kind) = match key.get_raw_value("Path") {
         Ok(raw) if matches!(raw.vtype, REG_SZ | REG_EXPAND_SZ) => {
             (read_wide(&raw.bytes), raw.vtype)
@@ -49,7 +40,6 @@ fn update_user_path(entry: &Path, add: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn read_wide(bytes: &[u8]) -> String {
     let (pairs, _) = bytes.as_chunks::<2>();
     let units: Vec<u16> = pairs
@@ -60,14 +50,12 @@ fn read_wide(bytes: &[u8]) -> String {
         .trim_end_matches('\0')
         .to_string()
 }
-
 fn write_wide(text: &str) -> Vec<u8> {
     text.encode_utf16()
         .chain(Some(0))
         .flat_map(u16::to_le_bytes)
         .collect()
 }
-
 /// Lets Explorer (and every terminal started from it) pick up the new PATH
 /// without signing out, the way the Environment Variables dialog does.
 fn broadcast_environment_change() {
@@ -75,8 +63,7 @@ fn broadcast_environment_change() {
         HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
     };
     let area: Vec<u16> = "Environment".encode_utf16().chain(Some(0)).collect();
-    // SAFETY: `area` is NUL-terminated and outlives the call; the result
-    // pointer is optional and left null.
+    // SAFETY: `area` is NUL-terminated and outlives the call; the result pointer is optional and left null.
     unsafe {
         SendMessageTimeoutW(
             HWND_BROADCAST,
@@ -89,7 +76,6 @@ fn broadcast_environment_change() {
         );
     }
 }
-
 /// `%VAR%` references expanded, so an entry written either way is recognised.
 fn expand_vars(value: &str) -> String {
     let mut out = String::new();
@@ -109,7 +95,6 @@ fn expand_vars(value: &str) -> String {
     out.push_str(rest);
     out
 }
-
 fn edit_path(before: &str, entry: &Path, add: bool) -> String {
     let wanted = normalized(entry);
     let mut parts: Vec<String> = before
@@ -130,7 +115,6 @@ fn edit_path(before: &str, entry: &Path, add: bool) -> String {
     }
     parts.join(";")
 }
-
 pub fn remove_allowlisted(target: &Path, allowlist: &[PathBuf]) -> Result<(), String> {
     if !target.is_absolute() || !allowlist.iter().any(|allowed| same_path(target, allowed)) {
         return Err(format!(
@@ -157,7 +141,6 @@ pub fn remove_allowlisted(target: &Path, allowlist: &[PathBuf]) -> Result<(), St
         std::fs::remove_file(target).map_err(err)
     }
 }
-
 fn validate_ancestors_and_canonical_target(target: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in target.components() {
@@ -179,13 +162,10 @@ fn validate_ancestors_and_canonical_target(target: &Path) -> Result<(), String> 
     }
     Ok(())
 }
-
 /// Recursive deletion must never cross a junction, symlink, cloud placeholder
 /// or other reparse point. Unknown linked content is reported and left intact.
 pub(super) fn validate_no_reparse_points(target: &Path) -> Result<(), String> {
-    // Validate every existing ancestor as well as the target tree. Checking
-    // only the final path is insufficient when (for example) a known AppData
-    // directory has itself been replaced by a junction.
+    // Validate every existing ancestor as well as the target tree. Checking only the final path is insufficient when (for example) a known AppData directory has itself been replaced by a junction.
     let mut ancestor = Some(target);
     while let Some(path) = ancestor {
         let metadata = std::fs::symlink_metadata(path).map_err(err)?;
@@ -199,7 +179,6 @@ pub(super) fn validate_no_reparse_points(target: &Path) -> Result<(), String> {
     }
     validate_descendants_no_reparse(target)
 }
-
 fn validate_descendants_no_reparse(target: &Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(target).map_err(err)?;
     if is_reparse(&metadata) {
@@ -217,19 +196,16 @@ fn validate_descendants_no_reparse(target: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
 #[cfg(windows)]
 fn is_reparse(metadata: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
     metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
-
 #[cfg(not(windows))]
 fn is_reparse(metadata: &std::fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
-
 fn normalized(path: &Path) -> String {
     path.as_os_str()
         .to_string_lossy()
@@ -237,11 +213,9 @@ fn normalized(path: &Path) -> String {
         .trim_end_matches('\\')
         .to_ascii_lowercase()
 }
-
 fn same_path(a: &Path, b: &Path) -> bool {
     normalized(a) == normalized(b)
 }
-
 /// A same-volume directory replacement. Until `commit`, dropping or manually
 /// rolling back restores the previous installation.
 pub struct DirectorySwap {
@@ -249,7 +223,6 @@ pub struct DirectorySwap {
     backup: Option<PathBuf>,
     committed: bool,
 }
-
 impl DirectorySwap {
     pub fn apply(staged: &Path, target: &Path, suffix: &str) -> Result<Self, String> {
         if !staged.is_dir() {
@@ -288,7 +261,6 @@ impl DirectorySwap {
             committed: false,
         })
     }
-
     pub fn rollback(&mut self) -> Result<(), String> {
         if self.committed {
             return Ok(());
@@ -304,7 +276,6 @@ impl DirectorySwap {
         self.committed = true;
         Ok(())
     }
-
     /// Makes the new directory authoritative. A locked old backup is returned
     /// to the caller for deferred cleanup; it must not turn a successful apply
     /// into a rollback after Spotify has already been patched.
@@ -316,7 +287,6 @@ impl DirectorySwap {
             .and_then(|backup| std::fs::remove_dir_all(&backup).err().map(|_| backup))
     }
 }
-
 impl Drop for DirectorySwap {
     fn drop(&mut self) {
         if !self.committed {
@@ -324,11 +294,9 @@ impl Drop for DirectorySwap {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn path_edit_adds_once_and_removes_only_its_exact_entry() {
         let entry = Path::new(r"C:\Users\Me\AppData\Local\spicetify");
@@ -338,7 +306,6 @@ mod tests {
         assert_eq!(edit_path(&added, entry, true), added);
         assert_eq!(edit_path(&added, entry, false), before);
     }
-
     #[test]
     fn path_edit_keeps_unexpanded_entries_and_recognises_them() {
         let profile = std::env::var("USERPROFILE").unwrap();
@@ -348,13 +315,11 @@ mod tests {
         assert_eq!(edit_path(before, &entry, false), r"%USERPROFILE%\.dotnet\tools");
         assert_eq!(expand_vars("%NO_SUCH_VAR_MYLE%\\x;50%"), "%NO_SUCH_VAR_MYLE%\\x;50%");
     }
-
     #[test]
     fn registry_strings_round_trip_through_utf16() {
         let text = r"C:\Ελληνικά;%USERPROFILE%\bin";
         assert_eq!(read_wide(&write_wide(text)), text);
     }
-
     #[test]
     fn removal_requires_exact_allowlist_membership() {
         let root = std::env::temp_dir().join(format!("myle-allowlist-{}", std::process::id()));
@@ -368,7 +333,6 @@ mod tests {
         assert!(!allowed.exists());
         let _ = std::fs::remove_dir_all(root);
     }
-
     #[test]
     fn directory_swap_can_roll_back() {
         let root = std::env::temp_dir().join(format!("myle-swap-{}", std::process::id()));

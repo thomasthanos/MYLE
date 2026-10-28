@@ -71,8 +71,7 @@
 
   small { color: var(--text-2); font-size: 12.5px; line-height: 1.4; }
 
-  /* One row of five, 48 px to hit (Android's touch target); a narrow phone
-     wraps the words inside a button, never the row. */
+  /* One row of five, 48 px to hit (Android's touch target); a narrow phone wraps the words inside a button, never the row. */
   .times { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 
   .times .chip { justify-content: center; height: 48px; padding: 0 4px; border-radius: 12px; font-size: 13px; line-height: 1.15; text-align: center; white-space: normal; }

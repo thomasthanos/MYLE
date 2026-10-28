@@ -1,7 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-
-/** "googleDrive", "mega", "dropbox", "oneDrive", or "sync:<app>" for any other
- *  app with a Windows sync root (iCloud, Box, Nextcloud…). */
+/* "googleDrive", "mega", "dropbox", "oneDrive", or "sync:<app>" for any other app with a Windows sync root (iCloud, Box, Nextcloud…). */
 export type CloudProvider = string;
 export interface CloudFolder { path: string; label: string }
 export interface CloudStatus {
@@ -25,8 +23,7 @@ export interface CloudProgress {
   /** Waiting for Google Drive's storage window, to press Clear cache there. */
   waitingForDrive: boolean;
 }
-/** Google Drive's cache: cleared (with its size before), already empty, or
- *  not cleared because Drive's storage window wasn't opened. */
+/* Google Drive's cache: cleared (with its size before), already empty, or not cleared because Drive's storage window wasn't opened. */
 export type DriveCache = { state: "cleared"; size: string | null } | { state: "empty" } | { state: "notOpen" };
 export interface CloudOutcome extends Omit<CloudProgress, "current" | "waitingForDrive"> {
   cancelled: boolean;

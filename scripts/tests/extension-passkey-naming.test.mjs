@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 const source = (await readFile(new URL("../../extension/content.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-
 function namingPage() {
   const start = source.indexOf("  // --- Passkey naming");
   const end = source.indexOf("  const busyLine", start);
@@ -67,7 +65,6 @@ function namingPage() {
   }
   return { scope, document, roots, inputs, dialogs, writes, listeners, timers, Input, dialog, capture, startNaming, changed, get observer() { return observer; } };
 }
-
 for (const title of ["Name your new passkey", "Ονομάστε το νέο κλειδί πρόσβασης", "Όνομα νέου κλειδιού πρόσβασης"]) {
   test(`a new naming field is filled with MYLE: ${title}`, () => {
     const page = namingPage();
@@ -82,7 +79,6 @@ for (const title of ["Name your new passkey", "Ονομάστε το νέο κλ
     assert.equal(field.value, "My own name", "a later user choice is preserved");
   });
 }
-
 test("existing fields, account inputs and unidentified rename dialogs are left alone", () => {
   const page = namingPage();
   page.dialog("Name your passkey");
@@ -94,7 +90,6 @@ test("existing fields, account inputs and unidentified rename dialogs are left a
   page.changed();
   assert.equal(page.writes.length, 0);
 });
-
 test("an explicitly identified rename dialog must belong to the newly created credential", () => {
   const page = namingPage();
   page.startNaming();
@@ -104,7 +99,6 @@ test("an explicitly identified rename dialog must belong to the newly created cr
   assert.equal(old.value, "random-device-123");
   assert.deepEqual(page.writes, [[fresh, "MYLE"]]);
 });
-
 test("generic naming titles require the new credential's identity", () => {
   for (const title of ["Passkey name", "Security key nickname", "Name your passkey", "Choose a new name for your passkey", "Enter a new security key nickname"]) {
     const unidentified = namingPage();
@@ -119,7 +113,6 @@ test("generic naming titles require the new credential's identity", () => {
   page.changed();
   assert.deepEqual(page.writes, [[fresh, "MYLE"]]);
 });
-
 test("trusted edits retargeted through a shadow host are preserved", () => {
   const page = namingPage();
   page.startNaming();
@@ -130,7 +123,6 @@ test("trusted edits retargeted through a shadow host are preserved", () => {
   assert.equal(page.writes.length, 0);
   assert.equal(field.value, "My custom name");
 });
-
 test("shadow roots are observed locally and their listeners are removed", () => {
   const page = namingPage();
   const rootListeners = new Map();
@@ -149,7 +141,6 @@ test("shadow roots are observed locally and their listeners are removed", () => 
   page.listeners.get("pagehide")();
   assert.equal(rootListeners.size, 0);
 });
-
 test("hidden, ambiguous and user-edited inputs are never overwritten", () => {
   const page = namingPage();
   page.startNaming();
@@ -160,7 +151,6 @@ test("hidden, ambiguous and user-edited inputs are never overwritten", () => {
   page.changed();
   assert.equal(page.writes.length, 0);
 });
-
 test("expiration, navigation and a replacement creation disconnect the helper", () => {
   const page = namingPage();
   page.startNaming();
@@ -176,7 +166,6 @@ test("expiration, navigation and a replacement creation disconnect the helper", 
   assert.equal(page.observer.connected, false);
   assert.equal(page.listeners.has("input"), false);
 });
-
 test("a page inspection failure cannot prevent passkey creation", () => {
   const page = namingPage();
   page.scope.deepAll = () => { throw new Error("page went away"); };
@@ -184,7 +173,6 @@ test("a page inspection failure cannot prevent passkey creation", () => {
   assert.doesNotThrow(() => page.startNaming(null));
   assert.equal(page.timers.size, 0);
 });
-
 test("only a successful MYLE creation starts naming; the credential response is unchanged", async () => {
   const start = source.indexOf("  async function offerNewPasskey(");
   const end = source.indexOf("\n  }\n", start) + 4;

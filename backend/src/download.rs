@@ -1,22 +1,14 @@
-//! Streaming HTTP downloads with progress reporting and SHA-256 hashing,
-//! shared by the app updater and the Install Apps page.
-//!
-//! Large files from servers that support byte ranges are fetched over a few
-//! connections at once: hosts such as Google Drive cap the speed of each
-//! connection, not of the download.
-
+// ! Streaming HTTP downloads with progress reporting and SHA-256 hashing, ! shared by the app updater and the Install Apps page. ! ! Large files from servers that support byte ranges are fetched over a few ! connections at once: hosts such as Google Drive cap the speed of each ! connection, not of the download.
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-
 use futures_util::StreamExt;
 use reqwest::StatusCode;
 use reqwest::header::{CONTENT_RANGE, RANGE};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, BufWriter};
-
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -28,7 +20,6 @@ const SEGMENT_RETRIES: u32 = 3;
 /// Network chunks are small (~16 KB); each write to a Tokio file is a trip
 /// to a blocking thread, so they are gathered first.
 const WRITE_BUFFER: usize = 1024 * 1024;
-
 pub fn http_client(user_agent: &str) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(user_agent)
@@ -37,7 +28,6 @@ pub fn http_client(user_agent: &str) -> Result<reqwest::Client, String> {
         .build()
         .map_err(err)
 }
-
 /// Downloads `url` to `dest`, calling `on_progress(downloaded, total)` at most
 /// every 100 ms (and once at the end). `is_cancelled` is polled between chunks.
 /// Returns the lowercase hex SHA-256 of the downloaded file.
@@ -61,7 +51,6 @@ pub async fn download_to(
     .await
     .map(Option::unwrap_or_default)
 }
-
 /// `download_to`, with the SHA-256 only when `want_hash` (a multi-gigabyte
 /// file fetched in parts is hashed by reading it back, which is not free).
 /// `total` is `None` while the size is unknown, including when a `size_hint`
@@ -90,7 +79,6 @@ pub async fn download_file(
     }
     result
 }
-
 async fn fetch(
     client: &reqwest::Client,
     url: &str,
@@ -103,8 +91,7 @@ async fn fetch(
     if let Some(dir) = dest.parent() {
         tokio::fs::create_dir_all(dir).await.map_err(err)?;
     }
-    // Asking for the whole file as a range tells, in the same request,
-    // whether the server can serve parts: 206 and a total, or a plain 200.
+    // Asking for the whole file as a range tells, in the same request, whether the server can serve parts: 206 and a total, or a plain 200.
     let response = client
         .get(url)
         .header(RANGE, "bytes=0-")
@@ -120,14 +107,12 @@ async fn fetch(
     if is_html(content_type) {
         return Err(html_instead_of_file(url));
     }
-
     let range = (response.status() == StatusCode::PARTIAL_CONTENT)
         .then(|| content_range_of(&response))
         .flatten();
     let ranged_total = range.and_then(|range| range.total);
     if let Some(total) = ranged_total.filter(|total| *total >= SEGMENTED_MIN) {
-        // Redirects (Drive, GitHub) are resolved once; the parts go straight
-        // to the final address.
+        // Redirects (Drive, GitHub) are resolved once; the parts go straight to the final address.
         let final_url = response.url().to_string();
         drop(response);
         on_progress(0, Some(total));
@@ -150,8 +135,7 @@ async fn fetch(
                 };
             }
             Err(e) if e == CANCELLED => return Err(e),
-            // Some servers refuse parallel ranges part-way; one plain
-            // connection still gets the file.
+            // Some servers refuse parallel ranges part-way; one plain connection still gets the file.
             Err(_) => {
                 let response = client
                     .get(url)
@@ -164,8 +148,7 @@ async fn fetch(
             }
         }
     }
-    // A server that answered with only the start of the file (or would not
-    // say how much it sent): ask again for all of it, without a range.
+    // A server that answered with only the start of the file (or would not say how much it sent): ask again for all of it, without a range.
     let response = match range {
         Some(range) if !range.is_whole_file() => {
             drop(response);
@@ -189,7 +172,6 @@ async fn fetch(
     )
     .await
 }
-
 /// One connection, written as it arrives and hashed on the way.
 async fn stream(
     response: reqwest::Response,
@@ -199,8 +181,7 @@ async fn stream(
     is_cancelled: impl Fn() -> bool,
     want_hash: bool,
 ) -> Result<Option<String>, String> {
-    // Checked on every answer that is saved, not only the first: a server
-    // may answer a second request (without a range) with a web page.
+    // Checked on every answer that is saved, not only the first: a server may answer a second request (without a range) with a web page.
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -217,11 +198,9 @@ async fn stream(
         _ => None,
     };
     let total = exact.or(size_hint.filter(|s| *s > 0));
-    // A size from the catalog can be stale: once passed, the size is unknown
-    // rather than a progress bar stuck past 100%.
+    // A size from the catalog can be stale: once passed, the size is unknown rather than a progress bar stuck past 100%.
     let shown = |downloaded: u64| total.filter(|total| downloaded <= *total);
     on_progress(0, total);
-
     let mut file = BufWriter::with_capacity(
         WRITE_BUFFER,
         tokio::fs::File::create(dest).await.map_err(err)?,
@@ -229,8 +208,7 @@ async fn stream(
     let mut hasher = want_hash.then(Sha256::new);
     let mut downloaded = 0u64;
     let mut body = response.bytes_stream();
-    // Progress goes out on a clock, not only when a chunk lands: a connection
-    // that delivers in bursts still moves the bar every 100 ms.
+    // Progress goes out on a clock, not only when a chunk lands: a connection that delivers in bursts still moves the bar every 100 ms.
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -264,7 +242,6 @@ async fn stream(
     on_progress(downloaded, Some(downloaded));
     Ok(hasher.map(|hasher| to_hex(&hasher.finalize())))
 }
-
 /// A `Content-Range: bytes <start>-<end>/<total>` header (`total` is `None`
 /// for `*`: the server does not know).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -273,7 +250,6 @@ struct ContentRange {
     end: u64,
     total: Option<u64>,
 }
-
 impl ContentRange {
     fn parse(value: &str) -> Option<Self> {
         let (span, total) = value.trim().strip_prefix("bytes ")?.split_once('/')?;
@@ -285,12 +261,10 @@ impl ContentRange {
         };
         (start <= end).then_some(Self { start, end, total })
     }
-
     fn is_whole_file(&self) -> bool {
         self.start == 0 && self.total == Some(self.end + 1)
     }
 }
-
 fn content_range_of(response: &reqwest::Response) -> Option<ContentRange> {
     response
         .headers()
@@ -298,7 +272,6 @@ fn content_range_of(response: &reqwest::Response) -> Option<ContentRange> {
         .and_then(|v| v.to_str().ok())
         .and_then(ContentRange::parse)
 }
-
 /// `total` bytes split into `count` inclusive ranges.
 fn split_ranges(total: u64, count: u64) -> Vec<(u64, u64)> {
     let count = count.clamp(1, total.max(1));
@@ -308,7 +281,6 @@ fn split_ranges(total: u64, count: u64) -> Vec<(u64, u64)> {
         .filter(|(start, end)| start <= end)
         .collect()
 }
-
 /// Fetches `total` bytes as `SEGMENTS` ranges at once, each written at its
 /// own offset of a file sized up front.
 async fn segmented(
@@ -322,7 +294,6 @@ async fn segmented(
     let file = tokio::fs::File::create(dest).await.map_err(err)?;
     file.set_len(total).await.map_err(err)?;
     drop(file);
-
     let done = Arc::new(AtomicU64::new(0));
     let stop = Arc::new(AtomicBool::new(false));
     let parts = split_ranges(total, SEGMENTS)
@@ -340,8 +311,7 @@ async fn segmented(
             let stop = stop.clone();
             async move {
                 let result = part.await;
-                // One part giving up dooms the whole attempt: stop the others
-                // now rather than let them finish for a file that is refetched.
+                // One part giving up dooms the whole attempt: stop the others now rather than let them finish for a file that is refetched.
                 if result.is_err() {
                     stop.store(true, Ordering::Relaxed);
                 }
@@ -364,15 +334,13 @@ async fn segmented(
     if is_cancelled() {
         return Err(CANCELLED.into());
     }
-    // The parts stopped because of a failure report "cancelled"; the failure
-    // itself is what counts (and is not the user cancelling).
+    // The parts stopped because of a failure report "cancelled"; the failure itself is what counts (and is not the user cancelling).
     let mut errors = results.into_iter().filter_map(Result::err);
     match errors.find(|e| e != CANCELLED) {
         Some(error) => Err(error),
         None => Ok(()),
     }
 }
-
 async fn fetch_range(
     client: reqwest::Client,
     url: String,
@@ -437,8 +405,7 @@ async fn fetch_range(
             Err(e) => last_error = e.to_string(),
         }
         if position <= end {
-            // Only drops in a row count: a long download over a flaky
-            // connection may lose its link many times and still get there.
+            // Only drops in a row count: a long download over a flaky connection may lose its link many times and still get there.
             if position > resumed_at {
                 failures = 0;
             }
@@ -451,7 +418,6 @@ async fn fetch_range(
     }
     file.flush().await.map_err(err)
 }
-
 /// SHA-256 of a file on disk, read off the async runtime.
 async fn hash_file(path: &Path) -> Result<String, String> {
     let path = path.to_path_buf();
@@ -472,14 +438,11 @@ async fn hash_file(path: &Path) -> Result<String, String> {
     .await
     .map_err(err)?
 }
-
 /// Error text used when a job was cancelled by the user.
 pub const CANCELLED: &str = "cancelled";
-
 fn is_html(content_type: Option<&str>) -> bool {
     content_type.is_some_and(|t| t.trim_start().to_ascii_lowercase().starts_with("text/html"))
 }
-
 /// File hosts answer with a web page when a download is blocked. Google Drive
 /// does it for its daily per-file quota and for files that are not shared.
 fn html_instead_of_file(url: &str) -> String {
@@ -493,18 +456,15 @@ fn html_instead_of_file(url: &str) -> String {
             .into()
     }
 }
-
 /// `"sha256:ABC…"` -> lowercase hex, if it is a well-formed SHA-256 digest.
 pub fn parse_sha256_digest(digest: &str) -> Option<String> {
     let hex = digest.strip_prefix("sha256:")?;
     (hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()))
         .then(|| hex.to_ascii_lowercase())
 }
-
 pub fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-
 /// A safe local file name for a download: the last URL/path segment with
 /// anything unusual replaced.
 pub fn file_name_from(name_or_url: &str, fallback: &str) -> String {
@@ -532,15 +492,12 @@ pub fn file_name_from(name_or_url: &str, fallback: &str) -> String {
         trimmed.to_string()
     }
 }
-
 pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn digest_parsing() {
         let hex = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
@@ -552,7 +509,6 @@ mod tests {
         assert_eq!(parse_sha256_digest("sha256:1234"), None);
         assert_eq!(parse_sha256_digest("sha512:abcd"), None);
     }
-
     #[test]
     fn ranges_cover_the_file_exactly_once() {
         let ranges = split_ranges(10, 4);
@@ -577,7 +533,6 @@ mod tests {
         assert_eq!(ContentRange::parse("bytes 9-3/10"), None);
         assert_eq!(ContentRange::parse("items 0-1/2"), None);
     }
-
     /// A local server that serves byte ranges, as Google Drive and GitHub do.
     async fn serve_ranges(body: Vec<u8>) -> (String, Arc<AtomicU64>) {
         use tokio::io::AsyncReadExt;
@@ -629,7 +584,6 @@ mod tests {
         });
         (format!("http://{address}/file.bin"), requests)
     }
-
     #[tokio::test]
     async fn a_large_file_is_fetched_in_parts_and_arrives_intact() {
         let body: Vec<u8> = (0..(SEGMENTED_MIN + 12_345))
@@ -658,7 +612,6 @@ mod tests {
         assert_eq!(requests.load(Ordering::Relaxed), 1 + SEGMENTS);
         let _ = std::fs::remove_file(&dest);
     }
-
     /// Answers the first range request (the probe) and plain requests, but
     /// refuses the parts that do not start at 0, like a host that stops
     /// honouring parallel ranges part-way.
@@ -717,7 +670,6 @@ mod tests {
         });
         format!("http://{address}/file.bin")
     }
-
     #[tokio::test]
     async fn a_refused_part_falls_back_to_one_connection_and_is_not_a_cancel() {
         let body: Vec<u8> = (0..(SEGMENTED_MIN + 4_321))
@@ -734,7 +686,6 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), body);
         let _ = std::fs::remove_file(&dest);
     }
-
     /// Answers any range with just the first KB (as a capped CDN might),
     /// and a plain request with the whole file.
     async fn serve_capped_ranges(body: Vec<u8>) -> String {
@@ -784,7 +735,6 @@ mod tests {
         });
         format!("http://{address}/file.bin")
     }
-
     #[tokio::test]
     async fn a_partial_answer_to_the_probe_is_not_saved_as_the_file() {
         let body: Vec<u8> = (0..200_000u32).map(|i| (i % 239) as u8).collect();
@@ -797,7 +747,6 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), body);
         let _ = std::fs::remove_file(&dest);
     }
-
     /// Answers a range with the first KB of the file, and a plain request
     /// with a web page (a host's "quota exceeded" page, say).
     async fn serve_page_on_the_second_try(total: usize) -> String {
@@ -846,7 +795,6 @@ mod tests {
         });
         format!("http://{address}/app.zip")
     }
-
     #[tokio::test]
     async fn a_web_page_on_the_second_try_is_not_saved_as_the_file() {
         let url = serve_page_on_the_second_try(200_000).await;
@@ -857,7 +805,6 @@ mod tests {
         assert!(error.contains("web page"), "{error}");
         assert!(!dest.exists());
     }
-
     #[tokio::test]
     async fn a_failed_download_leaves_no_partial_file() {
         let dest = std::env::temp_dir().join(format!("myle-failed-{}.bin", std::process::id()));
@@ -877,7 +824,6 @@ mod tests {
         assert!(result.is_err());
         assert!(!dest.exists());
     }
-
     #[test]
     fn sha256_hex_matches_known_vector() {
         let digest = Sha256::digest(b"abc");
@@ -886,7 +832,6 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
-
     #[test]
     fn web_pages_are_not_accepted_as_downloads() {
         assert!(is_html(Some("text/html; charset=utf-8")));
@@ -900,7 +845,6 @@ mod tests {
         );
         assert!(html_instead_of_file("https://example.com/a.zip").contains("web page"));
     }
-
     #[test]
     fn file_names_are_sanitized() {
         assert_eq!(

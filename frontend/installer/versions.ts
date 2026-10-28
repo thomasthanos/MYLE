@@ -1,8 +1,4 @@
-/**
- * Orders two versions by Semantic Versioning precedence: build metadata
- * (`+…`) is ignored, and a pre-release (`9.0.0-beta.1`) comes before its
- * release. Negative when `a` is older, positive when newer, 0 when equal.
- */
+/* Orders two versions by Semantic Versioning precedence: build metadata (`+…`) is ignored, and a pre-release (`9.0.0-beta.1`) comes before its release. Negative when `a` is older, positive when newer, 0 when equal. */
 export function compareVersions(a: string, b: string): number {
   const [x, y] = [parse(a), parse(b)];
   for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
@@ -26,7 +22,6 @@ export function compareVersions(a: string, b: string): number {
   }
   return Math.sign(x.pre.length - y.pre.length);
 }
-
 function parse(version: string) {
   const plain = version.trim().replace(/^v/i, "").split("+")[0];
   const dash = plain.indexOf("-");

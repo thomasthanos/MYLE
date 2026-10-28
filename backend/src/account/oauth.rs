@@ -1,25 +1,17 @@
-//! Sign-in in the user's own browser (RFC 8252): a one-shot loopback
-//! server that receives Supabase's redirect (PKCE: `myle_vault::account`).
-//!
-//! The browser, not a webview, shows the provider's page: Google refuses
-//! embedded browsers, and the user is usually signed in there already.
-
+// ! Sign-in in the user's own browser (RFC 8252): a one-shot loopback ! server that receives Supabase's redirect (PKCE: `myle_vault::account`). ! ! The browser, not a webview, shows the provider's page: Google refuses ! embedded browsers, and the user is usually signed in there already.
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-
 /// What came back from the provider on the redirect.
 #[derive(Debug, PartialEq)]
 pub enum Callback {
     Code(String),
     Error(String),
 }
-
 /// Listens on `localhost:<port>`, both IPv4 and IPv6: browsers try either.
 pub struct Loopback {
     v4: TcpListener,
     v6: Option<TcpListener>,
 }
-
 impl Loopback {
     pub async fn bind(port: u16) -> Result<Self, String> {
         let v4 = TcpListener::bind(("127.0.0.1", port)).await.map_err(|e| {
@@ -28,7 +20,6 @@ impl Loopback {
         let v6 = TcpListener::bind(("::1", port)).await.ok();
         Ok(Self { v4, v6 })
     }
-
     /// Answers requests until one carries a code or an error. Anything else
     /// (a favicon, a stray visit) gets a 404 and is ignored. Every connection
     /// is served on its own: browsers open spare connections that may never
@@ -48,7 +39,6 @@ impl Loopback {
         }
     }
 }
-
 async fn accept_optional(
     listener: Option<&TcpListener>,
 ) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
@@ -57,16 +47,13 @@ async fn accept_optional(
         None => std::future::pending().await,
     }
 }
-
 /// Answers one request. A code or an error is handed on only after the
 /// browser has its page, so the tab never hangs on a closed app.
 async fn serve(mut stream: TcpStream, found: tokio::sync::mpsc::Sender<Callback>) {
     let Some((target, opened_as_page)) = read_request(&mut stream).await else {
         return;
     };
-    // The redirect opens a page in the tab. A web page elsewhere could load
-    // this address unseen (an image, a frame, a fetch), and that must not end
-    // the sign-in with a made-up error.
+    // The redirect opens a page in the tab. A web page elsewhere could load this address unseen (an image, a frame, a fetch), and that must not end the sign-in with a made-up error.
     if !opened_as_page {
         respond(&mut stream, 404, "").await;
         return;
@@ -83,7 +70,6 @@ async fn serve(mut stream: TcpStream, found: tokio::sync::mpsc::Sender<Callback>
         None => respond(&mut stream, 404, "").await,
     }
 }
-
 /// `/?code=…` or `/?error=…&error_description=…` from the request target.
 pub fn parse_callback(target: &str) -> Option<Callback> {
     let url = reqwest::Url::parse(&format!("http://localhost{target}")).ok()?;
@@ -106,7 +92,6 @@ pub fn parse_callback(target: &str) -> Option<Callback> {
     }
     code.map(Callback::Code)
 }
-
 /// The request's target, and whether the browser opened it as a page (by
 /// `Sec-Fetch-Dest`; a browser too old to send it counts as a page).
 async fn read_request(stream: &mut TcpStream) -> Option<(String, bool)> {
@@ -131,14 +116,12 @@ async fn read_request(stream: &mut TcpStream) -> Option<(String, bool)> {
     let target = parts.next()?.to_string();
     Some((target, opened_as_page(lines)))
 }
-
 fn opened_as_page<'a>(headers: impl Iterator<Item = &'a str>) -> bool {
     headers
         .filter_map(|line| line.split_once(':'))
         .find(|(name, _)| name.trim().eq_ignore_ascii_case("sec-fetch-dest"))
         .is_none_or(|(_, value)| value.trim().eq_ignore_ascii_case("document"))
 }
-
 async fn respond(stream: &mut TcpStream, status: u16, body: &str) {
     let reason = if status == 200 { "OK" } else { "Not Found" };
     let response = format!(
@@ -148,7 +131,6 @@ async fn respond(stream: &mut TcpStream, status: u16, body: &str) {
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
 }
-
 /// The page left in the browser tab after the redirect.
 fn page(ok: bool, message: &str) -> String {
     let (title, text) = if ok {
@@ -171,18 +153,15 @@ p{{margin:0;color:#aab0c8}}
 </style></head><body><div class="card"><h1>{title}</h1><p>{text}</p></div></body></html>"#
     )
 }
-
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn redirects_are_read_for_a_code_or_an_error() {
         assert_eq!(
@@ -196,7 +175,6 @@ mod tests {
         assert_eq!(parse_callback("/favicon.ico"), None);
         assert_eq!(parse_callback("/"), None);
     }
-
     #[test]
     fn only_a_page_the_browser_opens_counts() {
         assert!(opened_as_page(["Host: localhost", "Sec-Fetch-Dest: document"].into_iter()));
@@ -206,7 +184,6 @@ mod tests {
         assert!(!opened_as_page(["Sec-Fetch-Dest: script"].into_iter()));
         assert!(!opened_as_page(["Sec-Fetch-Dest: iframe"].into_iter()), "a hidden frame");
     }
-
     /// Another website loading `localhost:5252/?error=…` in the background
     /// cannot cut a sign-in short; the real redirect still gets through.
     #[tokio::test]
@@ -227,12 +204,10 @@ mod tests {
             .unwrap();
         assert_eq!(callback, Callback::Code("real".into()));
     }
-
     #[test]
     fn error_text_cannot_inject_markup() {
         assert!(!page(false, "<script>x</script>").contains("<script>x"));
     }
-
     #[tokio::test]
     async fn an_idle_browser_connection_does_not_hold_up_the_redirect() {
         let server = Loopback::bind(0).await.unwrap();
@@ -254,7 +229,6 @@ mod tests {
                 .expect("the idle connection must not delay the real one");
         assert_eq!(callback, Callback::Code("fast".into()));
     }
-
     #[tokio::test]
     async fn the_loopback_server_hands_over_the_code_and_answers_the_browser() {
         let server = Loopback::bind(0).await;

@@ -1,31 +1,20 @@
-//! The administrator half of the debloater: machine-wide registry values,
-//! services, scheduled tasks, Store apps for every user, Edge, and restore
-//! points. It acts only on what the catalog names: a request carries tweak
-//! ids and package names, and an undo record is checked against the
-//! catalog before anything is written back (the record is the app's file,
-//! which another program of the user's could have edited).
-
+// ! The administrator half of the debloater: machine-wide registry values, ! services, scheduled tasks, Store apps for every user, Edge, and restore ! points. It acts only on what the catalog names: a request carries tweak ! ids and package names, and an undo record is checked against the ! catalog before anything is written back (the record is the app's file, ! which another program of the user's could have edited).
 use std::ffi::OsString;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
 use serde::{Deserialize, Serialize};
-
 use super::catalog::{self, Data, Hive, Op};
 use super::system::{self, Value};
 use super::undo::{Before, Saved};
 use crate::elevated_pipe::{self, Helper};
-
 pub const HELPER: Helper = Helper {
     flag: "--debloat-elevated-helper",
     pipe_prefix: r"\\.\pipe\myle-debloat-",
     what: "administrator debloater",
 };
-
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "do", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Request {
@@ -43,7 +32,6 @@ pub enum Request {
     /// Applies or clears the Start Menu `ConfigureStartPins` policy.
     SetStartPins { json: Option<String> },
 }
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Reply {
@@ -62,7 +50,6 @@ pub struct Reply {
     #[serde(default)]
     pub restore_point: Option<RestorePoint>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "camelCase")]
 pub enum RestorePoint {
@@ -71,16 +58,12 @@ pub enum RestorePoint {
     ProtectionOff,
     Failed { message: String },
 }
-
 impl Reply {
     fn error(message: impl Into<String>) -> Self {
         Reply { errors: vec![message.into()], ..Reply::default() }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Entry
-
+// --------------------------------------------------------------------------- Entry
 pub fn run_helper_from_args() -> Option<i32> {
     let args: Vec<OsString> = elevated_pipe::helper_args(&HELPER)?;
     let served = elevated_pipe::parse_serve_args(&HELPER, &args)
@@ -93,7 +76,6 @@ pub fn run_helper_from_args() -> Option<i32> {
         }
     })
 }
-
 pub fn handle(request: Request) -> Reply {
     match request {
         Request::Apply { tweak } => match catalog::find(&tweak) {
@@ -116,10 +98,7 @@ pub fn handle(request: Request) -> Reply {
         },
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tweaks
-
+// --------------------------------------------------------------------------- Tweaks
 fn apply(tweak: &catalog::Tweak) -> Reply {
     let mut reply = Reply::default();
     for (index, op) in tweak.ops.iter().enumerate() {
@@ -167,7 +146,6 @@ fn apply(tweak: &catalog::Tweak) -> Reply {
     }
     reply
 }
-
 /// Whether `saved` is something this tweak's operation `index` could have
 /// kept, and safe to write back.
 fn valid_undo(tweak: &catalog::Tweak, saved: &Saved) -> Option<&'static Op> {
@@ -189,7 +167,6 @@ fn valid_undo(tweak: &catalog::Tweak, saved: &Saved) -> Option<&'static Op> {
     };
     ok.then_some(op)
 }
-
 fn undo(tweak: &catalog::Tweak, saved: &[Saved]) -> Reply {
     let mut reply = Reply::default();
     for record in saved {
@@ -212,14 +189,10 @@ fn undo(tweak: &catalog::Tweak, saved: &[Saved]) -> Reply {
     }
     reply
 }
-
-// ---------------------------------------------------------------------------
-// Store apps
-
+// --------------------------------------------------------------------------- Store apps
 fn powershell() -> PathBuf {
     system::windows_dir().join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
 }
-
 /// Runs a script hidden and returns what it printed.
 fn run_script(script: &str, timeout: Duration) -> Result<String, String> {
     let mut child = Command::new(powershell())
@@ -245,7 +218,6 @@ fn run_script(script: &str, timeout: Duration) -> Result<String, String> {
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
-
 /// Removes (or adds back) the parts of Windows whose capability name starts
 /// with `name`, one of the catalog's. Adding back downloads it from Windows
 /// Update. True when something changed.
@@ -274,7 +246,6 @@ try {{
     }
     Err("Windows did not say whether the feature changed.".into())
 }
-
 fn remove_apps(packages: &[String]) -> Reply {
     let mut reply = Reply::default();
     // Only names of the catalog, never what Windows or MYLE needs.
@@ -314,12 +285,8 @@ foreach ($name in @({list})) {{
     }
     reply
 }
-
-// ---------------------------------------------------------------------------
-// Restore point
-
+// --------------------------------------------------------------------------- Restore point
 const SYSTEM_RESTORE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore";
-
 /// Whether System Protection covers the Windows drive: the volumes it
 /// protects are listed under SPP\Clients as "...:(C%3A)".
 fn protection_on() -> bool {
@@ -337,7 +304,6 @@ fn protection_on() -> bool {
             .is_ok_and(|volumes| volumes.iter().any(|volume| volume.to_ascii_uppercase().contains(&marker)))
     })
 }
-
 fn restore_point(turn_on: bool) -> RestorePoint {
     if !protection_on() {
         if !turn_on {
@@ -349,8 +315,7 @@ fn restore_point(turn_on: bool) -> RestorePoint {
             return RestorePoint::Failed { message };
         }
     }
-    // Windows makes at most one a day unless told otherwise; put its own
-    // setting back afterwards.
+    // Windows makes at most one a day unless told otherwise; put its own setting back afterwards.
     let before = system::read(Hive::Machine, SYSTEM_RESTORE, "SystemRestorePointCreationFrequency");
     let _ = system::write(Hive::Machine, SYSTEM_RESTORE, "SystemRestorePointCreationFrequency", Data::Dword(0));
     let result = run_script(
@@ -371,16 +336,11 @@ fn restore_point(turn_on: bool) -> RestorePoint {
         Err(message) => RestorePoint::Failed { message },
     }
 }
-
-// ---------------------------------------------------------------------------
-// Edge
-
+// --------------------------------------------------------------------------- Edge
 mod edge {
     use super::*;
-
     const UNINSTALL: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge";
     const EDGE_UPDATE_DEV: &str = r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdateDev";
-
     /// Splits `"C:\...\setup.exe" --a --b` into the program and its switches.
     pub(super) fn parse_uninstall(command: &str) -> Option<(PathBuf, Vec<String>)> {
         let command = command.trim();
@@ -398,7 +358,6 @@ mod edge {
             .collect();
         Some((PathBuf::from(program), switches))
     }
-
     /// Edge's own uninstaller, and only from where Edge lives.
     pub(super) fn trusted_setup(program: &Path, edge_root: &Path) -> bool {
         let Ok(program) = program.canonicalize() else { return false };
@@ -406,7 +365,6 @@ mod edge {
         program.starts_with(&root)
             && program.file_name().is_some_and(|name| name.eq_ignore_ascii_case("setup.exe"))
     }
-
     /// `Ok(true)`: Edge was there and is gone now.
     pub fn remove() -> Result<bool, String> {
         if !system::edge_installed() {
@@ -422,9 +380,7 @@ mod edge {
         }
         switches.retain(|switch| switch != "--force-uninstall");
         switches.push("--force-uninstall".into());
-
-        // Edge refuses to uninstall outside the EEA unless allowed, and
-        // unless it believes the old Edge is still present.
+        // Edge refuses to uninstall outside the EEA unless allowed, and unless it believes the old Edge is still present.
         let allow_before = system::read(Hive::Machine, EDGE_UPDATE_DEV, "AllowUninstall");
         let allow_created = system::first_missing(Hive::Machine, EDGE_UPDATE_DEV);
         system::write(Hive::Machine, EDGE_UPDATE_DEV, "AllowUninstall", Data::Sz(""))?;
@@ -432,7 +388,6 @@ mod edge {
         let stub = stub_dir.join("MicrosoftEdge.exe");
         let made_dir = !stub_dir.exists() && std::fs::create_dir_all(&stub_dir).is_ok();
         let made_stub = !stub.exists() && std::fs::write(&stub, b"").is_ok();
-
         let ran = Command::new(&setup)
             .args(&switches)
             .creation_flags(CREATE_NO_WINDOW)
@@ -455,7 +410,6 @@ mod edge {
                     }
                 }
             });
-
         if made_stub {
             let _ = std::fs::remove_file(&stub);
         }
@@ -471,7 +425,6 @@ mod edge {
             Ok(true)
         }
     }
-
     /// The Start menu and public desktop shortcuts every user shares.
     fn remove_common_shortcuts() {
         let program_data = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
@@ -484,12 +437,10 @@ mod edge {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::debloat::catalog::Start;
-
     #[test]
     fn requests_carry_only_ids() {
         let json = serde_json::to_string(&Request::Apply { tweak: "telemetry".into() }).unwrap();
@@ -499,7 +450,6 @@ mod tests {
         let reply = handle(Request::Apply { tweak: "../../evil".into() });
         assert!(!reply.errors.is_empty());
     }
-
     #[test]
     fn an_edited_undo_record_cannot_write_elsewhere() {
         let location = catalog::find("location").unwrap();
@@ -518,14 +468,12 @@ mod tests {
         let user_op = Saved { op: 2, before: Before::Reg { value: Value::Absent, created: None } };
         assert!(valid_undo(location, &user_op).is_none());
     }
-
     #[test]
     fn only_catalog_apps_reach_powershell() {
         let reply = remove_apps(&["Microsoft.WindowsStore".into(), "x'; Remove-Item C:\\ -Recurse; '".into()]);
         assert!(reply.removed.is_empty());
         assert!(!reply.errors.is_empty());
     }
-
     #[test]
     fn edges_uninstaller_is_parsed_and_checked() {
         let (program, switches) = edge::parse_uninstall(

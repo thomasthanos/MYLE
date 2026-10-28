@@ -1,36 +1,10 @@
-//! Filling in logins in Chromium browsers (Chrome, Edge, Brave, Vivaldi, Opera,
-//! Arc, Thorium) and Firefox browsers (Firefox, Zen, LibreWolf, Waterfox, Floorp).
-//!
-//! The browser extension (`extension/`) talks to a "native messaging host"
-//! the browser starts: this same program, run by the browser with the
-//! extension's id as its argument (`run_native_host`). The host passes each
-//! request over a named pipe to the app that is running, which answers from
-//! the unlocked vault (`serve`).
-//!
-//! Who may ask:
-//! - the browser starts the host only for our extension (the manifests list
-//!   its id), and the host also checks the id it was given and that a
-//!   browser started it;
-//! - the app answers only a host that is this same program, and the host
-//!   only talks to an app that is this same program;
-//! - the app answers only while browser filling is on and the vault is
-//!   unlocked, gives a password only for an entry saved for that site, and
-//!   only for https pages (or this PC's own `localhost`);
-//! - it answers only so many requests a minute: plenty for a person
-//!   clicking, far too few for a program trying to empty the vault;
-//! - look-ups from the browser never keep an unattended vault open; only
-//!   what the extension does at the user's click (fill, save, a new
-//!   password) counts as using it;
-//! - a page can change only the login saved for its own host, never one of
-//!   another subdomain (the password it replaces goes into the history).
-
+// ! Filling in logins in Chromium browsers (Chrome, Edge, Brave, Vivaldi, Opera, ! Arc, Thorium) and Firefox browsers (Firefox, Zen, LibreWolf, Waterfox, Floorp). ! ! The browser extension (`extension/`) talks to a "native messaging host" ! the browser starts: this same program, run by the browser with the ! extension's id as its argument (`run_native_host`). The host passes each ! request over a named pipe to the app that is running, which answers from ! the unlocked vault (`serve`). ! ! Who may ask: ! - the browser starts the host only for our extension (the manifests list ! its id), and the host also checks the id it was given and that a ! browser started it; ! - the app answers only a host that is this same program, and the host ! only talks to an app that is this same program; ! - the app answers only while browser filling is on and the vault is ! unlocked, gives a password only for an entry saved for that site, and ! only for https pages (or this PC's own `localhost`); ! - it answers only so many requests a minute: plenty for a person ! clicking, far too few for a program trying to empty the vault; ! - look-ups from the browser never keep an unattended vault open; only ! what the extension does at the user's click (fill, save, a new ! password) counts as using it; ! - a page can change only the login saved for its own host, never one of ! another subdomain (the password it replaces goes into the history).
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -48,13 +22,11 @@ use windows_sys::Win32::System::Threading::{
 use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
 use zeroize::Zeroizing;
-
 use super::PasswordsState;
 use super::hello::Consent;
 use super::passkeys;
 use super::vault::{EntryInput, Status};
 use myle_vault::sites::saved_host;
-
 /// The native messaging host's name, as the extension asks for it.
 pub const HOST_NAME: &str = "com.thomasthanos.myle";
 /// The extension's ids in Chrome, Edge, Brave and Vivaldi: the Chrome Web Store's,
@@ -110,7 +82,6 @@ const SENSITIVE_PER_MINUTE: usize = 20;
 const LOOKUPS_PER_MINUTE: usize = 120;
 static SENSITIVE: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
 static LOOKUPS: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
-
 /// Counts a request against `bucket`; false when the minute's share is used.
 fn allow(bucket: &Mutex<VecDeque<Instant>>, per_minute: usize) -> bool {
     let mut times = bucket.lock().unwrap_or_else(|p| p.into_inner());
@@ -127,14 +98,10 @@ fn allow(bucket: &Mutex<VecDeque<Instant>>, per_minute: usize) -> bool {
     times.push_back(now);
     true
 }
-
-// ---------------------------------------------------------------------------
-// Registration
-
+// --------------------------------------------------------------------------- Registration
 fn manifest_dir() -> Result<PathBuf, String> {
     Ok(crate::storage::local_dir()?.join("native-messaging"))
 }
-
 /// What the browsers are told about the host: a registry key per browser,
 /// pointing at a manifest that names this program.
 struct Hosts {
@@ -143,7 +110,6 @@ struct Hosts {
     dir: PathBuf,
     exe: PathBuf,
 }
-
 impl Hosts {
     fn here() -> Result<Self, String> {
         Ok(Self {
@@ -152,11 +118,9 @@ impl Hosts {
             exe: std::env::current_exe().map_err(|e| e.to_string())?,
         })
     }
-
     fn key(&self, browsers: &str) -> String {
         format!(r"{}{browsers}\{HOST_NAME}", self.root)
     }
-
     /// Each manifest's file name and text.
     fn manifests(&self) -> Result<[(&'static str, String); 2], String> {
         let description = "MYLE: fills in logins from your password vault";
@@ -177,7 +141,6 @@ impl Hosts {
         let text = |manifest: &Value| serde_json::to_string_pretty(manifest).map_err(|e| e.to_string());
         Ok([("chrome.json", text(&chrome)?), ("firefox.json", text(&firefox)?)])
     }
-
     fn write(&self) -> Result<(), String> {
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         for (name, text) in self.manifests()? {
@@ -191,7 +154,6 @@ impl Hosts {
         }
         Ok(())
     }
-
     /// Why a browser would not start this program as the host, if one would not.
     fn check(&self) -> Result<(), String> {
         let manifests = self.manifests()?;
@@ -214,7 +176,6 @@ impl Hosts {
         }
         Ok(())
     }
-
     fn remove(&self) {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         for (key, _, _) in HOST_KEYS {
@@ -223,7 +184,6 @@ impl Hosts {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
-
 /// Tells the Chromium and Firefox browsers where the host is, unless they
 /// already know: checked on every start, unlock and look at the setup, so a
 /// moved program or a deleted manifest mends itself.
@@ -235,25 +195,19 @@ pub fn ensure_registered() -> Result<(), String> {
     hosts.write()?;
     hosts.check()
 }
-
 /// Writes the registration again, whatever is there now.
 pub fn register_hosts() -> Result<(), String> {
     let hosts = Hosts::here()?;
     hosts.write()?;
     hosts.check()
 }
-
 /// Browser filling switched off: the browsers forget the host.
 pub fn unregister_hosts() {
     if let Ok(hosts) = Hosts::here() {
         hosts.remove();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Diagnostics: which browser last asked, and whom the host turned away. No
-// addresses or logins, only the browser and when.
-
+// --------------------------------------------------------------------------- Diagnostics: which browser last asked, and whom the host turned away. No addresses or logins, only the browser and when.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Contact {
@@ -267,7 +221,6 @@ pub struct Contact {
     #[serde(default)]
     pub version: String,
 }
-
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Refusal {
@@ -276,11 +229,9 @@ pub struct Refusal {
     pub reason: String,
     pub at: u64,
 }
-
 /// Sent to the page when a browser asks for the first time in a while.
 pub const CONTACT_EVENT: &str = "passwords-browser-contact";
 static LAST_CONTACT: Mutex<Option<Contact>> = Mutex::new(None);
-
 /// Notes a request from `browser`; true for the first in a minute (kept on
 /// disk too, so the setup still knows after a restart).
 fn note_contact(browser: &str, copy: &str, version: &str) -> bool {
@@ -296,7 +247,6 @@ fn note_contact(browser: &str, copy: &str, version: &str) -> bool {
     }
     !recent
 }
-
 pub fn last_contact() -> Option<Contact> {
     if let Some(contact) = LAST_CONTACT.lock().unwrap_or_else(|p| p.into_inner()).clone() {
         return Some(contact);
@@ -304,7 +254,6 @@ pub fn last_contact() -> Option<Contact> {
     let text = std::fs::read(manifest_dir().ok()?.join("contact.json")).ok()?;
     serde_json::from_slice(&text).ok()
 }
-
 /// Called by the host when it turns a start away.
 fn note_refusal(program: &str, reason: &str) {
     let Ok(dir) = manifest_dir() else { return };
@@ -315,12 +264,10 @@ fn note_refusal(program: &str, reason: &str) {
     let keep = lines.len().saturating_sub(REFUSALS_KEPT);
     let _ = std::fs::write(&path, lines[keep..].join("\n"));
 }
-
 pub fn last_refusal() -> Option<Refusal> {
     let text = std::fs::read_to_string(manifest_dir().ok()?.join("host.log")).ok()?;
     parse_refusal(text.lines().last()?)
 }
-
 fn parse_refusal(line: &str) -> Option<Refusal> {
     let mut parts = line.splitn(3, '\t');
     let at = parts.next()?.parse().ok()?;
@@ -330,10 +277,7 @@ fn parse_refusal(line: &str) -> Option<Refusal> {
         at,
     })
 }
-
-// ---------------------------------------------------------------------------
-// Processes
-
+// --------------------------------------------------------------------------- Processes
 /// The pipe both sides meet at, one per Windows user.
 fn pipe_name() -> String {
     let user = std::env::var("USERNAME").unwrap_or_default();
@@ -342,7 +286,6 @@ fn pipe_name() -> String {
     let id: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
     format!(r"\\.\pipe\myle-passwords-{id}")
 }
-
 pub(super) fn process_path(pid: u32) -> Option<PathBuf> {
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
@@ -356,14 +299,12 @@ pub(super) fn process_path(pid: u32) -> Option<PathBuf> {
         (ok != 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
     }
 }
-
 fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()),
     }
 }
-
 /// Whether `pid` runs this very program.
 fn is_this_program(pid: u32) -> bool {
     match (process_path(pid), std::env::current_exe()) {
@@ -371,7 +312,6 @@ fn is_this_program(pid: u32) -> bool {
         _ => false,
     }
 }
-
 /// This process's parent, grandparent and so on (Chrome starts the host
 /// through `cmd.exe`), as program file names, lowercase.
 fn ancestors() -> Vec<String> {
@@ -403,10 +343,7 @@ fn ancestors() -> Vec<String> {
     }
     chain
 }
-
-// ---------------------------------------------------------------------------
-// The host, started by the browser
-
+// --------------------------------------------------------------------------- The host, started by the browser
 /// `Some(exit code)` when a browser started this program as the extension's
 /// native messaging host; `None` for a normal start.
 pub fn run_native_host() -> Option<i32> {
@@ -432,7 +369,6 @@ pub fn run_native_host() -> Option<i32> {
         Err(_) => 2,
     })
 }
-
 /// What to call a browser, from its program file name; `None` for any
 /// other program.
 pub(super) fn browser_name(program: &str) -> Option<&'static str> {
@@ -441,7 +377,6 @@ pub(super) fn browser_name(program: &str) -> Option<&'static str> {
         .find(|(file, _)| program.eq_ignore_ascii_case(file))
         .map(|(_, name)| *name)
 }
-
 /// Which copy of our extension started the host, if one did. Chrome and
 /// Edge pass the extension's origin, sometimes without the trailing slash;
 /// Firefox the path of the manifest and the extension's id.
@@ -458,12 +393,10 @@ fn which_copy(args: &[String]) -> Option<&'static str> {
         }
     })
 }
-
 #[cfg(test)]
 fn started_by_our_extension(args: &[String]) -> bool {
     which_copy(args).is_some()
 }
-
 /// One message from the browser, or why it was not taken (its bytes are
 /// read all the same, so the next message is read as it should be).
 enum Frame {
@@ -471,7 +404,6 @@ enum Frame {
     TooLarge,
     Invalid,
 }
-
 fn read_frame(input: &mut impl Read) -> std::io::Result<Option<Frame>> {
     let mut length = [0u8; 4];
     match input.read_exact(&mut length) {
@@ -489,7 +421,6 @@ fn read_frame(input: &mut impl Read) -> std::io::Result<Option<Frame>> {
     input.read_exact(&mut body)?;
     Ok(Some(serde_json::from_slice(&body).map_or(Frame::Invalid, Frame::Message)))
 }
-
 #[cfg(test)]
 fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
     match read_frame(input)? {
@@ -498,20 +429,17 @@ fn read_message(input: &mut impl Read) -> std::io::Result<Option<Value>> {
         Some(_) => Err(std::io::ErrorKind::InvalidData.into()),
     }
 }
-
 fn write_message(output: &mut impl Write, value: &Value) -> std::io::Result<()> {
     let body = Zeroizing::new(serde_json::to_vec(value)?);
     output.write_all(&(body.len() as u32).to_le_bytes())?;
     output.write_all(&body)?;
     output.flush()
 }
-
 /// How long the host waits for the app it started to answer, before it tells
 /// the browser the app is not running after all.
 const APP_START_WAIT: Duration = Duration::from_secs(20);
 /// How often it looks for the app's pipe while it waits.
 const APP_START_POLL: Duration = Duration::from_millis(250);
-
 /// Passes each message from the browser to the app and back, saying which
 /// browser it came from.
 fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
@@ -519,7 +447,6 @@ fn host_loop(browser: &str, copy: &str) -> std::io::Result<()> {
     let mut output = std::io::stdout().lock();
     relay(&mut input, &mut output, |message| reply_for(browser, copy, message))
 }
-
 /// Answers each message with `reply`; one too large or not understood is
 /// answered too, and the next one read.
 fn relay(input: &mut impl Read, output: &mut impl Write, mut reply: impl FnMut(&Value) -> Value) -> std::io::Result<()> {
@@ -533,18 +460,15 @@ fn relay(input: &mut impl Read, output: &mut impl Write, mut reply: impl FnMut(&
     }
     Ok(())
 }
-
 /// The app's answer to one message from the browser.
 fn reply_for(browser: &str, copy: &str, message: &Value) -> Value {
     {
-        // An open-and-close availability probe consumes the listening pipe
-        // instance. Send the request on our first connection instead.
+        // An open-and-close availability probe consumes the listening pipe instance. Send the request on our first connection instead.
         let request = request_from(browser, copy, message);
         match ask_app(&request) {
             Ok(reply) => reply,
             Err(AppError::Failed) => lost_app_reply(),
-            // MYLE runs as administrator: the browser's host may not reach it,
-            // and a second MYLE is never started next to it.
+            // MYLE runs as administrator: the browser's host may not reach it, and a second MYLE is never started next to it.
             Err(AppError::Denied) => json!({ "ok": false, "error": "elevated" }),
             Err(AppError::Busy) => json!({ "ok": false, "error": "busy" }),
             Err(AppError::TimedOut) => json!({ "ok": false, "error": "timeout" }),
@@ -558,8 +482,7 @@ fn reply_for(browser: &str, copy: &str, message: &Value) -> Value {
                 json!({ "ok": false, "error": "notRunning" })
             }
             Err(AppError::Unavailable) => {
-                // No connection was made: start the app and wait until this
-                // request can be dispatched. A lost answer is never retried.
+                // No connection was made: start the app and wait until this request can be dispatched. A lost answer is never retried.
                 let how = launch_app(browser, copy);
                 let answer = how.map_or(Err(AppError::Unavailable), |_| wait_for_app(&request, APP_START_WAIT));
                 match answer {
@@ -581,12 +504,10 @@ fn reply_for(browser: &str, copy: &str, message: &Value) -> Value {
         }
     }
 }
-
 fn request_from(browser: &str, copy: &str, message: &Value) -> Value {
     let version = message.get("extVersion").and_then(Value::as_str).unwrap_or("");
     json!({ "browser": browser, "copy": copy, "version": version, "request": message })
 }
-
 /// Whether the host starts MYLE for this request when it is closed: passkeys
 /// only. A passkey request means the user is reaching for MYLE (a sign-in with
 /// one, or a page offering one), so starting it is what makes the click carry
@@ -599,17 +520,14 @@ fn wants_the_app(message: &Value) -> bool {
         _ => false,
     }
 }
-
 fn is_open(message: &Value) -> bool {
     message.get("type").and_then(Value::as_str) == Some("open")
 }
-
 /// The flag MYLE starts with to open on the Password Manager and ask to be
 /// unlocked; also what the `myle:` link starts it with.
 pub const OPEN_FLAG: &str = "--open-passwords";
 /// MYLE's own link scheme (`myle://passwords`), registered for this user.
 const PROTOCOL: &str = "myle";
-
 /// Starts MYLE on the Password Manager page, and says how.
 ///
 /// A program the browser starts lives in the browser's job: what it starts can
@@ -627,7 +545,6 @@ fn launch_app(browser: &str, copy: &str) -> Option<&'static str> {
     }
     Some(if open_link() { "started, then asked Windows to open MYLE" } else { "started" })
 }
-
 fn spawn_detached() -> bool {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -649,7 +566,6 @@ fn spawn_detached() -> bool {
     // Breaking away is refused in a job that does not allow it: then as is.
     start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB) || start(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
 }
-
 /// Opens `myle://passwords` through Explorer: the copy it starts is
 /// Explorer's, not the browser's.
 fn open_link() -> bool {
@@ -676,7 +592,6 @@ fn open_link() -> bool {
         })
         .is_ok()
 }
-
 /// `myle:` links start this program on the Password Manager (for this user
 /// only). Whatever the link says after the scheme is not passed on.
 pub fn register_protocol() -> Result<(), String> {
@@ -693,7 +608,6 @@ pub fn register_protocol() -> Result<(), String> {
     let (open, _) = key.create_subkey(r"shell\open\command").map_err(|e| e.to_string())?;
     open.set_value("", &command).map_err(|e| e.to_string())
 }
-
 /// Waits, up to `limit`, for the app to answer on its pipe. Milliseconds
 /// count: the app's window and vault come up in a couple of seconds.
 fn wait_for_app(message: &Value, limit: Duration) -> Result<Value, AppError> {
@@ -703,19 +617,16 @@ fn wait_for_app(message: &Value, limit: Duration) -> Result<Value, AppError> {
             Err(AppError::Unavailable) if Instant::now() < until => {
                 std::thread::sleep(APP_START_POLL);
             }
-            // The app may have committed a request with a lost answer.
-            // Retry only while no connection has been established.
+            // The app may have committed a request with a lost answer. Retry only while no connection has been established.
             answer => return answer,
         }
     }
 }
-
 fn open_app_pipe(name: &str, limit: Duration) -> std::io::Result<std::fs::File> {
     let until = Instant::now() + limit;
     loop {
         match std::fs::OpenOptions::new().read(true).write(true).open(name) {
-            // The app accepts an instance and replenishes its listener on
-            // another task. A simultaneous request can reach that short gap.
+            // The app accepts an instance and replenishes its listener on another task. A simultaneous request can reach that short gap.
             Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) && Instant::now() < until => {
                 std::thread::sleep(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(10)));
             }
@@ -723,12 +634,10 @@ fn open_app_pipe(name: &str, limit: Duration) -> std::io::Result<std::fs::File> 
         }
     }
 }
-
 /// One request, distinguishing unavailable connection from a lost answer.
 fn ask_app(message: &Value) -> Result<Value, AppError> {
     ask_app_on(&pipe_name(), message)
 }
-
 #[derive(Debug, PartialEq, Eq)]
 enum AppError {
     /// No connection was made: MYLE is not running (or not yet).
@@ -742,7 +651,6 @@ enum AppError {
     /// MYLE took the request and did not answer in time.
     TimedOut,
 }
-
 /// What a failure to open MYLE's pipe means. Only "not there" may lead to
 /// starting MYLE: an elevated or busy MYLE is running already.
 fn open_error(error: &std::io::Error) -> AppError {
@@ -753,7 +661,6 @@ fn open_error(error: &std::io::Error) -> AppError {
         _ => AppError::Unavailable,
     }
 }
-
 /// How long the host waits for MYLE's pipe to have a free instance (the app
 /// makes the next one right after each connection, retrying if it fails).
 const PIPE_BUSY_WAIT: Duration = Duration::from_secs(10);
@@ -761,14 +668,12 @@ const PIPE_BUSY_WAIT: Duration = Duration::from_secs(10);
 /// (Windows Hello, picking one) a good while longer.
 const REPLY_WAIT: Duration = Duration::from_secs(25);
 const PASSKEY_REPLY_WAIT: Duration = Duration::from_secs(140);
-
 fn reply_wait(message: &Value) -> Duration {
     match message.pointer("/request/type").and_then(Value::as_str) {
         Some("passkeyGet" | "passkeyCreate") => PASSKEY_REPLY_WAIT,
         _ => REPLY_WAIT,
     }
 }
-
 fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
     let pipe = open_app_pipe(name, PIPE_BUSY_WAIT).map_err(|error| open_error(&error))?;
     let mut server = 0u32;
@@ -781,8 +686,7 @@ fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
     line.push('\n');
     writer.write_all(line.as_bytes()).map_err(|_| AppError::Failed)?;
     writer.flush().map_err(|_| AppError::Failed)?;
-    // Read on a thread of its own, so a MYLE that never answers cannot keep
-    // this host (and the browser's request) waiting for ever.
+    // Read on a thread of its own, so a MYLE that never answers cannot keep this host (and the browser's request) waiting for ever.
     let (sent, answered) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut answer = Zeroizing::new(String::new());
@@ -795,14 +699,10 @@ fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
         Err(_) => Err(AppError::TimedOut),
     }
 }
-
 fn lost_app_reply() -> Value {
     json!({ "ok": false, "error": "hostExited", "detail": "MYLE's connection closed without an answer; the request was not retried" })
 }
-
-// ---------------------------------------------------------------------------
-// The app's side
-
+// --------------------------------------------------------------------------- The app's side
 /// How the app's end of the bridge stands, for Browser filling's health.
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -814,47 +714,37 @@ pub struct ServerHealth {
     /// Unix milliseconds of the last request answered.
     pub last_served_at: Option<u64>,
 }
-
 static HEALTH: Mutex<ServerHealth> = Mutex::new(ServerHealth { listening: false, error: None, last_served_at: None });
-
 pub fn server_health() -> ServerHealth {
     HEALTH.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
-
 fn health(update: impl FnOnce(&mut ServerHealth)) {
     update(&mut HEALTH.lock().unwrap_or_else(|p| p.into_inner()));
 }
-
 /// Waits between failed tries, twice as long each time up to `limit`.
 struct Backoff {
     first: Duration,
     next: Duration,
     limit: Duration,
 }
-
 impl Backoff {
     fn new(first: Duration, limit: Duration) -> Self {
         Self { first, next: first, limit }
     }
-
     fn wait(&mut self) -> Duration {
         let wait = self.next;
         self.next = (self.next * 2).min(self.limit);
         wait
     }
-
     fn reset(&mut self) {
         self.next = self.first;
     }
 }
-
 type PipeServer = tokio::net::windows::named_pipe::NamedPipeServer;
-
 /// A pipe instance: the first (only this copy may own the name) or another.
 fn pipe_instance(name: &str, first: bool) -> std::io::Result<PipeServer> {
     ServerOptions::new().first_pipe_instance(first).reject_remote_clients(true).create(name)
 }
-
 /// The pipe's first instance, tried until it is this copy's. A previous copy
 /// holding it (a live update) is waited for; any other error is retried
 /// too, longer and longer: browser filling is never off for the whole run.
@@ -882,7 +772,6 @@ async fn browser_listener(make: &mut impl FnMut(bool) -> std::io::Result<PipeSer
         }
     }
 }
-
 /// Accepts the browsers' hosts forever, handing each to `serve_client`. A
 /// host that could not be accepted, or a next instance that could not be
 /// made, never stops it: the host just connected is answered all the same
@@ -930,7 +819,6 @@ async fn accept_loop(
         }
     }
 }
-
 /// What to do with the browsers' registration at start: point them at this
 /// program, remove it (filling off), or, when the preference could not be
 /// read (the vault file held by a backup or an antivirus), leave it as is:
@@ -941,7 +829,6 @@ enum Registration {
     Unregister,
     Keep,
 }
-
 fn registration_for(filling: &Result<bool, String>) -> Registration {
     match filling {
         Ok(true) => Registration::Register,
@@ -949,15 +836,12 @@ fn registration_for(filling: &Result<bool, String>) -> Registration {
         Err(_) => Registration::Keep,
     }
 }
-
 /// How long a connected host may take to send its request.
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
-
 /// Answers the hosts while the app runs. `filling`: browser filling is on
 /// (an error: the vault could not be read just now).
 pub fn serve(app: AppHandle, state: PasswordsState, filling: Result<bool, String>) {
-    // The browsers are pointed at this program (or, filling off, forget it)
-    // whether or not the pipe is this copy's yet.
+    // The browsers are pointed at this program (or, filling off, forget it) whether or not the pipe is this copy's yet.
     let registration = registration_for(&filling);
     tauri::async_runtime::spawn_blocking(move || match registration {
         Registration::Register => {
@@ -978,7 +862,6 @@ pub fn serve(app: AppHandle, state: PasswordsState, filling: Result<bool, String
         .await;
     });
 }
-
 /// Reads until the host goes away (it sends nothing after its request).
 async fn until_gone(reader: &mut (impl tokio::io::AsyncRead + Unpin)) {
     use tokio::io::AsyncReadExt;
@@ -990,7 +873,6 @@ async fn until_gone(reader: &mut (impl tokio::io::AsyncRead + Unpin)) {
         }
     }
 }
-
 /// Runs `work` while the host is there: the host gone (the browser closed
 /// the tab, or the extension gave up), `work` is dropped, which cancels a
 /// passkey operation and closes its Windows Hello prompt. `None` then.
@@ -1000,7 +882,6 @@ async fn while_connected<T>(client: &mut (impl tokio::io::AsyncRead + Unpin), wo
         () = until_gone(client) => None,
     }
 }
-
 /// One host's request, answered.
 async fn serve_client(app: AppHandle, state: PasswordsState, client: PipeServer) {
     let mut pid = 0u32;
@@ -1029,8 +910,7 @@ async fn serve_client(app: AppHandle, state: PasswordsState, client: PipeServer)
                     None => return,
                 }
             } else {
-                // The vault's lock, files and the clipboard block: not on the
-                // runtime's own threads.
+                // The vault's lock, files and the clipboard block: not on the runtime's own threads.
                 let (app, state) = (app.clone(), state.clone());
                 tauri::async_runtime::spawn_blocking(move || answer(&app, &state, request))
                     .await
@@ -1045,7 +925,6 @@ async fn serve_client(app: AppHandle, state: PasswordsState, client: PipeServer)
     let _ = client.get_mut().write_all(out.as_bytes()).await;
     let _ = client.get_mut().flush().await;
 }
-
 /// What the host passes on: the browser's request, and which browser.
 #[derive(Deserialize)]
 struct Envelope {
@@ -1056,7 +935,6 @@ struct Envelope {
     version: String,
     request: Request,
 }
-
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum Request {
@@ -1135,13 +1013,11 @@ enum Request {
     /// Withdraws this browser copy's operation for exactly this origin.
     PasskeyCancel { url: String, operation_id: String },
 }
-
 impl Request {
     fn is_passkey(&self) -> bool {
         matches!(self, Self::PasskeyList { .. } | Self::PasskeyCreate { .. } | Self::PasskeyGet { .. } | Self::PasskeyCancel { .. })
     }
 }
-
 #[derive(Serialize)]
 struct Login {
     id: String,
@@ -1161,7 +1037,6 @@ struct Login {
     #[serde(rename = "hasPassword")]
     has_password: bool,
 }
-
 /// The page's host, if it is one we fill: https, or http on this PC.
 fn page_host(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
@@ -1169,13 +1044,11 @@ fn page_host(url: &str) -> Option<String> {
     let local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]");
     (parsed.scheme() == "https" || parsed.scheme() == "http" && local).then_some(host)
 }
-
 /// The part of a host that one owner controls (`accounts.google.com` →
 /// `google.com`, `a.b.co.uk` → `b.co.uk`), from the Public Suffix List.
 fn site(host: &str) -> String {
     psl::domain_str(host).unwrap_or(host).to_string()
 }
-
 /// How well an entry's saved address fits the page: `Some(true)` the same
 /// host, `Some(false)` the same site, `None` another site.
 fn fits(saved: &str, page: &str) -> Option<bool> {
@@ -1189,7 +1062,6 @@ fn fits(saved: &str, page: &str) -> Option<bool> {
         None
     }
 }
-
 fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     if let Request::Open = request {
         let locked = state.with_quiet(|vault| Ok(vault.status())).is_ok_and(|status| status == Status::Locked);
@@ -1203,8 +1075,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     let opened = state.with_quiet(|vault| Ok((vault.prefs().browser_filling, vault.status())));
     let app_version = app.package_info().version.to_string();
     if let Request::Status = request {
-        // `appVersion` tells the extension how old this MYLE is. A vault file
-        // that can't be read is said so, never taken for "no vault yet".
+        // `appVersion` tells the extension how old this MYLE is. A vault file that can't be read is said so, never taken for "no vault yet".
         return match opened {
             Ok((enabled, status)) => json!({ "ok": true, "enabled": enabled, "state": status, "appVersion": app_version }),
             Err(_) => json!({ "ok": false, "error": "vaultError", "appVersion": app_version }),
@@ -1232,8 +1103,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         };
     }
     if let Request::TotpFromImage { image } = &request {
-        // Decoded here and given back for the popup to show; kept only when
-        // the user then picks the login for it.
+        // Decoded here and given back for the popup to show; kept only when the user then picks the login for it.
         return match qr_in_screenshot(image) {
             Ok(link) => {
                 let info = super::totp::Totp::parse(&link).map(|key| key.info()).ok();
@@ -1243,8 +1113,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         };
     }
     if let Request::Generate = request {
-        // Asked at the user's click on a sign-up form: keep the vault open
-        // until the form is sent and the new login can be saved.
+        // Asked at the user's click on a sign-up form: keep the vault open until the form is sent and the new login can be saved.
         let _ = state.with_quiet(|vault| {
             vault.touch();
             Ok(())
@@ -1267,8 +1136,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         return json!({ "ok": false, "error": if status == Status::New { "noVault" } else { "locked" } });
     }
     if let Request::Copy { id, url, field } = &request {
-        // Read under the vault's lock; copied after it, so the clipboard's
-        // retries never hold the vault.
+        // Read under the vault's lock; copied after it, so the clipboard's retries never hold the vault.
         let text = state.with_quiet(|vault| copy_text(vault, id, url, field));
         return match text.and_then(|text| super::clipboard::copy_secret(&text)) {
             Ok(()) => json!({ "ok": true }),
@@ -1375,8 +1243,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
                         .into_iter()
                         .find(|e| e.id == *id)
                         .ok_or("notFound")?;
-                    // A login of this site; one that has a key already is
-                    // changed only from its own host, as with a password.
+                    // A login of this site; one that has a key already is changed only from its own host, as with a password.
                     let fit = entry.urls.iter().filter_map(|u| fits(u, &host)).max().ok_or("wrongSite")?;
                     if entry.has_totp && !fit {
                         return Err("wrongSite".to_string());
@@ -1474,7 +1341,6 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     }
     result.unwrap_or_else(|error| json!({ "ok": false, "error": error }))
 }
-
 /// What `Request::Copy` puts on the clipboard: only for a login saved for
 /// the page's site, by the same rule as filling it.
 fn copy_text(vault: &mut super::vault::Vault, id: &str, url: &str, field: &str) -> Result<Zeroizing<String>, String> {
@@ -1497,11 +1363,9 @@ fn copy_text(vault: &mut super::vault::Vault, id: &str, url: &str, field: &str) 
     vault.touch();
     Ok(text)
 }
-
 const PASSKEY_VERIFY_WAIT: Duration = Duration::from_secs(120);
 const OPERATION_KEEP: Duration = Duration::from_secs(300);
 const OPERATIONS_MAX: usize = 128;
-
 #[derive(Clone, PartialEq, Eq)]
 struct OperationKey {
     browser: String,
@@ -1509,7 +1373,6 @@ struct OperationKey {
     origin: String,
     id: String,
 }
-
 impl OperationKey {
     fn new(browser: &str, copy: &str, url: &str, id: &str) -> Result<Self, String> {
         if id.is_empty() || id.len() > 80 || page_host(url).is_none() {
@@ -1519,14 +1382,12 @@ impl OperationKey {
         Ok(Self { browser: browser.into(), copy: copy.into(), origin, id: id.into() })
     }
 }
-
 struct PasskeyOperation {
     until: Instant,
     keep_until: Instant,
     cancelled: Mutex<bool>,
     changed: tokio::sync::Notify,
 }
-
 impl PasskeyOperation {
     fn new(now: Instant) -> Self {
         Self {
@@ -1536,14 +1397,11 @@ impl PasskeyOperation {
             changed: tokio::sync::Notify::new(),
         }
     }
-
     fn cancel(&self) {
         *self.cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
         self.changed.notify_waiters();
     }
-
-    // Cancellation and the final vault commit share this lock. Verification
-    // never holds it: once cancellation is accepted there can be no save.
+    // Cancellation and the final vault commit share this lock. Verification never holds it: once cancellation is accepted there can be no save.
     fn commit<T>(&self, run: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         let cancelled = self.cancelled.lock().unwrap_or_else(|p| p.into_inner());
         if *cancelled || Instant::now() >= self.until {
@@ -1551,7 +1409,6 @@ impl PasskeyOperation {
         }
         run()
     }
-
     async fn verify<T>(&self, verification: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
         let changed = self.changed.notified();
         tokio::pin!(changed);
@@ -1566,18 +1423,14 @@ impl PasskeyOperation {
         }
     }
 }
-
 struct OperationRegistry(Vec<(OperationKey, Arc<PasskeyOperation>)>);
-
 impl OperationRegistry {
     fn prune(&mut self, now: Instant) {
         self.0.retain(|(_, operation)| now < operation.keep_until);
     }
-
     fn start(&mut self, key: OperationKey, now: Instant) -> Result<OperationGuard, String> {
         self.prune(now);
-        // A pre-arrived cancellation is a tombstone; reusing a consumed ID
-        // must never restart the same request after its page withdrew it.
+        // A pre-arrived cancellation is a tombstone; reusing a consumed ID must never restart the same request after its page withdrew it.
         if self.0.iter().any(|(found, _)| found == &key) {
             return Err("cancelled".into());
         }
@@ -1588,7 +1441,6 @@ impl OperationRegistry {
         self.0.push((key, operation.clone()));
         Ok(OperationGuard(operation))
     }
-
     fn cancel(&mut self, key: OperationKey, now: Instant) -> Result<(), String> {
         self.prune(now);
         if let Some((_, operation)) = self.0.iter().find(|(found, _)| found == &key) {
@@ -1604,27 +1456,21 @@ impl OperationRegistry {
         Ok(())
     }
 }
-
 static OPERATIONS: Mutex<OperationRegistry> = Mutex::new(OperationRegistry(Vec::new()));
-
 struct OperationGuard(Arc<PasskeyOperation>);
-
 impl std::ops::Deref for OperationGuard {
     type Target = PasskeyOperation;
     fn deref(&self) -> &Self::Target { &self.0 }
 }
-
 impl Drop for OperationGuard {
     fn drop(&mut self) { self.0.cancel(); }
 }
-
 fn start_operation(browser: &str, copy: &str, url: &str, id: Option<String>) -> Result<OperationGuard, String> {
     // Older extensions have no operation ID; their verification still expires.
     let id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let key = OperationKey::new(browser, copy, url, &id)?;
     OPERATIONS.lock().unwrap_or_else(|p| p.into_inner()).start(key, Instant::now())
 }
-
 /// Passkeys. Using one may ask the user to confirm with Windows Hello, so
 /// the vault is not held while that prompt shows.
 async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, copy: &str, request: Request) -> Result<Value, String> {
@@ -1647,8 +1493,7 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
     if status != Status::Unlocked {
         let wakes = !matches!(request, Request::PasskeyList { wake: false, .. });
         if status != Status::New && wakes {
-            // A sign-in waits on MYLE: it comes forward and asks to be
-            // unlocked (Windows Hello when it is on).
+            // A sign-in waits on MYLE: it comes forward and asks to be unlocked (Windows Hello when it is on).
             ask_to_unlock(app);
         }
         return Err(if status == Status::New { "noVault" } else { "locked" }.into());
@@ -1661,9 +1506,7 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
                 return Err("badRequest".into());
             }
             let found = state.with_quiet(|vault| vault.passkeys_for(&rp_id, &allow))?;
-            // Passkeys of this site the page did not ask for (its list names
-            // others): MYLE says so instead of quietly stepping aside. Their
-            // ids (not secret: sites list them) help the debug log.
+            // Passkeys of this site the page did not ask for (its list names others): MYLE says so instead of quietly stepping aside. Their ids (not secret: sites list them) help the debug log.
             let unlisted: Vec<String> = if allow.is_empty() {
                 Vec::new()
             } else {
@@ -1755,7 +1598,6 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
         _ => Err("badRequest".into()),
     }
 }
-
 /// Whether the user confirmed it is them, when the site asks for that
 /// ("preferred" unless it says otherwise): Windows Hello. Without Windows
 /// Hello, a site that insists gets the master password asked in MYLE.
@@ -1773,7 +1615,6 @@ async fn verify_user(app: &AppHandle, wanted: &str, site: &str) -> Result<bool, 
         Consent::Unavailable => Ok(false),
     }
 }
-
 /// The otpauth:// link in a picture's grey levels, if it is a 2FA QR code.
 fn qr_in_pixels(width: usize, height: usize, pixels: &str) -> Option<String> {
     use base64::Engine;
@@ -1786,7 +1627,6 @@ fn qr_in_pixels(width: usize, height: usize, pixels: &str) -> Option<String> {
     }
     super::qr::otpauth_in(&super::qr::Grey { width, height, pixels }).ok()
 }
-
 /// The otpauth:// link in a tab's screenshot (base64, or a data: URL).
 fn qr_in_screenshot(image: &str) -> Result<String, String> {
     use base64::Engine;
@@ -1796,7 +1636,6 @@ fn qr_in_screenshot(image: &str) -> Result<String, String> {
         .map_err(|_| "That is not a picture.".to_string())?;
     super::qr::otpauth_in(&super::qr::grey_from_bytes(&bytes)?)
 }
-
 /// The logins saved with one user name for a page.
 #[derive(Debug, Default, PartialEq)]
 struct SameLogin {
@@ -1806,7 +1645,6 @@ struct SameLogin {
     /// any of them holds is already known.
     same_site: Vec<String>,
 }
-
 fn same_login(vault: &mut super::vault::Vault, host: &str, username: &str) -> Result<SameLogin, String> {
     let summaries = vault.summaries()?;
     Ok(same_login_in(
@@ -1815,7 +1653,6 @@ fn same_login(vault: &mut super::vault::Vault, host: &str, username: &str) -> Re
         username,
     ))
 }
-
 fn same_login_in<'a>(
     entries: impl IntoIterator<Item = (&'a str, &'a str, &'a [String])>,
     host: &str,
@@ -1825,8 +1662,7 @@ fn same_login_in<'a>(
     let mut found = SameLogin::default();
     let mut on_host = Vec::new();
     for (id, name, urls) in entries {
-        // A password-change form often has no user name field: then any
-        // login of the site may be the one.
+        // A password-change form often has no user name field: then any login of the site may be the one.
         if !wanted.is_empty() && !name.eq_ignore_ascii_case(wanted) {
             continue;
         }
@@ -1843,12 +1679,10 @@ fn same_login_in<'a>(
     }
     found
 }
-
 /// Brings the app forward on the Password Manager page.
 /// What the Password Manager hears when a website waits for the vault: it
 /// asks to be unlocked at once.
 pub const UNLOCK_EVENT: &str = "myle-unlock-wanted";
-
 /// Brings MYLE to its vault and asks for it to be unlocked: at most every
 /// few seconds, however many requests a sign-in makes.
 pub fn ask_to_unlock(app: &AppHandle) {
@@ -1863,7 +1697,6 @@ pub fn ask_to_unlock(app: &AppHandle) {
     open_vault(app);
     let _ = app.emit(UNLOCK_EVENT, ());
 }
-
 pub fn open_vault(app: &AppHandle) {
     // Still starting: the splash hands over to the vault by itself.
     let starting = app.get_webview_window("splash").is_some();
@@ -1874,11 +1707,9 @@ pub fn open_vault(app: &AppHandle) {
     }
     let _ = app.emit("myle-navigate", "password-manager");
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn a_login_says_whether_it_has_a_password() {
         let login = Login {
@@ -1896,7 +1727,6 @@ mod tests {
         assert_eq!(json["totp"], true);
         assert!(json.get("icon").is_none());
     }
-
     #[test]
     fn passkey_cancel_request_is_supported() {
         let request: Request = serde_json::from_value(json!({
@@ -1904,11 +1734,9 @@ mod tests {
         })).expect("native passkey cancellation must be accepted");
         assert!(request.is_passkey());
     }
-
     fn operation_key(id: &str) -> OperationKey {
         OperationKey::new("Edge", "folder", "https://example.com/", id).unwrap()
     }
-
     #[tokio::test]
     async fn passkey_cancellation_interrupts_verification_before_commit() {
         let mut registry = OperationRegistry(Vec::new());
@@ -1925,7 +1753,6 @@ mod tests {
         assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
         assert!(!committed);
     }
-
     #[tokio::test]
     async fn passkey_cancellation_after_verification_still_prevents_commit() {
         let mut registry = OperationRegistry(Vec::new());
@@ -1937,7 +1764,6 @@ mod tests {
         assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
         assert!(!committed);
     }
-
     #[tokio::test]
     async fn passkey_verification_expires_before_it_can_commit() {
         let operation = PasskeyOperation {
@@ -1949,7 +1775,6 @@ mod tests {
         assert!(operation.commit(|| { committed = true; Ok(()) }).is_err());
         assert!(!committed);
     }
-
     #[test]
     fn passkey_cancellation_tombstones_are_scoped_bounded_and_expire() {
         let mut registry = OperationRegistry(Vec::new());
@@ -1974,7 +1799,6 @@ mod tests {
         assert!(registry.start(key, now + OPERATION_KEEP).is_ok());
         assert_eq!(registry.0.len(), 1);
     }
-
     #[test]
     fn only_https_pages_and_this_pc_are_filled() {
         assert_eq!(page_host("https://Accounts.Google.com/signin?x=1").as_deref(), Some("accounts.google.com"));
@@ -1983,7 +1807,6 @@ mod tests {
         assert_eq!(page_host("file:///C:/login.html"), None);
         assert_eq!(page_host("https://user@evil.com@bank.com/"), Some("bank.com".into()));
     }
-
     #[test]
     fn a_login_fits_its_own_site_and_never_a_look_alike() {
         assert_eq!(fits("https://github.com/login", "github.com"), Some(true));
@@ -1993,7 +1816,6 @@ mod tests {
         assert_eq!(fits("https://bank.co.uk", "evil.co.uk"), None);
         assert_eq!(fits("https://mybank.co.uk", "login.mybank.co.uk"), Some(false));
     }
-
     #[test]
     fn native_messages_round_trip() {
         let mut buffer = Vec::new();
@@ -2004,14 +1826,12 @@ mod tests {
         let too_big = (MAX_MESSAGE + 1).to_le_bytes();
         assert!(read_message(&mut &too_big[..]).is_err());
     }
-
     #[test]
     fn a_vault_that_cannot_be_read_at_start_leaves_the_browsers_registered() {
         assert_eq!(registration_for(&Ok(true)), Registration::Register);
         assert_eq!(registration_for(&Ok(false)), Registration::Unregister);
         assert_eq!(registration_for(&Err("locked by a backup".into())), Registration::Keep);
     }
-
     #[test]
     fn only_a_missing_pipe_may_lead_to_starting_myle() {
         assert_eq!(open_error(&std::io::Error::from_raw_os_error(2)), AppError::Unavailable);
@@ -2019,7 +1839,6 @@ mod tests {
         assert_eq!(open_error(&std::io::Error::from_raw_os_error(5)), AppError::Denied);
         assert_eq!(open_error(&std::io::Error::from_raw_os_error(231)), AppError::Busy);
     }
-
     #[test]
     fn a_passkey_waits_longer_for_its_answer_than_a_look_up() {
         let passkey = request_from("Edge", "store", &json!({ "type": "passkeyGet" }));
@@ -2028,7 +1847,6 @@ mod tests {
         assert_eq!(reply_wait(&logins), REPLY_WAIT);
         assert!(REPLY_WAIT < Duration::from_secs(30), "within the extension's own limit");
     }
-
     #[test]
     fn a_message_too_large_is_answered_and_the_next_one_still_read() {
         let mut input = Vec::new();
@@ -2045,7 +1863,6 @@ mod tests {
         assert_eq!(read_message(&mut answers).unwrap().unwrap()["type"], "status");
         assert!(read_message(&mut answers).unwrap().is_none());
     }
-
     #[tokio::test]
     async fn a_passkey_request_is_dropped_when_its_host_goes_away() {
         let (mut ours, theirs) = tokio::io::duplex(64);
@@ -2055,7 +1872,6 @@ mod tests {
         let (mut ours, _theirs) = tokio::io::duplex(64);
         assert_eq!(while_connected(&mut ours, async { 7 }).await, Some(7));
     }
-
     #[tokio::test]
     async fn the_pipe_keeps_answering_after_its_next_instance_could_not_be_made() {
         let name = format!(r"\\.\pipe\myle-browser-supervision-test-{}", uuid::Uuid::new_v4());
@@ -2077,8 +1893,7 @@ mod tests {
         ));
         for expected in 1..=2 {
             let open = name.clone();
-            // While the server makes its next instance again, a host finds no
-            // pipe for a moment (and asks again, as the extension does).
+            // While the server makes its next instance again, a host finds no pipe for a moment (and asks again, as the extension does).
             tokio::task::spawn_blocking(move || {
                 let until = Instant::now() + Duration::from_secs(5);
                 loop {
@@ -2104,7 +1919,6 @@ mod tests {
         assert!(failed.load(std::sync::atomic::Ordering::SeqCst));
         server.abort();
     }
-
     #[tokio::test]
     async fn browser_listener_takes_over_after_the_previous_version_exits() {
         let name = format!(r"\\.\pipe\myle-browser-update-test-{}", uuid::Uuid::new_v4());
@@ -2112,14 +1926,12 @@ mod tests {
         let mut make = |first| pipe_instance(&name, first);
         let listener = browser_listener(&mut make);
         tokio::pin!(listener);
-        // Updates deliberately overlap the two app processes. The new one
-        // must wait without joining the previous version's pipe.
+        // Updates deliberately overlap the two app processes. The new one must wait without joining the previous version's pipe.
         assert!(tokio::time::timeout(Duration::from_millis(50), &mut listener).await.is_err());
         drop(previous);
         let server = tokio::time::timeout(Duration::from_secs(2), listener).await.unwrap();
         drop(server);
     }
-
     #[tokio::test]
     async fn a_busy_browser_pipe_is_retried_until_the_next_listener_is_ready() {
         let name = format!(r"\\.\pipe\myle-browser-busy-test-{}", uuid::Uuid::new_v4());
@@ -2133,7 +1945,6 @@ mod tests {
         assert!(asking.await.unwrap().is_ok(), "a connected probe or simultaneous request must not mean MYLE is not running");
         drop((probe, previous, next));
     }
-
     #[tokio::test]
     async fn waiting_for_a_busy_browser_pipe_has_a_deadline() {
         let name = format!(r"\\.\pipe\myle-browser-busy-deadline-{}", uuid::Uuid::new_v4());
@@ -2151,7 +1962,6 @@ mod tests {
         assert!(elapsed < Duration::from_secs(1), "a busy pipe must not block the host indefinitely");
         drop((occupied, server));
     }
-
     #[test]
     fn a_missing_browser_pipe_is_reported_without_waiting() {
         let name = format!(r"\\.\pipe\myle-browser-missing-test-{}", uuid::Uuid::new_v4());
@@ -2159,7 +1969,6 @@ mod tests {
         assert_eq!(open_app_pipe(&name, Duration::from_secs(2)).unwrap_err().kind(), std::io::ErrorKind::NotFound);
         assert!(started.elapsed() < Duration::from_secs(1));
     }
-
     #[tokio::test]
     async fn a_lost_browser_reply_is_not_classified_as_safe_to_resend() {
         let name = format!(r"\\.\pipe\myle-browser-lost-reply-{}", uuid::Uuid::new_v4());
@@ -2170,12 +1979,10 @@ mod tests {
         let mut request = String::new();
         server.read_line(&mut request).await.unwrap();
         assert!(request.contains("passkeyCreate"));
-        // The app could already have committed this request; an EOF before
-        // its acknowledgement must not make the host dispatch it again.
+        // The app could already have committed this request; an EOF before its acknowledgement must not make the host dispatch it again.
         drop(server);
         assert_eq!(asking.await.unwrap(), Err(AppError::Failed));
     }
-
     #[test]
     fn a_page_changes_only_the_login_saved_for_its_own_host() {
         let urls = |u: &str| vec![u.to_string()];
@@ -2196,7 +2003,6 @@ mod tests {
         let two = [("a", "x", a.as_slice()), ("b", "y", b.as_slice())];
         assert_eq!(same_login_in(two, "two.example.com", "").exact, None, "which of the two is unclear");
     }
-
     #[test]
     fn a_script_cannot_ask_for_more_than_a_minutes_share() {
         let bucket = Mutex::new(VecDeque::new());
@@ -2205,7 +2011,6 @@ mod tests {
         }
         assert!(!allow(&bucket, 5), "the sixth in the same minute is refused");
     }
-
     #[test]
     fn only_our_extension_starts_the_host() {
         let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -2218,12 +2023,9 @@ mod tests {
         assert!(!started_by_our_extension(&args(&["chrome-extension://mifjffbnaeeljjfboiglbcoaokgdilca/x"])));
         assert!(!started_by_our_extension(&args(&[r"C:\x\firefox.json", "evil@example.com"])));
     }
-
     #[test]
     fn a_closed_app_is_started_for_a_passkey_and_left_alone_for_the_rest() {
-        // A passkey request is the user reaching for MYLE: it is started, so
-        // the click they already made carries on instead of hearing "not
-        // running" and making MYLE look as if it had no passkey at all.
+        // A passkey request is the user reaching for MYLE: it is started, so the click they already made carries on instead of hearing "not running" and making MYLE look as if it had no passkey at all.
         for message in [
             json!({ "type": "passkeyList", "url": "https://accounts.google.com/", "wake": true }),
             json!({ "type": "passkeyGet", "url": "https://x.com/", "challenge": "Y2g", "credentialId": "a" }),
@@ -2231,9 +2033,7 @@ mod tests {
         ] {
             assert!(wants_the_app(&message), "{message} starts the app");
         }
-        // Filling in a login does not: the menu has its own Open MYLE button,
-        // and a page must never bring the app up by itself. The extension's own
-        // "open" starts it through the host's other path.
+        // Filling in a login does not: the menu has its own Open MYLE button, and a page must never bring the app up by itself. The extension's own "open" starts it through the host's other path.
         for message in [
             // The menu on a sign-in field asking what MYLE has, by itself.
             json!({ "type": "passkeyList", "url": "https://accounts.google.com/" }),
@@ -2245,7 +2045,6 @@ mod tests {
             assert!(!wants_the_app(&message), "{message} leaves it closed");
         }
     }
-
     #[test]
     fn a_request_to_the_app_carries_the_browser_and_the_copy() {
         let envelope = request_from("Edge", "folder", &json!({ "type": "status" }));
@@ -2253,7 +2052,6 @@ mod tests {
         assert_eq!(envelope["copy"], "folder");
         assert_eq!(envelope["request"]["type"], "status");
     }
-
     #[test]
     fn a_registration_that_lost_its_manifest_or_points_elsewhere_is_found() {
         let id = std::process::id();
@@ -2263,25 +2061,21 @@ mod tests {
         assert!(hosts.check().unwrap_err().contains("not been told"), "nothing yet");
         hosts.write().unwrap();
         hosts.check().unwrap();
-
         // What this PC had: the browsers' keys, but the manifests gone.
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(hosts.check().unwrap_err().contains("missing"));
         hosts.write().unwrap();
         hosts.check().unwrap();
-
         // The program moved (or another copy registered): written again.
         let moved = Hosts { root: hosts.root.clone(), dir: dir.clone(), exe: PathBuf::from(r"D:\MYLE\MYLE.exe") };
         assert!(moved.check().unwrap_err().contains("another copy"));
         moved.write().unwrap();
         moved.check().unwrap();
-
         moved.remove();
         assert!(!dir.exists());
         assert!(moved.check().is_err());
         let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(&root);
     }
-
     #[test]
     fn the_host_names_the_browser_and_notes_whom_it_turned_away() {
         assert_eq!(browser_name("msedge.exe"), Some("Edge"));
@@ -2303,7 +2097,6 @@ mod tests {
         assert!(matches!(envelope.request, Request::Status));
         assert!(serde_json::from_value::<Envelope>(json!({ "type": "status" })).is_err(), "a bare request is refused");
     }
-
     #[test]
     fn passkey_requests_are_read_with_the_extensions_names() {
         let create: Request = serde_json::from_value(json!({
@@ -2326,7 +2119,6 @@ mod tests {
         let fill: Request = serde_json::from_value(json!({ "type": "fill", "id": "1", "url": "https://x.com" })).unwrap();
         assert!(!fill.is_passkey());
     }
-
     #[test]
     fn the_host_tells_the_stores_copy_from_a_folders() {
         let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -2337,7 +2129,6 @@ mod tests {
         let old: Envelope = serde_json::from_value(json!({ "browser": "Edge", "request": { "type": "status" } })).unwrap();
         assert_eq!(old.copy, "", "a host without the copy still works");
     }
-
     #[test]
     fn a_page_picture_must_be_whole_and_a_2fa_qr_code() {
         use base64::Engine;
@@ -2348,7 +2139,6 @@ mod tests {
         assert_eq!(qr_in_pixels(100, 100, &b64(vec![255; 10_000])), None, "a blank picture");
         assert_eq!(qr_in_pixels(10, 10, "not base64!"), None);
     }
-
     #[test]
     fn the_pipe_is_per_user_and_ours() {
         assert!(pipe_name().starts_with(r"\\.\pipe\myle-passwords-"));

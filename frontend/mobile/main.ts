@@ -1,5 +1,4 @@
-// MYLE Passwords for phones: the Password Manager page in a shell of its own
-// (`vite build --mode mobile`, embedded by backend/mobile).
+// MYLE Passwords for phones: the Password Manager page in a shell of its own (`vite build --mode mobile`, embedded by backend/mobile).
 import "../styles/tokens.css";
 import "../styles/base.css";
 import "../styles/background.css";

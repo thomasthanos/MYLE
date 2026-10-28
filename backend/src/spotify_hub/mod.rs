@@ -1,9 +1,4 @@
-//! Spotify Desktop and Spicetify lifecycle management.
-//!
-//! The webview can select only one of three action identifiers. Release URLs,
-//! process arguments, registry keys and filesystem targets are all resolved
-//! here from compile-time allowlists.
-
+// ! Spotify Desktop and Spicetify lifecycle management. ! ! The webview can select only one of three action identifiers. Release URLs, ! process arguments, registry keys and filesystem targets are all resolved ! here from compile-time allowlists.
 mod actions;
 mod detection;
 mod filesystem;
@@ -12,25 +7,19 @@ mod models;
 mod release;
 mod runner;
 mod state;
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
-
 use crate::apps::{Cleanup, Jobs};
 use crate::download::CANCELLED;
-
 pub use models::{
     PurgePreview, SpotifyHubAction, SpotifyHubEvent, SpotifyHubOutcome, SpotifyHubResult,
     SpotifyHubSnapshot,
 };
 use state::PreviewGrant;
 pub use state::SpotifyHubState;
-
 const PREVIEW_LIFETIME: Duration = Duration::from_secs(5 * 60);
-
 #[tauri::command]
 pub async fn spotify_hub_check_updates() -> Result<models::SpotifyHubReleases, String> {
     let (cli, marketplace) =
@@ -40,7 +29,6 @@ pub async fn spotify_hub_check_updates() -> Result<models::SpotifyHubReleases, S
         marketplace: marketplace.version,
     })
 }
-
 #[tauri::command]
 pub async fn spotify_hub_get_state(
     state: State<'_, SpotifyHubState>,
@@ -48,7 +36,6 @@ pub async fn spotify_hub_get_state(
     let detection = detection::detect().await?;
     Ok(detection.snapshot(state.last_outcome(), state.active()))
 }
-
 #[tauri::command]
 pub async fn spotify_hub_preview_purge(
     state: State<'_, SpotifyHubState>,
@@ -61,7 +48,6 @@ pub async fn spotify_hub_preview_purge(
         fingerprint: detection.fingerprint(),
         expires_at,
     });
-
     let mut detected_variants = Vec::new();
     if detection.desktop.installed {
         detected_variants.push(match &detection.desktop.version {
@@ -81,7 +67,6 @@ pub async fn spotify_hub_preview_purge(
             None => "Spicetify".into(),
         });
     }
-
     let mut categories = vec![
         "Spotify application files".into(),
         "Offline downloads and caches".into(),
@@ -112,7 +97,6 @@ pub async fn spotify_hub_preview_purge(
         expires_at,
     })
 }
-
 #[tauri::command]
 pub async fn spotify_hub_run(
     app: AppHandle,
@@ -126,7 +110,6 @@ pub async fn spotify_hub_run(
     let detection = detection::detect().await?;
     let job_id = format!("spotify-hub-{}", Uuid::new_v4().simple());
     let app_job = jobs.start_exclusive(&job_id)?;
-
     if action == SpotifyHubAction::PurgeAll {
         let token = purge_token.as_deref().ok_or(
             "A fresh purge preview and the exact REMOVE SPOTIFY confirmation are required.",
@@ -146,7 +129,6 @@ pub async fn spotify_hub_run(
     } else if purge_token.is_some() {
         return Err("A purge token is accepted only for Full Uninstall.".into());
     }
-
     let cancellation = state.begin(job_id.clone(), action)?;
     let reporter = runner::Reporter {
         job_id: &job_id,
@@ -154,7 +136,6 @@ pub async fn spotify_hub_run(
         state: &state,
     };
     reporter.stage(models::SpotifyHubStage::Preparing);
-
     let result = match action {
         SpotifyHubAction::InstallSpicetify => {
             actions::install(
@@ -174,7 +155,6 @@ pub async fn spotify_hub_run(
             actions::purge(&detection, &app_job, &cancellation, &reporter).await
         }
     };
-
     match result {
         Ok(outcome) => {
             state.finish(outcome.clone());
@@ -191,7 +171,6 @@ pub async fn spotify_hub_run(
         }
     }
 }
-
 #[tauri::command(async)]
 pub fn spotify_hub_cancel(
     state: State<'_, SpotifyHubState>,
@@ -201,7 +180,6 @@ pub fn spotify_hub_cancel(
     state.cancel(&job_id);
     jobs.cancel(&job_id);
 }
-
 fn unix_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -209,11 +187,9 @@ fn unix_millis(time: SystemTime) -> u64 {
         .try_into()
         .unwrap_or(u64::MAX)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn ipc_event_fields_are_camel_case() {
         let value = serde_json::to_value(SpotifyHubEvent::Stage {
@@ -228,7 +204,6 @@ mod tests {
                 "data": { "jobId": "job", "stage": "preparing" }
             })
         );
-
         let line = serde_json::to_value(SpotifyHubEvent::Line {
             job_id: "job".into(),
             text: "Patching files".into(),

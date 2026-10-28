@@ -1,7 +1,5 @@
 <script lang="ts">
-  // The project's releases on GitHub: edit their notes, delete some (and
-  // their tags, if asked), or combine several into one set of notes; and the
-  // tags no release uses, to delete on their own.
+  // The project's releases on GitHub: edit their notes, delete some (and their tags, if asked), or combine several into one set of notes; and the tags no release uses, to delete on their own.
   import { onMount, untrack } from "svelte";
   import Combine from "@lucide/svelte/icons/combine";
   import Download from "@lucide/svelte/icons/download";

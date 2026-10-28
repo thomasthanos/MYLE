@@ -1,32 +1,23 @@
-//! The Project Backups settings (`project-backups.json` next to MYLE's other
-//! settings), checking what the page saves, and the one-time import of the
-//! projects backup_projects knows.
-
+// ! The Project Backups settings (`project-backups.json` next to MYLE's other ! settings), checking what the page saves, and the one-time import of the ! projects backup_projects knows.
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
 use super::naming::{self, BACKUP_ROOT_NAME, CONFIG_MIRROR_FILE};
 use super::rules::{DEFAULT_PATTERNS, Pattern, RuleInput};
 use super::walk::same_path;
 use crate::cloud::CloudProvider;
-
 const FILE_NAME: &str = "project-backups.json";
 const MAX_PATTERNS: usize = 500;
 /// 2: names such as `target`, `out` and `release` are decided by the files
 /// around them, no longer by the pattern list.
 pub(crate) const SETTINGS_VERSION: u32 = 2;
-
 /// Held while the settings are read, changed and saved.
 static EDIT: Mutex<()> = Mutex::new(());
-
 pub(crate) fn edit_lock() -> MutexGuard<'static, ()> {
     EDIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LastBackup {
@@ -40,7 +31,6 @@ pub struct LastBackup {
     /// The full backup an increment builds on.
     pub base: Option<String>,
 }
-
 /// How the last backup attempt of a project ended.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -52,7 +42,6 @@ pub struct LastResult {
     pub code: Option<String>,
     pub error: Option<String>,
 }
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Project {
@@ -69,7 +58,6 @@ pub struct Project {
     pub last_backup: Option<LastBackup>,
     pub last_result: Option<LastResult>,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -87,7 +75,6 @@ pub struct Settings {
     /// The backup_projects import ran (it runs once by itself).
     pub imported: bool,
 }
-
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -102,14 +89,12 @@ impl Default for Settings {
         }
     }
 }
-
 pub(crate) fn default_patterns() -> Vec<String> {
     DEFAULT_PATTERNS
         .iter()
         .map(|pattern| pattern.to_string())
         .collect()
 }
-
 impl Settings {
     pub(crate) fn project(&self, id: &str) -> Result<&Project, String> {
         self.projects
@@ -117,7 +102,6 @@ impl Settings {
             .find(|project| project.id == id)
             .ok_or_else(|| "This project no longer exists.".to_string())
     }
-
     pub(crate) fn rule_input(&self, project: Option<&Project>) -> RuleInput {
         RuleInput {
             patterns: self.exclusions.clone(),
@@ -131,7 +115,6 @@ impl Settings {
             follow_gitignore: self.follow_gitignore,
         }
     }
-
     /// `<cloud folder>\Projects Backup`.
     pub(crate) fn backup_root(&self) -> Option<PathBuf> {
         self.cloud_folder
@@ -140,15 +123,12 @@ impl Settings {
             .map(|folder| Path::new(folder).join(BACKUP_ROOT_NAME))
     }
 }
-
 fn settings_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(FILE_NAME))
 }
-
 pub(crate) fn load() -> Result<Settings, String> {
     load_from(&settings_path()?)
 }
-
 pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -173,7 +153,6 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
         }
     }
 }
-
 /// Brings settings of an older MYLE up to date. The global list loses the
 /// 9.4.0 defaults that are now told apart by markers (`target/`, `out/`,
 /// `release/`, `gen/`, `venv/`, `*.obj`) and gains the new defaults; what
@@ -204,16 +183,13 @@ pub(crate) fn migrate(settings: &mut Settings) {
     }
     settings.version = SETTINGS_VERSION;
 }
-
 pub(crate) fn save(settings: &Settings) -> Result<(), String> {
     save_to(&settings_path()?, settings)
 }
-
 pub(crate) fn save_to(path: &Path, settings: &Settings) -> Result<(), String> {
     let text = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
     crate::game_saves::atomic::write(path, &text)
 }
-
 /// Reads the settings afresh, changes and saves them under the edit lock.
 pub(crate) fn edit(
     change: impl FnOnce(&mut Settings) -> Result<(), String>,
@@ -224,14 +200,11 @@ pub(crate) fn edit(
     save(&settings)?;
     Ok(settings)
 }
-
 // ─── Checks ────────────────────────────────────────────────────────────────
-
 const RESERVED: [&str; 22] = [
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
-
 /// A name usable as a single Windows file or folder name.
 pub(crate) fn valid_file_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or(name).to_ascii_lowercase();
@@ -244,7 +217,6 @@ pub(crate) fn valid_file_name(name: &str) -> bool {
         && !name.starts_with(' ')
         && !RESERVED.contains(&stem.as_str())
 }
-
 /// The names MYLE runs under: never closed for a backup.
 pub(crate) fn is_own_program(exe: &str) -> bool {
     let lower = exe.to_ascii_lowercase();
@@ -260,7 +232,6 @@ pub(crate) fn is_own_program(exe: &str) -> bool {
     .contains(&lower.as_str())
         || own.as_deref() == Some(lower.as_str())
 }
-
 pub(crate) fn clean_patterns(patterns: Vec<String>) -> Result<Vec<String>, String> {
     let mut out: Vec<String> = Vec::new();
     for pattern in patterns {
@@ -276,7 +247,6 @@ pub(crate) fn clean_patterns(patterns: Vec<String>) -> Result<Vec<String>, Strin
     }
     Ok(out)
 }
-
 /// Checks and tidies a project from the editor. `id` empty: a new project.
 pub(crate) fn check_project(
     settings: &Settings,
@@ -360,7 +330,6 @@ pub(crate) fn check_project(
     }
     Ok(project)
 }
-
 /// `path` is strictly inside `folder` (Windows path rules).
 pub(crate) fn inside(path: &Path, folder: &Path) -> bool {
     let text = |path: &Path| {
@@ -374,9 +343,7 @@ pub(crate) fn inside(path: &Path, folder: &Path) -> bool {
         && path.starts_with(&folder)
         && path.as_bytes()[folder.len()] == b'\\'
 }
-
 // ─── Import from backup_projects ──────────────────────────────────────────
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportReport {
@@ -385,7 +352,6 @@ pub struct ImportReport {
     /// Where the list came from, if one was found.
     pub from: Option<String>,
 }
-
 /// backup_projects' own list on this PC.
 pub(crate) fn backup_projects_config() -> Option<PathBuf> {
     let appdata = std::env::var_os("APPDATA")?;
@@ -396,7 +362,6 @@ pub(crate) fn backup_projects_config() -> Option<PathBuf> {
             .join("projects.json"),
     )
 }
-
 /// The projects in a backup_projects list (`projects.json` or its copy in
 /// the backups folder).
 pub(crate) fn read_backup_projects(text: &str) -> Vec<Project> {
@@ -442,7 +407,6 @@ pub(crate) fn read_backup_projects(text: &str) -> Vec<Project> {
         })
         .collect()
 }
-
 /// Projects that have backups in `root` (`Projects Backup`), for a PC
 /// where no list was kept: their folders are known, their sources not.
 pub(crate) fn projects_in_backup_root(root: &Path) -> Vec<Project> {
@@ -481,7 +445,6 @@ pub(crate) fn projects_in_backup_root(root: &Path) -> Vec<Project> {
     found.sort_by_key(|project| project.app_name.to_lowercase());
     found
 }
-
 /// Adds the projects of backup_projects that are not here yet (same backup
 /// name). Looks at its list on this PC, then at the copy it keeps in the
 /// backups folder, then at the backups themselves.
@@ -526,18 +489,15 @@ pub(crate) fn import(
     }
     report
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-store-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     const BACKUP_PROJECTS_JSON: &str = r#"{
       "activeProjectId": "default",
       "projects": [
@@ -547,7 +507,6 @@ mod tests {
         { "id": "p4", "name": "", "sourcePath": "", "appExe": "C:\\x.exe", "appName": "Restored", "restoredFromBackup": true }
       ]
     }"#;
-
     #[test]
     fn backup_projects_lists_are_imported_without_closing_myle() {
         let projects = read_backup_projects(BACKUP_PROJECTS_JSON);
@@ -559,7 +518,6 @@ mod tests {
         assert_eq!(projects[2].name, "Restored");
         assert_eq!(projects[2].close_app, None, "a path is not a program name");
     }
-
     #[test]
     fn import_prefers_the_local_list_then_the_copy_then_the_backups() {
         let root = temp("import");
@@ -575,18 +533,15 @@ mod tests {
         )
         .unwrap();
         fs::create_dir_all(backups.join("NoBackups")).unwrap();
-
         let mut settings = Settings::default();
         let report = import(&mut settings, Some(&config), Some(&backups));
         assert_eq!(report.added, ["Old"], "only folders that hold backups");
         assert_eq!(settings.projects[0].source_path, "");
-
         fs::write(backups.join(CONFIG_MIRROR_FILE), BACKUP_PROJECTS_JSON).unwrap();
         let mut settings = Settings::default();
         let report = import(&mut settings, Some(&config), Some(&backups));
         assert_eq!(report.added.len(), 3);
         assert!(report.from.unwrap().ends_with(CONFIG_MIRROR_FILE));
-
         fs::write(
             &config,
             r#"{"projects":[{"name":"Steam Idler","appName":"STEAM_IDLER","sourcePath":"E:\\s"}]}"#,
@@ -597,7 +552,6 @@ mod tests {
         assert_eq!(report.already_known, 1, "matched by backup name, any case");
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn projects_are_checked() {
         let root = temp("check");
@@ -620,7 +574,6 @@ mod tests {
         assert!(!saved.source_path.ends_with('\\'));
         assert_eq!(saved.extra_exclusions, ["secrets/"]);
         settings.projects.push(saved.clone());
-
         let mut other = good.clone();
         other.app_name = "Other".into();
         assert!(check_project(&settings, other.clone(), true).is_ok());
@@ -650,7 +603,6 @@ mod tests {
             .display()
             .to_string();
         assert!(check_project(&settings, nested, false).is_err());
-
         // A missing folder is allowed (fixed later) unless asked for.
         let mut missing = saved.clone();
         missing.source_path = root.join("gone").display().to_string();
@@ -658,7 +610,6 @@ mod tests {
         assert!(check_project(&settings, missing, true).is_err());
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn settings_survive_a_round_trip_and_a_damaged_file() {
         let root = temp("roundtrip");
@@ -685,7 +636,6 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn settings_of_9_4_0_are_brought_up_to_date() {
         let mut settings = Settings {

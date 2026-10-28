@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { Component, Snippet } from "svelte";
 
-  /** One group of settings: a glass card with its name and, in plain words,
-   *  what the group is for. */
+  /* One group of settings: a glass card with its name and, in plain words, what the group is for. */
   let {
     icon: Icon,
     title,

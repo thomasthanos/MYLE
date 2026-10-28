@@ -1,45 +1,35 @@
-//! Windows plumbing for Software Health: the registry, PowerShell, file
-//! signatures, the Recycle Bin, and the safety lists.
-
+// ! Windows plumbing for Software Health: the registry, PowerShell, file ! signatures, the Recycle Bin, and the safety lists.
 use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
-
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
-
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 pub fn root(hive: &str) -> RegKey {
     match hive {
         "HKLM" => RegKey::predef(HKEY_LOCAL_MACHINE),
         _ => RegKey::predef(HKEY_CURRENT_USER),
     }
 }
-
 /// Opens `hive\path` for reading, in the 64-bit view.
 pub fn open(hive: &str, path: &str) -> Option<RegKey> {
     root(hive)
         .open_subkey_with_flags(path, KEY_READ | KEY_WOW64_64KEY)
         .ok()
 }
-
 pub fn subkeys(key: &RegKey) -> Vec<String> {
     key.enum_keys().flatten().collect()
 }
-
 pub fn string(key: &RegKey, name: &str) -> Option<String> {
     key.get_value::<String, _>(name)
         .ok()
         .filter(|s| !s.trim().is_empty())
 }
-
 pub fn dword(key: &RegKey, name: &str) -> Option<u32> {
     key.get_value::<u32, _>(name).ok()
 }
-
 /// A command with no window; its stdout as text (empty on failure).
 pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new(program)
@@ -63,7 +53,6 @@ pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
         })
     }
 }
-
 /// A PowerShell script's output (UTF-8).
 pub fn powershell(script: &str) -> Result<String, String> {
     let full = format!(
@@ -83,7 +72,6 @@ pub fn powershell(script: &str) -> Result<String, String> {
         ],
     )
 }
-
 /// PowerShell's JSON: an array, or one object, or nothing.
 pub fn json_list(text: &str) -> Vec<serde_json::Value> {
     match serde_json::from_str::<serde_json::Value>(text.trim()) {
@@ -92,14 +80,12 @@ pub fn json_list(text: &str) -> Vec<serde_json::Value> {
         Ok(one) => vec![one],
     }
 }
-
 #[derive(Clone, Debug, Default)]
 pub struct Signature {
     pub signed: bool,
     /// The signer's name (the certificate's CN), if signed.
     pub signer: String,
 }
-
 /// Authenticode signatures of `paths` (one PowerShell call for all).
 pub fn signatures(paths: &[String]) -> HashMap<String, Signature> {
     let mut out = HashMap::new();
@@ -142,7 +128,6 @@ pub fn signatures(paths: &[String]) -> HashMap<String, Signature> {
     let _ = std::fs::remove_file(&list);
     out
 }
-
 /// The program a command line starts: `"C:\a b\x.exe" --y` → `C:\a b\x.exe`.
 pub fn program_of(command: &str) -> Option<String> {
     let text = expand(command.trim());
@@ -157,14 +142,12 @@ pub fn program_of(command: &str) -> Option<String> {
     };
     Some(path.trim().to_string()).filter(|p| !p.is_empty())
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presence {
     Present,
     Missing,
     Unknown,
 }
-
 pub fn path_status(path: &Path, directory: bool) -> Presence {
     match std::fs::metadata(path) {
         Ok(meta)
@@ -181,7 +164,6 @@ pub fn path_status(path: &Path, directory: bool) -> Presence {
         Err(_) => Presence::Unknown,
     }
 }
-
 fn program_status_in(command: &str, search: &[PathBuf]) -> Presence {
     let Some(program) = program_of(command) else {
         return Presence::Unknown;
@@ -217,7 +199,6 @@ fn program_status_in(command: &str, search: &[PathBuf]) -> Presence {
         Presence::Missing
     }
 }
-
 pub fn program_status(command: &str) -> Presence {
     let mut search = Vec::new();
     if let Some(windows) = env_dir("SystemRoot") {
@@ -229,7 +210,6 @@ pub fn program_status(command: &str) -> Presence {
     }
     program_status_in(command, &search)
 }
-
 /// `%VAR%` expanded from the environment.
 pub fn expand(text: &str) -> String {
     let mut out = String::new();
@@ -259,7 +239,6 @@ pub fn expand(text: &str) -> String {
     out.push_str(rest);
     out
 }
-
 /// Lowercase letters and digits only: names compared however written.
 pub fn norm(text: &str) -> String {
     text.chars()
@@ -267,7 +246,6 @@ pub fn norm(text: &str) -> String {
         .flat_map(char::to_lowercase)
         .collect()
 }
-
 /// Windows itself, Microsoft, drivers, hardware vendors and MYLE: never
 /// offered for any change.
 pub fn protected_name(name: &str) -> bool {
@@ -303,7 +281,6 @@ pub fn protected_name(name: &str) -> bool {
     let n = norm(name);
     NEVER.iter().any(|word| n.contains(word))
 }
-
 /// A path under the Windows folder (or a driver).
 pub fn system_path(path: &str) -> bool {
     let p = path.to_lowercase();
@@ -312,13 +289,11 @@ pub fn system_path(path: &str) -> bool {
         .to_lowercase();
     p.starts_with(&windir) || p.ends_with(".sys") || p.contains(r"\windowsapps\")
 }
-
 pub fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
 }
-
 /// Bytes in a folder (stops after `limit` entries; links not followed).
 pub fn dir_size(path: &Path, limit: usize) -> u64 {
     let mut total = 0;
@@ -348,7 +323,6 @@ pub fn dir_size(path: &Path, limit: usize) -> u64 {
     }
     total
 }
-
 /// What a folder holds, for a person deciding about it: how many files (up
 /// to `limit` entries looked at; links not followed) and the names of the
 /// first few, shallowest first.
@@ -384,7 +358,6 @@ pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<S
     }
     (files, found)
 }
-
 /// A folder of a known Windows location (`{6D809377-…}` for Program Files)
 /// as UserAssist writes it, resolved to its path.
 pub fn known_folder(id: &str) -> Option<PathBuf> {
@@ -411,7 +384,6 @@ pub fn known_folder(id: &str) -> Option<PathBuf> {
     unsafe { CoTaskMemFree(raw as *const _) };
     path
 }
-
 /// The newest modification inside a folder, two levels deep.
 pub fn newest_change(path: &Path) -> Option<SystemTime> {
     let mut newest = std::fs::metadata(path).ok()?.modified().ok();
@@ -433,7 +405,6 @@ pub fn newest_change(path: &Path) -> Option<SystemTime> {
     }
     newest
 }
-
 pub fn days_since(time: SystemTime) -> u64 {
     SystemTime::now()
         .duration_since(time)
@@ -441,7 +412,6 @@ pub fn days_since(time: SystemTime) -> u64 {
         .as_secs()
         / 86_400
 }
-
 /// Whether this user may remove the folder itself (opened for DELETE, as
 /// moving it to the Recycle Bin needs). A folder an installer made as
 /// administrator usually lets other users only read it.
@@ -471,7 +441,6 @@ pub fn can_delete(path: &Path) -> bool {
     }
     true
 }
-
 /// What a failed move to the Recycle Bin means (SHFileOperation's codes).
 fn recycle_error(code: i32) -> String {
     match code {
@@ -484,7 +453,6 @@ fn recycle_error(code: i32) -> String {
         _ => format!("Some files are in use or could not be moved to the Recycle Bin (code {code})."),
     }
 }
-
 /// Moves files or folders to the Recycle Bin (no prompt, no progress).
 pub fn recycle(paths: &[PathBuf]) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::{
@@ -516,18 +484,15 @@ pub fn recycle(paths: &[PathBuf]) -> Result<(), String> {
     }
     Ok(())
 }
-
 trait WideCompat {
     fn encode_wide_compat(&self) -> Vec<u16>;
 }
-
 impl WideCompat for std::ffi::OsStr {
     fn encode_wide_compat(&self) -> Vec<u16> {
         use std::os::windows::ffi::OsStrExt;
         self.encode_wide().collect()
     }
 }
-
 /// `reg export` of a key to `file` (a backup before it is changed).
 pub fn export_key(hive: &str, path: &str, file: &Path) -> Result<(), String> {
     let full = format!("{hive}\\{path}");
@@ -537,7 +502,6 @@ pub fn export_key(hive: &str, path: &str, file: &Path) -> Result<(), String> {
     )
     .map(|_| ())
 }
-
 /// Whether a program of this name runs now (`chrome.exe`).
 pub fn running(image: &str) -> bool {
     run(
@@ -547,11 +511,9 @@ pub fn running(image: &str) -> bool {
     .map(|text| text.to_lowercase().contains(&image.to_lowercase()))
     .unwrap_or(false)
 }
-
 #[cfg(test)]
 mod executable_tests {
     use super::*;
-
     #[test]
     fn uninstaller_on_search_path_is_not_missing() {
         let dir = std::env::temp_dir().join(format!("myle-health-test-{}", uuid::Uuid::new_v4()));

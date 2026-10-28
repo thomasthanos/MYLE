@@ -1,19 +1,11 @@
-// The feeds of a MYLE Passwords release (.github/workflows/mobile.yml):
-//   mobile-latest.json  what Android's update check reads (backend/mobile/src/update.rs)
-//   sidestore.json      the SideStore / AltStore source an iPhone adds once
-//
-//   node scripts/mobile-feeds.mjs --version 1.0.0 --tag mobile-v1.0.0 \
-//     --base https://downloads.thomast.uk --repo owner/repo \
-//     --apk out/MYLE-Passwords.apk --ipa out/MYLE-Passwords.ipa --out out
+// The feeds of a MYLE Passwords release (.github/workflows/mobile.yml): mobile-latest.json what Android's update check reads (backend/mobile/src/update.rs) sidestore.json the SideStore / AltStore source an iPhone adds once node scripts/mobile-feeds.mjs --version 1.0.0 --tag mobile-v1.0.0 \ --base https://downloads.thomast.uk --repo owner/repo \ --apk out/MYLE-Passwords.apk --ipa out/MYLE-Passwords.ipa --out out
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
-
 export const APP_ID = "uk.thomast.myle.passwords";
 export const MIN_IOS = "15.0";
-
 /** Release notes (markdown) as SideStore shows them: plain text, short. */
 export function plainNotes(markdown, limit = 1200) {
   let text = markdown
@@ -29,16 +21,13 @@ export function plainNotes(markdown, limit = 1200) {
   if (text.length > limit) text = text.slice(0, limit).replace(/\s+\S*$/, "") + "…";
   return text;
 }
-
 /** The notes file of a release: the phone's own, else the Windows app's. */
 export function notesFileFor(version, tag) {
   return tag.startsWith("mobile-v")
     ? [`docs/release-notes/mobile-${version}.md`]
     : [`docs/release-notes/mobile-${version}.md`, `docs/release-notes/${version}.md`];
 }
-
-/** `apk` and `ipa`: { size, sha256 } of the files published next to the feeds.
- *  `whatsNew`: the release notes in plain text, if any. */
+/* `apk` and `ipa`: { size, sha256 } of the files published next to the feeds. `whatsNew`: the release notes in plain text, if any. */
 export function feeds({ version, tag, base, repo, apk, ipa, whatsNew = "", date = new Date() }) {
   const notes = `https://github.com/${repo}/releases/tag/${tag}`;
   const day = date.toISOString().slice(0, 10);
@@ -97,12 +86,10 @@ export function feeds({ version, tag, base, repo, apk, ipa, whatsNew = "", date 
   };
   return { latest, sidestore };
 }
-
 async function described(path) {
   const bytes = await readFile(path);
   return { size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
-
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({
     options: Object.fromEntries(["version", "tag", "base", "repo", "apk", "ipa", "out"].map((name) => [name, { type: "string" }])),

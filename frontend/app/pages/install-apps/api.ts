@@ -1,13 +1,11 @@
 // Typed bridge to the Rust commands in backend/src/apps/.
 import { Channel, invoke } from "@tauri-apps/api/core";
-
 export interface InstalledPackage {
   id: string;
   name: string;
   version: string;
   available: string | null;
 }
-
 export interface CustomStatus {
   id: string;
   installed: boolean;
@@ -15,13 +13,11 @@ export interface CustomStatus {
   available: string | null;
   activated: boolean;
 }
-
 export interface InstalledReport {
   winget: InstalledPackage[];
   wingetError: string | null;
   custom: CustomStatus[];
 }
-
 export interface CustomAppInfo {
   id: string;
   name: string;
@@ -33,40 +29,32 @@ export interface CustomAppInfo {
   activateLabel: string | null;
   activateAfterInstall: boolean;
 }
-
 export interface PackageLinks {
   homepage: string | null;
   iconDomain: string | null;
 }
-
 export interface SearchHit {
   id: string;
   name: string;
   version: string;
 }
-
 export type Stage = "resolving" | "downloading" | "verifying" | "extracting" | "installing";
-
 export type JobEvent =
   | { event: "stage"; data: { stage: Stage } }
   | { event: "progress"; data: { fraction: number; downloaded: number | null; total: number | null } }
   | { event: "file"; data: { name: string; total: number | null } }
   | { event: "note"; data: { text: string } };
-
 export type JobOutcome =
   | { result: "done"; note: string | null }
   | { result: "upToDate" }
   | { result: "hashMismatch" }
   | { result: "cancelled" };
-
 export type Mode = "install" | "upgrade";
-
 function channel(onEvent: (e: JobEvent) => void): Channel<JobEvent> {
   const ch = new Channel<JobEvent>();
   ch.onmessage = onEvent;
   return ch;
 }
-
 export const api = {
   installed: () => invoke<InstalledReport>("apps_installed"),
   customCatalog: () => invoke<CustomAppInfo[]>("apps_custom_catalog"),

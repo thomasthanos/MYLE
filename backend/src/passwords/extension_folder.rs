@@ -1,5 +1,4 @@
 use std::path::Path;
-
 pub fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
@@ -14,11 +13,9 @@ pub fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn local_copy_contains_and_updates_both_browser_builds() {
         let root = std::env::temp_dir().join(format!("myle-extension-copy-{}", std::process::id()));

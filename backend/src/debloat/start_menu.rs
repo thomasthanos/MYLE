@@ -1,24 +1,16 @@
-//! Windows 11 Start Menu customization: layout, alignment, Windows 11 24H2/25H2
-//! All Apps view mode (Category / Grid / List), Recommended section visibility,
-//! quick folders next to the Power button (`VisiblePlaces`), and pinned apps
-//! presets / cleanup with backup & restore of `start2.bin`.
-
+// ! Windows 11 Start Menu customization: layout, alignment, Windows 11 24H2/25H2 ! All Apps view mode (Category / Grid / List), Recommended section visibility, ! quick folders next to the Power button (`VisiblePlaces`), and pinned apps ! presets / cleanup with backup & restore of `start2.bin`.
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-
 use serde::{Deserialize, Serialize};
 use winreg::RegKey;
 use winreg::enums::{
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_BINARY,
 };
 use winreg::RegValue;
-
 use super::catalog::{Data, Hive};
 use super::system::{self, Value};
-
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const START_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Start";
 const USER_EXPLORER_POLICY: &str = r"Software\Policies\Microsoft\Windows\Explorer";
@@ -27,7 +19,6 @@ const POLICY_MANAGER_START: &str = r"SOFTWARE\Microsoft\PolicyManager\current\de
 const POLICY_MANAGER_EDU: &str = r"SOFTWARE\Microsoft\PolicyManager\current\device\Education";
 const PROVIDER_GUID: &str = "B5292708-1619-419B-9923-E5D9F3925E71";
 const POLICY_PROVIDER_START: &str = r"SOFTWARE\Microsoft\PolicyManager\providers\B5292708-1619-419B-9923-E5D9F3925E71\default\Device\Start";
-
 /// Official 16-byte little-endian GUIDs for `HKCU\...\Start\VisiblePlaces`.
 pub const FOLDERS: &[(&str, [u8; 16])] = &[
     // Settings: {52730886-51AA-4243-9F7B-2776584659D4}
@@ -49,7 +40,6 @@ pub const FOLDERS: &[(&str, [u8; 16])] = &[
     // Network: {FE758144-080D-42AE-8BDA-34ED97B66394}
     ("network", [0x44, 0x81, 0x75, 0xFE, 0x0D, 0x08, 0xAE, 0x42, 0x8B, 0xDA, 0x34, 0xED, 0x97, 0xB6, 0x63, 0x94]),
 ];
-
 /// Fixed catalog of safe Start Menu pin targets for `ConfigureStartPins`.
 const PIN_CATALOG: &[(&str, &str)] = &[
     ("explorer", r#"{"desktopAppId":"Microsoft.Windows.Explorer"}"#),
@@ -65,7 +55,6 @@ const PIN_CATALOG: &[(&str, &str)] = &[
     ("edge", r#"{"desktopAppId":"MSEdge"}"#),
     ("xbox", r#"{"packagedAppId":"Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App"}"#),
 ];
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartMenuStatus {
@@ -82,7 +71,6 @@ pub struct StartMenuStatus {
     pub folders: Vec<String>,
     pub has_pins_backup: bool,
 }
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartMenuUpdate {
@@ -96,14 +84,12 @@ pub struct StartMenuUpdate {
     pub show_account_notifications: Option<bool>,
     pub folders: Option<Vec<String>>,
 }
-
 fn read_dword(hive: Hive, path: &str, name: &str) -> Option<u32> {
     match system::read(hive, path, name) {
         Value::Dword { value } => Some(value),
         _ => None,
     }
 }
-
 fn read_visible_places() -> Vec<String> {
     let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(START_KEY, KEY_READ | KEY_WOW64_64KEY) else {
         return Vec::new();
@@ -121,7 +107,6 @@ fn read_visible_places() -> Vec<String> {
     }
     active
 }
-
 fn write_visible_places(ids: &[String]) -> Result<(), String> {
     let mut bytes = Vec::with_capacity(ids.len() * 16);
     for id in ids {
@@ -138,17 +123,14 @@ fn write_visible_places(ids: &[String]) -> Result<(), String> {
     let _ = key.set_value("PlacesInitializedVersion", &2u32);
     Ok(())
 }
-
 fn start_bin_path() -> Option<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
     Some(local.join(r"Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState\start2.bin"))
 }
-
 fn start_bin_backup_path() -> Option<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
     Some(local.join(r"Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState\start2.bin.myle-backup"))
 }
-
 /// These are Windows 11's Start Menu settings: on another Windows they are
 /// never written, whatever the page asks.
 pub fn ensure_supported() -> Result<(), String> {
@@ -158,7 +140,6 @@ pub fn ensure_supported() -> Result<(), String> {
         Err("Start Menu customization needs Windows 11.".into())
     }
 }
-
 pub fn status() -> StartMenuStatus {
     let info = system::windows_info();
     let alignment = match read_dword(Hive::User, ADVANCED, "TaskbarAl") {
@@ -189,7 +170,6 @@ pub fn status() -> StartMenuStatus {
     let show_account_notifications = read_dword(Hive::User, ADVANCED, "Start_AccountNotifications") != Some(0);
     let folders = read_visible_places();
     let has_pins_backup = start_bin_backup_path().is_some_and(|p| p.is_file());
-
     StartMenuStatus {
         supported: info.windows11,
         alignment,
@@ -205,10 +185,8 @@ pub fn status() -> StartMenuStatus {
         has_pins_backup,
     }
 }
-
 pub fn apply_user_update(update: StartMenuUpdate) -> Result<StartMenuStatus, String> {
     let mut restart_host = false;
-
     if let Some(alignment) = update.alignment.as_deref() {
         let val = if alignment == "left" { 0 } else { 1 };
         system::write(Hive::User, ADVANCED, "TaskbarAl", Data::Dword(val))?;
@@ -250,7 +228,6 @@ pub fn apply_user_update(update: StartMenuUpdate) -> Result<StartMenuStatus, Str
     if let Some(folders) = update.folders {
         write_visible_places(&folders)?;
     }
-
     system::broadcast_setting_change("TraySettings");
     system::broadcast_setting_change("Policy");
     if restart_host {
@@ -258,7 +235,6 @@ pub fn apply_user_update(update: StartMenuUpdate) -> Result<StartMenuStatus, Str
     }
     Ok(status())
 }
-
 pub fn apply_user_hide_recommended(hide: bool) -> Result<(), String> {
     if hide {
         system::write(Hive::User, USER_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
@@ -272,7 +248,6 @@ pub fn apply_user_hide_recommended(hide: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 /// Runs inside the elevated administrator helper.
 pub fn apply_machine_hide_recommended(hide: bool) -> Result<(), String> {
     if hide {
@@ -286,7 +261,6 @@ pub fn apply_machine_hide_recommended(hide: bool) -> Result<(), String> {
     }
     Ok(())
 }
-
 pub fn build_pins_json(pin_ids: &[String]) -> Result<String, String> {
     let mut items = Vec::new();
     for id in pin_ids {
@@ -299,7 +273,6 @@ pub fn build_pins_json(pin_ids: &[String]) -> Result<String, String> {
     }
     Ok(format!(r#"{{"pinnedList":[{}]}}"#, items.join(",")))
 }
-
 /// Validates that `json` was built solely from `PIN_CATALOG` entries before the
 /// elevated helper writes it to `PolicyManager`.
 pub fn valid_pins_json(json: &str) -> bool {
@@ -324,7 +297,6 @@ pub fn valid_pins_json(json: &str) -> bool {
         rest = next;
     }
 }
-
 /// Runs inside the elevated administrator helper. `Some(json)` sets the
 /// `ConfigureStartPins` policy; `None` removes the policy keys so the user can
 /// freely pin and unpin apps again.
@@ -340,7 +312,6 @@ pub fn apply_machine_start_pins(json: Option<&str>) -> Result<(), String> {
         start_key.set_value("ConfigureStartPins", &json).map_err(|e| e.to_string())?;
         start_key.set_value("ConfigureStartPins_ProviderSet", &1u32).map_err(|e| e.to_string())?;
         start_key.set_value("ConfigureStartPins_WinningProvider", &PROVIDER_GUID).map_err(|e| e.to_string())?;
-
         let (prov_key, _) = hklm
             .create_subkey_with_flags(POLICY_PROVIDER_START, KEY_ALL_ACCESS | KEY_WOW64_64KEY)
             .map_err(|e| format!("{POLICY_PROVIDER_START}: {e}"))?;
@@ -356,7 +327,6 @@ pub fn apply_machine_start_pins(json: Option<&str>) -> Result<(), String> {
     }
     Ok(())
 }
-
 pub fn backup_start_bin() {
     if let (Some(src), Some(dst)) = (start_bin_path(), start_bin_backup_path())
         && src.is_file()
@@ -365,7 +335,6 @@ pub fn backup_start_bin() {
         let _ = std::fs::copy(src, dst);
     }
 }
-
 pub fn restore_start_bin() -> Result<(), String> {
     let src = start_bin_backup_path().ok_or("LocalAppData path not found.")?;
     let dst = start_bin_path().ok_or("LocalAppData path not found.")?;
@@ -381,27 +350,22 @@ pub fn restore_start_bin() -> Result<(), String> {
     restart_start_menu();
     Ok(())
 }
-
 pub fn restart_start_menu() {
     let _ = Command::new(system::windows_dir().join(r"System32\taskkill.exe"))
         .args(["/f", "/im", "StartMenuExperienceHost.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn pins_json_is_validated_strictly() {
         let empty = build_pins_json(&[]).unwrap();
         assert_eq!(empty, r#"{"pinnedList":[]}"#);
         assert!(valid_pins_json(&empty));
-
         let some = build_pins_json(&["explorer".into(), "settings".into(), "terminal".into()]).unwrap();
         assert!(valid_pins_json(&some));
-
         assert!(!valid_pins_json(r#"{"pinnedList":[{"desktopAppId":"evil.exe"}]}"#));
         assert!(build_pins_json(&["unknown".into()]).is_err());
     }

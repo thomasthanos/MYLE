@@ -1,13 +1,4 @@
-// The toolbar popup: whether MYLE is there and its vault unlocked, and the
-// logins saved for the site in the current tab and for the sign-in frames
-// inside it. It is part of the browser, not of the page, so it is also the
-// safe way to fill a form embedded from another site. Copy buttons ask MYLE to
-// put the text on the clipboard itself (marked secret, cleared after 30
-// seconds): a password never comes to this page.
-//
-// One screen at a time: every flow (the list, a 2FA scan, a retry) takes a new
-// view token, and a flow whose token is no longer the current one drops what
-// it found, so a late list never covers a scanned 2FA key.
+// The toolbar popup: whether MYLE is there and its vault unlocked, and the logins saved for the site in the current tab and for the sign-in frames inside it. It is part of the browser, not of the page, so it is also the safe way to fill a form embedded from another site. Copy buttons ask MYLE to put the text on the clipboard itself (marked secret, cleared after 30 seconds): a password never comes to this page. One screen at a time: every flow (the list, a 2FA scan, a retry) takes a new view token, and a flow whose token is no longer the current one drops what it found, so a late list never covers a scanned 2FA key.
 const ext = globalThis.browser ?? globalThis.chrome;
 const byId = (id) => document.getElementById(id);
 const ui = {
@@ -66,8 +57,7 @@ function reasonFor(error) {
   }
 }
 
-/** What the popup says in place of the list after `error`: a title, a
- *  sentence and the actions offered (`open`, `retry` or `back`). */
+/* What the popup says in place of the list after `error`: a title, a sentence and the actions offered (`open`, `retry` or `back`). */
 function errorView(error) {
   switch (error) {
     case "locked":
@@ -115,8 +105,7 @@ function errorView(error) {
   }
 }
 
-/** The header's chip from MYLE's `status` answer: `tone` ok, warn, bad or
- *  idle, and `action` (`open`) when a click on it helps. */
+/* The header's chip from MYLE's `status` answer: `tone` ok, warn, bad or idle, and `action` (`open`) when a click on it helps. */
 function chipFor(answer, tooOld = false) {
   if (!answer) return { tone: "idle", text: "Checking…", title: "Asking MYLE…", action: null };
   if (answer.ok) {
@@ -154,8 +143,7 @@ function copiedText(field) {
   }
 }
 
-/** `web` (https, or this computer's own sites), `insecure` (plain http) or
- *  `other` (a browser page, a file…). */
+/* `web` (https, or this computer's own sites), `insecure` (plain http) or `other` (a browser page, a file…). */
 function kindOf(url) {
   if (typeof url !== "string") return "other";
   if (/^https:\/\//i.test(url) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:[/?#]|$)/i.test(url)) return "web";
@@ -371,9 +359,7 @@ const COPY = {
   totp: { label: "Copy the 2FA code", shape: "code" },
 };
 
-/** A small button that has MYLE copy one field of the login. One restore
- *  timer per button, cleared on every click, so a failure never keeps an
- *  earlier success's check mark. */
+/* A small button that has MYLE copy one field of the login. One restore timer per button, cleared on every click, so a failure never keeps an earlier success's check mark. */
 function copyButton(login, tabId, field) {
   const { label, shape } = COPY[field];
   const node = document.createElement("button");
@@ -562,8 +548,7 @@ async function load() {
   }
 }
 
-/** Brings MYLE forward (its unlock prompt when locked). The popup closes
- *  only when MYLE answered; otherwise it says why. */
+/* Brings MYLE forward (its unlock prompt when locked). The popup closes only when MYLE answered; otherwise it says why. */
 async function openApp(node = null) {
   if (node && isBusy(node)) return false;
   if (node) setBusy(node, true);
@@ -616,8 +601,7 @@ async function scanQr() {
   }
 }
 
-/** Where to keep a scanned key: a new login (the default), or a saved one.
- *  The key itself stays in this function's closure, never in the page. */
+/* Where to keep a scanned key: a new login (the default), or a saved one. The key itself stays in this function's closure, never in the page. */
 function showScanResult(token, tabId, found, logins) {
   if (token !== view) return;
   rows = [];
@@ -666,8 +650,7 @@ function showScanResult(token, tabId, found, logins) {
   fresh.focus();
 }
 
-/** Keeps the scanned key. A login that already has a key is replaced only
- *  after a second, explicit click: the old key is gone after that. */
+/* Keeps the scanned key. A login that already has a key is replaced only after a second, explicit click: the old key is gone after that. */
 async function keep(token, tabId, login, link, node) {
   if (isBusy(node) || token !== view) return;
   if (login?.totp && node.dataset.confirm !== "yes") {
@@ -745,8 +728,7 @@ function start() {
   void refreshStatus();
   void load();
 
-  // The version loaded in this browser, and the debug log (read by the
-  // extension's part in each page, which writes to that page's console).
+  // The version loaded in this browser, and the debug log (read by the extension's part in each page, which writes to that page's console).
   ui.version.textContent = `MYLE Passwords ${ext.runtime.getManifest().version}`;
   void Promise.resolve(ext.storage.local.get("debug")).then((found) => (ui.debug.checked = found?.debug === true), () => {});
   ui.debug.addEventListener("change", () => {

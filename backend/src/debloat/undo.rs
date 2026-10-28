@@ -1,18 +1,9 @@
-//! What a tweak changed, kept so Undo puts back exactly what was there
-//! before: the value, or its absence (and the keys made for it), the
-//! service's start type, the task's state, the user's time format.
-//!
-//! Only the first application of a tweak is kept: applying it again must
-//! not replace the original with the tweak's own value.
-
+// ! What a tweak changed, kept so Undo puts back exactly what was there ! before: the value, or its absence (and the keys made for it), the ! service's start type, the task's state, the user's time format. ! ! Only the first application of a tweak is kept: applying it again must ! not replace the original with the tweak's own value.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
-
 use super::catalog::Start;
 use super::system::Value;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Before {
@@ -26,7 +17,6 @@ pub enum Before {
     /// A part of Windows was installed; Undo adds it again.
     Capability,
 }
-
 /// One operation of a tweak (its index in the tweak's `ops`) and what it
 /// found there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +25,6 @@ pub struct Saved {
     pub op: usize,
     pub before: Before,
 }
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Store {
@@ -45,12 +34,10 @@ pub struct Store {
     #[serde(default)]
     pub removed_apps: BTreeSet<String>,
 }
-
 impl Store {
     fn path() -> Result<PathBuf, String> {
         Ok(crate::storage::local_dir()?.join("debloat-undo.json"))
     }
-
     pub fn load() -> Store {
         Self::path()
             .ok()
@@ -58,7 +45,6 @@ impl Store {
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default()
     }
-
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path()?;
         if let Some(dir) = path.parent() {
@@ -69,7 +55,6 @@ impl Store {
         std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
         std::fs::rename(&temp, &path).map_err(|e| e.to_string())
     }
-
     /// Keeps `saved` unless this operation's original is already kept.
     pub fn record(&mut self, tweak: &str, saved: Saved) {
         let list = self.tweaks.entry(tweak.to_string()).or_default();
@@ -77,11 +62,9 @@ impl Store {
             list.push(saved);
         }
     }
-
     pub fn saved(&self, tweak: &str) -> Vec<Saved> {
         self.tweaks.get(tweak).cloned().unwrap_or_default()
     }
-
     /// After Undo: the operations put back are forgotten.
     pub fn forget(&mut self, tweak: &str, ops: &[usize]) {
         if let Some(list) = self.tweaks.get_mut(tweak) {
@@ -92,11 +75,9 @@ impl Store {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn the_first_original_is_the_one_kept() {
         let mut store = Store::default();
@@ -111,7 +92,6 @@ mod tests {
         store.forget("telemetry", &[3]);
         assert!(store.tweaks.is_empty());
     }
-
     #[test]
     fn it_reads_back_what_it_wrote() {
         let mut store = Store::default();

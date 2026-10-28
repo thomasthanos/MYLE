@@ -1,5 +1,4 @@
-// State of the Creative Hub page: the fixed catalog and the running jobs.
-// The list ships with the app; nothing here can change it.
+// State of the Creative Hub page: the fixed catalog and the running jobs. The list ships with the app; nothing here can change it.
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { toast } from "../../../lib/toast.svelte";
 import type { JobEvent, JobOutcome, Stage } from "../install-apps/api";

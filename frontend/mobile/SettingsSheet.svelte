@@ -9,8 +9,7 @@
   import SyncCard from "./settings/SyncCard.svelte";
 
   const close = () => (shell.settingsOpen = false);
-  /** A dialog opened from here (Change master password) sits over the sheet
-   *  and closes first. */
+  /* A dialog opened from here (Change master password) sits over the sheet and closes first. */
   const dialogOver = () => !!document.querySelector('.backdrop > [role="dialog"]');
 
   function focusSheet(node: HTMLElement) {

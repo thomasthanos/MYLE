@@ -4,11 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
-
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-
 use super::atomic;
 use crate::cloud::onedrive as cloud;
 use super::detection::{self, same_title};
@@ -25,24 +23,19 @@ use super::settings;
 use super::safety;
 use super::state::{GameSavesState, OperationHandle};
 use super::undo;
-
 /// Must stay in sync with `GAME_SAVES_TASK` in installer/src/product.rs: the
 /// uninstaller deletes this task.
 const TASK_NAME: &str = "MakeYourLifeEasier Game Saves Backup";
-
 /// The parsed game database, keyed by the manifest's size and modification
 /// time: parsing the 17 MB file on every scan cost a noticeable pause.
 static MANIFEST: Mutex<Option<(u64, SystemTime, ManifestMetadata)>> = Mutex::new(None);
-
 /// Held by the quick settings commands while they read, change and save the
 /// settings file. They run on the async pool, so two clicks in a row could
 /// otherwise both read the old file and the second save would drop the first.
 static SETTINGS_EDIT: Mutex<()> = Mutex::new(());
-
 fn settings_edit() -> std::sync::MutexGuard<'static, ()> {
     SETTINGS_EDIT.lock().unwrap_or_else(|p| p.into_inner())
 }
-
 /// Reads the settings afresh, lets `change` change them and saves them, all
 /// under the edit lock. For the commands that wait on something first (a
 /// folder picker, a scan, the task scheduler): what was saved meanwhile is
@@ -57,7 +50,6 @@ fn edit_settings(
     settings::save(app, &value)?;
     Ok(value)
 }
-
 async fn page_cache_after_engine(
     state: &GameSavesState,
     engine_version: impl std::future::Future<Output = Option<String>>,
@@ -65,8 +57,7 @@ async fn page_cache_after_engine(
     read_cache: impl FnOnce() -> Option<CachedScan>,
 ) -> Result<(Option<String>, GameSavesSettings, Option<GameSavesScan>), String> {
     let version = engine_version.await;
-    // No settings guard crosses the engine await. Read, validate and publish
-    // together so an older request cannot replay another destination's state.
+    // No settings guard crosses the engine await. Read, validate and publish together so an older request cannot replay another destination's state.
     let _edit = settings_edit();
     let settings = read_settings()?;
     let cached = read_cache();
@@ -75,7 +66,6 @@ async fn page_cache_after_engine(
         .map(|scan| GameSavesScan { discovery_due: due, ..scan });
     Ok((version, settings, cached_scan))
 }
-
 #[tauri::command]
 pub async fn game_saves_get_state(
     app: AppHandle,
@@ -102,8 +92,7 @@ pub async fn game_saves_get_state(
         cloud_folders: detection::detect_cloud_folders(),
         engine_available: engine.is_some(),
         engine_version: version,
-        // The scheduled backup runs in a process of its own: the page waits
-        // for it like for one of its own operations, instead of failing.
+        // The scheduled backup runs in a process of its own: the page waits for it like for one of its own operations, instead of failing.
         active_operation: state.active_kind().or_else(|| {
             settings::config_root(&app)
                 .is_ok_and(|root| super::state::held_elsewhere(&root))
@@ -113,7 +102,6 @@ pub async fn game_saves_get_state(
         cached_scan,
     })
 }
-
 #[tauri::command]
 pub async fn game_saves_pick_backup_folder(
     app: AppHandle,
@@ -126,7 +114,6 @@ pub async fn game_saves_pick_backup_folder(
     };
     set_backup_folder(&app, &state, &path).map(Some)
 }
-
 /// Makes `<cloud folder>\Make Your Life Easier\Game Saves Backups` the
 /// backup folder, creating it. `path` must be one of the folders this app
 /// detected for `provider`; without one, the user is asked where that
@@ -180,7 +167,6 @@ pub async fn game_saves_use_cloud_folder(
     .await
     .map_err(|e| e.to_string())?
 }
-
 #[tauri::command(async)]
 pub fn game_saves_open_backup_folder(app: AppHandle) -> Result<(), String> {
     let settings = settings::initialize(&app)?;
@@ -189,7 +175,6 @@ pub fn game_saves_open_backup_folder(app: AppHandle) -> Result<(), String> {
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| error.to_string())
 }
-
 #[tauri::command(async)]
 pub fn game_saves_open_game_folder(
     state: State<'_, GameSavesState>,
@@ -213,12 +198,10 @@ pub fn game_saves_open_game_folder(
     };
     tauri_plugin_opener::open_path(folder, None::<&str>).map_err(|error| error.to_string())
 }
-
 #[tauri::command(async)]
 pub fn game_saves_detect_cloud_folders() -> Vec<DetectedFolder> {
     detection::detect_cloud_folders()
 }
-
 #[tauri::command(async)]
 pub fn game_saves_refresh_roots(
     app: AppHandle,
@@ -232,7 +215,6 @@ pub fn game_saves_refresh_roots(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command]
 pub async fn game_saves_add_root(
     app: AppHandle,
@@ -267,7 +249,6 @@ pub async fn game_saves_add_root(
     })
     .map(Some)
 }
-
 #[tauri::command(async)]
 pub fn game_saves_remove_root(
     app: AppHandle,
@@ -285,7 +266,6 @@ pub fn game_saves_remove_root(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command]
 pub async fn game_saves_set_schedule(
     app: AppHandle,
@@ -310,8 +290,7 @@ pub async fn game_saves_set_schedule(
         Ok(())
     })?;
     if let Err(error) = configure_scheduled_task(schedule, &time, weekday).await {
-        // Keep the persisted settings and the Windows task in agreement,
-        // unless another change of the schedule came in meanwhile.
+        // Keep the persisted settings and the Windows task in agreement, unless another change of the schedule came in meanwhile.
         if let Some((old_schedule, old_time, old_weekday, old_started_at)) = previous {
             let _ = edit_settings(&app, |value| {
                 if value.schedule == schedule && value.schedule_time == time && value.schedule_weekday == weekday {
@@ -327,7 +306,6 @@ pub async fn game_saves_set_schedule(
     }
     Ok(value)
 }
-
 #[tauri::command(async)]
 pub fn game_saves_set_game_auto_backup(
     app: AppHandle,
@@ -357,7 +335,6 @@ pub fn game_saves_set_game_auto_backup(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command]
 pub async fn game_saves_pick_folder(
     app: AppHandle,
@@ -367,7 +344,6 @@ pub async fn game_saves_pick_folder(
         .await
         .map(|picked| picked.map(|path| path.to_string_lossy().into_owned()))
 }
-
 #[tauri::command(async)]
 pub fn game_saves_upsert_custom_game(
     app: AppHandle,
@@ -407,7 +383,6 @@ pub fn game_saves_upsert_custom_game(
             return Err(format!("The install folder does not exist: {install}"));
         }
     }
-
     let mut value = settings::initialize(&app)?;
     if let Some(backup) = value.backup_folder.as_deref() {
         for path in &game.paths {
@@ -416,7 +391,6 @@ pub fn game_saves_upsert_custom_game(
             }
         }
     }
-
     let existing = (!game.id.trim().is_empty())
         .then(|| {
             value
@@ -431,9 +405,7 @@ pub fn game_saves_upsert_custom_game(
     } else if existing.is_none() {
         return Err("For a new custom game, leave its id empty.".into());
     }
-    // The scan identifies the game by its name; keep the per-game exclusion
-    // in step with the switch in this dialog, or turning it back on here
-    // would have no effect.
+    // The scan identifies the game by its name; keep the per-game exclusion in step with the switch in this dialog, or turning it back on here would have no effect.
     let scanned_id = detection::stable_id("game", &game.name);
     value
         .auto_backup_excluded_game_ids
@@ -455,7 +427,6 @@ pub fn game_saves_upsert_custom_game(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command(async)]
 pub fn game_saves_remove_custom_game(
     app: AppHandle,
@@ -473,7 +444,6 @@ pub fn game_saves_remove_custom_game(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command(async)]
 pub fn game_saves_set_path_mapping(
     app: AppHandle,
@@ -491,8 +461,7 @@ pub fn game_saves_set_path_mapping(
         return Err("Both the original and replacement restore paths are required.".into());
     }
     let target = Path::new(&mapping.target);
-    // The place this PC's Documents keeps it may not exist yet (a new PC):
-    // made, as the game itself would, when the folder above it is there.
+    // The place this PC's Documents keeps it may not exist yet (a new PC): made, as the game itself would, when the folder above it is there.
     if !target.is_dir()
         && game.suggested_target.as_deref().is_some_and(|suggested| settings::paths_equal(Path::new(suggested), target))
         && target.parent().is_some_and(Path::is_dir)
@@ -518,7 +487,6 @@ pub fn game_saves_set_path_mapping(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command(async)]
 pub fn game_saves_remove_path_mapping(
     app: AppHandle,
@@ -535,7 +503,6 @@ pub fn game_saves_remove_path_mapping(
     settings::save(&app, &value)?;
     Ok(value)
 }
-
 #[tauri::command]
 pub async fn game_saves_scan(
     app: AppHandle,
@@ -547,14 +514,10 @@ pub async fn game_saves_scan(
     let operation = state.begin(&root, OperationKind::Scan)?;
     send_stage(&on_event, OperationStage::Preparing);
     let mut value = settings::initialize(&app)?;
-    // Launchers gain library folders over time (a new drive for Steam). The
-    // automatic roots were only detected once, so games installed there were
-    // never scanned; they are re-detected here, manual roots are kept.
+    // Launchers gain library folders over time (a new drive for Steam). The automatic roots were only detected once, so games installed there were never scanned; they are re-detected here, manual roots are kept.
     let known_roots = value.roots.clone();
     settings::merge_detected_roots(&mut value);
-    // A backup folder whose drive is not there (Google Drive not running) is
-    // not a reason to show nothing: a scan only reads, so the saves on this
-    // PC are listed, and the page says the backups are out of reach.
+    // A backup folder whose drive is not there (Google Drive not running) is not a reason to show nothing: a scan only reads, so the saves on this PC are listed, and the page says the backups are out of reach.
     let unreachable = value
         .backup_folder
         .clone()
@@ -570,9 +533,7 @@ pub async fn game_saves_scan(
     }
     let engine = Engine::for_app(&app)?;
     engine.prepare(&value)?;
-
-    // A quick refresh needs a list of games to re-check; without a saved
-    // scan there is none, and the full scan is the only way to find them.
+    // A quick refresh needs a list of games to re-check; without a saved scan there is none, and the full scan is the only way to find them.
     let cached = scan_cache::load(&root);
     let titles = match (mode.unwrap_or_default(), &cached) {
         (ScanMode::Quick, Some(cached)) => {
@@ -594,9 +555,7 @@ pub async fn game_saves_scan(
             Ok(())
         })?;
     }
-
-    // A quick refresh keeps the full scan's fingerprint and time: it did not
-    // look for new games, so whether that is due has not changed.
+    // A quick refresh keeps the full scan's fingerprint and time: it did not look for new games, so whether that is due has not changed.
     let now = parser::now();
     let (fingerprint, full_scan_at) = match (&titles, &cached) {
         (Some(_), Some(cached)) => (cached.fingerprint.clone(), cached.scan.full_scan_at),
@@ -610,12 +569,10 @@ pub async fn game_saves_scan(
     };
     scan_cache::save(&root, &cached);
     scan.discovery_due = scan.quick && scan_cache::discovery_due(&cached, &value, now);
-
     send_stage(&on_event, OperationStage::Finishing);
     state.cache_scan(scan.clone());
     Ok(scan)
 }
-
 #[tauri::command]
 pub async fn game_saves_update_database(
     app: AppHandle,
@@ -674,7 +631,6 @@ pub async fn game_saves_update_database(
         updated_at,
     })
 }
-
 #[tauri::command]
 pub async fn game_saves_backup(
     app: AppHandle,
@@ -704,11 +660,9 @@ pub async fn game_saves_backup(
     send_stage(&on_event, OperationStage::Finishing);
     Ok(result)
 }
-
 /// How long a backup waits for OneDrive to start and bring online-only saves
 /// down to this PC.
 const ONEDRIVE_WAIT: Duration = Duration::from_secs(90);
-
 /// Backs up `titles`. Games that failed only because their saves are
 /// online-only in OneDrive and OneDrive was not running get a second pass,
 /// once OneDrive has been started and their files can be read.
@@ -719,8 +673,7 @@ pub(crate) async fn backup_titles(
     operation: &OperationHandle,
     on_stage: &(dyn Fn(OperationStage) + Sync),
 ) -> Result<GameSavesOperationResult, String> {
-    // A game whose backup list is damaged is not backed up: the engine would
-    // start a new list and delete every older snapshot of it.
+    // A game whose backup list is damaged is not backed up: the engine would start a new list and delete every older snapshot of it.
     let (titles, protected): (Vec<String>, Vec<GameFailure>) = titles.iter().fold(
         (Vec::new(), Vec::new()),
         |(mut ok, mut protected), title| {
@@ -736,7 +689,6 @@ pub(crate) async fn backup_titles(
     result.failures.extend(protected);
     Ok(result)
 }
-
 async fn backup_known_good(
     engine: &Engine,
     backup: &str,
@@ -769,7 +721,6 @@ async fn backup_known_good(
     on_stage(OperationStage::BackingUp);
     let api = backup_pass(engine, backup, &retry, operation).await?;
     let second = operation_result(OperationKind::Backup, &retry, &api, None);
-
     let still_failed = |title: &String| !retry.contains(title);
     let mut failed_games: Vec<String> =
         first.failed_games.iter().filter(|t| still_failed(t)).cloned().collect();
@@ -790,7 +741,6 @@ async fn backup_known_good(
         rolled_back: Vec::new(),
     })
 }
-
 async fn backup_pass(
     engine: &Engine,
     backup: &str,
@@ -808,7 +758,6 @@ async fn backup_pass(
     ensure_not_cancelled(operation)?;
     Ok(api)
 }
-
 /// The failed games whose saves could not be read because the cloud app
 /// that keeps them online-only was not running, and those files.
 fn cloud_offline(failed: &[String], api: &ApiOutput) -> (Vec<String>, Vec<PathBuf>) {
@@ -839,7 +788,6 @@ fn cloud_offline(failed: &[String], api: &ApiOutput) -> (Vec<String>, Vec<PathBu
     }
     (games, files)
 }
-
 /// Starts OneDrive for `files` and waits until they can be read. False when
 /// they are not OneDrive's, OneDrive is not installed, or it took too long.
 async fn wait_for_onedrive(
@@ -866,7 +814,6 @@ async fn wait_for_onedrive(
     }
     Ok(false)
 }
-
 #[tauri::command]
 pub async fn game_saves_restore(
     app: AppHandle,
@@ -886,11 +833,7 @@ pub async fn game_saves_restore(
     settings::validate_backup_folder(&app, &backup, &value)?;
     let engine = Engine::for_app(&app)?;
     engine.prepare(&value)?;
-
-    // Re-preview every selected restore point immediately before touching any
-    // local files. This catches a deleted/corrupt/stale snapshot while it is
-    // still safe to stop, applies persisted path redirects in the preview, and
-    // names every file the restore will write.
+    // Re-preview every selected restore point immediately before touching any local files. This catches a deleted/corrupt/stale snapshot while it is still safe to stop, applies persisted path redirects in the preview, and names every file the restore will write.
     send_stage(&on_event, OperationStage::Preparing);
     let total = games.len();
     send_progress(&on_event, 0, total, None);
@@ -916,9 +859,7 @@ pub async fn game_saves_restore(
         targets.extend(safety::targets(&api));
         send_progress(&on_event, index + 1, total, Some(game.title.clone()));
     }
-
-    // Each snapshot is read through (every file's CRC) before anything is
-    // touched: a damaged backup must not be half written over a good save.
+    // Each snapshot is read through (every file's CRC) before anything is touched: a damaged backup must not be half written over a good save.
     let titles: Vec<String> = games.iter().map(|(game, _)| game.title.clone()).collect();
     let folders = backup_folders(&engine, &backup, &titles, &operation).await?;
     for (game, snapshot) in &games {
@@ -930,9 +871,7 @@ pub async fn game_saves_restore(
         })?;
     }
     ensure_not_cancelled(&operation)?;
-
-    // A save the game (or its launcher) holds open cannot be written whole,
-    // and would be overwritten again when the game saves on exit.
+    // A save the game (or its launcher) holds open cannot be written whole, and would be overwritten again when the game saves on exit.
     let locked = safety::locked(&targets);
     if !locked.is_empty() {
         return Err(format!(
@@ -949,16 +888,11 @@ pub async fn game_saves_restore(
             safety::ensure_room(folder, needed, "the restored saves")?;
         }
     }
-
-    // Every file the restore writes is copied first (and each copy checked),
-    // so any game whose restore does not finish cleanly is put back at once,
-    // and "Undo last restore" can put the whole restore back. From here on,
-    // Cancel stops only between games: a save is never cut off half-written.
+    // Every file the restore writes is copied first (and each copy checked), so any game whose restore does not finish cleanly is put back at once, and "Undo last restore" can put the whole restore back. From here on, Cancel stops only between games: a save is never cut off half-written.
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
     operation.set_killable(false);
     let slot = if targets.is_empty() {
-        // Nothing on this PC changes: there is nothing to undo, and an older
-        // restore's undo must not stay offered as if it were this one's.
+        // Nothing on this PC changes: there is nothing to undo, and an older restore's undo must not stay offered as if it were this one's.
         undo::clear(&safety_root);
         None
     } else {
@@ -977,7 +911,6 @@ pub async fn game_saves_restore(
             }
         }
     };
-
     send_stage(&on_event, OperationStage::Restoring);
     let mut processed_games = 0;
     let mut processed_bytes = 0;
@@ -1082,7 +1015,6 @@ pub async fn game_saves_restore(
         rolled_back,
     })
 }
-
 /// Each game's folder in the backup, as the engine lists them.
 async fn backup_folders(
     engine: &Engine,
@@ -1101,7 +1033,6 @@ async fn backup_folders(
         .filter_map(|(title, game)| game.backup_path.map(|path| (title, PathBuf::from(path.replace('/', "\\")))))
         .collect())
 }
-
 #[tauri::command]
 pub async fn game_saves_undo_last_restore(
     app: AppHandle,
@@ -1117,9 +1048,7 @@ pub async fn game_saves_undo_last_restore(
     let value = settings::initialize(&app)?;
     let engine = Engine::for_app(&app)?;
     engine.prepare(&value)?;
-
-    // What the undo will write: the files of the restore's own copy, or (a
-    // copy an older MYLE made with the engine) what the engine would restore.
+    // What the undo will write: the files of the restore's own copy, or (a copy an older MYLE made with the engine) what the engine would restore.
     send_stage(&on_event, OperationStage::Preparing);
     let manifest = safety::load(&slot);
     let targets = match &manifest {
@@ -1140,9 +1069,7 @@ pub async fn game_saves_undo_last_restore(
     if !locked.is_empty() {
         return Err(format!("Close the game first: these saves are in use, so nothing was undone: {}", locked.join(", ")));
     }
-
-    // The saves as they are now are copied first: whatever was played since
-    // the restore is not lost, and this undo can itself be undone.
+    // The saves as they are now are copied first: whatever was played since the restore is not lost, and this undo can itself be undone.
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
     operation.set_killable(false);
     let (now_record, now_slot) = undo::create_slot(&safety_root)?;
@@ -1153,7 +1080,6 @@ pub async fn game_saves_undo_last_restore(
             return Err(format!("Nothing was undone because the copy of the current saves failed: {error}"));
         }
     };
-
     send_stage(&on_event, OperationStage::Restoring);
     let failed = match &manifest {
         Some(manifest) => safety::put_back(&slot, manifest, None),
@@ -1181,8 +1107,7 @@ pub async fn game_saves_undo_last_restore(
             failed.join("; ")
         ));
     }
-    // The copy just taken replaces the restore's: "Undo" now puts back what
-    // was there before this undo.
+    // The copy just taken replaces the restore's: "Undo" now puts back what was there before this undo.
     undo::commit(&safety_root, now_record, undo_record.games.clone())?;
     Ok(GameSavesOperationResult {
         kind: OperationKind::Restore,
@@ -1194,7 +1119,6 @@ pub async fn game_saves_undo_last_restore(
         rolled_back: Vec::new(),
     })
 }
-
 /// What of the Game Saves setup the account syncs.
 #[tauri::command(async)]
 pub fn game_saves_sync_export(app: AppHandle) -> Result<SyncedGameSaves, String> {
@@ -1208,7 +1132,6 @@ pub fn game_saves_sync_export(app: AppHandle) -> Result<SyncedGameSaves, String>
         custom_games: value.custom_games,
     })
 }
-
 /// Applies settings synced from another PC. Custom games keep only the save
 /// folders that exist here (profile names and drives differ between PCs);
 /// a game with none left is skipped. Local folders are never touched.
@@ -1255,7 +1178,6 @@ pub async fn game_saves_sync_import(
     })?;
     Ok(value)
 }
-
 fn merge_synced_custom_games(local: &mut Vec<CustomGame>, synced: Vec<CustomGame>) {
     for mut game in synced {
         game.paths.retain(|path| Path::new(path).is_dir());
@@ -1274,12 +1196,10 @@ fn merge_synced_custom_games(local: &mut Vec<CustomGame>, synced: Vec<CustomGame
         local.push(game);
     }
 }
-
 #[tauri::command(async)]
 pub fn game_saves_cancel(state: State<'_, GameSavesState>) {
     state.cancel();
 }
-
 /// Runs the three engine passes side by side: what is on this PC (all games,
 /// or only `titles`), what a restore would change, and the backup inventory.
 pub(crate) async fn scan_with_engine(
@@ -1330,7 +1250,6 @@ pub(crate) async fn scan_with_engine(
         metadata,
     ))
 }
-
 /// The "on this PC" pass limited to known games. A name the database no
 /// longer has (a removed custom game, a renamed entry) makes the engine
 /// process nothing at all, so those are dropped and the pass runs once more.
@@ -1370,7 +1289,6 @@ async fn quick_local_preview(
     }
     Err("The quick scan could not complete; run a full scan.".into())
 }
-
 pub(crate) async fn run_engine(
     engine: &Engine,
     args: &[String],
@@ -1385,7 +1303,6 @@ pub(crate) async fn run_engine(
         result
     }
 }
-
 /// Runs the engine and answers what it did, even when Cancel was pressed
 /// meanwhile: a restore is never stopped half-way (see `set_killable`), and a
 /// game it finished must count as finished.
@@ -1398,7 +1315,6 @@ async fn run_engine_to_end(
     let mut track = |pid, running| operation.track_pid(pid, running);
     engine.run(args, stdin, &mut track).await
 }
-
 pub(crate) fn operation_result(
     kind: OperationKind,
     requested: &[String],
@@ -1406,8 +1322,7 @@ pub(crate) fn operation_result(
     safety_backup_path: Option<String>,
 ) -> GameSavesOperationResult {
     let failed_games = failed_games(requested, api);
-    // Never trust an aggregate count without matching per-game output. A
-    // truncated but syntactically valid JSON object must not become success.
+    // Never trust an aggregate count without matching per-game output. A truncated but syntactically valid JSON object must not become success.
     let processed_games = requested.len().saturating_sub(failed_games.len()) as u64;
     let processed_bytes = api
         .overall
@@ -1432,7 +1347,6 @@ pub(crate) fn operation_result(
         rolled_back: Vec::new(),
     }
 }
-
 /// The first error the engine reported for each failed game, in words a
 /// player can act on, with the file it happened to.
 pub(crate) fn failure_reasons(failed: &[String], api: &ApiOutput) -> Vec<GameFailure> {
@@ -1468,14 +1382,12 @@ pub(crate) fn failure_reasons(failed: &[String], api: &ApiOutput) -> Vec<GameFai
         })
         .collect()
 }
-
 /// Ludusavi passes on the operating system's message; the common ones get a
 /// hint about what to do.
 fn explain_error(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
     let hint = match os_error_code(message) {
-        // The backup already tried to start OneDrive; this is left when it
-        // is not installed or signed in here, or another cloud app keeps it.
+        // The backup already tried to start OneDrive; this is left when it is not installed or signed in here, or another cloud app keeps it.
         Some(cloud::PROVIDER_NOT_RUNNING) => Some(
             "the file is online-only in OneDrive or another cloud folder, and that app is not running; start it and let the file download, or mark the folder \"Always keep on this device\"",
         ),
@@ -1497,7 +1409,6 @@ fn explain_error(message: &str) -> String {
         None => message.trim().to_string(),
     }
 }
-
 /// The Windows error code in a message such as "… (os error 362)".
 fn os_error_code(message: &str) -> Option<u32> {
     message
@@ -1505,7 +1416,6 @@ fn os_error_code(message: &str) -> Option<u32> {
         .rsplit_once("os error ")
         .and_then(|(_, rest)| rest.trim_end_matches(')').trim().parse().ok())
 }
-
 /// The end of a long save path, enough to recognise it.
 fn short_path(path: &str) -> String {
     const KEEP: usize = 60;
@@ -1516,7 +1426,6 @@ fn short_path(path: &str) -> String {
         format!("…{}", chars[chars.len() - KEEP..].iter().collect::<String>())
     }
 }
-
 pub(crate) fn failed_games(requested: &[String], api: &ApiOutput) -> Vec<String> {
     let mut failed = Vec::new();
     for requested_title in requested {
@@ -1541,7 +1450,6 @@ pub(crate) fn failed_games(requested: &[String], api: &ApiOutput) -> Vec<String>
     failed.dedup();
     failed
 }
-
 fn game_failed(game: &ApiGame) -> bool {
     game.files
         .values()
@@ -1550,15 +1458,12 @@ fn game_failed(game: &ApiGame) -> bool {
             .registry
             .values()
             .any(|entry| entry.failed || entry.error.is_some())
-        // For backup/restore output, only an explicit `Processed` decision is
-        // success. `Ignored`, `Cancelled`, or a truncated object with no
-        // decision must never be presented as a completed backup.
+        // For backup/restore output, only an explicit `Processed` decision is success. `Ignored`, `Cancelled`, or a truncated object with no decision must never be presented as a completed backup.
         || !game
             .decision
             .as_deref()
             .is_some_and(|decision| decision.eq_ignore_ascii_case("processed"))
 }
-
 async fn load_manifest_metadata(engine: &Engine) -> Result<ManifestMetadata, String> {
     let path = engine.manifest_path();
     let stamp = fs::metadata(&path)
@@ -1585,7 +1490,6 @@ async fn load_manifest_metadata(engine: &Engine) -> Result<ManifestMetadata, Str
     }
     Ok(metadata)
 }
-
 fn selected_games(
     state: &GameSavesState,
     ids: &[String],
@@ -1621,7 +1525,6 @@ fn selected_games(
     }
     Ok(games)
 }
-
 fn selected_restore_games(
     state: &GameSavesState,
     selections: &[RestoreSelection],
@@ -1647,10 +1550,7 @@ fn selected_restore_games(
             .get(&selection.game_id)
             .cloned()
             .ok_or("One of the selected games is stale. Scan again.")?;
-        // The status comes from the last scan; a location chosen since then is
-        // only in the settings, and must not be refused as missing.
-        // Every save folder without a place needs one (a game may keep its
-        // saves in several); a scan from before that was told counts any.
+        // The status comes from the last scan; a location chosen since then is only in the settings, and must not be refused as missing. Every save folder without a place needs one (a game may keep its saves in several); a scan from before that was told counts any.
         let mappings: Vec<_> = settings.path_mappings.iter().filter(|mapping| mapping.game_id == game.id).collect();
         let placed = if game.unmapped_paths.is_empty() {
             !mappings.is_empty()
@@ -1679,7 +1579,6 @@ fn selected_restore_games(
     }
     Ok(result)
 }
-
 fn set_backup_folder(app: &AppHandle, state: &GameSavesState, path: &Path) -> Result<GameSavesSettings, String> {
     if !path.is_dir() {
         return Err("Choose an existing backup folder.".into());
@@ -1692,14 +1591,12 @@ fn set_backup_folder(app: &AppHandle, state: &GameSavesState, path: &Path) -> Re
         Ok(())
     })
 }
-
 fn validate_current_backup(app: &AppHandle, value: &GameSavesSettings) -> Result<(), String> {
     if let Some(backup) = value.backup_folder.as_deref() {
         settings::validate_backup_folder(app, Path::new(backup), value)?;
     }
     Ok(())
 }
-
 fn backup_folder(value: &GameSavesSettings) -> Result<PathBuf, String> {
     value
         .backup_folder
@@ -1708,7 +1605,6 @@ fn backup_folder(value: &GameSavesSettings) -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .ok_or_else(|| "Choose a backup folder first.".into())
 }
-
 async fn pick_folder(app: AppHandle, title: String) -> Result<Option<PathBuf>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
@@ -1721,12 +1617,10 @@ async fn pick_folder(app: AppHandle, title: String) -> Result<Option<PathBuf>, S
     .await
     .map_err(|error| error.to_string())?
 }
-
 /// Held while the Windows task is changed (and, by the check at start-up,
 /// while it is looked at): two changes at once could leave the task as the
 /// earlier one asked, under settings saved by the later.
 static TASK_EDIT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 async fn configure_scheduled_task(
     schedule: BackupSchedule,
     time: &str,
@@ -1735,7 +1629,6 @@ async fn configure_scheduled_task(
     let _task = TASK_EDIT.lock().await;
     register_scheduled_task(schedule, time, weekday).await
 }
-
 async fn register_scheduled_task(
     schedule: BackupSchedule,
     time: &str,
@@ -1761,7 +1654,6 @@ async fn register_scheduled_task(
         }
         return Ok(());
     }
-
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let script = scheduled_task_script(schedule, time, weekday, &executable);
     let output = crate::apps::process::hidden(crate::apps::process::powershell())
@@ -1788,7 +1680,6 @@ async fn register_scheduled_task(
     }
     Ok(())
 }
-
 fn scheduled_task_script(
     schedule: BackupSchedule,
     time: &str,
@@ -1807,10 +1698,7 @@ fn scheduled_task_script(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_string_lossy();
-    // The start written without a UTC offset is local time, so the backup
-    // keeps its hour when daylight saving time begins or ends (with the
-    // offset New-ScheduledTaskTrigger writes, it moved by one). Errors are
-    // written in UTF-8, so they read right in any Windows language.
+    // The start written without a UTC offset is local time, so the backup keeps its hour when daylight saving time begins or ends (with the offset New-ScheduledTaskTrigger writes, it moved by one). Errors are written in UTF-8, so they read right in any Windows language.
     format!(
         "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ \
          $action = New-ScheduledTaskAction -Execute {} -Argument '--game-saves-auto-backup' -WorkingDirectory {}; \
@@ -1834,7 +1722,6 @@ fn scheduled_task_script(
         ps_literal(TASK_NAME),
     )
 }
-
 /// What Windows has for the task, as `scheduled_task_query` writes it.
 #[derive(Debug, PartialEq, Eq)]
 enum TaskFound {
@@ -1846,7 +1733,6 @@ enum TaskFound {
     /// It could not be looked at (no PowerShell, no access): left as it is.
     Unknown,
 }
-
 fn scheduled_task_query() -> String {
     format!(
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
@@ -1860,7 +1746,6 @@ fn scheduled_task_query() -> String {
         ps_literal(TASK_NAME)
     )
 }
-
 fn parse_task_query(output: &str) -> TaskFound {
     let mut lines = output.lines().map(str::trim).filter(|line| !line.is_empty());
     match (lines.next(), lines.next()) {
@@ -1873,7 +1758,6 @@ fn parse_task_query(output: &str) -> TaskFound {
         _ => TaskFound::Unknown,
     }
 }
-
 /// Whether the task must be registered again: it is gone (an uninstall that
 /// kept the settings removed it, or a clean-up tool did) or starts a program
 /// that is not this one (MYLE moved). The settings say a backup is scheduled,
@@ -1885,7 +1769,6 @@ fn needs_registering(found: &TaskFound, this_program: &Path) -> bool {
         TaskFound::Unknown => false,
     }
 }
-
 /// Once per run of the app, in the background: puts the scheduled backup's
 /// task back when the settings say there is one and Windows has none (or one
 /// for another copy of MYLE). Not from a development build, whose program
@@ -1921,9 +1804,7 @@ fn check_scheduled_task_once(app: &AppHandle, value: &GameSavesSettings) {
             if needs_registering(&found, &this_program) {
                 let _ = register_scheduled_task(value.schedule, &value.schedule_time, value.schedule_weekday).await;
             }
-            // A task may have been recreated after its scheduled hour, or
-            // Windows may have missed a run while no user token was available.
-            // App startup catches up too; headless rechecks under its lock.
+            // A task may have been recreated after its scheduled hour, or Windows may have missed a run while no user token was available. App startup catches up too; headless rechecks under its lock.
             if super::headless::is_due(&value, parser::now()) {
                 let mut child = crate::apps::process::hidden(&this_program);
                 child.arg("--game-saves-auto-backup")
@@ -1936,11 +1817,9 @@ fn check_scheduled_task_once(app: &AppHandle, value: &GameSavesSettings) {
         }
     });
 }
-
 fn ps_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
-
 fn weekday_for_scheduled_tasks(day: ScheduleWeekday) -> &'static str {
     match day {
         ScheduleWeekday::Sunday => "Sunday",
@@ -1952,17 +1831,14 @@ fn weekday_for_scheduled_tasks(day: ScheduleWeekday) -> &'static str {
         ScheduleWeekday::Saturday => "Saturday",
     }
 }
-
 fn stdin_titles(titles: &[String]) -> String {
     let mut input = titles.join("\n");
     input.push('\n');
     input
 }
-
 fn send_stage(channel: &Channel<GameSavesEvent>, stage: OperationStage) {
     let _ = channel.send(GameSavesEvent::Stage { stage });
 }
-
 fn send_progress(
     channel: &Channel<GameSavesEvent>,
     done: usize,
@@ -1975,7 +1851,6 @@ fn send_progress(
         current,
     });
 }
-
 fn ensure_not_cancelled(operation: &OperationHandle) -> Result<(), String> {
     if operation.is_cancelled() {
         Err("The Game Saves operation was cancelled.".into())
@@ -1983,11 +1858,9 @@ fn ensure_not_cancelled(operation: &OperationHandle) -> Result<(), String> {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[tokio::test]
     async fn a_delayed_page_request_uses_current_settings_and_preserves_a_newer_verified_scan() {
         let state = GameSavesState::default();
@@ -2026,7 +1899,6 @@ mod tests {
         assert_eq!(published.on_this_pc[0].snapshots[0].id, "new.zip");
         assert_eq!(state.cached_scan().unwrap().on_this_pc, fresh.on_this_pc, "an old request must not erase the current backend history");
     }
-
     #[test]
     fn partial_api_failures_are_exposed_to_the_ui() {
         let api = parser::parse_api(
@@ -2046,7 +1918,6 @@ mod tests {
         assert_eq!(result.failures[0].reason, "locked");
         assert_eq!(result.failures[0].file.as_deref(), Some("x"));
     }
-
     #[test]
     fn common_os_errors_come_with_a_hint() {
         let cloud = explain_error("The cloud file provider is not running. (os error 362)");
@@ -2058,7 +1929,6 @@ mod tests {
         assert_eq!(explain_error("something else"), "something else");
         assert!(short_path(&"a/".repeat(80)).starts_with('…'));
     }
-
     #[test]
     fn only_saves_waiting_for_a_cloud_app_get_a_second_pass() {
         let api = parser::parse_api(
@@ -2080,7 +1950,6 @@ mod tests {
         assert_eq!(os_error_code("x (os error 362)"), Some(362));
         assert_eq!(os_error_code("no code"), None);
     }
-
     #[test]
     fn missing_per_game_output_can_never_be_reported_as_success() {
         let api =
@@ -2090,7 +1959,6 @@ mod tests {
         assert_eq!(result.processed_games, 0);
         assert_eq!(result.failed_games, vec!["Missing"]);
     }
-
     #[test]
     fn ignored_or_truncated_game_output_is_not_success() {
         let api =
@@ -2105,7 +1973,6 @@ mod tests {
         assert_eq!(result.processed_games, 0);
         assert_eq!(result.failed_games, vec!["Ignored", "Truncated"]);
     }
-
     #[test]
     fn a_restore_location_chosen_after_the_scan_is_accepted() {
         use super::super::models::GameSaveSnapshot;
@@ -2152,7 +2019,6 @@ mod tests {
         });
         assert!(selected_restore_games(&state, &selections, &value).is_ok());
     }
-
     #[test]
     fn synced_custom_games_keep_only_folders_that_exist_here() {
         let here = std::env::temp_dir();
@@ -2197,7 +2063,6 @@ mod tests {
         assert_eq!(alpha.paths.len(), 1);
         assert_eq!(alpha.install_path, None);
     }
-
     #[test]
     fn scheduled_weekdays_use_scheduled_tasks_enum_names() {
         assert_eq!(
@@ -2209,7 +2074,6 @@ mod tests {
             "Wednesday"
         );
     }
-
     #[test]
     fn scheduled_task_is_limited_interactive_catch_up_and_never_wakes_the_pc() {
         let script = scheduled_task_script(
@@ -2224,11 +2088,9 @@ mod tests {
         assert!(script.contains("-Weekly -DaysOfWeek Sunday -At $at"));
         assert!(script.contains("--game-saves-auto-backup"));
     }
-
     #[tokio::test]
     async fn registration_provides_catch_up_after_sleep_and_user_sign_in() {
-        // Construct real Windows trigger/settings objects, replacing only the
-        // registration boundary so this test never changes Task Scheduler.
+        // Construct real Windows trigger/settings objects, replacing only the registration boundary so this test never changes Task Scheduler.
         let capture = r#"Import-Module ScheduledTasks -ErrorAction Stop;
         function MYLE-CaptureScheduledTask {
             param($TaskName, $InputObject, [switch]$Force)
@@ -2264,7 +2126,6 @@ mod tests {
         assert_eq!(task["catchUp"], true);
         assert_eq!(task["wake"], false);
     }
-
     #[test]
     fn the_scheduled_hour_survives_daylight_saving_and_errors_read_in_any_language() {
         let script = scheduled_task_script(
@@ -2282,7 +2143,6 @@ mod tests {
         assert!(script.find("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8").unwrap() < script.find("try {").unwrap());
         assert!(script.contains("'C:\\Users\\Παναγιώτης\\AppData\\Local\\MYLE\\MakeYourLifeEasier.exe'"));
     }
-
     #[test]
     fn a_scheduled_backup_without_its_task_gets_it_back() {
         assert_eq!(parse_task_query("missing\r\n"), TaskFound::Missing);
@@ -2293,7 +2153,6 @@ mod tests {
             parse_task_query("present\r\n\"C:\\MYLE\\MakeYourLifeEasier.exe\"\r\nready\r\n"),
             TaskFound::Starts(r"C:\MYLE\MakeYourLifeEasier.exe".into())
         );
-
         let this_program = std::env::current_exe().unwrap();
         assert!(needs_registering(&TaskFound::Missing, &this_program));
         assert!(!needs_registering(&TaskFound::Unknown, &this_program), "what cannot be seen is left alone");
@@ -2303,7 +2162,6 @@ mod tests {
         assert!(needs_registering(&TaskFound::Starts(moved.to_string_lossy().into_owned()), &this_program));
         assert!(scheduled_task_query().contains("-TaskName 'MakeYourLifeEasier Game Saves Backup'"));
     }
-
     #[test]
     fn a_calendar_only_task_is_migrated_even_when_it_starts_the_same_program() {
         let executable = std::env::current_exe().unwrap();

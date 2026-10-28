@@ -1,6 +1,5 @@
 // Typed bridge to the cleaner commands in backend/src/cleaner/.
 import { Channel, invoke } from "@tauri-apps/api/core";
-
 export interface CleanerCategory {
   id: string;
   title: string;
@@ -10,12 +9,10 @@ export interface CleanerCategory {
   /** Some of its folders can only be read as administrator. */
   mayNeedAdmin: boolean;
 }
-
 export type ScanEvent = {
   event: "category";
   data: { id: string; bytes: number; files: number; locked: boolean };
 };
-
 export type CleanEvent =
   | { event: "progress"; data: { done: number; total: number; current: string } }
   | {
@@ -32,13 +29,11 @@ export type CleanEvent =
         locked: boolean;
       };
     };
-
 export interface ScanSummary {
   bytes: number;
   /** Categories that need administrator rights to be measured fully. */
   locked: string[];
 }
-
 export interface CleanSummary {
   freed: number;
   files: number;
@@ -51,13 +46,11 @@ export interface CleanSummary {
   adminSkippedBytes: number;
   locked: string[];
 }
-
 function channel<T>(onEvent: (e: T) => void): Channel<T> {
   const ch = new Channel<T>();
   ch.onmessage = onEvent;
   return ch;
 }
-
 export const cleanerApi = {
   downloadsPreview: () => invoke<import("./downloads").Preview>("cleaner_downloads_preview"),
   downloadsDelete: (paths: string[]) => invoke<import("./downloads").Outcome>("cleaner_downloads_delete", { paths }),
@@ -72,7 +65,6 @@ export const cleanerApi = {
   cleanElevated: (ids: string[], onEvent: (e: CleanEvent) => void) =>
     invoke<CleanSummary>("cleaner_clean_elevated", { ids, onEvent: channel(onEvent) }),
 };
-
 /** "647.3 MB", "7.3 GB", "0 B" */
 export function formatSize(bytes: number): string {
   if (bytes <= 0) return "0 B";

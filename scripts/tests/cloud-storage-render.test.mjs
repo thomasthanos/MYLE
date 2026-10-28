@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "vite";
-
 test("Disk Analyzer shows one online-only button with an info, and no dialog or app buttons", async () => {
   const server = await createServer({ server: { middlewareMode: true }, logLevel: "error" });
   try {

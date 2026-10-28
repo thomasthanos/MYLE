@@ -1,14 +1,5 @@
 <script lang="ts">
-  // The treemap, drawn on a canvas: thousands of rectangles are too many for
-  // the DOM. The map itself is drawn on one canvas, only when the data or the
-  // size changes; hover, selection and the kind in focus go on a second
-  // canvas above it, so moving the pointer never redraws the map. The tooltip
-  // and the right-click menu find the item under the pointer in the layout's
-  // flat arrays.
-  //
-  // The look follows the rest of the app: flat rounded tiles in one calm
-  // colour per kind of file, folders as quiet panels with their name on top,
-  // and the accent colour for hover and selection.
+  // The treemap, drawn on a canvas: thousands of rectangles are too many for the DOM. The map itself is drawn on one canvas, only when the data or the size changes; hover, selection and the kind in focus go on a second canvas above it, so moving the pointer never redraws the map. The tooltip and the right-click menu find the item under the pointer in the layout's flat arrays. The look follows the rest of the app: flat rounded tiles in one calm colour per kind of file, folders as quiet panels with their name on top, and the accent colour for hover and selection.
   import { onMount } from "svelte";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Type from "@lucide/svelte/icons/type";
@@ -220,8 +211,7 @@
       const radius = radiusOf(w, h);
 
       if (kind === FOLDER && opened[i]) {
-        // Start from an opaque base so deeply nested tints do not accumulate
-        // into a muddy colour. A restrained accent separates each group.
+        // Start from an opaque base so deeply nested tints do not accumulate into a muddy colour. A restrained accent separates each group.
         ctx.fillStyle = colors.background;
         tile(ctx, x, y, w, h, radius);
         ctx.fillStyle = `${folderColors[i]}29`;
@@ -247,8 +237,7 @@
         continue;
       }
 
-      // Small groups keep a visible fill and outline too. Folder accents
-      // distinguish groups; actual files keep their category's colour.
+      // Small groups keep a visible fill and outline too. Folder accents distinguish groups; actual files keep their category's colour.
       const neutral = kind === FOLDER || kind === SMALLER || kind === LINK;
       if (neutral) {
         ctx.fillStyle = colors.background;

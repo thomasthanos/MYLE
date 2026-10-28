@@ -1,13 +1,10 @@
-// Pieces of the extension's page script (content.js) that need no page:
-// `node --test scripts/tests/`.
+// Pieces of the extension's page script (content.js) that need no page: `node --test scripts/tests/`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 // A Windows checkout may have CRLF line endings: read it as LF.
 const source = (await readFile(new URL("../../extension/content.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-
 test("an RP mismatch leaves related-origin validation to the browser without asking MYLE to sign", async () => {
   const start = source.indexOf("  async function passkeysHere(");
   const end = source.indexOf("\n  }\n", start);
@@ -27,7 +24,6 @@ test("an RP mismatch leaves related-origin validation to the browser without ask
   assert.equal(calls[0].rpId, "related.example");
   assert.equal(scope.prompted, null);
 });
-
 /** One function of content.js, by name, run on its own. */
 function pick(name) {
   const start = source.indexOf(`  function ${name}(`);
@@ -35,7 +31,6 @@ function pick(name) {
   const end = source.indexOf("\n  }\n", start);
   return vm.runInNewContext(`(${source.slice(start, end + 4).trim()})`);
 }
-
 function unlockWait(context) {
   const start = source.indexOf("  async function carryOnWhenUnlocked(");
   assert.ok(start >= 0);
@@ -47,7 +42,6 @@ function unlockWait(context) {
   wait.scope = scope;
   return wait;
 }
-
 for (const [label, reply] of [
   ["refused", { ok: false, error: "badRequest" }],
   ["disconnected", { ok: false, error: "noHost" }],
@@ -68,7 +62,6 @@ for (const [label, reply] of [
     assert.equal(calls, 1);
   });
 }
-
 test("a valid unlocked reply resumes the waiting sign-in once", async () => {
   const wait = unlockWait({ send: async () => ({ ok: true, state: "unlocked", unlocked: true }) });
   const shown = { textContent: "" };
@@ -77,7 +70,6 @@ test("a valid unlocked reply resumes the waiting sign-in once", async () => {
   assert.equal(retries, 1);
   assert.match(shown.textContent, /Signing you in/);
 });
-
 test("a 2FA key written on a setup page is told from other text", () => {
   const keyIn = pick("keyIn");
   // As sites write them: groups of four, either case, or one block.
@@ -96,7 +88,6 @@ test("a 2FA key written on a setup page is told from other text", () => {
   assert.equal(keyIn("ORDER-1234-5678-9012-3456"), null);
   assert.equal(keyIn("JBSW Y3DP"), null);
 });
-
 test("a prompt drawn again ends the earlier wait, so the sign-in is carried on once", async () => {
   let release;
   const wait = unlockWait({
@@ -111,7 +102,6 @@ test("a prompt drawn again ends the earlier wait, so the sign-in is carried on o
   await waiting;
   assert.equal(retries, 0, "only the wait of the prompt on screen carries the sign-in on");
 });
-
 test("a copy left behind by an extension update answers instead of throwing", async () => {
   const removed = [];
   const send = vm.runInNewContext(`(${source.slice(source.indexOf("  function send("), source.indexOf("\n  }\n", source.indexOf("  function send(")) + 4).trim()})`, {
@@ -123,7 +113,6 @@ test("a copy left behind by an extension update answers instead of throwing", as
   assert.equal((await send({ type: "logins" })).error, "reloaded");
   assert.equal(removed.length, 1, "a fresh copy may take the page over");
 });
-
 test("a rejected message is a missing host while the extension lives, and reloaded once it is gone", async () => {
   const start = source.indexOf("  const lost = ");
   const line = source.slice(start, source.indexOf("\n", start));
@@ -132,7 +121,6 @@ test("a rejected message is a missing host while the extension lives, and reload
   assert.equal(alive().error, "noHost");
   assert.equal(gone().error, "reloaded");
 });
-
 test("the 2FA key prompt closes only itself", () => {
   const settleKey = vm.runInNewContext(`(${source.slice(source.indexOf("  function settleKey("), source.indexOf("\n  }\n", source.indexOf("  function settleKey(")) + 4).trim()})`, {
     get prompted() { return "passkey-request"; },

@@ -1,8 +1,4 @@
-// State of the Disk Analyzer page: the drives, the running scan, and the
-// slices of its result the page shows. The backend keeps the whole result;
-// the page asks for a folder's children, a treemap or the largest files. It
-// sends one path to scan, then only ids the backend gave it, so moving items
-// to the Recycle Bin goes by id and the backend checks every path itself.
+// State of the Disk Analyzer page: the drives, the running scan, and the slices of its result the page shows. The backend keeps the whole result; the page asks for a folder's children, a treemap or the largest files. It sends one path to scan, then only ids the backend gave it, so moving items to the Recycle Bin goes by id and the backend checks every path itself.
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { confirm, type ConfirmOptions } from "../../../lib/confirm.svelte";
@@ -27,7 +23,6 @@ import {
   type TreemapPayload,
 } from "./api";
 import { flatten, type ChildPage, type Row } from "./rows";
-
 export const KEY = { sizeMode: "myle.diskAnalyzer.sizeMode", view: "myle.diskAnalyzer.view", fast: "myle.diskAnalyzer.fast" };
 export type Phase = "idle" | "scanning" | "ready" | "deleting";
 export type View = "folders" | "files" | "types";
@@ -42,12 +37,10 @@ const TEN_GB = 10 * 1024 ** 3;
 const MANY_FILES = 1000;
 /** The most warnings the Recycle Bin question lists one by one. */
 const CAUTIONS_SHOWN = 4;
-
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const isSizeMode = (v: unknown) => v === "size" || v === "alloc";
 const isView = (v: unknown) => v === "folders" || v === "files" || v === "types";
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
-
 /** The question asked before anything goes to the Recycle Bin. */
 export function recycleQuestion(items: readonly NodeView[], locked: number, mode: SizeMode, permanent = false): ConfirmOptions {
   const bytes = items.reduce((sum, item) => sum + (permanent ? item.size : sizeOf(item, mode)), 0);
@@ -76,7 +69,6 @@ export function recycleQuestion(items: readonly NodeView[], locked: number, mode
   if (locked) lines.push(`${plural(locked, "protected item")} ${locked === 1 ? "stays where it is" : "stay where they are"}.`);
   return { title: permanent ? "Delete permanently?" : "Move to Recycle Bin?", message: lines.join("\n\n"), confirmLabel: permanent ? "Delete permanently" : "Move to Recycle Bin", danger: true };
 }
-
 class DiskAnalyzerState {
   drives = $state.raw<Drive[]>([]);
   /** What Scan scans: a drive's root or a chosen folder. */
@@ -119,7 +111,6 @@ class DiskAnalyzerState {
   #typesRequest = 0;
   /** Bumped when the size mode or the sort changes: older answers are dropped. */
   #generation = 0;
-
   readonly scanId = $derived(this.done?.scanId ?? null);
   readonly busy = $derived(this.phase === "scanning" || this.phase === "deleting");
   readonly rows: Row[] = $derived(flatten(this.root, this.pages, this.expanded, this.sizeMode));
@@ -133,7 +124,6 @@ class DiskAnalyzerState {
   /** Scan reads the file table: a whole fixed NTFS drive, with the fast scan on. */
   readonly fastScan = $derived(this.fast && !!this.targetDrive?.mftPossible);
   readonly currentSize = $derived(this.trail.length ? sizeOf(this.trail[this.trail.length - 1], this.sizeMode) : 0);
-
   async load() {
     if (!isTauri()) return;
     try {
@@ -146,18 +136,15 @@ class DiskAnalyzerState {
       this.error = message(err);
     }
   }
-
   /** Re-reads the saved view choices (after account sync replaced them). */
   reloadChoices() {
     const mode = readJson<SizeMode>(KEY.sizeMode, this.sizeMode, isSizeMode);
     if (mode !== this.sizeMode) void this.setSizeMode(mode, false);
     this.view = readJson<View>(KEY.view, this.view, isView);
   }
-
   choose(root: string) {
     if (!this.busy) this.target = root;
   }
-
   /** Lets the user pick a folder, then scans it. */
   async pickFolder() {
     if (this.busy) return;
@@ -170,7 +157,6 @@ class DiskAnalyzerState {
       toast.error(`The folder picker did not open: ${message(err)}`);
     }
   }
-
   async scan() {
     const root = this.target;
     if (!root || this.busy) return;
@@ -200,16 +186,13 @@ class DiskAnalyzerState {
       this.progress = null;
     }
   }
-
   cancel() {
     if (this.phase === "scanning") void diskApi.cancel().catch(() => {});
   }
-
   setFast(on: boolean) {
     this.fast = on;
     writeJson(KEY.fast, on);
   }
-
   #reset() {
     this.done = null;
     this.root = null;
@@ -227,7 +210,6 @@ class DiskAnalyzerState {
     this.error = null;
     this.#treemapArea = 0;
   }
-
   async #afterScan() {
     const done = this.done;
     if (!done) return;
@@ -241,24 +223,19 @@ class DiskAnalyzerState {
     if (this.view === "files") void this.loadTopFiles();
     if (this.view === "types") void this.loadExtensions();
   }
-
   async #loadRoot() {
     const done = this.done;
     if (!done) return;
     const [root] = await diskApi.nodes(done.scanId, [done.rootId]);
     if (this.scanId === done.scanId) this.root = root ?? null;
   }
-
   async #loadTrail(id: number) {
     const scanId = this.scanId;
     if (scanId === null) return;
     const trail = await diskApi.trail(scanId, id);
     if (this.scanId === scanId) this.trail = trail;
   }
-
-  // ------------------------------------------------------------------
-  // The folder list
-
+  // ------------------------------------------------------------------ The folder list
   /** Loads a folder's children, or its next page (`more`). */
   async loadChildren(id: number, more = false, quiet = false) {
     const scanId = this.scanId;
@@ -282,13 +259,11 @@ class DiskAnalyzerState {
       if (!quiet) toast.error(`That folder could not be opened: ${message(err)}`);
     }
   }
-
   #setPage(id: number, page: ChildPage) {
     const next = new Map(this.pages);
     next.set(id, page);
     this.pages = next;
   }
-
   /** Opens or closes a folder in the list. */
   toggle(id: number, open?: boolean) {
     const isOpen = this.expanded.has(id);
@@ -301,7 +276,6 @@ class DiskAnalyzerState {
     this.expanded.add(id);
     if (!this.pages.has(id)) void this.loadChildren(id);
   }
-
   /** Picks an item: on its own, added or taken out (Ctrl), or a run of rows (Shift). */
   select(id: number, how: "only" | "toggle" | "range" = "only") {
     if (id === SMALLER_ID) return;
@@ -326,12 +300,10 @@ class DiskAnalyzerState {
     this.#anchor = id;
     this.focused = id;
   }
-
   clearSelection() {
     this.selection.clear();
     this.#anchor = null;
   }
-
   /** Opens the list down to an item and brings it into view. */
   async showInTree(id: number) {
     const scanId = this.scanId;
@@ -355,32 +327,25 @@ class DiskAnalyzerState {
       // A stale id (a new scan started): nothing to show.
     }
   }
-
   async setSort(sort: SortKey) {
     if (sort === this.sort) return;
     this.sort = sort;
     this.#generation++;
     await this.#reloadPages();
   }
-
   /** Reloads every open folder, keeping what is shown until the answer is in. */
   async #reloadPages() {
     this.pages = new Map([...this.pages].filter(([id]) => this.expanded.has(id)).map(([id, page]) => [id, { ...page, loading: false }]));
     await Promise.all([...this.expanded].map((id) => this.loadChildren(id, false, true)));
   }
-
-  // ------------------------------------------------------------------
-  // The treemap
-
-  /** The treemap's size on screen. A much bigger or smaller one asks for a
-   *  new payload; the layout itself follows every change. */
+  // ------------------------------------------------------------------ The treemap
+  /* The treemap's size on screen. A much bigger or smaller one asks for a new payload; the layout itself follows every change. */
   setArea(width: number, height: number) {
     this.#area = { width, height };
     const before = this.#treemapArea;
     const now = width * height;
     if (!before || now > before * 1.5 || now < before / 1.5) void this.loadTreemap();
   }
-
   async loadTreemap() {
     const scanId = this.scanId;
     const { width, height } = this.#area;
@@ -397,7 +362,6 @@ class DiskAnalyzerState {
       if (request === this.#treemapRequest && this.scanId === scanId) toast.error(`The treemap could not be drawn: ${message(err)}`);
     }
   }
-
   /** Shows a folder in the treemap. */
   async zoomTo(id: number) {
     const scanId = this.scanId;
@@ -414,15 +378,11 @@ class DiskAnalyzerState {
     await this.loadTreemap();
     if (this.view === "types" || this.extensions) void this.loadExtensions();
   }
-
   /** One folder up. */
   zoomOut() {
     if (this.trail.length > 1) void this.zoomTo(this.trail[this.trail.length - 2].id);
   }
-
-  // ------------------------------------------------------------------
-  // Size mode, tabs, the other lists
-
+  // ------------------------------------------------------------------ Size mode, tabs, the other lists
   async setSizeMode(mode: SizeMode, save = true) {
     if (mode === this.sizeMode) return;
     this.sizeMode = mode;
@@ -436,14 +396,12 @@ class DiskAnalyzerState {
       this.extensions ? this.loadExtensions() : null,
     ]);
   }
-
   setView(view: View) {
     this.view = view;
     writeJson(KEY.view, view);
     if (view === "files" && !this.topFiles) void this.loadTopFiles();
     if (view === "types" && !this.extensions) void this.loadExtensions();
   }
-
   async loadTopFiles() {
     const scanId = this.scanId;
     if (scanId === null) return;
@@ -455,12 +413,10 @@ class DiskAnalyzerState {
       if (request === this.#filesRequest) toast.error(`The largest files could not be listed: ${message(err)}`);
     }
   }
-
   setFilter(text: string) {
     this.filter = text;
     void this.loadTopFiles();
   }
-
   async loadExtensions() {
     const scanId = this.scanId;
     if (scanId === null) return;
@@ -472,10 +428,7 @@ class DiskAnalyzerState {
       if (request === this.#typesRequest) toast.error(`File types could not be counted: ${message(err)}`);
     }
   }
-
-  // ------------------------------------------------------------------
-  // Explorer, the path, the Recycle Bin
-
+  // ------------------------------------------------------------------ Explorer, the path, the Recycle Bin
   async reveal(id: number) {
     if (this.scanId === null || id === SMALLER_ID) return;
     try {
@@ -484,7 +437,6 @@ class DiskAnalyzerState {
       toast.error(`Explorer could not open it: ${message(err)}`);
     }
   }
-
   async copyPath(id: number) {
     if (this.scanId === null || id === SMALLER_ID) return;
     try {
@@ -494,17 +446,14 @@ class DiskAnalyzerState {
       toast.error(`The path could not be copied: ${message(err)}`);
     }
   }
-
   /** Asks, then moves the items (the selection by default) to the Recycle Bin. */
   async recycle(ids: number[] = [...this.selection]) {
     return this.#remove(ids, false);
   }
-
   /** A separate, explicitly confirmed action for items the bin could not take. */
   async deletePermanently(ids: number[]) {
     return this.#remove(ids, true);
   }
-
   async #remove(ids: number[], permanent: boolean) {
     const scanId = this.scanId;
     const wanted = ids.filter((id) => id !== SMALLER_ID);
@@ -559,11 +508,9 @@ class DiskAnalyzerState {
       this.deletingPermanently = false;
     }
   }
-
   dismissSkipped() {
     this.skipped = [];
   }
-
   /** The totals moved on in the backend: show them, without scanning again. */
   async #afterDelete(gone: number[]) {
     if (!gone.length || this.scanId === null) return;
@@ -585,5 +532,4 @@ class DiskAnalyzerState {
     ]);
   }
 }
-
 export const diskState = new DiskAnalyzerState();

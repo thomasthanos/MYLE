@@ -1,19 +1,11 @@
-//! The eight Software Health scans. Each returns findings paired with the
-//! target the backend keeps to act on them. Every scan is read-only and
-//! holds to the safety lists in `sys`: Windows, Microsoft, drivers, hardware
-//! vendors and MYLE are never offered for a change.
-
+// ! The eight Software Health scans. Each returns findings paired with the ! target the backend keeps to act on them. Every scan is read-only and ! holds to the safety lists in `sys`: Windows, Microsoft, drivers, hardware ! vendors and MYLE are never offered for a change.
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-
 use uuid::Uuid;
-
 use super::sys;
 use super::{Finding, Target};
-
 /// Reports how far a scan is, 0..1.
 pub type Tick<'a> = &'a (dyn Fn(f32) + Sync);
-
 pub fn scan(module: &str, tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     match module {
         "leftovers" => leftovers(tick),
@@ -27,11 +19,9 @@ pub fn scan(module: &str, tick: Tick) -> Result<Vec<(Finding, Target)>, String> 
         other => Err(format!("Unknown module {other}")),
     }
 }
-
 fn id() -> String {
     Uuid::new_v4().simple().to_string()
 }
-
 fn finding(module: &'static str, title: impl Into<String>) -> Finding {
     Finding {
         id: id(),
@@ -49,9 +39,7 @@ fn finding(module: &'static str, title: impl Into<String>) -> Finding {
         review_reason: None,
     }
 }
-
 // ─── Installed software, once, for several scans ─────────────────────────────
-
 #[derive(Clone)]
 struct Installed {
     name: String,
@@ -60,9 +48,7 @@ struct Installed {
     publisher: String,
     display_icon: Option<String>,
 }
-
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
-
 fn uninstall_keys() -> Vec<(&'static str, String, Installed)> {
     uninstall_keys_at(&[
         ("HKLM", UNINSTALL),
@@ -77,7 +63,6 @@ fn uninstall_keys() -> Vec<(&'static str, String, Installed)> {
         ),
     ])
 }
-
 fn uninstall_keys_at(roots: &[(&'static str, &str)]) -> Vec<(&'static str, String, Installed)> {
     let mut out = Vec::new();
     for &(hive, uninstall_root) in roots {
@@ -112,14 +97,12 @@ fn uninstall_keys_at(roots: &[(&'static str, &str)]) -> Vec<(&'static str, Strin
     }
     out
 }
-
 fn installed_list() -> Vec<Installed> {
     uninstall_keys()
         .into_iter()
         .map(|(_, _, app)| app)
         .collect()
 }
-
 /// Installed programs that say where they live: name and folder. The Disk
 /// Analyzer keeps these folders out of the Recycle Bin.
 pub(crate) fn install_locations() -> Vec<(String, PathBuf)> {
@@ -131,7 +114,6 @@ pub(crate) fn install_locations() -> Vec<(String, PathBuf)> {
         })
         .collect()
 }
-
 fn installation_status(app: &Installed) -> (sys::Presence, sys::Presence, sys::Presence) {
     let location = app
         .install_location
@@ -151,7 +133,6 @@ fn installation_status(app: &Installed) -> (sys::Presence, sys::Presence, sys::P
         .unwrap_or(sys::Presence::Unknown);
     (location, uninstaller, icon)
 }
-
 fn icon_path(icon: &str) -> String {
     let text = sys::expand(icon.trim());
     let path = text
@@ -160,7 +141,6 @@ fn icon_path(icon: &str) -> String {
         .map_or(text.as_str(), |(path, _)| path);
     path.trim().trim_matches('"').to_string()
 }
-
 fn broken_candidate(
     location: sys::Presence,
     uninstaller: sys::Presence,
@@ -170,7 +150,6 @@ fn broken_candidate(
     !evidence.contains(&sys::Presence::Present)
         && [location, uninstaller].contains(&sys::Presence::Missing)
 }
-
 fn installed_elsewhere(app: &Installed, list: &[Installed]) -> bool {
     list.iter().any(|other| {
         sys::norm(&other.name) == sys::norm(&app.name) && {
@@ -179,7 +158,6 @@ fn installed_elsewhere(app: &Installed, list: &[Installed]) -> bool {
         }
     })
 }
-
 fn registered_paths(app: &Installed) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(location) = &app.install_location {
@@ -204,7 +182,6 @@ fn registered_paths(app: &Installed) -> Vec<PathBuf> {
     }
     paths
 }
-
 fn related_folder(folder: &Path, installed: &Path) -> bool {
     let normalize = |p: &Path| {
         p.to_string_lossy()
@@ -219,7 +196,6 @@ fn related_folder(folder: &Path, installed: &Path) -> bool {
             || folder.starts_with(&format!("{installed}\\"))
             || installed.starts_with(&format!("{folder}\\")))
 }
-
 fn orphan_folder_evidence(
     registered_location: bool,
     uninstaller: sys::Presence,
@@ -227,7 +203,6 @@ fn orphan_folder_evidence(
 ) -> bool {
     registered_location && uninstaller == sys::Presence::Missing && icon != sys::Presence::Present
 }
-
 fn orphan_folder_owner<'a>(path: &Path, list: &'a [Installed]) -> Option<&'a Installed> {
     list.iter().find(|app| {
         if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {
@@ -245,7 +220,6 @@ fn orphan_folder_owner<'a>(path: &Path, list: &'a [Installed]) -> Option<&'a Ins
         orphan_folder_evidence(registered_location, uninstaller, icon)
     })
 }
-
 fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
     // An unreadable/truncated tree cannot be verified as abandoned.
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -266,8 +240,7 @@ fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
             return true;
         }
         let name = entry.file_name().to_string_lossy().to_lowercase();
-        // Programs and installers, shortcuts, and save games (FromSoftware's
-        // .sl2, Bethesda's .ess and .fos among them).
+        // Programs and installers, shortcuts, and save games (FromSoftware's .sl2, Bethesda's .ess and .fos among them).
         if kind.is_file()
             && ["exe", "msi", "lnk", "sav", "save", "sl2", "ess", "fos"].contains(
                 &entry
@@ -291,7 +264,6 @@ fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
     }
     false
 }
-
 /// Normalised vendor and product words of everything installed, for matching
 /// a folder's name against software that is really there.
 fn installed_tokens(list: &[Installed]) -> HashSet<String> {
@@ -319,7 +291,6 @@ fn installed_tokens(list: &[Installed]) -> HashSet<String> {
     }
     set
 }
-
 /// Folder names of running programs, services and AppX packages: whatever
 /// runs or is installed outside the Uninstall list still counts as present.
 fn live_tokens() -> Result<HashSet<String>, String> {
@@ -339,9 +310,7 @@ fn live_tokens() -> Result<HashSet<String>, String> {
     }
     Ok(set)
 }
-
 // ─── 1. Uninstallation leftovers ─────────────────────────────────────────────
-
 /// Where uninstallers leave settings and profiles behind, and where a folder
 /// nothing claims may be shown (for review only). Program Files is left to
 /// registered installations.
@@ -349,7 +318,6 @@ const USER_DATA_ROOTS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "ProgramData"];
 /// A leftover folder must have been left alone this long: anything touched
 /// lately is still in use.
 const IDLE_DAYS: u64 = 30;
-
 /// Windows' own folders in AppData and ProgramData, the same on every PC:
 /// never shown as unclaimed. Apps' folders are told apart by what is on the
 /// PC instead (installed list, processes, services, Store apps, shortcuts,
@@ -360,7 +328,6 @@ const WINDOWS_OWN: &[&str] = &[
     "elevateddiagnostics", "packagemanagement", "usoshared", "usoprivate", "softwaredistribution",
     "regid", "ssh", "fontcache", "identities", "certificates", "credentials", "crypto",
 ];
-
 /// Words too common to tie a folder to a program on their own: an installed
 /// "… Installer" or a "… Client" service doesn't claim every folder named so.
 const GENERIC_WORDS: &[&str] = &[
@@ -369,12 +336,10 @@ const GENERIC_WORDS: &[&str] = &[
     "data", "system", "launcher", "helper", "host", "tools", "common", "shared", "runtime", "plugin",
     "plugins", "program", "files", "user", "users", "store", "online", "desktop", "mobile", "studio",
     "games", "game", "portable", "network", "report", "reporter", "epic", "core", "free", "light",
-    // Folders on the PATH, and where programs are often run from, that say
-    // nothing about a program.
+    // Folders on the PATH, and where programs are often run from, that say nothing about a program.
     "bin", "cmd", "sbin", "lib", "libexec", "scripts", "usr", "system32", "wbem", "windowsapps",
     "downloads", "documents", "temp", "appdata", "roaming", "programfiles", "programfilesx86", "users",
 ];
-
 /// Whether something on this PC goes by the folder's name: a name of four
 /// letters or more inside it (or it inside one), or a whole word of it ("npm"
 /// in "npm-cache"). For a folder no registered installation owns, common
@@ -397,7 +362,6 @@ fn claimed(name: &str, tokens: &HashSet<String>, unclaimed: bool) -> bool {
             }
         })
 }
-
 /// Folder names on the PATH, where command-line tools live (npm, pnpm,
 /// Python, Git…): a tool installed without an Uninstall entry still counts.
 fn path_tokens() -> HashSet<String> {
@@ -413,7 +377,6 @@ fn path_tokens() -> HashSet<String> {
         .filter(|word| word.len() >= 3 && !GENERIC_WORDS.contains(&word.as_str()))
         .collect()
 }
-
 /// Programs Windows saw run (the shell's MuiCache, the Compatibility
 /// Assistant, UserAssist) that are still on disk: a portable app with no
 /// Uninstall entry still counts while its program is there, wherever it is.
@@ -448,7 +411,6 @@ fn ran_programs() -> Vec<PathBuf> {
         })
         .collect()
 }
-
 fn rot13(text: &str) -> String {
     text.chars()
         .map(|c| match c {
@@ -458,7 +420,6 @@ fn rot13(text: &str) -> String {
         })
         .collect()
 }
-
 /// Names a program that ran goes by: its file and its two folders. Setups
 /// are left out: the installer of an app that is gone, still in Downloads,
 /// doesn't make its leftovers in use.
@@ -478,7 +439,6 @@ fn ran_tokens(programs: &[PathBuf]) -> HashSet<String> {
     }
     set
 }
-
 /// The folder names in AppData, LocalAppData and ProgramData where games keep
 /// saves and settings, from Ludusavi's manifest (the one Game Saves uses). A
 /// game's folder is never a leftover, even when the game itself is gone.
@@ -496,21 +456,18 @@ fn save_roots_in(manifest: &str) -> HashSet<String> {
     }
     roots
 }
-
 fn game_save_roots() -> HashSet<String> {
     crate::game_saves::manifest_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|text| save_roots_in(&text))
         .unwrap_or_default()
 }
-
 /// How sure the scan is that a folder nothing claims is a leftover: more
 /// the longer nothing changed in it, most when it is empty.
 fn unclaimed_confidence(idle_days: u64, empty: bool) -> u8 {
     let age = (idle_days.saturating_sub(IDLE_DAYS) / 15).min(4) as u8 * 10;
     (30 + age + if empty { 25 } else { 0 }).min(95)
 }
-
 /// What a leftover holds and since when, for the person deciding about it.
 fn contents_line(files: usize, names: &[String], idle_days: u64) -> String {
     let since = format!("Nothing in it changed for {idle_days} days.");
@@ -523,7 +480,6 @@ fn contents_line(files: usize, names: &[String], idle_days: u64) -> String {
         }
     }
 }
-
 /// Whether a folder nothing claims may be shown for review: a readable name
 /// (not an id), and not one of Windows' own folders.
 fn unclaimed_candidate(name: &str) -> bool {
@@ -533,7 +489,6 @@ fn unclaimed_candidate(name: &str) -> bool {
     let letters = name.chars().filter(|c| c.is_alphabetic()).count();
     !id_like && letters >= 3 && !WINDOWS_OWN.contains(&folder.as_str())
 }
-
 fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     let list = installed_list();
     let active: Vec<_> = list
@@ -552,7 +507,6 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     tokens.extend(live_tokens()?);
     tick(0.4);
     let mut out = Vec::new();
-
     let roots: Vec<(PathBuf, bool)> = [
         "APPDATA",
         "LOCALAPPDATA",
@@ -563,7 +517,6 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     .iter()
     .filter_map(|v| sys::env_dir(v).map(|dir| (dir, USER_DATA_ROOTS.contains(v))))
     .collect();
-
     let mut seen = HashSet::new();
     let roots_total = roots.len().max(1) as f32;
     for (index, (root, user_data)) in roots.into_iter().enumerate() {
@@ -590,10 +543,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             {
                 continue;
             }
-            // Proof of uninstallation: a registered installation whose
-            // uninstaller is gone. In AppData and ProgramData, where the
-            // record usually goes with the uninstall, a folder nothing on
-            // this PC claims is shown too, for review only (stricter below).
+            // Proof of uninstallation: a registered installation whose uninstaller is gone. In AppData and ProgramData, where the record usually goes with the uninstall, a folder nothing on this PC claims is shown too, for review only (stricter below).
             let owner = orphan_folder_owner(&path, &list);
             if owner.is_none() && !(user_data && unclaimed_candidate(&name)) {
                 continue;
@@ -626,13 +576,11 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             if idle < IDLE_DAYS {
                 continue;
             }
-            // An empty folder left behind is a leftover too (the folder was
-            // read above: one that can't be is never offered).
+            // An empty folder left behind is a leftover too (the folder was read above: one that can't be is never offered).
             let size = sys::dir_size(&path, 20_000);
             let (files, names) = sys::folder_contents(&path, 20_000, 3);
             let empty = files == 0;
-            // Made by an installer running as administrator (ProgramData,
-            // Program Files): this user may only read it.
+            // Made by an installer running as administrator (ProgramData, Program Files): this user may only read it.
             let deletable = sys::can_delete(&path);
             let mut f = finding("leftovers", name.clone());
             f.path = Some(path.to_string_lossy().into_owned());
@@ -649,8 +597,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
                     "Nothing on this PC uses this name: no installed program, running or recently run app, service, Store app, shortcut, command-line tool or game. {holds}"
                 );
                 f.confidence = Some(unclaimed_confidence(idle, empty));
-                // Nothing to lose in an empty folder: selected for cleanup.
-                // Anything inside is for the user to look at first.
+                // Nothing to lose in an empty folder: selected for cleanup. Anything inside is for the user to look at first.
                 if empty && deletable {
                     f.recommended = true;
                 } else {
@@ -665,7 +612,6 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             out.push((f, Target::Paths(vec![path])));
         }
     }
-
     // Orphaned Uninstall keys: no uninstaller and no install folder.
     for (hive, key_name, app) in uninstall_keys() {
         if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {
@@ -685,8 +631,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
         {
             continue;
         }
-        // This is a dead record; Broken uninstalls offers Force Clean. Here,
-        // only the plain orphaned key with nothing on disk at all.
+        // This is a dead record; Broken uninstalls offers Force Clean. Here, only the plain orphaned key with nothing on disk at all.
         if app.install_location.is_some() {
             continue;
         }
@@ -705,12 +650,9 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             },
         ));
     }
-
     Ok(out)
 }
-
 // ─── 2. Broken uninstalls ────────────────────────────────────────────────────
-
 fn broken() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     let list = installed_list();
@@ -765,16 +707,13 @@ fn broken() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 // ─── 3. Software redundant files (curated) ───────────────────────────────────
-
 struct Rule {
     app: &'static str,
     /// Relative to %LOCALAPPDATA% (`L:`) or %APPDATA% (`R:`).
     rel: &'static str,
     what: &'static str,
 }
-
 const REDUNDANT: &[Rule] = &[
     Rule {
         app: "Google Chrome",
@@ -847,7 +786,6 @@ const REDUNDANT: &[Rule] = &[
         what: "download cache",
     },
 ];
-
 fn redundant() -> Vec<(Finding, Target)> {
     let local = sys::env_dir("LOCALAPPDATA");
     let roaming = sys::env_dir("APPDATA");
@@ -878,25 +816,20 @@ fn redundant() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 // ─── 4. Software hibernation ─────────────────────────────────────────────────
-
 const APPROVED_RUN: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 const APPROVED_FOLDER: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
 const RUN: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-
 fn startup_enabled(approved_hive: &str, name: &str) -> bool {
     match sys::open(approved_hive, APPROVED_RUN).and_then(|key| key.get_raw_value(name).ok()) {
         Some(value) => value.bytes.first().map(|b| b % 2 == 0).unwrap_or(true),
         None => true,
     }
 }
-
 fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
-
     for hive in ["HKLM", "HKCU"] {
         let Some(key) = sys::open(hive, RUN) else {
             continue;
@@ -931,7 +864,6 @@ fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
             ));
         }
     }
-
     tick(0.15);
     // The Startup folder (shortcuts), approved the same way.
     if let Some(roaming) = sys::env_dir("APPDATA") {
@@ -969,14 +901,12 @@ fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
             }
         }
     }
-
     tick(0.25);
     // Busy third-party background processes (information: CPU and memory).
     if let Ok(text) = sys::powershell(
         "Get-Process | Where-Object { $_.Path -and $_.MainWindowHandle -eq 0 } | Sort-Object WorkingSet64 -Descending | Select-Object -First 40 Name,Path,CPU,WorkingSet64 | ConvertTo-Json -Compress",
     ) {
-        // One program often runs as several processes (browsers, Electron
-        // apps): one finding per program, its processes added up.
+        // One program often runs as several processes (browsers, Electron apps): one finding per program, its processes added up.
         let mut programs: Vec<(String, String, u64, f64, usize)> = Vec::new();
         for item in sys::json_list(&text) {
             let path = item["Path"].as_str().unwrap_or_default().to_string();
@@ -1009,7 +939,6 @@ fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
             out.push((f, Target::Info));
         }
     }
-
     tick(0.6);
     // Third-party automatic services that are running now.
     if let Ok(text) = sys::powershell(
@@ -1038,15 +967,11 @@ fn hibernation(tick: Tick) -> Vec<(Finding, Target)> {
             out.push((f, Target::Service { name, start: 2 }));
         }
     }
-
     out
 }
-
 // ─── 5. Software permissions ─────────────────────────────────────────────────
-
 const CONSENT: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
-
 fn permissions() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     let names = app_names();
@@ -1102,7 +1027,6 @@ fn permissions() -> Vec<(Finding, Target)> {
             }
         }
     }
-
     // Background apps (packaged), on by default; off is reversible.
     let bg = r"SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications";
     if let Some(root) = sys::open("HKCU", bg) {
@@ -1134,10 +1058,8 @@ fn permissions() -> Vec<(Finding, Target)> {
             out.push((f, Target::Background { path }));
         }
     }
-
     out
 }
-
 /// A consent-store app id into something readable: `Microsoft.Foo_8wek…` →
 /// `Microsoft.Foo`; a packaged family name kept as is; a path's file name.
 fn pretty_app(app: &str) -> String {
@@ -1152,11 +1074,9 @@ fn pretty_app(app: &str) -> String {
     }
     app.split('_').next().unwrap_or(app).to_string()
 }
-
 fn app_names() -> HashMap<String, String> {
     let mut names = HashMap::new();
-    // Windows resolves localized resource names here, including numeric
-    // package publishers. Never execute an app to identify it.
+    // Windows resolves localized resource names here, including numeric package publishers. Never execute an app to identify it.
     if let Ok(text) = sys::powershell(
         "$shell = New-Object -ComObject Shell.Application; @($shell.NameSpace('shell:AppsFolder').Items() | ForEach-Object { [pscustomobject]@{ id = $_.Path; name = $_.Name } }) | ConvertTo-Json -Compress",
     ) {
@@ -1208,7 +1128,6 @@ fn app_names() -> HashMap<String, String> {
     }
     names
 }
-
 fn friendly_app(app: &str, names: &HashMap<String, String>) -> String {
     let id = app.replace('#', "\\");
     let key = id.split('!').next().unwrap_or(&id).to_lowercase();
@@ -1249,11 +1168,8 @@ fn friendly_app(app: &str, names: &HashMap<String, String>) -> String {
     }
     readable
 }
-
 // ─── 6. Disturbing notifications ─────────────────────────────────────────────
-
 const NOTIFY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings";
-
 fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     let names = app_names();
@@ -1280,7 +1196,6 @@ fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
             out.push((f, Target::Notify { path }));
         }
     }
-
     // Browser site push permissions.
     tick(0.3);
     out.extend(chrome_sites("chrome.exe", r"Google\Chrome\User Data"));
@@ -1294,7 +1209,6 @@ fn notifications(tick: Tick) -> Vec<(Finding, Target)> {
     out.extend(firefox_sites());
     out
 }
-
 fn chrome_profiles(user_data: &Path) -> Vec<PathBuf> {
     let mut profiles = vec![user_data.join("Default")];
     if let Ok(entries) = std::fs::read_dir(user_data) {
@@ -1309,7 +1223,6 @@ fn chrome_profiles(user_data: &Path) -> Vec<PathBuf> {
         .filter(|p| p.join("Preferences").is_file())
         .collect()
 }
-
 fn chrome_sites(exe: &'static str, rel: &str) -> Vec<(Finding, Target)> {
     let Some(local) = sys::env_dir("LOCALAPPDATA") else {
         return Vec::new();
@@ -1358,7 +1271,6 @@ fn chrome_sites(exe: &'static str, rel: &str) -> Vec<(Finding, Target)> {
     }
     out
 }
-
 fn firefox_sites() -> Vec<(Finding, Target)> {
     let Some(roaming) = sys::env_dir("APPDATA") else {
         return Vec::new();
@@ -1373,8 +1285,7 @@ fn firefox_sites() -> Vec<(Finding, Target)> {
         if !db.is_file() {
             continue;
         }
-        // permissions.sqlite is a locked binary; counting needs the browser's
-        // own tools. Offer a single switch to block new requests via user.js.
+        // permissions.sqlite is a locked binary; counting needs the browser's own tools. Offer a single switch to block new requests via user.js.
         let mut f = finding("notifications", "Firefox: site notifications");
         f.detail = "Block new notification requests in this Firefox profile (existing ones stay until you clear them in Settings).".into();
         f.path = Some(entry.path().to_string_lossy().into_owned());
@@ -1393,9 +1304,7 @@ fn firefox_sites() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 // ─── 7. Installation files ───────────────────────────────────────────────────
-
 fn is_installer(name: &str) -> bool {
     let lower = name.to_lowercase();
     if lower.ends_with(".msi") || lower.ends_with(".msix") || lower.ends_with(".appx") {
@@ -1420,7 +1329,6 @@ fn is_installer(name: &str) -> bool {
     }
     false
 }
-
 fn installers() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -1434,7 +1342,6 @@ fn installers() -> Vec<(Finding, Target)> {
     .into_iter()
     .flatten()
     .collect();
-
     for (dir, downloads) in dirs {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -1472,9 +1379,7 @@ fn installers() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 // ─── 8. Suspicious software & extensions ─────────────────────────────────────
-
 fn suspicious(tick: Tick) -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     out.extend(browser_extensions("Chrome", r"Google\Chrome\User Data"));
@@ -1491,7 +1396,6 @@ fn suspicious(tick: Tick) -> Vec<(Finding, Target)> {
     out.extend(suspicious_tasks());
     out
 }
-
 fn browser_extensions(browser: &'static str, rel: &str) -> Vec<(Finding, Target)> {
     let Some(local) = sys::env_dir("LOCALAPPDATA") else {
         return Vec::new();
@@ -1513,8 +1417,7 @@ fn browser_extensions(browser: &'static str, rel: &str) -> Vec<(Finding, Target)
             continue;
         };
         for (ext_id, data) in exts {
-            // location: 1 internal (store), 4 external reg, 5 command line /
-            // unpacked, 10 component. Store-installed and components are fine.
+            // location: 1 internal (store), 4 external reg, 5 command line / unpacked, 10 component. Store-installed and components are fine.
             let location = data.get("location").and_then(|l| l.as_i64()).unwrap_or(0);
             let from_store = data
                 .get("from_webstore")
@@ -1575,7 +1478,6 @@ fn browser_extensions(browser: &'static str, rel: &str) -> Vec<(Finding, Target)
     }
     out
 }
-
 fn scheme(browser: &str) -> &'static str {
     match browser {
         "Edge" => "edge://",
@@ -1583,7 +1485,6 @@ fn scheme(browser: &str) -> &'static str {
         _ => "chrome://",
     }
 }
-
 fn suspicious_startup() -> Vec<(Finding, Target)> {
     let mut programs = Vec::new();
     for hive in ["HKLM", "HKCU"] {
@@ -1635,7 +1536,6 @@ fn suspicious_startup() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 fn suspicious_tasks() -> Vec<(Finding, Target)> {
     let script = "Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.Principal.RunLevel -ne $null } | ForEach-Object { $a = $_.Actions | Where-Object { $_.Execute }; if ($a) { [pscustomobject]@{ name = $_.TaskPath + $_.TaskName; exe = $a[0].Execute } } } | ConvertTo-Json -Compress";
     let Ok(text) = sys::powershell(script) else {
@@ -1677,11 +1577,9 @@ fn suspicious_tasks() -> Vec<(Finding, Target)> {
     }
     out
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn installers_are_told_from_ordinary_exes() {
         assert!(is_installer("npp.8.5.Installer.x64.exe"));
@@ -1690,7 +1588,6 @@ mod tests {
         assert!(!is_installer("game.exe"));
         assert!(!is_installer("notes.txt"));
     }
-
     #[test]
     fn app_ids_become_readable() {
         assert_eq!(
@@ -1699,7 +1596,6 @@ mod tests {
         );
         assert_eq!(pretty_app(r"C:#Program Files#Foo#foo.exe"), "foo.exe");
     }
-
     #[test]
     fn existing_installation_evidence_prevents_false_broken_entries() {
         assert!(!broken_candidate(
@@ -1728,7 +1624,6 @@ mod tests {
             sys::Presence::Unknown
         ));
     }
-
     #[test]
     fn registry_product_names_match_vendor_and_portable_folder_names() {
         let root_path = format!("Software\\MYLE-Health-Scan-Test-{}", uuid::Uuid::new_v4());
@@ -1778,7 +1673,6 @@ mod tests {
         }
         registry.delete_subkey_all(root_path).unwrap();
     }
-
     #[test]
     fn permission_names_resolve_packages_and_desktop_paths_without_showing_ids() {
         let names = std::collections::HashMap::from([(
@@ -1805,7 +1699,6 @@ mod tests {
             "WhatsApp Desktop"
         );
     }
-
     #[test]
     fn registered_paths_protect_vendor_folders_and_their_children() {
         assert!(related_folder(
@@ -1821,7 +1714,6 @@ mod tests {
             Path::new(r"C:\Program Files\Vendor")
         ));
     }
-
     #[test]
     fn existing_icon_and_portable_executables_are_installation_evidence() {
         let dir =
@@ -1846,7 +1738,6 @@ mod tests {
         std::fs::remove_file(dir.join("App icon.ico")).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }
-
     #[test]
     fn deeply_nested_portable_apps_are_not_classified_as_abandoned() {
         let dir = std::env::temp_dir().join(format!("myle-health-deep-{}", uuid::Uuid::new_v4()));
@@ -1859,7 +1750,6 @@ mod tests {
             std::fs::remove_dir(path).unwrap();
         }
     }
-
     #[test]
     fn unrecognized_folders_need_positive_uninstallation_evidence() {
         assert!(!orphan_folder_evidence(
@@ -1888,7 +1778,6 @@ mod tests {
             sys::Presence::Unknown
         ));
     }
-
     #[test]
     fn only_windows_own_folders_and_ids_are_left_out_by_name() {
         for name in ["Package Cache", "VirtualStore", "D3DSCache", "ConnectedDevicesPlatform"] {
@@ -1903,7 +1792,6 @@ mod tests {
             assert!(unclaimed_candidate(name), "{name} is judged by the PC");
         }
     }
-
     #[test]
     fn a_folder_is_claimed_by_a_name_on_the_pc_or_a_whole_word_of_it() {
         let tokens: HashSet<String> = ["pnpm", "npm", "discord", "installer", "nodejs"].map(String::from).into();
@@ -1917,14 +1805,12 @@ mod tests {
         // A registered installation's folder: any name counts.
         assert!(claimed("Iris Installer", &tokens, false));
     }
-
     #[test]
     fn game_save_folders_come_from_the_manifest_without_placeholders() {
         let manifest = "Death Stranding:\n  files:\n    <winLocalAppData>/KojimaProductions/DeathStranding/*:\n      tags: [save]\n    \"<winAppData>/Rockstar Games/GTA V\": {}\n    <winAppData>/<game>/saves: {}\n    <winProgramData>/*/x: {}\n    <home>/Documents/My Games: {}\n";
         let roots = save_roots_in(manifest);
         assert_eq!(roots, ["kojimaproductions", "rockstargames"].map(String::from).into());
     }
-
     #[test]
     fn programs_that_ran_claim_their_names_but_setups_do_not() {
         assert_eq!(rot13(r"P:\Gbbyf\YBBG.rkr"), r"C:\Tools\LOOT.exe");
@@ -1939,7 +1825,6 @@ mod tests {
         assert!(!tokens.iter().any(|token| token.contains("winhance")), "an installer left in Downloads claims nothing");
         assert!(!tokens.contains("downloads"));
     }
-
     #[test]
     fn confidence_grows_with_time_and_emptiness_and_the_contents_are_described() {
         assert_eq!(unclaimed_confidence(30, false), 30);
@@ -1959,7 +1844,6 @@ mod tests {
         assert_eq!(sys::folder_contents(&dir, 100, 1), (2, vec!["top.ini".to_string()]), "shallowest first");
         std::fs::remove_dir_all(&dir).unwrap();
     }
-
     #[test]
     fn a_folder_this_user_made_can_be_deleted() {
         let dir = std::env::temp_dir().join(format!("myle-health-delete-{}", uuid::Uuid::new_v4()));
@@ -1968,7 +1852,6 @@ mod tests {
         std::fs::remove_dir(&dir).unwrap();
         assert!(!sys::can_delete(&dir), "a folder that is gone can't be moved either");
     }
-
     #[test]
     #[ignore = "scans this PC's leftovers (PowerShell, AppData); changes nothing"]
     fn this_pc_s_leftovers() {
@@ -1980,7 +1863,6 @@ mod tests {
         }
         println!("{} findings", found.len());
     }
-
     #[test]
     fn folder_ownership_requires_an_exact_registered_installation() {
         let dir = std::env::temp_dir().join(format!("myle-health-owner-{}", uuid::Uuid::new_v4()));

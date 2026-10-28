@@ -1,14 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-
 use super::models::UndoRestore;
 use super::{atomic, parser};
-
 const METADATA_FILE: &str = "latest-restore.json";
 const RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 static NEXT_SLOT: AtomicU64 = AtomicU64::new(1);
-
 pub(crate) fn create_slot(root: &Path) -> Result<(UndoRestore, PathBuf), String> {
     let created_at = parser::now();
     prune_expired_slots(root, created_at);
@@ -26,7 +23,6 @@ pub(crate) fn create_slot(root: &Path) -> Result<(UndoRestore, PathBuf), String>
         path,
     ))
 }
-
 fn prune_expired_slots(root: &Path, now: u64) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
@@ -42,7 +38,6 @@ fn prune_expired_slots(root: &Path, now: u64) {
         }
     }
 }
-
 pub(crate) fn commit(root: &Path, mut undo: UndoRestore, games: Vec<String>) -> Result<(), String> {
     undo.games = games;
     let previous = load_valid(root);
@@ -50,7 +45,6 @@ pub(crate) fn commit(root: &Path, mut undo: UndoRestore, games: Vec<String>) -> 
     let path = root.join(METADATA_FILE);
     let json = serde_json::to_vec_pretty(&undo).map_err(|error| error.to_string())?;
     atomic::write(&path, &json)?;
-
     if let Some(previous) = previous.filter(|previous| previous.id != undo.id)
         && let Ok(old_path) = slot_path(root, &previous.id)
     {
@@ -58,7 +52,6 @@ pub(crate) fn commit(root: &Path, mut undo: UndoRestore, games: Vec<String>) -> 
     }
     Ok(())
 }
-
 pub(crate) fn load_valid(root: &Path) -> Option<UndoRestore> {
     let path = root.join(METADATA_FILE);
     let undo: UndoRestore = fs::read_to_string(&path)
@@ -72,7 +65,6 @@ pub(crate) fn load_valid(root: &Path) -> Option<UndoRestore> {
     }
     Some(undo)
 }
-
 /// Forgets the last restore's safety copy: a newer restore that changes
 /// nothing must not leave "Undo last restore" putting back an older one.
 pub(crate) fn clear(root: &Path) {
@@ -81,13 +73,11 @@ pub(crate) fn clear(root: &Path) {
         discard_slot(root, &previous.id);
     }
 }
-
 pub(crate) fn discard_slot(root: &Path, id: &str) {
     if let Ok(path) = slot_path(root, id) {
         let _ = fs::remove_dir_all(path);
     }
 }
-
 pub(crate) fn slot_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     if !id.starts_with("restore-")
         || id.len() > 96
@@ -99,11 +89,9 @@ pub(crate) fn slot_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     }
     Ok(root.join(id))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn slot_ids_cannot_escape_the_safety_root() {
         let root = Path::new(r"C:\safe");

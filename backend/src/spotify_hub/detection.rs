@@ -2,32 +2,25 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::SystemTime;
-
 use sha2::{Digest, Sha256};
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
-
 use crate::apps::process::hidden;
 use crate::download::to_hex;
-
 use super::filesystem::validate_no_reparse_points;
 use super::models::{
     InstallationState, MarketplaceState, Prerequisites, SpicetifyState, SpotifyHubSnapshot,
 };
-
 const DESKTOP_UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Spotify";
 const STORE_FAMILY: &str = "SpotifyAB.SpotifyMusic_zpdnekdrzrea0";
 /// Per-user AppX registrations; one subkey per installed package full name.
 const APPX_PACKAGES_KEY: &str = r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
-
 /// `spicetify -v` of the last CLI build seen, keyed by the exe's size and
 /// modification time. Detection runs on every visit to the page and this is
 /// the only part of it that starts a process.
 static CLI_VERSION: Mutex<Option<CliVersion>> = Mutex::new(None);
-
 /// Size and modification time of the exe, then `(version, healthy)`.
 type CliVersion = (u64, SystemTime, Option<String>, bool);
-
 #[derive(Clone, Debug)]
 pub struct KnownPaths {
     pub local: PathBuf,
@@ -41,7 +34,6 @@ pub struct KnownPaths {
     pub start_shortcut: PathBuf,
     pub desktop_shortcut: PathBuf,
 }
-
 impl KnownPaths {
     pub fn discover() -> Result<Self, String> {
         let roaming = env_path("APPDATA")?;
@@ -67,18 +59,15 @@ impl KnownPaths {
             config,
         })
     }
-
     pub fn cli_exe(&self) -> PathBuf {
         self.cli.join("spicetify.exe")
     }
-
     pub fn desktop_dir(&self) -> PathBuf {
         self.desktop_spotify
             .parent()
             .expect("known Spotify path has a parent")
             .to_path_buf()
     }
-
     pub fn purge_targets(&self) -> Vec<PathBuf> {
         vec![
             self.desktop_dir(),
@@ -91,7 +80,6 @@ impl KnownPaths {
         ]
     }
 }
-
 #[derive(Clone, Debug)]
 pub struct Detection {
     pub paths: KnownPaths,
@@ -101,7 +89,6 @@ pub struct Detection {
     pub marketplace: MarketplaceState,
     pub unknown_desktop_registration: bool,
 }
-
 impl Detection {
     pub fn snapshot(
         &self,
@@ -136,7 +123,6 @@ impl Detection {
             active_job,
         }
     }
-
     pub fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
         for value in [
@@ -151,9 +137,7 @@ impl Detection {
             hasher.update(value.as_bytes());
             hasher.update([0]);
         }
-        // What exists and what kind of thing it is. Sizes and times are left
-        // out on purpose: a running Spotify rewrites its cache and prefs every
-        // few seconds, which made every purge fail as "state changed".
+        // What exists and what kind of thing it is. Sizes and times are left out on purpose: a running Spotify rewrites its cache and prefs every few seconds, which made every purge fail as "state changed".
         for path in self.paths.purge_targets() {
             hasher.update(path.as_os_str().to_string_lossy().as_bytes());
             let kind = match std::fs::symlink_metadata(&path) {
@@ -167,7 +151,6 @@ impl Detection {
         to_hex(&hasher.finalize())
     }
 }
-
 pub async fn detect() -> Result<Detection, String> {
     let paths = KnownPaths::discover()?;
     let (registered_version, registered_location, registry_present) = desktop_registry();
@@ -177,11 +160,9 @@ pub async fn detect() -> Result<Detection, String> {
         && registered_location.is_some_and(|location| {
             !same_path(&location, &paths.desktop_dir()) && location.join("Spotify.exe").is_file()
         });
-
     let store_folder = paths.store_data.is_dir();
     let store_version = store_version();
     let store_present = store_folder || store_version.is_some();
-
     let cli_exe = paths.cli_exe();
     let cli_present = cli_exe.is_file();
     let (spicetify_version, healthy) =
@@ -192,7 +173,6 @@ pub async fn detect() -> Result<Detection, String> {
         };
     let config = std::fs::read(paths.config.join("config-xpui.ini")).unwrap_or_default();
     let apps = super::actions::spotify_apps_dir(&config, &paths.desktop_dir());
-
     Ok(Detection {
         desktop: InstallationState {
             installed: desktop_present,
@@ -217,7 +197,6 @@ pub async fn detect() -> Result<Detection, String> {
         unknown_desktop_registration,
     })
 }
-
 async fn cached_executable_version(exe: &std::path::Path) -> (Option<String>, bool) {
     let stamp = std::fs::metadata(exe)
         .ok()
@@ -239,7 +218,6 @@ async fn cached_executable_version(exe: &std::path::Path) -> (Option<String>, bo
     }
     (version, healthy)
 }
-
 async fn executable_version(exe: &std::path::Path) -> (Option<String>, bool) {
     let output = hidden(exe).arg("-v").stdin(Stdio::null()).output().await;
     match output {
@@ -254,7 +232,6 @@ async fn executable_version(exe: &std::path::Path) -> (Option<String>, bool) {
         _ => (None, false),
     }
 }
-
 /// The Microsoft Store build's version, read from the per-user AppX
 /// registrations instead of starting PowerShell for `Get-AppxPackage`
 /// (half a second or more on every visit to the page).
@@ -268,7 +245,6 @@ fn store_version() -> Option<String> {
         .filter_map(|name| store_package_version(&name))
         .max_by_key(|version| version_key(version))
 }
-
 /// `SpotifyAB.SpotifyMusic_1.268.495.0_x64__zpdnekdrzrea0` -> `1.268.495.0`.
 fn store_package_version(full_name: &str) -> Option<String> {
     let (name, publisher) = STORE_FAMILY.split_once('_')?;
@@ -280,14 +256,12 @@ fn store_package_version(full_name: &str) -> Option<String> {
     (!version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.'))
         .then(|| version.to_string())
 }
-
 fn version_key(version: &str) -> Vec<u64> {
     version
         .split('.')
         .map(|part| part.parse().unwrap_or(0))
         .collect()
 }
-
 fn desktop_registry() -> (Option<String>, Option<PathBuf>, bool) {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let Ok(key) = hkcu.open_subkey_with_flags(DESKTOP_UNINSTALL_KEY, KEY_READ) else {
@@ -301,7 +275,6 @@ fn desktop_registry() -> (Option<String>, Option<PathBuf>, bool) {
         .map(PathBuf::from);
     (version, location, true)
 }
-
 fn user_desktop() -> Option<PathBuf> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu
@@ -313,7 +286,6 @@ fn user_desktop() -> Option<PathBuf> {
     let raw: String = key.get_value("Desktop").ok()?;
     Some(expand_known_env(&raw))
 }
-
 fn expand_known_env(value: &str) -> PathBuf {
     let mut expanded = value.to_string();
     for name in ["USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
@@ -323,7 +295,6 @@ fn expand_known_env(value: &str) -> PathBuf {
     }
     PathBuf::from(expanded)
 }
-
 fn env_path(name: &str) -> Result<PathBuf, String> {
     let value = std::env::var_os(name).ok_or_else(|| format!("{name} is unavailable"))?;
     let path = PathBuf::from(value);
@@ -332,23 +303,19 @@ fn env_path(name: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-
 fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     a.as_os_str()
         .to_string_lossy()
         .eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn known_environment_expansion_does_not_expand_arbitrary_variables() {
         let value = expand_known_env(r"%NOT_ALLOWED%\Spotify");
         assert!(value.to_string_lossy().contains("%NOT_ALLOWED%"));
     }
-
     #[test]
     fn store_versions_come_from_the_package_full_name() {
         assert_eq!(
@@ -367,7 +334,6 @@ mod tests {
         );
         assert!(version_key("1.10.0.0") > version_key("1.9.9.0"));
     }
-
     #[test]
     fn windows_path_comparison_is_case_insensitive() {
         assert!(same_path(

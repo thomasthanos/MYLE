@@ -1,8 +1,6 @@
 import { cloudStorageApi as api, PROVIDERS, type CloudOutcome, type CloudProgress, type CloudStatus } from "./api";
-
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const initial = (): CloudProgress => ({ visited: 0, requested: 0, alreadyOnline: 0, pendingUploads: 0, skipped: 0, failed: 0, foldersRequested: 0, foldersAlreadyOnline: 0, current: null, waitingForDrive: false });
-
 class CloudStorageState {
   providers = $state.raw<CloudStatus[]>(PROVIDERS.map((provider) => ({ ...provider, folders: [], mode: "unavailable", detail: "Cloud folders have not been checked yet." })));
   loading = $state(false);
@@ -18,7 +16,6 @@ class CloudStorageState {
   /** The apps on this PC that need their own controls. */
   left = $derived(this.providers.filter((provider) => provider.mode === "guided"));
   #loadSequence = 0;
-
   async load() {
     if (this.running) return;
     const sequence = ++this.#loadSequence;
@@ -34,9 +31,7 @@ class CloudStorageState {
       if (sequence === this.#loadSequence) this.loading = false;
     }
   }
-
-  /** One request for every ready app, with the folders checked last: the
-   *  backend refuses it if they changed meanwhile. */
+  /* One request for every ready app, with the folders checked last: the backend refuses it if they changed meanwhile. */
   async makeOnlineOnly() {
     const ready = this.ready;
     if (this.running || this.loading || this.loadError || !ready.length) return;
@@ -64,7 +59,6 @@ class CloudStorageState {
       }
     }
   }
-
   async cancel() {
     const id = this.requestId;
     if (!id || !this.running || this.cancelling) return;
@@ -79,6 +73,5 @@ class CloudStorageState {
     }
   }
 }
-
 // Keep an active request and its Stop control when the user changes pages.
 export const cloudStorage = new CloudStorageState();

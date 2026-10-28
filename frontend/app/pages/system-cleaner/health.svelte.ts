@@ -1,19 +1,15 @@
-// Software Health: the eight scans in backend/src/cleaner/health/, their
-// findings, and the reversible changes offered for them.
+// Software Health: the eight scans in backend/src/cleaner/health/, their findings, and the reversible changes offered for them.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { confirm } from "../../../lib/confirm.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { formatSize } from "./api";
 import type { BatchItem } from "./health-model";
-
 export type HealthModule =
   | "leftovers" | "broken" | "redundant" | "hibernation"
   | "permissions" | "notifications" | "installers" | "suspicious";
-
 export type HealthAction =
   | "recycle" | "forceClean" | "deleteKey" | "disable" | "enable" | "manual"
   | "revoke" | "allow" | "mute" | "unmute" | "block" | "open";
-
 export interface Finding {
   id: string;
   module: HealthModule;
@@ -29,7 +25,6 @@ export interface Finding {
   recommended: boolean;
   reviewReason: string | null;
 }
-
 export interface ModuleReport { module: HealthModule; findings: Finding[]; error: string | null }
 export interface RestoreEntry { id: string; at: number; module: string; title: string; undo: { kind: string } }
 export interface ApplyResult { id: string; ok: boolean; message: string | null }
@@ -38,7 +33,6 @@ export type HealthEvent =
   | { event: "started"; data: { module: HealthModule } }
   | { event: "step"; data: { module: HealthModule; fraction: number } }
   | { event: "result"; data: { report: ModuleReport } };
-
 export const MODULES: { id: HealthModule; title: string; hint: string }[] = [
   { id: "leftovers", title: "Uninstallation leftovers", hint: "Folders and registry entries of software that is gone." },
   { id: "broken", title: "Broken uninstalls", hint: "Programs listed in Windows whose uninstaller or folder is missing." },
@@ -49,13 +43,11 @@ export const MODULES: { id: HealthModule; title: string; hint: string }[] = [
   { id: "installers", title: "Installation files", hint: "Old setup files in Temp and Downloads (7-day rule)." },
   { id: "suspicious", title: "Suspicious software & extensions", hint: "Side-loaded extensions, unsigned startup programs and tasks." },
 ];
-
 export const ACTION_LABELS: Record<HealthAction, string> = {
   recycle: "Move to Recycle Bin", forceClean: "Force clean", deleteKey: "Remove entry",
   disable: "Disable", enable: "Enable", manual: "Set to Manual", revoke: "Block access", allow: "Allow access",
   mute: "Mute", unmute: "Unmute", block: "Block", open: "Open in browser",
 };
-
 /** What each action does, for the preview dialog. */
 const ACTION_NOTES: Partial<Record<HealthAction, string>> = {
   recycle: "Files go to the Recycle Bin and can be restored from there.",
@@ -64,7 +56,6 @@ const ACTION_NOTES: Partial<Record<HealthAction, string>> = {
   manual: "Windows asks for administrator approval. The service then starts only when needed; restore puts it back.",
   block: "The browser must be closed. Restore puts the permission back.",
 };
-
 export const healthApi = {
   scan: async (modules: HealthModule[], onEvent: (event: HealthEvent) => void) => {
     const channel = new Channel<HealthEvent>(); channel.onmessage = onEvent;
@@ -77,7 +68,6 @@ export const healthApi = {
   restoreList: () => invoke<RestoreEntry[]>("cleaner_health_restore_list"),
   undo: (id: string) => invoke<void>("cleaner_health_restore", { id }),
 };
-
 export class HealthState {
   reports = $state<Record<string, ModuleReport>>({});
   scanning = $state(false);
@@ -94,31 +84,25 @@ export class HealthState {
   #seen = new Set<string>();
   #seenModules = new Map<string, HealthModule>();
   #attempts = new Map<string, BatchItem>();
-
   get findings() { return Object.values(this.reports).flatMap((r) => r.findings); }
   get picked() { return this.findings.filter((f) => this.selected.has(f.id)); }
-
   get count() {
     return Object.values(this.reports).reduce((n, r) => n + r.findings.length, 0);
   }
-
   /** Per module while a scan runs: 0..1, or 1 once its result is in. */
   progress = $state<Record<string, number>>({});
   /** Modules that are scanning right now. */
   running = $state<Set<string>>(new Set());
-
   /** Overall 0..1: finished modules plus how far the running ones are. */
   get fraction() {
     const ids = Object.keys(this.progress);
     if (!ids.length) return 0;
     return ids.reduce((n, id) => n + this.progress[id], 0) / ids.length;
   }
-
   async scan(modules: HealthModule[] = []) {
     if (this.scanning || this.busy) return;
     await this.#scan(modules, true);
   }
-
   async #scan(modules: HealthModule[], recommend: boolean) {
     const ids = modules.length ? modules : MODULES.map((m) => m.id);
     this.scanning = true;
@@ -168,7 +152,6 @@ export class HealthState {
     }
     await this.loadRestore();
   }
-
   toggle(id: string) {
     if (this.busy || this.scanning) return;
     const next = new Set(this.selected);
@@ -176,12 +159,10 @@ export class HealthState {
     else next.add(id);
     this.selected = next;
   }
-
   /** Compatibility entry point; mixed lists use applyBatch. */
   async apply(module: HealthModule, action: HealthAction, items: Finding[]) {
     await this.applyBatch(items.filter((f) => f.module === module && f.actions.includes(action)).map((f) => ({ id: f.id, action })));
   }
-
   async applyBatch(requests: BatchItem[]) {
     if (!requests.length || this.busy || this.scanning) return;
     const byId = new Map(this.findings.map((f) => [f.id, f]));
@@ -231,13 +212,10 @@ export class HealthState {
       this.operation = null;
     }
   }
-
   async retryFailed() { await this.applyBatch([...this.#attempts.values()].filter((i) => !!this.failures[i.id])); }
-
   async loadRestore() {
     this.restore = await healthApi.restoreList().catch(() => []);
   }
-
   async undo(entry: RestoreEntry) {
     if (this.busy || this.scanning || entry.undo.kind === "recycled") return;
     this.busy = true;
@@ -253,5 +231,4 @@ export class HealthState {
     await this.loadRestore();
   }
 }
-
 export const health = new HealthState();

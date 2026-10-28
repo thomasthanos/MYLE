@@ -26,8 +26,7 @@
   let setup = $state<BrowserSetup | null>(null);
   let saving = $state(false);
   let loadError = $state<string | null>(null);
-  /** Loading the extension from MYLE's folder (Firefox, or for testing):
-   *  shown on request, or at once when there is no store page. */
+  /* Loading the extension from MYLE's folder (Firefox, or for testing): shown on request, or at once when there is no store page. */
   let showSteps = $state<boolean | null>(null);
   /** The extensions page of the browser that connected. */
   const extensionsPage = $derived(
@@ -327,8 +326,7 @@
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: clamp(12px, 3vh, 24px); background: var(--scrim); }
 
-  /* Never set overflow on a .glass element: .glass::before sits at inset: -1px
-     and would cause a permanent 1px scrollbar. */
+  /* Never set overflow on a .glass element: .glass::before sits at inset: -1px and would cause a permanent 1px scrollbar. */
   .dialog { display: flex; flex-direction: column; width: min(560px, 100%); max-height: calc(100dvh - clamp(24px, 6vh, 48px)); border-radius: var(--radius-xl); }
 
   .dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(10px, 1.6vh, 14px); min-height: 0; padding: clamp(14px, 2.2vh, 20px); overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-radius: inherit; }

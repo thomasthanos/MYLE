@@ -1,6 +1,4 @@
-// State of the System Maintenance page: the fixed cards, the one task that is
-// allowed to run, and the output buffers of the embedded consoles.
-// A singleton, because ContentArea destroys the page on every navigation.
+// State of the System Maintenance page: the fixed cards, the one task that is allowed to run, and the output buffers of the embedded consoles. A singleton, because ContentArea destroys the page on every navigation.
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../lib/confirm.svelte";
@@ -90,8 +88,7 @@ class MaintenanceState {
     try {
       this.cards = await maintenanceApi.cards();
       this.#loaded = true;
-      // A task can outlive a page reload. Keep the buttons locked, but watch
-      // for it finishing: its events went to a channel that no longer exists.
+      // A task can outlive a page reload. Keep the buttons locked, but watch for it finishing: its events went to a channel that no longer exists.
       const current = await maintenanceApi.running();
       if (current) {
         this.running = current;
@@ -177,8 +174,7 @@ class MaintenanceState {
       this.#setStatus(card, action, "error", `${this.#actionName(action)} failed`);
       toast.error(`${card.title}: ${message(err)}`);
     } finally {
-      // Only release the lock if it is still ours: a rejected second run must
-      // not unlock the page while the first one is still going.
+      // Only release the lock if it is still ours: a rejected second run must not unlock the page while the first one is still going.
       if (this.running === action.id) {
         this.running = null;
         this.phase = null;

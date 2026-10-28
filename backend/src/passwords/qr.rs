@@ -1,12 +1,7 @@
-//! Reading a site's 2FA QR code from a picture: the clipboard (a snip with
-//! Win+Shift+S) or an image file. Windows' own decoders (WIC) read the files,
-//! so any format Windows shows works; the search itself is `myle_vault::qr`.
-
+// ! Reading a site's 2FA QR code from a picture: the clipboard (a snip with ! Win+Shift+S) or an image file. Windows' own decoders (WIC) read the files, ! so any format Windows shows works; the search itself is `myle_vault::qr`.
 use std::path::Path;
-
 pub use myle_vault::qr::{Grey, grey_from_dib, otpauth_in};
 use myle_vault::qr::MAX_PIXELS;
-
 /// An image file, through Windows' decoders.
 pub fn grey_from_file(path: &Path) -> Result<Grey, String> {
     use windows::Win32::Foundation::GENERIC_READ;
@@ -16,7 +11,6 @@ pub fn grey_from_file(path: &Path) -> Result<Grey, String> {
         factory.CreateDecoderFromFilename(&HSTRING::from(path.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
     })
 }
-
 /// A picture in memory (a screenshot of a browser tab), the same way.
 pub fn grey_from_bytes(bytes: &[u8]) -> Result<Grey, String> {
     use windows::Win32::Graphics::Imaging::WICDecodeMetadataCacheOnDemand;
@@ -27,7 +21,6 @@ pub fn grey_from_bytes(bytes: &[u8]) -> Result<Grey, String> {
         factory.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)
     })
 }
-
 fn decode(
     open: impl FnOnce(
         &windows::Win32::Graphics::Imaging::IWICImagingFactory,
@@ -38,7 +31,6 @@ fn decode(
         WICBitmapPaletteTypeCustom,
     };
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
-
     let unreadable = |_| "That picture could not be read. Use a PNG, JPEG or BMP file.".to_string();
     unsafe {
         // This thread may already have COM set up another way: fine either way.
@@ -61,13 +53,10 @@ fn decode(
         Ok(Grey { width, height, pixels })
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     const LINK: &str = "otpauth://totp/MYLE:test@example.com?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=MYLE";
-
     /// A QR code of `text`, `scale` pixels a module, with a white border.
     fn qr_picture(text: &str, scale: usize) -> Grey {
         let code = qrcode::QrCode::new(text.as_bytes()).unwrap();
@@ -85,7 +74,6 @@ mod tests {
         }
         Grey { width: side, height: side, pixels }
     }
-
     #[test]
     fn an_image_file_is_read_through_windows() {
         let qr = qr_picture(LINK, 4);

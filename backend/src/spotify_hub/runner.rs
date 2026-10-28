@@ -2,24 +2,19 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
-
 use tauri::ipc::Channel;
 use tokio::io::AsyncReadExt;
-
 use crate::apps::JobHandle;
 use crate::apps::process::{self, hidden};
 use crate::console::{Line, LineSplitter};
 use crate::download::err;
-
 use super::models::{SpotifyHubEvent, SpotifyHubStage};
 use super::state::{Cancellation, SpotifyHubState};
-
 pub struct Reporter<'a> {
     pub job_id: &'a str,
     pub channel: &'a Channel<SpotifyHubEvent>,
     pub state: &'a SpotifyHubState,
 }
-
 impl Reporter<'_> {
     pub fn stage(&self, stage: SpotifyHubStage) {
         self.state.update(self.job_id, stage, None);
@@ -28,7 +23,6 @@ impl Reporter<'_> {
             stage,
         });
     }
-
     pub fn progress(&self, fraction: f64) {
         let fraction = fraction.clamp(0.0, 1.0);
         self.state
@@ -38,11 +32,9 @@ impl Reporter<'_> {
             fraction,
         });
     }
-
     pub fn line(&self, text: impl Into<String>) {
         self.output(text, false);
     }
-
     fn output(&self, text: impl Into<String>, replace: bool) {
         let text = text.into();
         if !text.trim().is_empty() {
@@ -53,7 +45,6 @@ impl Reporter<'_> {
             });
         }
     }
-
     fn current_stage(&self) -> SpotifyHubStage {
         self.state
             .active()
@@ -62,7 +53,6 @@ impl Reporter<'_> {
             .unwrap_or(SpotifyHubStage::Preparing)
     }
 }
-
 pub async fn run_program(
     program: &Path,
     args: &[OsString],
@@ -79,7 +69,6 @@ pub async fn run_program(
         .map_err(err)?;
     let pid = child.id().ok_or("The child process has no process id.")?;
     job.set_pid(Some(pid));
-
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<(bool, Vec<u8>)>();
     if let Some(stdout) = child.stdout.take() {
         spawn_reader(stdout, false, sender.clone());
@@ -88,7 +77,6 @@ pub async fn run_program(
         spawn_reader(stderr, true, sender.clone());
     }
     drop(sender);
-
     let mut stdout_splitter = LineSplitter::default();
     let mut stderr_splitter = LineSplitter::default();
     let mut stdout_display = StreamDisplay::default();
@@ -107,10 +95,8 @@ pub async fn run_program(
             }
         }
     };
-
     let mut wait = Box::pin(child.wait());
-    // An interval, not a sleep re-armed per loop: with steady output a fresh
-    // sleep never fires, and Stop would be ignored until the program went quiet.
+    // An interval, not a sleep re-armed per loop: with steady output a fresh sleep never fires, and Stop would be ignored until the program went quiet.
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
     let mut open = true;
     let mut killed = false;
@@ -131,10 +117,7 @@ pub async fn run_program(
         }
     };
     job.set_pid(None);
-
-    // A program the child started (Spotify relaunched by Spicetify, an
-    // uninstaller's helper) can inherit the pipes and keep them open long
-    // after the child exits, so the remaining output gets a short grace period.
+    // A program the child started (Spotify relaunched by Spicetify, an uninstaller's helper) can inherit the pipes and keep them open long after the child exits, so the remaining output gets a short grace period.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     while open {
         match tokio::time::timeout_at(deadline, receiver.recv()).await {
@@ -148,70 +131,57 @@ pub async fn run_program(
     if let Some(line) = stderr_splitter.finish() {
         emit_terminal_line(line, reporter, &mut stderr_display, &mut stdout_display);
     }
-
     if cancellation.is_cancelled() {
         return Err(crate::download::CANCELLED.into());
     }
     Ok(status.code().unwrap_or(-1))
 }
-
 #[derive(Debug, PartialEq)]
 struct CleanedOutput {
     text: Option<String>,
     progress: Option<f64>,
 }
-
 #[derive(Debug, Default, PartialEq, Eq)]
 struct StreamDisplay {
     /// This stream currently owns the final visible row in the shared console.
     row_visible: bool,
     last_text: Option<String>,
 }
-
 impl StreamDisplay {
     fn reset(&mut self) {
         self.row_visible = false;
         self.last_text = None;
     }
 }
-
 #[derive(Debug, PartialEq)]
 struct TerminalUpdate {
     text: Option<(String, bool)>,
     progress: Option<f64>,
 }
-
 fn prepare_terminal_update(line: Line, display: &mut StreamDisplay) -> TerminalUpdate {
-    // A non-replacement starts a fresh terminal row. If it is later filtered
-    // (for example an ANSI-only progress frame), that row must not inherit
-    // ownership of an unrelated visible console line.
+    // A non-replacement starts a fresh terminal row. If it is later filtered (for example an ANSI-only progress frame), that row must not inherit ownership of an unrelated visible console line.
     if !line.replace {
         display.reset();
     }
-
     let cleaned = clean_terminal_output(&line.text);
     let text = cleaned.text.and_then(|text| {
-        // Suppress only identical redraws of the same provisional row. Normal
-        // committed messages such as `OK\nOK\n` must both remain visible.
+        // Suppress only identical redraws of the same provisional row. Normal committed messages such as `OK\nOK\n` must both remain visible.
         if line.replace
             && display.row_visible
             && display.last_text.as_deref() == Some(text.as_str())
         {
             return None;
         }
-
         let replace = line.replace && display.row_visible;
         display.row_visible = true;
         display.last_text = Some(text.clone());
         Some((text, replace))
     });
-
     TerminalUpdate {
         text,
         progress: cleaned.progress,
     }
 }
-
 fn emit_terminal_line(
     line: Line,
     reporter: &Reporter<'_>,
@@ -224,13 +194,10 @@ fn emit_terminal_line(
     }
     if let Some((text, replace)) = update.text {
         reporter.output(text, replace);
-        // stdout and stderr share one frontend list. Once this stream writes,
-        // a provisional row from the other stream is no longer the last row
-        // and therefore cannot be replaced safely.
+        // stdout and stderr share one frontend list. Once this stream writes, a provisional row from the other stream is no longer the last row and therefore cannot be replaced safely.
         other_display.reset();
     }
 }
-
 fn clean_terminal_output(input: &str) -> CleanedOutput {
     let text = strip_terminal_sequences(input).trim().to_string();
     if text.is_empty() {
@@ -246,7 +213,6 @@ fn clean_terminal_output(input: &str) -> CleanedOutput {
     .then_some(text);
     CleanedOutput { text, progress }
 }
-
 /// Removes CSI colours/cursor movement, OSC titles/hyperlinks and the other
 /// small escape forms used by terminal renderers. This is intentionally local
 /// to Spotify Hub: other features still receive the original decoded text.
@@ -259,8 +225,7 @@ fn strip_terminal_sequences(input: &str) -> String {
                 Some('[') => skip_csi(&mut chars),
                 Some(']') => skip_string_escape(&mut chars),
                 Some('P' | 'X' | '^' | '_') => skip_string_escape(&mut chars),
-                // Two-character escape sequences (save/restore cursor,
-                // character-set selection, and similar) carry no text.
+                // Two-character escape sequences (save/restore cursor, character-set selection, and similar) carry no text.
                 Some(value) => skip_short_escape(value, &mut chars),
                 None => {}
             },
@@ -275,11 +240,8 @@ fn strip_terminal_sequences(input: &str) -> String {
     }
     output
 }
-
 fn skip_short_escape(first: char, chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    // ISO-2022 style escapes (for example ESC ( B) begin with one or more
-    // intermediate bytes followed by a final byte. Single-byte escapes are
-    // already complete after `first`.
+    // ISO-2022 style escapes (for example ESC ( B) begin with one or more intermediate bytes followed by a final byte. Single-byte escapes are already complete after `first`.
     if (' '..='/').contains(&first) {
         for value in chars.by_ref() {
             if ('0'..='~').contains(&value) {
@@ -288,7 +250,6 @@ fn skip_short_escape(first: char, chars: &mut std::iter::Peekable<std::str::Char
         }
     }
 }
-
 fn skip_csi(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
     for value in chars.by_ref() {
         if ('@'..='~').contains(&value) {
@@ -296,7 +257,6 @@ fn skip_csi(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
         }
     }
 }
-
 fn skip_string_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
     let mut escaped = false;
     for value in chars.by_ref() {
@@ -306,7 +266,6 @@ fn skip_string_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
         escaped = value == '\u{1b}';
     }
 }
-
 fn percentage(text: &str) -> Option<u8> {
     let bytes = text.as_bytes();
     for percent in (0..bytes.len()).filter(|index| bytes[*index] == b'%') {
@@ -325,18 +284,15 @@ fn percentage(text: &str) -> Option<u8> {
     }
     None
 }
-
 fn is_decorative_bar(text: &str) -> bool {
     const BAR: &str = "█▓▒░▉▊▋▌▍▎▏▐▀▄▁▂▃▅▆▇■□▪▫▬▭▮▯▰▱─━═|[](){}<>=-_~·•";
     text.chars()
         .all(|value| value.is_whitespace() || BAR.contains(value))
 }
-
 fn is_progress_bar_frame(text: &str) -> bool {
     const BLOCKS: &str = "█▓▒░▉▊▋▌▍▎▏▐▀▄▁▂▃▅▆▇■□▪▫▬▭▮▯▰▱";
     text.chars().any(|value| BLOCKS.contains(value)) && has_numeric_ratio(text)
 }
-
 fn has_numeric_ratio(text: &str) -> bool {
     let bytes = text.as_bytes();
     for slash in (0..bytes.len()).filter(|index| bytes[*index] == b'/') {
@@ -354,7 +310,6 @@ fn has_numeric_ratio(text: &str) -> bool {
     }
     false
 }
-
 fn is_progress_only(text: &str, has_percentage: bool) -> bool {
     if !has_percentage {
         return false;
@@ -368,7 +323,6 @@ fn is_progress_only(text: &str, has_percentage: bool) -> bool {
             )
         })
 }
-
 fn spawn_reader<R>(
     mut reader: R,
     stderr: bool,
@@ -390,7 +344,6 @@ fn spawn_reader<R>(
         }
     });
 }
-
 pub async fn stop_spotify_processes(reporter: &Reporter<'_>) {
     for image in ["Spotify.exe", "spicetify.exe"] {
         let output = hidden(crate::apps::process::system32("taskkill.exe"))
@@ -405,18 +358,15 @@ pub async fn stop_spotify_processes(reporter: &Reporter<'_>) {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn ansi_colours_cursor_codes_and_hyperlinks_are_removed() {
         let raw =
             "\u{1b}[90mDim\u{1b}[0m \u{1b}[2K\u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{7}";
         assert_eq!(strip_terminal_sequences(raw), "Dim link");
     }
-
     #[test]
     fn spicetify_progress_art_is_collapsed_into_numeric_progress() {
         let bar = clean_terminal_output("\u{1b}[90m████████████\u{1b}[0m");
@@ -427,16 +377,13 @@ mod tests {
                 progress: None
             }
         );
-
         let progress = clean_terminal_output("\u{1b}[38;2;182;72;0m 28%\u{1b}[0m | 2s\u{1b}[0m");
         assert_eq!(progress.text, None);
         assert_eq!(progress.progress, Some(0.28));
-
         let message = clean_terminal_output("\u{1b}[1mPatching files\u{1b}[0m");
         assert_eq!(message.text.as_deref(), Some("Patching files"));
         assert_eq!(message.progress, None);
     }
-
     #[test]
     fn partial_ratio_progress_frame_is_hidden_before_percentage_arrives() {
         let mut display = StreamDisplay::default();
@@ -449,7 +396,6 @@ mod tests {
         );
         assert_eq!(partial.text, None);
         assert_eq!(partial.progress, None);
-
         let complete = prepare_terminal_update(
             Line {
                 text: "[28/100] ███████░░░ 28% | 2s".into(),
@@ -461,7 +407,6 @@ mod tests {
         assert_eq!(complete.progress, Some(0.28));
         assert!(!display.row_visible);
     }
-
     #[test]
     fn meaningful_messages_with_a_percentage_are_kept() {
         let output = clean_terminal_output("Downloaded 75% of the archive");
@@ -471,7 +416,6 @@ mod tests {
         );
         assert_eq!(output.progress, Some(0.75));
     }
-
     #[test]
     fn a_filtered_provisional_row_never_replaces_an_unrelated_message() {
         let mut display = StreamDisplay::default();
@@ -483,7 +427,6 @@ mod tests {
             &mut display,
         );
         assert_eq!(hidden.text, None);
-
         let visible = prepare_terminal_update(
             Line {
                 text: "Patching files".into(),
@@ -493,7 +436,6 @@ mod tests {
         );
         assert_eq!(visible.text, Some(("Patching files".into(), false)));
     }
-
     #[test]
     fn a_visible_provisional_row_is_safely_replaced() {
         let mut display = StreamDisplay::default();
@@ -514,7 +456,6 @@ mod tests {
         assert_eq!(first.text, Some(("Preparing".into(), false)));
         assert_eq!(second.text, Some(("Patching files".into(), true)));
     }
-
     #[test]
     fn repeated_committed_messages_are_not_deduplicated() {
         let mut display = StreamDisplay::default();
@@ -529,7 +470,6 @@ mod tests {
             assert_eq!(update.text, Some(("OK".into(), false)));
         }
     }
-
     #[test]
     fn another_stream_invalidates_repaint_ownership() {
         let mut stdout = StreamDisplay {
@@ -541,7 +481,6 @@ mod tests {
             last_text: Some("stderr message".into()),
         };
         stdout.reset();
-
         let update = prepare_terminal_update(
             Line {
                 text: "stdout done".into(),
@@ -552,7 +491,6 @@ mod tests {
         assert_eq!(update.text, Some(("stdout done".into(), false)));
         assert!(stderr.row_visible);
     }
-
     #[test]
     fn charset_selection_and_incomplete_escape_sequences_do_not_leak() {
         assert_eq!(strip_terminal_sequences("\u{1b}(Bplain"), "plain");

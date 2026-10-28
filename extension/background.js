@@ -1,20 +1,4 @@
-// MYLE Passwords: the go-between for the page and the app.
-//
-// Pages (content.js) and the popup ask here; this asks the app through the
-// native messaging host ("com.thomasthanos.myle"). The page's address always
-// comes from the browser (the sender's url, its tab's url, or the sender of a
-// frame's census answer), never from what a page writes in a message.
-//
-// Permissions are kept to nativeMessaging, activeTab and storage: the frames
-// of a tab are learned from our own scripts answering a census, and a passkey
-// request ends with the port it came on, so webNavigation is not needed.
-//
-// Our script in a page may ask only about its own frame: its logins, a fill,
-// a new password, and saving what the user typed and sent there. A sign-in
-// form embedded from another site is filled only from the toolbar popup,
-// where the user sees whose it is. Only the popup looks across a tab's frames.
-// Chromium's service worker loads the Public Suffix List here; Firefox lists it
-// before this script in its manifest.
+// MYLE Passwords: the go-between for the page and the app. Pages (content.js) and the popup ask here; this asks the app through the native messaging host ("com.thomasthanos.myle"). The page's address always comes from the browser (the sender's url, its tab's url, or the sender of a frame's census answer), never from what a page writes in a message. Permissions are kept to nativeMessaging, activeTab and storage: the frames of a tab are learned from our own scripts answering a census, and a passkey request ends with the port it came on, so webNavigation is not needed. Our script in a page may ask only about its own frame: its logins, a fill, a new password, and saving what the user typed and sent there. A sign-in form embedded from another site is filled only from the toolbar popup, where the user sees whose it is. Only the popup looks across a tab's frames. Chromium's service worker loads the Public Suffix List here; Firefox lists it before this script in its manifest.
 if (!globalThis.MYLE_PUBLIC_SUFFIXES && typeof importScripts === "function") importScripts("psl.js");
 
 const ext = globalThis.browser ?? globalThis.chrome;
@@ -23,8 +7,7 @@ const OWN_PAGES = ext.runtime.getURL("");
 /** A sent login waits this long for the next page, and then for a click. */
 const WAIT_FOR_PAGE = 60_000;
 const WAIT_FOR_CLICK = 3 * 60_000;
-/** An offer shows on one page: again only on a page right after it (a
- *  sign-in that redirects once more), never on a reload or a later page. */
+/* An offer shows on one page: again only on a page right after it (a sign-in that redirects once more), never on a reload or a later page. */
 const SHOWN_GRACE = 5_000;
 
 /** Why the browser could not reach MYLE, from the browser's own message. */
@@ -38,17 +21,12 @@ function hostProblem(detail) {
   return "noHost";
 }
 
-/** How long an answer may take. MYLE is started by the host when it is closed,
- *  which takes a few seconds; past this, the browser is told it is not there,
- *  so a page is never left waiting on a call that will not come back. */
+/* How long an answer may take. MYLE is started by the host when it is closed, which takes a few seconds; past this, the browser is told it is not there, so a page is never left waiting on a call that will not come back. */
 const ANSWER_LIMIT = 30_000;
 // Native verification has a total 120s deadline, plus time to start MYLE.
 const PASSKEY_ANSWER_LIMIT = 150_000;
 
-/** Requests that only read, so asking once more can never do anything twice:
- *  while MYLE starts, or hands over to its update, its pipe is gone for a
- *  moment. Saving, making a passkey, opening MYLE and reading a picture are
- *  never asked again. */
+/* Requests that only read, so asking once more can never do anything twice: while MYLE starts, or hands over to its update, its pipe is gone for a moment. Saving, making a passkey, opening MYLE and reading a picture are never asked again. */
 const ASK_AGAIN = new Set(["status", "logins", "known", "totpKnown", "passkeySites", "fill", "totp", "copy"]);
 const ASK_AGAIN_AFTER = 400;
 
@@ -88,11 +66,7 @@ function hostOf(value) {
   }
 }
 
-/**
- * The part of a host that one owner controls, by the Public Suffix List, as the
- * app reckons it (`login.example.com` → `example.com`, `a.github.io` stays
- * `a.github.io`, since each github.io name has its own owner).
- */
+/* The part of a host that one owner controls, by the Public Suffix List, as the app reckons it (`login.example.com` → `example.com`, `a.github.io` stays `a.github.io`, since each github.io name has its own owner). */
 function siteOf(host) {
   const labels = host.toLowerCase().replace(/\.$/, "").split(".");
   if (labels.length < 2 || /^[\d.]+$/.test(host) || host.startsWith("[")) return host;
@@ -147,20 +121,14 @@ const fromPage = (sender) =>
   allowedUrl(sender.url) &&
   (!sender.documentLifecycle || sender.documentLifecycle === "active");
 
-/** Our script in a page withdrawing what it asked for (a passkey request, an
- *  unlock wait): it may already be leaving, or in a tab the user moved away
- *  from, so only who it is counts. It can only stop work of its own tab,
- *  frame and document. */
+/* Our script in a page withdrawing what it asked for (a passkey request, an unlock wait): it may already be leaving, or in a tab the user moved away from, so only who it is counts. It can only stop work of its own tab, frame and document. */
 const fromOwnScript = (sender) =>
   !fromPopup(sender) &&
   Number.isInteger(sender.tab?.id) &&
   Number.isInteger(sender.frameId) &&
   allowedUrl(sender.url);
 
-/** For a frame inside a page of another site: that page's host, else "". The
- *  top page's address is the tab's, which the browser reports along with the
- *  message; when it does not (Firefox without access to that page), the frame
- *  is treated as one from another site, and the popup can still fill it. */
+/* For a frame inside a page of another site: that page's host, else "". The top page's address is the tab's, which the browser reports along with the message; when it does not (Firefox without access to that page), the frame is treated as one from another site, and the popup can still fill it. */
 function embeddedIn(sender) {
   if (sender.frameId === 0) return "";
   const top = typeof sender.tab?.url === "string" ? sender.tab.url : "";
@@ -169,32 +137,21 @@ function embeddedIn(sender) {
 
 let lastOpen = 0;
 
-/** Brings MYLE forward, at most every two seconds; a second ask within that
- *  time says so (`throttled`), since nothing new happens. */
+/* Brings MYLE forward, at most every two seconds; a second ask within that time says so (`throttled`), since nothing new happens. */
 function openApp() {
   if (Date.now() - lastOpen < 2000) return { ok: true, throttled: true };
   lastOpen = Date.now();
   return ask({ type: "open" });
 }
 
-// --- The popup: every sign-in frame of the tab ------------------------------------
-//
-// The frames of a tab are found by a census: our script in every frame is
-// asked at once, and each answers with a message of its own, so the browser
-// tells us which frame, document and address each answer came from. What a
-// frame says about itself is only whether it has sign-in fields; a hostile
-// frame can hide itself or say it has fields, never claim another's address.
+// --- The popup: every sign-in frame of the tab ------------------------------------ The frames of a tab are found by a census: our script in every frame is asked at once, and each answers with a message of its own, so the browser tells us which frame, document and address each answer came from. What a frame says about itself is only whether it has sign-in fields; a hostile frame can hide itself or say it has fields, never claim another's address.
 
-/** How long the census waits for answers still on their way once every frame
- *  has had the question. */
+/* How long the census waits for answers still on their way once every frame has had the question. */
 const CENSUS_GRACE = 150;
 /** Censuses being taken, by their random round: whose tab, and who answered. */
 const censuses = new Map();
 
-/** The tab's frames that may be filled, by frame number: each with its address,
- *  its document, and what our script there saw. The page itself (frame 0) is
- *  listed even where our script is not running (a tab opened before the
- *  extension was installed or updated), as `reachable: false`. */
+/* The tab's frames that may be filled, by frame number: each with its address, its document, and what our script there saw. The page itself (frame 0) is listed even where our script is not running (a tab opened before the extension was installed or updated), as `reachable: false`. */
 async function framesFor(tabId) {
   if (!Number.isInteger(tabId)) return null;
   const tab = await ext.tabs.get(tabId);
@@ -204,8 +161,7 @@ async function framesFor(tabId) {
   censuses.set(round, { tabId, frames });
   try {
     try {
-      // Every frame's script hears this; none answers it directly (that would
-      // end it at the first answer), each sends a "present" message instead.
+      // Every frame's script hears this; none answers it directly (that would end it at the first answer), each sends a "present" message instead.
       await ext.tabs.sendMessage(tabId, { type: "census", round });
     } catch {
       // No script answered in this tab, or the channel closed unanswered.
@@ -220,8 +176,7 @@ async function framesFor(tabId) {
   return [...frames.values()].sort((a, b) => a.frameId - b.frameId);
 }
 
-/** A frame answering a census: who it is comes from the browser (the sender),
- *  only its flags from the message. */
+/* A frame answering a census: who it is comes from the browser (the sender), only its flags from the message. */
 function present(message, sender) {
   const census = text(message.round, 64) ? censuses.get(message.round) : null;
   if (!census || census.tabId !== sender.tab.id || census.frames.has(sender.frameId)) return { ok: true };
@@ -238,8 +193,7 @@ function present(message, sender) {
   return { ok: true };
 }
 
-/** Where to send something for one frame: its very document when the browser
- *  names documents, else the frame number. */
+/* Where to send something for one frame: its very document when the browser names documents, else the frame number. */
 const targetOf = (frame) => (frame.documentId ? { documentId: frame.documentId } : { frameId: frame.frameId });
 
 async function loginsForTab(tabId) {
@@ -254,8 +208,7 @@ async function loginsForTab(tabId) {
 
   const items = [];
   const seen = new Map();
-  // The main page is useful even before its sign-in form appears. For embedded
-  // frames, list only those where our content script sees a login field.
+  // The main page is useful even before its sign-in form appears. For embedded frames, list only those where our content script sees a login field.
   for (const frame of frames) {
     if (frame.frameId !== 0 && !frame.fields) continue;
     const answer = await ask({ type: "logins", url: frame.url });
@@ -264,15 +217,12 @@ async function loginsForTab(tabId) {
     const embedded = frame.frameId !== 0 && !sameSite(frame.url, topUrl);
     const rank = Number(frame.fields) + Number(frame.password) + Number(frame.focused) * 2;
     for (const login of answer.logins ?? []) {
-      // One row per login of this site, wherever its sign-in form is (the
-      // page, or a frame of the same site such as login.example.com); a frame
-      // from another site keeps rows of its own, marked as such.
+      // One row per login of this site, wherever its sign-in form is (the page, or a frame of the same site such as login.example.com); a frame from another site keeps rows of its own, marked as such.
       const key = embedded ? `${new URL(frame.url).origin}:${login.id}` : `site:${login.id}`;
       const item = { ...login, frameId: frame.frameId, frameSite, embedded };
       const previous = seen.get(key);
       if (previous) {
-        // Prefer the frame whose sign-in field is focused, then a password
-        // field over a lone email field.
+        // Prefer the frame whose sign-in field is focused, then a password field over a lone email field.
         if (rank > previous.rank) {
           items[previous.index] = item;
           previous.rank = rank;
@@ -296,21 +246,18 @@ async function fillTab(tabId, frameId, id) {
   }
   const frame = frames?.find((item) => item.frameId === frameId);
   if (!frame) return { ok: false, error: "pageChanged" };
-  // No script of ours in that frame: opened before the extension was installed
-  // or updated. Only a reload helps.
+  // No script of ours in that frame: opened before the extension was installed or updated. Only a reload helps.
   if (!frame.reachable) return { ok: false, error: "noContent" };
   if (!frame.fields) return { ok: false, error: "noFields" };
   // Refused before the vault is asked for the password.
   if (frame.insecure) return { ok: false, error: "insecureForm" };
 
-  // Authorize the real frame URL with the vault immediately before sending to
-  // that exact document. The content script checks its origin once more.
+  // Authorize the real frame URL with the vault immediately before sending to that exact document. The content script checks its origin once more.
   const credentials = await ask({ type: "fill", id, url: frame.url });
   if (!credentials?.ok) return credentials;
   try {
     if (!frame.documentId) {
-      // Without document ids (older Firefox), the frame must still show the
-      // page the vault was asked about.
+      // Without document ids (older Firefox), the frame must still show the page the vault was asked about.
       const current = (await framesFor(tabId))?.find((item) => item.frameId === frameId);
       if (!current || current.url !== frame.url) return { ok: false, error: "pageChanged" };
     }
@@ -328,13 +275,7 @@ async function fillTab(tabId, frameId, id) {
   }
 }
 
-/**
- * Has the app copy a login's user name, password or 2FA code for a frame of
- * the tab (the popup's Copy buttons). The app checks the login is saved for
- * that frame's site, puts the text on the clipboard itself (marked secret,
- * cleared after 30 seconds) and answers only whether it did: the text never
- * comes through the browser.
- */
+/* Has the app copy a login's user name, password or 2FA code for a frame of the tab (the popup's Copy buttons). The app checks the login is saved for that frame's site, puts the text on the clipboard itself (marked secret, cleared after 30 seconds) and answers only whether it did: the text never comes through the browser. */
 async function copyTab(tabId, frameId, id, field) {
   if (!Number.isInteger(frameId) || !text(id, 100) || !["username", "password", "totp"].includes(field)) return refused;
   let frames;
@@ -351,16 +292,10 @@ async function copyTab(tabId, frameId, id, field) {
   return answer;
 }
 
-// --- Offering to save ------------------------------------------------------------
-//
-// A login the user typed and sent is kept in the browser's memory (never on
-// disk), under a random nonce, until the next page of that site offers to
-// save it. The page gets only the nonce and the user name back, never the
-// password, and "save" works only with the nonce of an offer it was shown.
+// --- Offering to save ------------------------------------------------------------ A login the user typed and sent is kept in the browser's memory (never on disk), under a random nonce, until the next page of that site offers to save it. The page gets only the nonce and the user name back, never the password, and "save" works only with the nonce of an offer it was shown.
 
 const pendingKey = (tabId) => `pending:${tabId}`;
-/** Sent logins still being checked with the app, by tab: a fast next page
- *  waits for them before it asks for an offer. */
+/* Sent logins still being checked with the app, by tab: a fast next page waits for them before it asks for an offer. */
 const checking = new Map();
 /** Saves waiting on an unlock; dismissing or replacing an offer cancels them. */
 const saveWaits = new Map();
@@ -377,8 +312,7 @@ async function readPending(tabId) {
   return found;
 }
 
-/** A strong password from the app, for the sign-up form the user clicked. It
- *  is not kept here: the field it goes into is what is offered for saving. */
+/* A strong password from the app, for the sign-up form the user clicked. It is not kept here: the field it goes into is what is offered for saving. */
 function suggest() {
   return ask({ type: "generate" });
 }
@@ -387,8 +321,7 @@ async function submitted(message, sender) {
   if (!text(message.username, 256) || !text(message.password, 512) || !message.password) return refused;
   const tabId = sender.tab.id;
   const known = await ask({ type: "known", url: sender.url, username: message.username, password: message.password });
-  // While the vault is locked nothing can be checked, so it is offered:
-  // saving waits for the unlock, and skips a login the vault already has.
+  // While the vault is locked nothing can be checked, so it is offered: saving waits for the unlock, and skips a login the vault already has.
   const locked = !known?.ok && known?.error === "locked";
   if ((known?.ok && !known.known) || locked) {
     saveWaits.delete(tabId);
@@ -407,19 +340,12 @@ async function submitted(message, sender) {
   return { ok: true };
 }
 
-/** Waits (two minutes at most) for the user to unlock the vault in MYLE;
- *  `stopped()` ends the wait early (the page no longer needs it). The wait
- *  covers MYLE being started here too, so a page that asked while it was
- *  closed carries on by itself once it is open and unlocked. */
+/* Waits (two minutes at most) for the user to unlock the vault in MYLE; `stopped()` ends the wait early (the page no longer needs it). The wait covers MYLE being started here too, so a page that asked while it was closed carries on by itself once it is open and unlocked. */
 async function whenUnlocked(stopped = () => false, limit = 120_000) {
   return (await untilUnlocked(stopped, limit)).unlocked;
 }
 
-/** Polls MYLE until its vault is open, `stopped()` or `limit` ms, answering
- *  with the last thing seen. `unlocked` only when MYLE said so; a status that
- *  names no vault state ends the wait at once instead of polling for two
- *  minutes and then blaming the vault: that answer means a copy of MYLE this
- *  extension does not understand. */
+/* Polls MYLE until its vault is open, `stopped()` or `limit` ms, answering with the last thing seen. `unlocked` only when MYLE said so; a status that names no vault state ends the wait at once instead of polling for two minutes and then blaming the vault: that answer means a copy of MYLE this extension does not understand. */
 async function untilUnlocked(stopped, limit) {
   const until = Date.now() + limit;
   let state = "unknown";
@@ -445,12 +371,10 @@ async function untilUnlocked(stopped, limit) {
   return { unlocked: false, state, detail };
 }
 
-/** A page waiting for the vault to open, by tab: one wait each, and a new
- *  one (or the page saying it is done) ends the one before. */
+/* A page waiting for the vault to open, by tab: one wait each, and a new one (or the page saying it is done) ends the one before. */
 const unlockWaits = new Map();
 
-/** `seconds` (at most 30): the page asks again in rounds, saying in its
- *  prompt how far MYLE is (starting, locked), until its own time is up. */
+/* `seconds` (at most 30): the page asks again in rounds, saying in its prompt how far MYLE is (starting, locked), until its own time is up. */
 async function waitForUnlock(sender, seconds) {
   const tabId = sender.tab.id;
   const token = {};
@@ -465,8 +389,7 @@ async function waitForUnlock(sender, seconds) {
 async function offer(sender) {
   await checking.get(sender.tab.id)?.catch(() => {});
   const found = await readPending(sender.tab.id);
-  // An identity provider can redirect through another site before returning
-  // to the sign-in site: the offer waits for a page of that site.
+  // An identity provider can redirect through another site before returning to the sign-in site: the offer waits for a page of that site.
   if (!found || !sameSite(found.url, sender.url)) return null;
   // Seen on a page that stayed (not a redirect), or long ago: said once.
   if (found.settled || (found.shownAt && Date.now() - found.shownAt > SHOWN_GRACE)) return null;
@@ -511,8 +434,7 @@ async function answerOffer(message, sender, save) {
       answer = await ask({ type: "save", ...login });
       if (stopped()) return { ok: false, error: "expired" };
       if (answer?.error === "locked") {
-        // MYLE comes forward; the login is saved once the vault is open,
-        // only while the user still wants this offer saved.
+        // MYLE comes forward; the login is saved once the vault is open, only while the user still wants this offer saved.
         void openApp();
         if (!(await whenUnlocked(stopped))) return { ok: false, error: stopped() ? "expired" : "locked" };
         const known = await ask({ type: "known", ...login });
@@ -545,8 +467,7 @@ async function scanTab(tabId) {
   let image;
   try {
     image = await ext.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-    // MYLE takes at most 8 MB in one message, and a busy page on a large,
-    // high-DPI screen can make a bigger PNG: a JPEG is still read well.
+    // MYLE takes at most 8 MB in one message, and a busy page on a large, high-DPI screen can make a bigger PNG: a JPEG is still read well.
     if (image.length > LARGEST_PICTURE) image = await ext.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 92 });
   } catch {
     return { ok: false, error: "noCapture" };
@@ -567,8 +488,7 @@ async function keyPrint(secret) {
 
 const DISMISSED_KEYS = "dismissedKeys";
 
-/** Whether to offer a 2FA key a page shows: not when turned down for this
- *  site this session, nor when a login of the site has it already. */
+/* Whether to offer a 2FA key a page shows: not when turned down for this site this session, nor when a login of the site has it already. */
 async function keyWorth(message, sender) {
   if (!text(message.secret, 2048) || !message.secret) return refused;
   const site = siteOf(hostOf(sender.url));
@@ -605,12 +525,7 @@ ext.tabs.onRemoved.addListener((tabId) => {
   void ext.storage.session.remove([pendingKey(tabId), suggestedKey(tabId), signedInKey(tabId)]);
 });
 
-// --- 2FA right after signing in -----------------------------------------------------
-//
-// A password sent or filled in a tab: for a few minutes, the site's next page
-// (or the same page, changed) watches for its 2FA code field, and opens the
-// codes menu by itself when it gets the focus. Kept in the session's storage,
-// so a restarted service worker still knows.
+// --- 2FA right after signing in ----------------------------------------------------- A password sent or filled in a tab: for a few minutes, the site's next page (or the same page, changed) watches for its 2FA code field, and opens the codes menu by itself when it gets the focus. Kept in the session's storage, so a restarted service worker still knows.
 
 const SIGN_IN_FRESH = 5 * 60_000;
 const signedInKey = (tabId) => `signedIn:${tabId}`;
@@ -625,8 +540,7 @@ function signedIn(tabId, url) {
   }
 }
 
-/** Whether a password was sent or filled for the sender's site, in its tab,
- *  in the last few minutes. */
+/* Whether a password was sent or filled for the sender's site, in its tab, in the last few minutes. */
 async function recentSignIn(sender) {
   const key = signedInKey(sender.tab.id);
   let found;
@@ -640,11 +554,7 @@ async function recentSignIn(sender) {
   return { ok: true, recent };
 }
 
-// --- Lookups a page may make on its own ---------------------------------------------
-//
-// MYLE's limits are shared by every tab and browser, so a page that keeps
-// asking (a picture scanned again and again, a sign-in calling for passkeys
-// in a loop) is answered "busy" here, without reaching MYLE.
+// --- Lookups a page may make on its own --------------------------------------------- MYLE's limits are shared by every tab and browser, so a page that keeps asking (a picture scanned again and again, a sign-in calling for passkeys in a loop) is answered "busy" here, without reaching MYLE.
 
 const PAGE_LOOKUPS = { qrPixels: 10, passkeyList: 30 };
 /** Recent lookups, by tab: kind -> times (ms) within the last minute. */
@@ -661,24 +571,14 @@ function overLimit(tabId, kind) {
   return false;
 }
 
-// --- Passkeys ---------------------------------------------------------------------
-//
-// Only the page itself asks (not a frame inside it), and the app gets the
-// page's address from the browser; what the page sends is only checked for
-// shape here, and judged in the app.
-//
-// A request to sign in or to make a passkey comes on a port of its own: the
-// browser closes the port when the document goes away (a navigation, the tab
-// closed, the page put in the back/forward cache) or the extension stops, and
-// that cancels the request in MYLE, Windows Hello prompt included.
+// --- Passkeys --------------------------------------------------------------------- Only the page itself asks (not a frame inside it), and the app gets the page's address from the browser; what the page sends is only checked for shape here, and judged in the app. A request to sign in or to make a passkey comes on a port of its own: the browser closes the port when the document goes away (a navigation, the tab closed, the page put in the back/forward cache) or the extension stops, and that cancels the request in MYLE, Windows Hello prompt included.
 
 const list = (value) => Array.isArray(value) && value.length <= 64 && value.every((item) => text(item, 1400));
 const passkeyOperations = new Map();
 const passkeyOperationKey = (sender, requestId) =>
   `${sender.tab.id}:${sender.frameId}:${sender.documentId ?? new URL(sender.url).origin}:${requestId}`;
 const PASSKEY_PORT = "myle-passkey";
-/** Operations started by this worker; any other found in session storage was
- *  left by a worker that stopped (an update, a crash) and is cancelled. */
+/* Operations started by this worker; any other found in session storage was left by a worker that stopped (an update, a crash) and is cancelled. */
 const ownOperations = new Set();
 const operationKey = (id) => `passkeyOp:${id}`;
 
@@ -726,8 +626,7 @@ function cancelPasskey(message, sender) {
   return ask({ type: "passkeyCancel", url: operation.url, operationId: operation.id });
 }
 
-/** Asks MYLE to sign in or make a passkey, as one operation the page can
- *  withdraw. With `port`, the operation also ends when the port closes. */
+/* Asks MYLE to sign in or make a passkey, as one operation the page can withdraw. With `port`, the operation also ends when the port closes. */
 async function runPasskey(request, sender, requestId, port) {
   if (requestId !== undefined && (!text(requestId, 80) || !requestId)) return refused;
   const key = passkeyOperationKey(sender, requestId ?? crypto.randomUUID());
@@ -759,13 +658,10 @@ async function runPasskey(request, sender, requestId, port) {
   }
 }
 
-// Which sites have a passkey in MYLE, remembered from the vault's answers so
-// that a locked (or closed) MYLE can still be offered on those sites: kept
-// as salted hashes of the site's name, never the names or the passkeys.
+// Which sites have a passkey in MYLE, remembered from the vault's answers so that a locked (or closed) MYLE can still be offered on those sites: kept as salted hashes of the site's name, never the names or the passkeys.
 const PASSKEY_SITES = "passkeySites";
 const PASSKEY_SALT = "passkeySalt";
-/** The salt, read or made once: two first lookups at the same time must not
- *  make two salts (the list would then hold hashes no lookup matches). */
+/* The salt, read or made once: two first lookups at the same time must not make two salts (the list would then hold hashes no lookup matches). */
 let saltOnce = null;
 
 function passkeySalt() {
@@ -795,8 +691,7 @@ async function passkeySites() {
   return Array.isArray(found) ? found : [];
 }
 
-/** Changes to the list run one after another, so none is lost to another
- *  read at the same time. */
+/* Changes to the list run one after another, so none is lost to another read at the same time. */
 let sitesQueue = Promise.resolve();
 function changeSites(change) {
   const run = sitesQueue.then(change, change);
@@ -817,9 +712,7 @@ function rememberPasskeySite(rpId, has) {
 
 let sitesSynced = 0;
 
-/** Learns every site the vault has passkeys for (at most every five
- *  minutes, while it is unlocked), so that a closed or locked MYLE is
- *  offered on them even before a passkey was used here. */
+/* Learns every site the vault has passkeys for (at most every five minutes, while it is unlocked), so that a closed or locked MYLE is offered on them even before a passkey was used here. */
 async function syncPasskeySites() {
   if (Date.now() - sitesSynced < 5 * 60_000) return;
   sitesSynced = Date.now();
@@ -843,8 +736,7 @@ async function listPasskeys(message, sender, rpId) {
   const answer = await ask({ type: "passkeyList", url: sender.url, rpId, allow, wake: message.wake === true });
   if (answer?.ok && Array.isArray(answer.passkeys)) {
     void syncPasskeySites();
-    // Only a full list says the site has none; a short "allow" list may
-    // just name another account's.
+    // Only a full list says the site has none; a short "allow" list may just name another account's.
     if (answer.passkeys.length || !allow.length) await rememberPasskeySite(answer.rpId, answer.passkeys.length > 0);
     return answer;
   }
@@ -965,16 +857,14 @@ async function handle(message, sender) {
         return refused;
     }
   }
-  // Withdrawals only stop the sender's own work, so they are taken from a page
-  // that is leaving or from a tab the user has moved away from as well.
+  // Withdrawals only stop the sender's own work, so they are taken from a page that is leaving or from a tab the user has moved away from as well.
   if (message.type === "passkeyCancel" || message.type === "stopWaiting") {
     if (!fromOwnScript(sender)) return refused;
     if (message.type === "passkeyCancel") return cancelPasskey(message, sender);
     unlockWaits.delete(sender.tab.id);
     return { ok: true };
   }
-  // Waiting for the vault only reads MYLE's state; it goes on while the user
-  // is in another tab (unlocking MYLE, say), as long as the page is still there.
+  // Waiting for the vault only reads MYLE's state; it goes on while the user is in another tab (unlocking MYLE, say), as long as the page is still there.
   if (message.type === "waitUnlocked" && fromOwnScript(sender) &&
     (!sender.documentLifecycle || sender.documentLifecycle === "active")) {
     return sender.frameId === 0 || !embeddedIn(sender) ? waitForUnlock(sender, message.seconds) : refused;
@@ -1006,8 +896,7 @@ async function handle(message, sender) {
     case "recentSignIn":
       return recentSignIn(sender);
     case "submitted":
-      // A form sent to the app: ask whether the login is new, and if so offer
-      // to save it on the next page (the form usually navigates).
+      // A form sent to the app: ask whether the login is new, and if so offer to save it on the next page (the form usually navigates).
       if (embeddedIn(sender)) return { ok: true };
       signedIn(sender.tab.id, sender.url);
       {
@@ -1021,8 +910,7 @@ async function handle(message, sender) {
     case "offerSettled":
       return sender.frameId === 0 && text(message.nonce, 64) ? offerSettled(message, sender) : refused;
     case "qrPixels":
-      // A picture of the page, read as grey levels, for its 2FA QR code. Only
-      // the page itself scans (not a frame inside it, such as an ad).
+      // A picture of the page, read as grey levels, for its 2FA QR code. Only the page itself scans (not a frame inside it, such as an ad).
       if (sender.frameId !== 0 || !Number.isInteger(message.width) || !Number.isInteger(message.height) ||
         !text(message.pixels, 2_000_000)) {
         return refused;
@@ -1035,8 +923,7 @@ async function handle(message, sender) {
     case "passkeyList":
     case "passkeyGet":
     case "passkeyCreate":
-      // Sign-ins and new passkeys come on a port of their own (above); as
-      // messages they still work, without the port's end cancelling them.
+      // Sign-ins and new passkeys come on a port of their own (above); as messages they still work, without the port's end cancelling them.
       return passkey(message, sender);
     case "saveTotp":
       // A key the page shows, kept at the user's click in MYLE's bar.

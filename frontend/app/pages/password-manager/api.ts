@@ -1,6 +1,4 @@
-// Typed bridge to the Rust vault (backend/src/passwords in MYLE, backend/mobile
-// in MYLE Passwords for phones: the same commands). The vault key never comes
-// here; a password does only when the user reveals it.
+// Typed bridge to the Rust vault (backend/src/passwords in MYLE, backend/mobile in MYLE Passwords for phones: the same commands). The vault key never comes here; a password does only when the user reveals it.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 export type VaultStatus = "new" | "locked" | "unlocked";
@@ -158,8 +156,7 @@ export interface BrowserSetup {
   localVersion: string | null;
   /** The side-loaded copy is older than the one this app carries. */
   localUpdate: boolean;
-  /** MYLE's end of the bridge waits for the browsers; what went wrong last;
-   *  when a browser was last answered (Unix ms). */
+  /* MYLE's end of the bridge waits for the browsers; what went wrong last; when a browser was last answered (Unix ms). */
   serverListening?: boolean;
   serverError?: string | null;
   lastServedAt?: number | null;
@@ -193,7 +190,6 @@ export interface DeleteAllResult {
   keptWithPasskeys: number;
   damaged: number;
 }
-
 export interface PasswordsApi {
   status(): Promise<StatusInfo>;
   create(master: string): Promise<string>;
@@ -261,16 +257,13 @@ export interface PasswordsApi {
   useAccountVault(): Promise<void>;
   onLocked(handler: () => void): Promise<() => void>;
   onSynced(handler: (result: SyncResult) => void): Promise<() => void>;
-  /** Phones: the app went out of sight, or came back; true when the vault
-   *  was locked on the way back (away a while). */
+  /* Phones: the app went out of sight, or came back; true when the vault was locked on the way back (away a while). */
   appHidden(hidden: boolean): Promise<boolean>;
   /** Phones (Android): a newer version, if there is one. */
   updateCheck(): Promise<MobileUpdate | null>;
-  /** Phones (Android): downloads the update into the app's own folder and
-   *  checks it; its path. One already downloaded is reused. */
+  /* Phones (Android): downloads the update into the app's own folder and checks it; its path. One already downloaded is reused. */
   updateDownload(update: MobileUpdate): Promise<string>;
-  /** Phones (Android): Android's installer over it. Rejects with
-   *  "allow-installs" when Android's setting for it opened instead. */
+  /* Phones (Android): Android's installer over it. Rejects with "allow-installs" when Android's setting for it opened instead. */
   updateInstall(path: string): Promise<void>;
   /** Phones (Android): download progress listener. */
   onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<() => void>;

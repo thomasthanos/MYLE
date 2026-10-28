@@ -1,10 +1,4 @@
-// The signed-in account and the sync of this app's settings through it.
-//
-// Preferences use the newer snapshot's `updatedAt`. GitHub project paths
-// have their own timestamp, so unrelated preferences cannot replace them.
-// A change here
-// is pushed a couple of seconds after it happens; the cloud is read at start,
-// after signing in, and on "Sync now".
+// The signed-in account and the sync of this app's settings through it. Preferences use the newer snapshot's `updatedAt`. GitHub project paths have their own timestamp, so unrelated preferences cannot replace them. A change here is pushed a couple of seconds after it happens; the cloud is read at start, after signing in, and on "Sync now".
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { confirm } from "../../lib/confirm.svelte";
@@ -41,8 +35,7 @@ export class AccountState {
   syncing = $state(false);
   lastSyncedAt = $state<number | null>(readJson<number | null>(SYNCED_AT_KEY, null, (v) => typeof v === "number"));
   error = $state<string | null>(null);
-  /** The owner-only pages (GitHub Releases, Project Backups) are open. The
-   *  backend decides and enforces it; this only shows or hides them. */
+  /* The owner-only pages (GitHub Releases, Project Backups) are open. The backend decides and enforces it; this only shows or hides them. */
   owner = $state(false);
   /** The first answer about `owner` is in (until then a page waits). */
   accessKnown = $state(false);
@@ -165,8 +158,7 @@ export class AccountState {
         await this.#push();
         pushed = true;
       }
-      // Upgrade an existing account once, even when its timestamp equals this
-      // PC's. Older snapshots never meant "delete all local project paths".
+      // Upgrade an existing account once, even when its timestamp equals this PC's. Older snapshots never meant "delete all local project paths".
       if (!pushed && this.owner && isSnapshot(cloud) && (cloud.githubReleases == null || pushProjects)) {
         const snapshot = await collect(localUpdatedAt() ?? cloud.updatedAt, true);
         if (snapshot.githubReleases && (snapshot.githubReleases.paths.length || snapshot.githubReleasesUpdatedAt || pushProjects)) {

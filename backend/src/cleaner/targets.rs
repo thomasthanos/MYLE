@@ -1,16 +1,8 @@
-//! What the System Cleaner is allowed to touch.
-//!
-//! Every path is fixed here in the code: the page sends a category id and
-//! nothing else, and each file is checked against these roots before it is
-//! deleted. Only the *contents* of a folder are removed, never the folder.
-
+// ! What the System Cleaner is allowed to touch. ! ! Every path is fixed here in the code: the page sends a category id and ! nothing else, and each file is checked against these roots before it is ! deleted. Only the *contents* of a folder are removed, never the folder.
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
-
 use crate::apps::custom::expand_env;
-
 /// One folder to clean, with an optional file-name filter.
 #[derive(Debug, Clone, Copy)]
 pub struct Target {
@@ -21,13 +13,11 @@ pub struct Target {
     /// Known to be readable only with administrator rights.
     pub admin: bool,
 }
-
 #[derive(Debug, Clone, Copy)]
 pub enum Kind {
     Folders(&'static [Target]),
     RecycleBin,
 }
-
 #[derive(Debug, Clone, Copy)]
 pub struct Category {
     pub id: &'static str,
@@ -39,7 +29,6 @@ pub struct Category {
     pub icon: &'static str,
     pub kind: Kind,
 }
-
 const fn folder(dir: &'static str) -> Target {
     Target {
         dir,
@@ -47,7 +36,6 @@ const fn folder(dir: &'static str) -> Target {
         admin: false,
     }
 }
-
 const fn admin_folder(dir: &'static str) -> Target {
     Target {
         dir,
@@ -55,7 +43,6 @@ const fn admin_folder(dir: &'static str) -> Target {
         admin: true,
     }
 }
-
 pub const CATEGORIES: &[Category] = &[
     Category {
         id: "temp",
@@ -117,11 +104,9 @@ pub const CATEGORIES: &[Category] = &[
         ]),
     },
 ];
-
 pub fn find(id: &str) -> Option<&'static Category> {
     CATEGORIES.iter().find(|c| c.id == id)
 }
-
 impl Category {
     pub fn targets(&self) -> &'static [Target] {
         match self.kind {
@@ -130,17 +115,14 @@ impl Category {
         }
     }
 }
-
 impl Target {
     pub fn path(&self) -> PathBuf {
         PathBuf::from(expand_env(self.dir))
     }
 }
-
 /// The folders listed above, resolved once. Every delete is checked against
 /// them, so a bug elsewhere still cannot reach the rest of the disk.
 pub struct Allowed(Vec<PathBuf>);
-
 impl Allowed {
     pub fn new() -> Self {
         Self(
@@ -151,7 +133,6 @@ impl Allowed {
                 .collect(),
         )
     }
-
     /// True when `path` sits inside one of the folders.
     pub fn contains(&self, path: &Path) -> bool {
         // "..\.." would otherwise walk back out of an allowed root.
@@ -163,7 +144,6 @@ impl Allowed {
         }
         self.holds(&normalize(path))
     }
-
     /// `contains` for a link (a symlink or a junction) itself, wherever it
     /// points: only its own place counts, since only it is removed.
     pub fn contains_link(&self, path: &Path) -> bool {
@@ -178,7 +158,6 @@ impl Allowed {
         }
         self.holds(&normalize(parent).join(name.to_string_lossy().to_ascii_lowercase()))
     }
-
     fn holds(&self, candidate: &Path) -> bool {
         // A root itself is not a target: only what is inside it.
         self.0
@@ -186,7 +165,6 @@ impl Allowed {
             .any(|root| candidate.starts_with(root) && candidate != root)
     }
 }
-
 /// Lower-cased, `..` resolved as far as possible, trailing separators dropped.
 fn normalize(path: &Path) -> PathBuf {
     let cleaned = canonical(path);
@@ -196,7 +174,6 @@ fn normalize(path: &Path) -> PathBuf {
             .trim_start_matches(r"\\?\"),
     )
 }
-
 /// `canonicalize`, also for a path that does not exist (yet): its deepest
 /// existing folder is resolved and the rest appended. A root and a file under
 /// it then compare alike even when one is spelled with 8.3 short names
@@ -218,7 +195,6 @@ fn canonical(path: &Path) -> PathBuf {
         }
     }
 }
-
 /// `thumbcache_*.db` style matching (one `*`, case-insensitive).
 pub fn matches(name: &str, patterns: &[&str]) -> bool {
     if patterns.is_empty() {
@@ -237,7 +213,6 @@ pub fn matches(name: &str, patterns: &[&str]) -> bool {
         }
     })
 }
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Measured {
     pub bytes: u64,
@@ -245,7 +220,6 @@ pub struct Measured {
     /// Something could not be read: administrator rights are needed.
     pub locked: bool,
 }
-
 /// Adds up what a target holds, without touching anything.
 pub fn measure(target: &Target) -> Measured {
     let mut out = Measured::default();
@@ -264,7 +238,6 @@ pub fn measure(target: &Target) -> Measured {
     );
     out
 }
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Cleaned {
     pub bytes: u64,
@@ -280,7 +253,6 @@ pub struct Cleaned {
     pub admin_skipped_bytes: u64,
     pub locked: bool,
 }
-
 /// Deletes the contents of a target. The folder itself stays.
 pub fn clean(target: &Target) -> Cleaned {
     let mut out = Cleaned::default();
@@ -296,7 +268,6 @@ pub fn clean(target: &Target) -> Cleaned {
         &mut |path, size| files.push((path, size)),
         &mut out.locked,
     );
-
     for (path, size) in files {
         let link = path
             .symlink_metadata()
@@ -312,8 +283,7 @@ pub fn clean(target: &Target) -> Cleaned {
             continue;
         }
         let removed = match link {
-            // A link to a folder (a junction, say) is removed as a folder:
-            // the link itself goes, and what it points to is never touched.
+            // A link to a folder (a junction, say) is removed as a folder: the link itself goes, and what it points to is never touched.
             Some(meta) if meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 => {
                 std::fs::remove_dir(&path)
             }
@@ -330,9 +300,7 @@ pub fn clean(target: &Target) -> Cleaned {
             }
         }
     }
-
-    // Then the directories that are now empty, deepest first. Only when the
-    // whole folder was in scope: a filtered target leaves the structure alone.
+    // Then the directories that are now empty, deepest first. Only when the whole folder was in scope: a filtered target leaves the structure alone.
     if target.patterns.is_empty() {
         let mut dirs = Vec::new();
         collect_dirs(&dir, &mut dirs, &mut out.locked);
@@ -345,7 +313,6 @@ pub fn clean(target: &Target) -> Cleaned {
     }
     out
 }
-
 /// Visits every matching file under `dir`. Symlinks and junctions are reported
 /// as files (so they are unlinked, never followed).
 fn walk(dir: &Path, patterns: &[&str], visit: &mut impl FnMut(PathBuf, u64), locked: &mut bool) {
@@ -378,7 +345,6 @@ fn walk(dir: &Path, patterns: &[&str], visit: &mut impl FnMut(PathBuf, u64), loc
         }
     }
 }
-
 fn collect_dirs(dir: &Path, out: &mut Vec<PathBuf>, locked: &mut bool) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         *locked = true;
@@ -395,11 +361,9 @@ fn collect_dirs(dir: &Path, out: &mut Vec<PathBuf>, locked: &mut bool) {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn every_category_has_usable_targets() {
         assert_eq!(CATEGORIES.len(), 6);
@@ -426,7 +390,6 @@ mod tests {
         ));
         assert!(find("nope").is_none());
     }
-
     #[test]
     fn only_files_inside_the_listed_folders_may_be_deleted() {
         let allowed = Allowed::new();
@@ -434,7 +397,6 @@ mod tests {
         let temp = PathBuf::from(expand_env("%TEMP%"));
         assert!(is_allowed(&temp.join("some-file.tmp")));
         assert!(is_allowed(&temp.join("deep").join("nested.log")));
-
         // The roots themselves, and everything else, are off limits.
         assert!(!is_allowed(&temp));
         assert!(!is_allowed(Path::new(r"C:\Windows\System32\kernel32.dll")));
@@ -446,7 +408,6 @@ mod tests {
         ))));
         assert!(!is_allowed(&temp.join("..").join("..").join("Documents")));
     }
-
     /// A junction is removed itself, wherever it points, and what it points
     /// to is left as it was.
     #[test]
@@ -478,7 +439,6 @@ mod tests {
         std::fs::create_dir_all(&sibling).unwrap();
         std::fs::write(sibling.join("sentinel.txt"), b"keep").unwrap();
         junction(&root.join("to-sibling"), &sibling);
-
         let target = Target {
             dir: Box::leak(root.to_string_lossy().into_owned().into_boxed_str()),
             patterns: &[],
@@ -490,12 +450,10 @@ mod tests {
         assert!(!root.join("kept").exists());
         assert_eq!(std::fs::read(elsewhere.join("sentinel.txt")).unwrap(), b"keep");
         assert_eq!(std::fs::read(sibling.join("sentinel.txt")).unwrap(), b"keep");
-
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&elsewhere);
         let _ = std::fs::remove_dir_all(&sibling);
     }
-
     #[test]
     fn patterns_match_like_a_file_filter() {
         assert!(matches("anything.txt", &[]));
@@ -508,7 +466,6 @@ mod tests {
         ));
         assert!(matches("exact.log", &["exact.log"]));
     }
-
     #[test]
     fn cleaning_empties_a_folder_but_keeps_it_and_skips_open_files() {
         // A folder inside %TEMP%, so it is inside an allowed root.
@@ -519,14 +476,12 @@ mod tests {
         std::fs::write(root.join("a.log"), vec![b'x'; 1000]).unwrap();
         std::fs::write(root.join("sub").join("b.log"), vec![b'y'; 500]).unwrap();
         std::fs::write(root.join("sub").join("deeper").join("c.log"), b"zz").unwrap();
-
         use std::os::windows::fs::OpenOptionsExt;
         let open = std::fs::File::options()
             .read(true)
             .share_mode(0) // deny everything: the file cannot be deleted
             .open(root.join("a.log"))
             .unwrap();
-
         let target = Target {
             dir: Box::leak(root.to_string_lossy().into_owned().into_boxed_str()),
             patterns: &[],
@@ -534,7 +489,6 @@ mod tests {
         };
         let measured = measure(&target);
         assert_eq!((measured.bytes, measured.files), (1502, 3));
-
         let cleaned = clean(&target);
         assert_eq!(cleaned.files, 2, "the open file is skipped");
         assert_eq!(cleaned.bytes, 502);
@@ -546,7 +500,6 @@ mod tests {
         assert!(root.exists(), "the folder itself stays");
         assert!(!root.join("sub").exists(), "empty subfolders go");
         assert!(root.join("a.log").exists());
-
         drop(open);
         let _ = std::fs::remove_dir_all(&root);
     }

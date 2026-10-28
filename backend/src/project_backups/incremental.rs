@@ -1,29 +1,12 @@
-//! Incremental backups: only the files that changed since the newest full
-//! backup and the increments made on it.
-//!
-//! An increment lives in `<backup root>\<App>\Incremental\`, never in a month
-//! folder, and its name (`increment-V<base version>-<n>.zip`) never starts
-//! with `<App>_` nor holds a version above its base's: the backup lists, the
-//! version numbering and the import (here and in backup_projects) never take
-//! it for a backup. It holds the added and modified files and a
-//! `.backup-info.json` (`format: "zip-incremental"`) naming its base, the
-//! increment before it, the files deleted since, and `state`: every file the
-//! project then held with its size, CRC-32 and date, so a restore checks
-//! every byte it puts back. It is written and checked like a full backup
-//! (`archive::write_verified`). Nothing is ever deleted: full backups stay the
-//! anchors, and a full backup is made instead whenever an increment would
-//! make a long or risky chain.
-
+// ! Incremental backups: only the files that changed since the newest full ! backup and the increments made on it. ! ! An increment lives in `<backup root>\<App>\Incremental\`, never in a month ! folder, and its name (`increment-V<base version>-<n>.zip`) never starts ! with `<App>_` nor holds a version above its base's: the backup lists, the ! version numbering and the import (here and in backup_projects) never take ! it for a backup. It holds the added and modified files and a ! `.backup-info.json` (`format: "zip-incremental"`) naming its base, the ! increment before it, the files deleted since, and `state`: every file the ! project then held with its size, CRC-32 and date, so a restore checks ! every byte it puts back. It is written and checked like a full backup ! (`archive::write_verified`). Nothing is ever deleted: full backups stay the ! anchors, and a full backup is made instead whenever an increment would ! make a long or risky chain.
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
-
 use super::archive::{self, ZipJob};
 use super::changes;
 use super::compare::{self, FileInfo, Recorded, Side};
@@ -31,7 +14,6 @@ use super::engine::{self, BackupEntry, BackupOutcome, BackupRequest, SkippedItem
 use super::rules::{BACKUP_INFO_FILE, Rules};
 use super::walk::{self, SourceFile};
 use super::{Failure, Sink, Stage, naming};
-
 /// The folder of the increments, next to the month folders.
 pub(crate) const FOLDER: &str = "Incremental";
 pub(crate) const FORMAT: &str = "zip-incremental";
@@ -45,11 +27,9 @@ const MAX_SHARE: f64 = 0.5;
 const STALE_PARTIAL: Duration = Duration::from_secs(60 * 60);
 /// An info file larger than this is not read (a project of ~500k files).
 const MAX_INFO_BYTES: u64 = 64 * 1024 * 1024;
-
 /// One file as an increment recorded it: size, CRC-32, date (Unix ms).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct Stamp(pub u64, pub u32, pub i64);
-
 /// An increment's `.backup-info.json`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,33 +66,27 @@ pub(crate) struct Info {
     #[serde(default)]
     pub total_bytes: u64,
 }
-
 pub(crate) struct Increment {
     pub path: PathBuf,
     pub info: Arc<Info>,
     pub size: u64,
     pub modified: Option<i64>,
 }
-
 impl Increment {
     /// `Incremental/<name>.zip`, as the page names it.
     pub(crate) fn id(&self) -> String {
         format!("{FOLDER}/{}.zip", self.info.name)
     }
 }
-
 /// Increments read once while unchanged (size and date), by path.
 type Known = HashMap<PathBuf, (u64, Option<i64>, Arc<Info>)>;
 static INFOS: LazyLock<Mutex<Known>> = LazyLock::new(Default::default);
-
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 pub(crate) fn increment_name(base_version: u32, sequence: u32) -> String {
     format!("increment-V{base_version}-{sequence}")
 }
-
 /// The `.backup-info.json` at the top of the zip at `path`.
 fn info_text(path: &Path) -> Result<String, String> {
     let file = File::open(path).map_err(|error| format!("Can't open \"{}\": {error}", path.display()))?;
@@ -128,7 +102,6 @@ fn info_text(path: &Path) -> Result<String, String> {
         .map_err(|error| format!("Can't read the details of \"{}\": {error}", path.display()))?;
     Ok(text)
 }
-
 /// The increment at `path`, if it is one.
 fn increment(path: &Path) -> Option<Increment> {
     let meta = fs::metadata(path).ok().filter(|meta| meta.is_file())?;
@@ -147,7 +120,6 @@ fn increment(path: &Path) -> Option<Increment> {
     lock(&INFOS).insert(path.to_path_buf(), (size, modified, info.clone()));
     Some(Increment { path: path.to_path_buf(), info, size, modified })
 }
-
 /// The increments on the full backup `base`, oldest first. The chain stops
 /// at the first one that is missing, can't be read or does not follow.
 pub(crate) fn chain(app_dir: &Path, base: &BackupEntry) -> Vec<Increment> {
@@ -169,7 +141,6 @@ pub(crate) fn chain(app_dir: &Path, base: &BackupEntry) -> Vec<Increment> {
     }
     chain
 }
-
 /// Discovery cannot treat an existing unreadable increment as if it never
 /// existed: the older state would not establish the latest backup's files.
 pub(crate) fn checked_chain(app_dir: &Path, base: &BackupEntry) -> Result<Vec<Increment>, String> {
@@ -207,18 +178,15 @@ pub(crate) fn checked_chain(app_dir: &Path, base: &BackupEntry) -> Result<Vec<In
     }
     Ok(chain)
 }
-
 /// What the files of a project were at its last backup.
 struct Previous {
     files: BTreeMap<String, FileInfo>,
     /// Files written after this were not seen by that backup.
     reference: Option<SystemTime>,
 }
-
 fn millis(time: Option<SystemTime>) -> i64 {
     time.map(naming::unix_millis).unwrap_or(0)
 }
-
 fn reference(started_ms: i64, file_ms: Option<i64>) -> Option<SystemTime> {
     let at = |ms: i64| UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64);
     let earliest = match file_ms {
@@ -227,7 +195,6 @@ fn reference(started_ms: i64, file_ms: Option<i64>) -> Option<SystemTime> {
     };
     (earliest > 0).then(|| at(earliest).checked_sub(Duration::from_secs(2)).unwrap_or(UNIX_EPOCH))
 }
-
 /// The state an increment ends with, as a backup listing.
 pub(crate) fn listing_of(info: &Info) -> BTreeMap<String, FileInfo> {
     info.state
@@ -245,7 +212,6 @@ pub(crate) fn listing_of(info: &Info) -> BTreeMap<String, FileInfo> {
         })
         .collect()
 }
-
 /// An increment to write, or why a full backup is made instead.
 pub(crate) struct Plan {
     base: BackupEntry,
@@ -257,7 +223,6 @@ pub(crate) struct Plan {
     deleted: Vec<String>,
     state: BTreeMap<String, Stamp>,
 }
-
 /// Plans an increment of `found` (the project as a backup would take it) on
 /// the newest full backup. `Err`: why a full backup is made instead.
 fn plan(app_dir: &Path, app_name: &str, found: &walk::Walk, now: SystemTime, sink: &dyn Sink) -> Result<Plan, String> {
@@ -295,7 +260,6 @@ fn plan(app_dir: &Path, app_name: &str, found: &walk::Walk, now: SystemTime, sin
             reference: reference(base_started, base.modified),
         },
     };
-
     let mut files = Vec::new();
     let mut crcs = HashMap::new();
     let mut state = BTreeMap::new();
@@ -340,7 +304,6 @@ fn plan(app_dir: &Path, app_name: &str, found: &walk::Walk, now: SystemTime, sin
         state,
     })
 }
-
 /// Backs up only what changed since the newest backup of the project.
 /// `Ok(Err(why))`: no increment fits, a full backup is to be made instead.
 pub(crate) fn backup(request: &BackupRequest, sink: &dyn Sink) -> Result<Result<BackupOutcome, String>, Failure> {
@@ -398,8 +361,7 @@ pub(crate) fn backup(request: &BackupRequest, sink: &dyn Sink) -> Result<Result<
     };
     let info = serde_json::to_vec(&info).map_err(|error| Failure::Message(error.to_string()))?;
     let buffers = vec![(BACKUP_INFO_FILE.to_string(), info)];
-    // The zip must hold exactly the planned files, as they were planned: a
-    // file written in between would make `state` wrong.
+    // The zip must hold exactly the planned files, as they were planned: a file written in between would make `state` wrong.
     let mut completeness = |written: &archive::Written| -> Result<(), Failure> {
         sink.stage(Stage::CheckingCompleteness);
         let held = written.manifest.len().saturating_sub(1);
@@ -449,9 +411,7 @@ pub(crate) fn backup(request: &BackupRequest, sink: &dyn Sink) -> Result<Result<
         deleted_count: plan.deleted.len(),
     }))
 }
-
 // ─── Restoring ──────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Restored {
@@ -461,7 +421,6 @@ pub struct Restored {
     /// The backups it was put together from, oldest first.
     pub from: Vec<String>,
 }
-
 /// Puts the project as last backed up (the newest full backup and its
 /// increments) into `target`, an empty folder. Every file is checked against
 /// the size and CRC-32 the backup recorded; on any difference nothing is
@@ -494,7 +453,6 @@ pub(crate) fn restore(app_dir: &Path, app_name: &str, target: &Path, cancelled: 
         Some(last) => last.info.empty_folders.clone(),
         None => base_dirs(&base_path)?,
     };
-
     fs::create_dir_all(target).map_err(|error| format!("Can't create \"{}\": {error}", target.display()))?;
     let is_empty = fs::read_dir(target)
         .map_err(|error| format!("Can't open \"{}\": {error}", target.display()))?
@@ -518,7 +476,6 @@ pub(crate) fn restore(app_dir: &Path, app_name: &str, target: &Path, cancelled: 
     from.extend(chain.iter().map(|increment| increment.info.name.clone()));
     Ok(Restored { folder: target.display().to_string(), files: wanted.len(), bytes, from })
 }
-
 /// The empty folder entries of a full backup.
 fn base_dirs(path: &Path) -> Result<Vec<String>, String> {
     let file = File::open(path).map_err(|error| format!("Can't open \"{}\": {error}", path.display()))?;
@@ -530,7 +487,6 @@ fn base_dirs(path: &Path) -> Result<Vec<String>, String> {
         .map(|name| name.trim_end_matches('/').to_string())
         .collect())
 }
-
 fn put_together(
     target: &Path,
     wanted: &BTreeMap<String, (u64, u32)>,
@@ -596,19 +552,16 @@ fn put_together(
     }
     Ok(bytes)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::project_backups::archive::tests::{Quiet, temp};
     use crate::project_backups::store::{Project, Settings};
-
     struct Scene {
         root: PathBuf,
         settings: Settings,
         backup_root: PathBuf,
     }
-
     impl Scene {
         fn new(name: &str) -> Scene {
             let root = temp(&format!("increment-{name}"));
@@ -628,17 +581,14 @@ mod tests {
             };
             Scene { backup_root: settings.backup_root().unwrap(), settings, root }
         }
-
         fn write(&self, rel: &str, body: &[u8]) {
             let path = self.root.join("source").join(rel);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, body).unwrap();
         }
-
         fn app_dir(&self) -> PathBuf {
             self.settings.backup_root().unwrap().join("App")
         }
-
         fn request(&self) -> BackupRequest<'_> {
             let project = &self.settings.projects[0];
             BackupRequest {
@@ -650,29 +600,24 @@ mod tests {
                 delays: &[1],
             }
         }
-
         fn full(&self) -> BackupOutcome {
             engine::backup_project(&self.request(), &Quiet).unwrap()
         }
-
         fn increment(&self) -> Result<BackupOutcome, String> {
             backup(&self.request(), &Quiet).unwrap()
         }
     }
-
     impl Drop for Scene {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
-
     fn names_in(zip: &str) -> Vec<String> {
         let archive = ZipArchive::new(BufReader::new(File::open(zip).unwrap())).unwrap();
         let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
         names.sort();
         names
     }
-
     #[test]
     fn an_increment_holds_only_what_changed_and_the_whole_state() {
         let scene = Scene::new("only");
@@ -695,7 +640,6 @@ mod tests {
         assert_eq!(info.state["a.txt"].1, crc32fast::hash(b"uno"));
         assert_eq!(info.state["src/b.rs"].1, crc32fast::hash(b"fn main() {}"));
     }
-
     #[test]
     fn increments_never_count_as_backups_nor_change_the_numbering() {
         let scene = Scene::new("numbering");
@@ -712,7 +656,6 @@ mod tests {
         assert_eq!(naming::next_version(&scene.app_dir(), "App"), full.version + 1);
         assert_eq!(chain(&scene.app_dir(), &listed[0]).len(), 2);
     }
-
     #[test]
     fn a_full_backup_is_made_when_an_increment_does_not_fit() {
         let scene = Scene::new("policy");
@@ -724,7 +667,6 @@ mod tests {
         scene.write("big.bin", &[8u8; 4096]);
         assert_eq!(scene.increment().unwrap_err(), "most of the project changed");
     }
-
     #[test]
     fn a_restore_puts_the_last_backed_up_project_together_and_checks_it() {
         let scene = Scene::new("restore");
@@ -738,7 +680,6 @@ mod tests {
         scene.write("c.txt", b"sea");
         fs::remove_file(scene.root.join("source/gone.txt")).unwrap();
         scene.increment().unwrap();
-
         let target = scene.root.join("restored");
         let restored = restore(&scene.app_dir(), "App", &target, &|| false).unwrap();
         assert_eq!(restored.files, 3);
@@ -748,13 +689,11 @@ mod tests {
         assert_eq!(fs::read(target.join("c.txt")).unwrap(), b"sea");
         assert!(!target.join("gone.txt").exists());
         assert!(target.join("empty").is_dir());
-
         // Never into a folder with files in it.
         let error = restore(&scene.app_dir(), "App", &target, &|| false).unwrap_err();
         assert!(error.contains("empty folder"), "{error}");
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"uno");
     }
-
     #[test]
     fn a_restore_refuses_an_increment_that_does_not_match_its_record() {
         let scene = Scene::new("tampered");
@@ -775,13 +714,11 @@ mod tests {
         zip.write_all(&serde_json::to_vec(&info).unwrap()).unwrap();
         zip.finish().unwrap();
         lock(&INFOS).remove(&path);
-
         let target = scene.root.join("restored");
         let error = restore(&scene.app_dir(), "App", &target, &|| false).unwrap_err();
         assert!(error.contains("not what the backup recorded"), "{error}");
         assert_eq!(fs::read_dir(&target).unwrap().count(), 0, "nothing is left behind");
     }
-
     #[test]
     fn detection_compares_with_the_newest_increment() {
         let scene = Scene::new("detect");

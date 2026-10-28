@@ -1,12 +1,9 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-
 use tauri::{AppHandle, Manager};
-
 use crate::apps::process::{self, ERROR_CANCELLED, encode_command};
 use crate::apps::{Cleanup, JobHandle};
 use crate::download::{CANCELLED, err};
-
 use super::detection::{Detection, KnownPaths};
 use super::filesystem::{
     DirectorySwap, add_user_path_entry, remove_allowlisted, remove_user_path_entry,
@@ -16,7 +13,6 @@ use super::models::{SpotifyHubAction, SpotifyHubOutcome, SpotifyHubResult, Spoti
 use super::release;
 use super::runner::{Reporter, run_program, stop_spotify_processes};
 use super::state::Cancellation;
-
 fn replace_release(installed: Option<&str>, latest: &str) -> bool {
     match (
         installed.and_then(|version| semver::Version::parse(version).ok()),
@@ -26,7 +22,6 @@ fn replace_release(installed: Option<&str>, latest: &str) -> bool {
         _ => true,
     }
 }
-
 fn finish_install(
     job_id: &str,
     cli: &str,
@@ -39,8 +34,7 @@ fn finish_install(
     if cancelled {
         note.push_str(" Spotify launch skipped because cancellation was requested.");
     } else if let Err(error) = launch(spotify) {
-        // The swaps are already committed. A Windows launch failure must not
-        // undo a valid installation or silently look like an installer error.
+        // The swaps are already committed. A Windows launch failure must not undo a valid installation or silently look like an installer error.
         note.push_str(&format!(
             " Spotify could not open automatically: {error}. Open it from the Start menu."
         ));
@@ -52,21 +46,17 @@ fn finish_install(
         Some(note),
     )
 }
-
 fn launch_spotify(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
     if !path.is_file() {
         return Err("Spotify.exe was not found".into());
     }
     validate_no_reparse_points(path)?;
     let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
     let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // Open through the shell with a visible window, rather than inheriting the
-    // CLI runner's hidden startup environment and redirected output handles.
-    // SAFETY: the NUL-terminated strings live for the duration of this call.
+    // Open through the shell with a visible window, rather than inheriting the CLI runner's hidden startup environment and redirected output handles. SAFETY: the NUL-terminated strings live for the duration of this call.
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
@@ -83,7 +73,6 @@ fn launch_spotify(path: &Path) -> Result<(), String> {
         Err(format!("Windows launch error {result}"))
     }
 }
-
 pub async fn install(
     app: &AppHandle,
     detection: &Detection,
@@ -113,9 +102,7 @@ pub async fn install(
         "Selected stable Marketplace {}.",
         marketplace_release.version
     ));
-
-    // Staging lives below LOCALAPPDATA and is registered for next-startup
-    // cleanup before the first network byte is written.
+    // Staging lives below LOCALAPPDATA and is registered for next-startup cleanup before the first network byte is written.
     let work = detection
         .paths
         .local
@@ -126,7 +113,6 @@ pub async fn install(
     tokio::fs::create_dir_all(&work).await.map_err(err)?;
     let cli_zip = work.join("spicetify.zip");
     let marketplace_zip = work.join("marketplace.zip");
-
     reporter.stage(SpotifyHubStage::Downloading);
     reporter.line("Downloading Spicetify from its official GitHub release…");
     release::download_verified(&cli_release, &cli_zip, cancellation, |done, total| {
@@ -149,7 +135,6 @@ pub async fn install(
     .await?;
     reporter.stage(SpotifyHubStage::Verifying);
     reporter.line("Both GitHub SHA-256 digests are valid.");
-
     let unpacked_cli = work.join("cli-unpacked");
     let unpacked_marketplace = work.join("marketplace-unpacked");
     extract(
@@ -188,14 +173,12 @@ pub async fn install(
             SpotifyHubAction::InstallSpicetify,
         ));
     }
-
     reporter.stage(SpotifyHubStage::Installing);
     let cli_stage = detection
         .paths
         .local
         .join(format!(".spicetify.myle-stage-{}", reporter.job_id));
-    // Staged folders are renamed into place on success; if a later step fails
-    // they would otherwise be left behind next to the real installation.
+    // Staged folders are renamed into place on success; if a later step fails they would otherwise be left behind next to the real installation.
     cleanup.add(cli_stage.clone());
     move_directory(&unpacked_cli, &cli_stage)?;
     let marketplace_parent = detection
@@ -209,7 +192,6 @@ pub async fn install(
     cleanup.add(marketplace_stage.clone());
     move_directory(&marketplace_payload, &marketplace_stage)?;
     super::installed::write_version(&marketplace_stage, &marketplace_release.version)?;
-
     let config_file = detection.paths.config.join("config-xpui.ini");
     let previous_config = std::fs::read(&config_file).ok();
     let active_theme = previous_config
@@ -218,7 +200,6 @@ pub async fn install(
         .unwrap_or_default();
     let preserve_custom_theme =
         !active_theme.is_empty() && !active_theme.eq_ignore_ascii_case("marketplace");
-
     let installed_cli = detection
         .spicetify
         .healthy
@@ -273,7 +254,6 @@ pub async fn install(
         ));
         None
     };
-
     let mut theme_swap = if preserve_custom_theme {
         reporter.line(format!("Preserving active custom theme “{active_theme}”."));
         None
@@ -294,7 +274,6 @@ pub async fn install(
             reporter.job_id,
         )?)
     };
-
     let configured = configure_spicetify(
         detection,
         job,
@@ -328,7 +307,6 @@ pub async fn install(
             ));
         }
     };
-
     if let Err(error) = add_user_path_entry(&detection.paths.cli) {
         best_effort_restore_after_failed_apply(detection, reporter).await;
         restore_file(&config_file, previous_config.as_deref());
@@ -387,7 +365,6 @@ pub async fn install(
     }
     Ok(outcome)
 }
-
 async fn configure_spicetify(
     detection: &Detection,
     job: &JobHandle,
@@ -412,8 +389,7 @@ async fn configure_spicetify(
         )
         .await?;
     }
-    // This is the verified local executable and a fixed argument list. It is
-    // intentionally unelevated and never invokes a downloaded script.
+    // This is the verified local executable and a fixed argument list. It is intentionally unelevated and never invokes a downloaded script.
     let config = std::fs::read(detection.paths.config.join("config-xpui.ini")).map_err(err)?;
     let apps_dir = spotify_apps_dir(&config, &detection.paths.desktop_dir());
     let args = backup_apply_args(&apps_dir)?;
@@ -426,7 +402,6 @@ async fn configure_spicetify(
         .ok_or("Spotify Apps directory has no parent")?
         .join("Spotify.exe"))
 }
-
 /// Match the official CLI updater's IsBackupable check. A Spotify update may
 /// leave both .spa packages and extracted directories: back up those new stock
 /// packages without restoring an older Spotify version over them. A fully
@@ -443,7 +418,6 @@ fn backup_apply_args(apps_dir: &Path) -> Result<&'static [&'static str], String>
     }
     Ok(&["restore", "backup", "apply"])
 }
-
 /// Honor the path the CLI will use, including %VAR% references. Like its
 /// InitPaths, fall back to detected Desktop Spotify when the configured Apps
 /// directory does not exist. Do not inspect a different installation's state.
@@ -473,7 +447,6 @@ pub(super) fn spotify_apps_dir(config: &[u8], default_spotify: &Path) -> PathBuf
     }
     default_spotify.join("Apps")
 }
-
 /// If applying the new build changed Spotify and a later install step fails,
 /// restore vanilla Spotify while the verified new CLI and its recovery files
 /// are still present. This is deliberately best-effort: rollback of the old
@@ -498,7 +471,6 @@ async fn best_effort_restore_after_failed_apply(detection: &Detection, reporter:
         ),
     }
 }
-
 pub async fn restore(
     detection: &Detection,
     job: &JobHandle,
@@ -532,7 +504,6 @@ pub async fn restore(
     if cancellation.is_cancelled() {
         return Ok(cancelled(reporter.job_id, SpotifyHubAction::RestoreSpotify));
     }
-
     reporter.stage(SpotifyHubStage::Cleaning);
     let allowlist = vec![detection.paths.cli.clone(), detection.paths.config.clone()];
     let mut failures = Vec::new();
@@ -566,7 +537,6 @@ pub async fn restore(
         ))
     }
 }
-
 pub async fn purge(
     detection: &Detection,
     job: &JobHandle,
@@ -577,7 +547,6 @@ pub async fn purge(
     stop_spotify_processes(reporter).await;
     let mut changed = false;
     let mut failures: Vec<(PathBuf, String)> = Vec::new();
-
     reporter.stage(SpotifyHubStage::Uninstalling);
     if detection.desktop.installed && detection.paths.desktop_spotify.is_file() {
         match validate_no_reparse_points(&detection.paths.desktop_dir()) {
@@ -647,7 +616,6 @@ pub async fn purge(
     if cancellation.is_cancelled() {
         return Ok(partial_or_cancelled(reporter.job_id, changed));
     }
-
     reporter.stage(SpotifyHubStage::Cleaning);
     reset_update_acl(&detection.paths, reporter).await;
     let allowlist = detection.paths.purge_targets();
@@ -671,14 +639,12 @@ pub async fn purge(
         }
         reporter.progress((index + 1) as f64 / total as f64 * 0.9);
     }
-
     if remove_user_registry_entries(reporter) {
         changed = true;
     }
     if let Err(error) = remove_user_path_entry(&detection.paths.cli) {
         reporter.line(format!("Could not update PATH: {error}"));
     }
-
     let admin_paths: Vec<PathBuf> = failures
         .iter()
         .filter(|(_, error)| admin_retry_worthwhile(error))
@@ -704,7 +670,6 @@ pub async fn purge(
             Err(error) => reporter.line(format!("Elevated cleanup failed: {error}")),
         }
     }
-
     reporter.stage(SpotifyHubStage::Finalizing);
     reporter.progress(1.0);
     if failures.is_empty() && !machine_spotify_registration_exists() {
@@ -729,7 +694,6 @@ pub async fn purge(
         ))
     }
 }
-
 async fn extract(
     archive: &Path,
     destination: &Path,
@@ -758,7 +722,6 @@ async fn extract(
     .await
     .map_err(err)?
 }
-
 async fn ensure_success(
     exe: &Path,
     args: &[&str],
@@ -777,7 +740,6 @@ async fn ensure_success(
         ))
     }
 }
-
 fn current_theme(config: &[u8]) -> Option<String> {
     String::from_utf8_lossy(config).lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
@@ -786,7 +748,6 @@ fn current_theme(config: &[u8]) -> Option<String> {
             .then(|| value.trim().to_string())
     })
 }
-
 fn bundled_theme(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app
         .path()
@@ -799,7 +760,6 @@ fn bundled_theme(app: &AppHandle) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-
 fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
     if destination.exists() {
         std::fs::remove_dir_all(destination).map_err(err)?;
@@ -816,7 +776,6 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn move_directory(source: &Path, destination: &Path) -> Result<(), String> {
     if destination.exists() {
         std::fs::remove_dir_all(destination).map_err(err)?;
@@ -826,7 +785,6 @@ fn move_directory(source: &Path, destination: &Path) -> Result<(), String> {
         std::fs::remove_dir_all(source).map_err(err)
     })
 }
-
 fn restore_file(path: &Path, previous: Option<&[u8]>) {
     match previous {
         Some(bytes) => {
@@ -838,11 +796,9 @@ fn restore_file(path: &Path, previous: Option<&[u8]>) {
         None => drop(std::fs::remove_file(path)),
     }
 }
-
 fn cancelled(job_id: &str, action: SpotifyHubAction) -> SpotifyHubOutcome {
     SpotifyHubOutcome::new(SpotifyHubResult::Cancelled, job_id, action, None)
 }
-
 fn partial_or_cancelled(job_id: &str, changed: bool) -> SpotifyHubOutcome {
     if changed {
         SpotifyHubOutcome::new(
@@ -855,7 +811,6 @@ fn partial_or_cancelled(job_id: &str, changed: bool) -> SpotifyHubOutcome {
         cancelled(job_id, SpotifyHubAction::PurgeAll)
     }
 }
-
 async fn reset_update_acl(paths: &KnownPaths, reporter: &Reporter<'_>) {
     let update = paths.local_spotify.join("Update");
     if !update.exists() {
@@ -876,7 +831,6 @@ async fn reset_update_acl(paths: &KnownPaths, reporter: &Reporter<'_>) {
         reporter.line("Spotify update-folder restrictions could not be reset in the user pass.");
     }
 }
-
 fn remove_user_registry_entries(reporter: &Reporter<'_>) -> bool {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
@@ -907,7 +861,6 @@ fn remove_user_registry_entries(reporter: &Reporter<'_>) -> bool {
     }
     changed
 }
-
 fn machine_spotify_registration_exists() -> bool {
     use winreg::RegKey;
     use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
@@ -919,7 +872,6 @@ fn machine_spotify_registration_exists() -> bool {
     .iter()
     .any(|key| hklm.open_subkey_with_flags(key, KEY_READ).is_ok())
 }
-
 fn admin_retry_worthwhile(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     !lower.contains("safety validation failed")
@@ -927,11 +879,8 @@ fn admin_retry_worthwhile(error: &str) -> bool {
             || lower.contains("permission denied")
             || lower.contains("os error 5"))
 }
-
 async fn elevated_cleanup(paths: &[PathBuf], machine_registry: bool) -> Result<i32, String> {
-    // The paths originate solely from KnownPaths::purge_targets and have
-    // already passed exact allowlist validation. They are encoded as literal
-    // PowerShell strings; no frontend-provided command/path reaches this pass.
+    // The paths originate solely from KnownPaths::purge_targets and have already passed exact allowlist validation. They are encoded as literal PowerShell strings; no frontend-provided command/path reaches this pass.
     let literals = paths
         .iter()
         .map(|path| ps_quote(&path.as_os_str().to_string_lossy()))
@@ -956,15 +905,12 @@ async fn elevated_cleanup(paths: &[PathBuf], machine_registry: bool) -> Result<i
     ];
     process::run_elevated("powershell.exe", &args, true).await
 }
-
 fn ps_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn completed_install_launches_the_same_spotify_installation() {
         let spotify = Path::new(r"C:\Custom Spotify\Spotify.exe");
@@ -976,7 +922,6 @@ mod tests {
         assert_eq!(launched.as_deref(), Some(spotify));
         assert_eq!(outcome.result, SpotifyHubResult::Done);
     }
-
     #[test]
     fn launch_failure_preserves_successful_install_and_reports_manual_open() {
         let outcome = finish_install(
@@ -993,7 +938,6 @@ mod tests {
         assert!(note.contains("Windows error 5"));
         assert!(note.contains("Start menu"));
     }
-
     #[test]
     fn cancellation_after_commit_skips_launch_without_undoing_install() {
         let outcome = finish_install(
@@ -1009,7 +953,6 @@ mod tests {
         assert_eq!(outcome.result, SpotifyHubResult::Done);
         assert!(outcome.note.unwrap().contains("launch skipped"));
     }
-
     #[test]
     #[ignore = "Opens the local Spotify window; run explicitly for a launch smoke test"]
     fn manually_open_local_spotify_with_visible_shell_launch() {
@@ -1018,7 +961,6 @@ mod tests {
         let apps = spotify_apps_dir(&config, &paths.desktop_dir());
         launch_spotify(&apps.parent().unwrap().join("Spotify.exe")).unwrap();
     }
-
     #[test]
     fn a_newer_installed_component_is_preserved_when_the_other_component_updates() {
         assert!(!replace_release(Some("2.46.0"), "2.45.3"));
@@ -1028,9 +970,7 @@ mod tests {
         assert!(replace_release(Some("2.45.3"), "2.45.3"));
         assert!(replace_release(None, "2.45.3"));
     }
-
     struct SpotifyAppsFixture(PathBuf);
-
     impl SpotifyAppsFixture {
         fn new(stock: bool, modified: bool) -> Self {
             let root =
@@ -1045,13 +985,11 @@ mod tests {
             Self(root)
         }
     }
-
     impl Drop for SpotifyAppsFixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-
     #[test]
     fn updating_modified_spotify_restores_before_rebuilding_backup() {
         let apps = SpotifyAppsFixture::new(false, true);
@@ -1060,7 +998,6 @@ mod tests {
             ["restore", "backup", "apply"]
         );
     }
-
     #[test]
     fn fresh_or_updated_spotify_backs_up_without_restoring_old_files() {
         for modified in [false, true] {
@@ -1068,7 +1005,6 @@ mod tests {
             assert_eq!(backup_apply_args(&apps.0).unwrap(), ["backup", "apply"]);
         }
     }
-
     #[test]
     fn a_directory_named_spa_is_not_an_original_package() {
         let apps = SpotifyAppsFixture::new(false, true);
@@ -1078,13 +1014,11 @@ mod tests {
             ["restore", "backup", "apply"]
         );
     }
-
     #[test]
     fn unreadable_spotify_apps_are_not_assumed_safe_to_back_up() {
         let apps = SpotifyAppsFixture::new(false, false);
         assert!(backup_apply_args(&apps.0.join("missing")).is_err());
     }
-
     #[test]
     fn backup_policy_uses_the_configured_spotify_installation() {
         let root = SpotifyAppsFixture::new(false, false);
@@ -1097,7 +1031,6 @@ mod tests {
         );
         assert_eq!(spotify_apps_dir(config.as_bytes(), &default), apps);
     }
-
     #[test]
     fn missing_or_invalid_configured_path_uses_detected_desktop_spotify() {
         let root = SpotifyAppsFixture::new(false, false);
@@ -1115,19 +1048,16 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn existing_custom_theme_is_detected_and_preserved() {
         let config = b"[Setting]\ncurrent_theme = Dribbblish\ncolor_scheme = base\n";
         assert_eq!(current_theme(config).as_deref(), Some("Dribbblish"));
         assert_eq!(current_theme(b"[Setting]\ncolor_scheme=base"), None);
     }
-
     #[test]
     fn powershell_literals_cannot_break_out() {
         assert_eq!(ps_quote("C:\\it's\\Spotify"), "'C:\\it''s\\Spotify'");
     }
-
     #[test]
     fn only_acl_style_failures_request_elevation() {
         assert!(admin_retry_worthwhile("Access is denied. (os error 5)"));

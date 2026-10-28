@@ -1,7 +1,5 @@
 <script lang="ts">
-  // Releasing a project: the version (synced across its files), the notes
-  // (AI from the commits), checks, then build → commit → push → tag →
-  // release and upload, or the tag's GitHub Actions workflow.
+  // Releasing a project: the version (synced across its files), the notes (AI from the commits), checks, then build → commit → push → tag → release and upload, or the tag's GitHub Actions workflow.
   import { onMount, untrack } from "svelte";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
@@ -146,8 +144,7 @@
     timer = setTimeout(() => void check(), 450);
     return () => clearTimeout(timer);
   });
-  // The checks run again as the form changes; only the newest answer counts
-  // (an older one finishing later would show checks for another version).
+  // The checks run again as the form changes; only the newest answer counts (an older one finishing later would show checks for another version).
   let checkSeq = 0;
   async function check() {
     if (!s.version.trim()) return;
@@ -324,8 +321,7 @@
       void gr.loadRemote(repoId);
     }
   }
-  /** Following the workflow on GitHub: the tag is out, so stopping means
-   *  either no longer following, or cancelling the run there. */
+  /* Following the workflow on GitHub: the tag is out, so stopping means either no longer following, or cancelling the run there. */
   const following = $derived(s.mode === "actions" && s.steps.workflow?.state === "running");
   /** The failures' box: brought into view when a failure is told. */
   let failuresBox = $state<HTMLElement>();

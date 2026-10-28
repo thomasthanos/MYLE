@@ -22,8 +22,7 @@
 
   /** This phone has a vault: null until known. */
   let hasVault = $state<boolean | null>(null);
-  /** Out of sight: the page is covered, so the app switcher's picture of
-   *  it shows no passwords. */
+  /* Out of sight: the page is covered, so the app switcher's picture of it shows no passwords. */
   let away = $state(false);
 
   const welcome = $derived(account.loaded && !account.profile);
@@ -73,8 +72,7 @@
     updater.resumed();
   }
 
-  /** Android's back button: closes what is open, then goes back a step;
-   *  on the list, it leaves the app (the vault locks with it). */
+  /* Android's back button: closes what is open, then goes back a step; on the list, it leaves the app (the vault locks with it). */
   function goBack() {
     if (scanner.active) {
       scanner.stop();
@@ -134,8 +132,7 @@
 <style>
   .shell { display: flex; flex-direction: column; height: 100%; padding-right: env(safe-area-inset-right); padding-left: env(safe-area-inset-left); }
 
-  /* The bar: frosted glass over the page, lit along its lower edge, the
-     same panel colours as MYLE's title bar on Windows. */
+  /* The bar: frosted glass over the page, lit along its lower edge, the same panel colours as MYLE's title bar on Windows. */
   .bar { position: relative; z-index: 5; display: flex; flex: none; align-items: center; gap: 6px; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px 16px; border-bottom: 1px solid var(--glass-border); background: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.01)), color-mix(in srgb, var(--bg-1) 82%, transparent); box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.04), 0 10px 28px -18px rgb(0 0 0 / 0.7); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
 
   .brand :global(svg) { filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.35)); }

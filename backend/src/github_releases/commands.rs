@@ -1,18 +1,12 @@
-//! The Tauri commands of the GitHub Releases page. Projects are addressed
-//! by id (`<repo id>` or `<repo id>/<app folder>`), files by their path in
-//! the repository's status, release files by a path the backend checks;
-//! the token and AI keys never come back to the page.
-
+// ! The Tauri commands of the GitHub Releases page. Projects are addressed ! by id (`<repo id>` or `<repo id>/<app folder>`), files by their path in ! the repository's status, release files by a path the backend checks; ! the token and AI keys never come back to the page.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-
 use super::ai::{self, Answer, ProviderId};
 use super::build::artifacts::{self, Artifact};
 use super::build::detect::{self, BuildPlan};
@@ -27,14 +21,11 @@ use super::store::{self, Account, GbrImport, Settings};
 use super::versions::{self, Bump, Versions};
 use super::{Problem, blocking, gbr_import, ops, secrets};
 use crate::project_backups::compare::{self, FileDiff};
-
 const SCAN_KEY: &str = "__scan__";
-
 #[tauri::command]
 pub async fn github_releases_sync_export() -> Result<super::sync::SyncedProjects, String> {
     blocking(|| super::sync::export(&store::load()?)).await?
 }
-
 #[tauri::command]
 pub async fn github_releases_sync_import(
     synced: super::sync::SyncedProjects,
@@ -43,8 +34,7 @@ pub async fn github_releases_sync_import(
     let state = state.inner().clone();
     blocking(move || state.with_idle(|| {
         let settings = store::edit(|settings| super::sync::reconcile(settings, &synced))?;
-        // A sync import never probes project folders, runs Git or reads keys.
-        // The page keeps its live metadata and refreshes normally if open.
+        // A sync import never probes project folders, runs Git or reads keys. The page keeps its live metadata and refreshes normally if open.
         Ok(PageState {
             repos: settings.repos.iter().map(|repo| RepoBrief {
                 id: repo.id.clone(), path: repo.path.clone(),
@@ -58,9 +48,7 @@ pub async fn github_releases_sync_import(
         })
     })).await?
 }
-
 // ─── Page state ────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoBrief {
@@ -69,7 +57,6 @@ pub struct RepoBrief {
     pub name: String,
     pub exists: bool,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderView {
@@ -79,7 +66,6 @@ pub struct ProviderView {
     pub ready: bool,
     pub key_hint: Option<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiView {
@@ -88,7 +74,6 @@ pub struct AiView {
     pub ollama_url: Option<String>,
     pub ollama_enabled: bool,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageState {
@@ -100,7 +85,6 @@ pub struct PageState {
     /// Shown until dismissed: what the Github-Build-Release import did.
     pub gbr_import: Option<GbrImport>,
 }
-
 fn briefs(settings: &Settings) -> Vec<RepoBrief> {
     settings
         .repos
@@ -119,7 +103,6 @@ fn briefs(settings: &Settings) -> Vec<RepoBrief> {
         })
         .collect()
 }
-
 fn ai_view(settings: &Settings) -> AiView {
     let providers = ai::PROVIDERS
         .iter()
@@ -148,7 +131,6 @@ fn ai_view(settings: &Settings) -> AiView {
         ollama_enabled: settings.ai.ollama_enabled,
     }
 }
-
 fn page_state(settings: &Settings) -> PageState {
     PageState {
         repos: briefs(settings),
@@ -162,7 +144,6 @@ fn page_state(settings: &Settings) -> PageState {
         gbr_import: settings.gbr_import.clone().filter(|i| !i.dismissed),
     }
 }
-
 /// The page's data. The first time, Github-Build-Release's last project and
 /// DeepSeek key are brought over.
 #[tauri::command]
@@ -188,7 +169,6 @@ pub async fn github_releases_get_state() -> Result<PageState, String> {
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn github_releases_dismiss_import() -> Result<(), String> {
     blocking(|| {
@@ -202,9 +182,7 @@ pub async fn github_releases_dismiss_import() -> Result<(), String> {
     })
     .await?
 }
-
 // ─── Projects ──────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryStatus {
@@ -226,7 +204,6 @@ pub struct EntryStatus {
     pub release_mode: String,
     pub skip_version_files: Vec<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoStatus {
@@ -241,7 +218,6 @@ pub struct RepoStatus {
     pub workflows: Vec<Workflow>,
     pub problem: Option<String>,
 }
-
 fn entry_status(
     entry: &Entry,
     tags: &[git::Tag],
@@ -288,7 +264,6 @@ fn entry_status(
         versions,
     }
 }
-
 async fn repo_status(repo_id: &str) -> Result<RepoStatus, String> {
     let settings = blocking(store::load).await??;
     let repo = settings.repo(repo_id)?.clone();
@@ -348,12 +323,10 @@ async fn repo_status(repo_id: &str) -> Result<RepoStatus, String> {
     out.workflows = workflows;
     Ok(out)
 }
-
 #[tauri::command]
 pub async fn github_releases_status(repo_id: String) -> Result<RepoStatus, String> {
     repo_status(&repo_id).await
 }
-
 /// Brings the remote's branches and tags; then the fresh status.
 #[tauri::command]
 pub async fn github_releases_fetch(
@@ -379,7 +352,6 @@ pub async fn github_releases_fetch(
     }
     Ok(status)
 }
-
 async fn repo_root(repo_id: &str) -> Result<PathBuf, String> {
     let settings = blocking(store::load).await??;
     let repo = settings.repo(repo_id)?;
@@ -389,7 +361,6 @@ async fn repo_root(repo_id: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-
 async fn resolve(entry_id: &str) -> Result<Entry, String> {
     let id = entry_id.to_string();
     blocking(move || {
@@ -402,7 +373,6 @@ async fn resolve(entry_id: &str) -> Result<Entry, String> {
     })
     .await?
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FoundRepo {
@@ -412,7 +382,6 @@ pub struct FoundRepo {
     /// App folders, for a monorepo.
     pub apps: Vec<String>,
 }
-
 async fn pick_folder(app: AppHandle, title: &str) -> Result<Option<PathBuf>, String> {
     let title = title.to_string();
     blocking(move || {
@@ -425,7 +394,6 @@ async fn pick_folder(app: AppHandle, title: &str) -> Result<Option<PathBuf>, Str
     })
     .await?
 }
-
 fn found(settings: &Settings, paths: Vec<PathBuf>) -> Vec<FoundRepo> {
     paths
         .into_iter()
@@ -446,7 +414,6 @@ fn found(settings: &Settings, paths: Vec<PathBuf>) -> Vec<FoundRepo> {
         })
         .collect()
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddResult {
@@ -456,7 +423,6 @@ pub struct AddResult {
     /// Repositories found inside the chosen folder, when it isn't one.
     pub found: Vec<FoundRepo>,
 }
-
 /// Adds a repository: the one the chosen folder is in, or (when it holds
 /// several) lists them to pick from.
 #[tauri::command]
@@ -491,7 +457,6 @@ pub async fn github_releases_add_folder(app: AppHandle) -> Result<Option<AddResu
     })
     .await?
 }
-
 /// Looks for repositories in a folder (up to four levels down).
 #[tauri::command]
 pub async fn github_releases_scan_folder(
@@ -515,7 +480,6 @@ pub async fn github_releases_scan_folder(
     drop(running);
     result.map(Some)
 }
-
 #[tauri::command]
 pub async fn github_releases_add_repos(paths: Vec<String>) -> Result<PageState, String> {
     blocking(move || {
@@ -533,7 +497,6 @@ pub async fn github_releases_add_repos(paths: Vec<String>) -> Result<PageState, 
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn github_releases_remove_repo(
     state: State<'_, GithubReleasesState>,
@@ -551,12 +514,10 @@ pub async fn github_releases_remove_repo(
     })
     .await?
 }
-
 /// A field that may be missing (left alone), `null` (cleared) or a value.
 fn double<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<Option<T>>, D::Error> {
     Option::<T>::deserialize(deserializer).map(Some)
 }
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrySettings {
@@ -567,7 +528,6 @@ pub struct EntrySettings {
     #[serde(default, deserialize_with = "double")]
     pub build_choice: Option<Option<String>>,
 }
-
 #[tauri::command]
 pub async fn github_releases_set_entry(
     entry_id: String,
@@ -599,9 +559,7 @@ pub async fn github_releases_set_entry(
     })
     .await?
 }
-
 // ─── GitHub data ───────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
@@ -612,7 +570,6 @@ pub struct RemoteInfo {
     pub run: Option<Run>,
     pub problem: Option<Problem>,
 }
-
 fn problem_of(error: String) -> Problem {
     serde_json::from_str::<serde_json::Value>(&error)
         .ok()
@@ -624,7 +581,6 @@ fn problem_of(error: String) -> Problem {
         })
         .unwrap_or_else(|| Problem::new("FAILED", error))
 }
-
 /// The newest release whose tag belongs to `entry` (its own prefix, else a
 /// shared `v…` tag of its major version not ahead of it).
 fn last_release_of<'a>(
@@ -643,7 +599,6 @@ fn last_release_of<'a>(
     let last = project::last_tag(&tags, prefix, current)?;
     published.into_iter().find(|r| r.tag_name == last.name)
 }
-
 #[tauri::command]
 pub async fn github_releases_remote(repo_id: String) -> Result<RemoteInfo, String> {
     let status = repo_status(&repo_id).await?;
@@ -687,7 +642,6 @@ pub async fn github_releases_remote(repo_id: String) -> Result<RemoteInfo, Strin
     }
     Ok(info)
 }
-
 #[tauri::command]
 pub async fn github_releases_cancel_ci(repo_id: String, run_id: u64) -> Result<(), String> {
     let status = repo_status(&repo_id).await?;
@@ -702,20 +656,16 @@ pub async fn github_releases_cancel_ci(repo_id: String, run_id: u64) -> Result<(
     };
     github::cancel_run(&token, &owner, &repo, run_id).await
 }
-
 // ─── Changes ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum GitEvent {
     Line { text: String, replace: bool },
 }
-
 #[tauri::command]
 pub async fn github_releases_changes(repo_id: String) -> Result<git::Status, String> {
     git::status(&repo_root(&repo_id).await?).await
 }
-
 /// Reads `spec` (`HEAD:path`) from git, up to `limit` bytes.
 async fn read_blob(root: &Path, spec: &str, limit: u64) -> Option<Result<Vec<u8>, u64>> {
     let size = git::read(root, &["cat-file", "-s", spec])
@@ -730,7 +680,6 @@ async fn read_blob(root: &Path, spec: &str, limit: u64) -> Option<Result<Vec<u8>
     let output = git::run(root, &["cat-file", "blob", spec]).await.ok()?;
     output.ok().then_some(Ok(output.stdout))
 }
-
 #[tauri::command]
 pub async fn github_releases_file_diff(repo_id: String, path: String) -> Result<FileDiff, String> {
     let root = repo_root(&repo_id).await?;
@@ -773,7 +722,6 @@ pub async fn github_releases_file_diff(repo_id: String, path: String) -> Result<
     let path_for = path.clone();
     blocking(move || compare::bytes_diff(&path_for, old, new)).await
 }
-
 /// Stages (or unstages) `paths`, which must be changed files.
 #[tauri::command]
 pub async fn github_releases_stage(
@@ -824,7 +772,6 @@ pub async fn github_releases_stage(
     }
     git::status(&root).await
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitOutcome {
@@ -833,7 +780,6 @@ pub struct CommitOutcome {
     pub push: Option<ops::NetOutcome>,
     pub status: git::Status,
 }
-
 fn line_sink(channel: &Channel<GitEvent>) -> impl Fn(&str, bool) + Send + Sync + '_ {
     move |text: &str, replace: bool| {
         let _ = channel.send(GitEvent::Line {
@@ -842,7 +788,6 @@ fn line_sink(channel: &Channel<GitEvent>) -> impl Fn(&str, bool) + Send + Sync +
         });
     }
 }
-
 /// Commits what is staged; with `push`, pushes it right after.
 #[tauri::command]
 pub async fn github_releases_commit(
@@ -883,7 +828,6 @@ pub async fn github_releases_commit(
     outcome.status = git::status(&root).await.unwrap_or_default();
     Ok(outcome)
 }
-
 #[tauri::command]
 pub async fn github_releases_push(
     state: State<'_, GithubReleasesState>,
@@ -895,7 +839,6 @@ pub async fn github_releases_push(
     let sink = line_sink(&on_event);
     ops::push(&root, running.cancel.clone(), &sink).await
 }
-
 #[tauri::command]
 pub async fn github_releases_pull(
     state: State<'_, GithubReleasesState>,
@@ -907,17 +850,14 @@ pub async fn github_releases_pull(
     let sink = line_sink(&on_event);
     ops::pull(&root, running.cancel.clone(), &sink).await
 }
-
 #[tauri::command]
 pub fn github_releases_cancel(state: State<'_, GithubReleasesState>, repo_id: String) -> bool {
     state.cancel(&repo_id)
 }
-
 #[tauri::command]
 pub fn github_releases_cancel_scan(state: State<'_, GithubReleasesState>) -> bool {
     state.cancel(SCAN_KEY)
 }
-
 const LOCK_EXCLUDES: &[&str] = &[
     ":(exclude)package-lock.json",
     ":(exclude)**/package-lock.json",
@@ -928,7 +868,6 @@ const LOCK_EXCLUDES: &[&str] = &[
     ":(exclude)*.min.js",
     ":(exclude)*.map",
 ];
-
 /// A commit message for what is staged (everything changed when nothing is).
 #[tauri::command]
 pub async fn github_releases_ai_commit_message(
@@ -978,9 +917,7 @@ pub async fn github_releases_ai_commit_message(
     let prompt = ai::commit_prompt(&stat, &diff, &recent);
     ai::complete(&settings.ai, provider, ai::COMMIT_SYSTEM, &prompt, 1500).await
 }
-
 // ─── Building ──────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildInfo {
@@ -993,7 +930,6 @@ pub struct BuildInfo {
     pub last_build: Option<store::BuildStats>,
     pub running: bool,
 }
-
 fn chosen_command(entry: &Entry, plan: &BuildPlan) -> Option<String> {
     entry.config.build_command.clone().or_else(|| {
         entry
@@ -1005,7 +941,6 @@ fn chosen_command(entry: &Entry, plan: &BuildPlan) -> Option<String> {
             .map(|o| o.command.clone())
     })
 }
-
 #[tauri::command]
 pub async fn github_releases_build_info(
     state: State<'_, GithubReleasesState>,
@@ -1026,7 +961,6 @@ pub async fn github_releases_build_info(
     })
     .await
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildResult {
@@ -1037,7 +971,6 @@ pub struct BuildResult {
     /// Unix milliseconds; artifacts newer than this belong to this build.
     pub started_at: i64,
 }
-
 /// Builds the project with `command` (`install`: installs its dependencies).
 #[tauri::command]
 pub async fn github_releases_build(
@@ -1093,7 +1026,6 @@ pub async fn github_releases_build(
             .unwrap_or(0),
     })
 }
-
 /// The files the last build made (newer than `since`, Unix ms).
 #[tauri::command]
 pub async fn github_releases_artifacts(
@@ -1104,7 +1036,6 @@ pub async fn github_releases_artifacts(
     let since = SystemTime::UNIX_EPOCH + Duration::from_millis(since.max(0) as u64);
     blocking(move || artifacts::find(&entry.dir, since)).await
 }
-
 /// The SHA-256 of a file the build made, to paste into release notes.
 #[tauri::command]
 pub async fn github_releases_checksum(entry_id: String, path: String) -> Result<String, String> {
@@ -1121,7 +1052,6 @@ pub async fn github_releases_checksum(entry_id: String, path: String) -> Result<
     })
     .await?
 }
-
 /// Opens `file` (as a build printed it) at `line`:`column` in VS Code (or
 /// Cursor), or with the default app when neither is installed.
 #[tauri::command]
@@ -1166,7 +1096,6 @@ pub async fn github_releases_open_in_editor(
     }
     tauri_plugin_opener::open_path(&display, None::<&str>).map_err(|error| error.to_string())
 }
-
 /// `vscode`, `cursor`: the editors whose link handler is registered.
 fn editor_schemes() -> Vec<&'static str> {
     use winreg::RegKey;
@@ -1183,7 +1112,6 @@ fn editor_schemes() -> Vec<&'static str> {
         })
         .collect()
 }
-
 fn encode_path(path: &str) -> String {
     path.chars()
         .map(|c| match c {
@@ -1195,7 +1123,6 @@ fn encode_path(path: &str) -> String {
         })
         .collect()
 }
-
 /// Shows a file (an artifact, a log) in Explorer, or opens a folder.
 #[tauri::command]
 pub async fn github_releases_reveal(entry_id: String, path: Option<String>) -> Result<(), String> {
@@ -1227,9 +1154,7 @@ pub async fn github_releases_reveal(entry_id: String, path: Option<String>) -> R
             .map_err(|error| error.to_string())
     }
 }
-
 // ─── Releasing ─────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseInfo {
@@ -1250,7 +1175,6 @@ pub struct ReleaseInfo {
     /// The project's whole build, when the chosen command is not it.
     pub full_build: Option<String>,
 }
-
 /// The folder a release workflow reads its notes from: the first
 /// `…/release-notes/` path in it (`docs/release-notes`), in code or a comment.
 fn notes_dir_of(workflow: &str) -> Option<String> {
@@ -1277,7 +1201,6 @@ fn notes_dir_of(workflow: &str) -> Option<String> {
             ok.then_some(dir)
         })
 }
-
 #[tauri::command]
 pub async fn github_releases_release_info(entry_id: String) -> Result<ReleaseInfo, String> {
     let entry = resolve(&entry_id).await?;
@@ -1361,7 +1284,6 @@ pub async fn github_releases_release_info(entry_id: String) -> Result<ReleaseInf
         branch: status.branch.branch,
     })
 }
-
 /// The newest commits of a project and how many of them came after its
 /// last release (for a clean working tree's overview).
 #[derive(Clone, Debug, Serialize)]
@@ -1372,10 +1294,8 @@ pub struct RecentCommits {
     pub unreleased: usize,
     pub last_tag: Option<String>,
 }
-
 const RECENT_LIMIT: usize = 30;
 const UNRELEASED_LIMIT: usize = 200;
-
 #[tauri::command]
 pub async fn github_releases_recent_commits(
     entry_id: String,
@@ -1419,7 +1339,6 @@ pub async fn github_releases_recent_commits(
         last_tag: last_tag.map(|tag| tag.name),
     })
 }
-
 #[tauri::command]
 pub async fn github_releases_preflight(
     entry_id: String,
@@ -1435,7 +1354,6 @@ pub async fn github_releases_preflight(
     let context = release::context_for_checks(entry).await?;
     Ok(release::preflight(&context, &version, mode, include_changes, has_build, build).await)
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Notes {
@@ -1444,7 +1362,6 @@ pub struct Notes {
     pub provider: ProviderId,
     pub model: String,
 }
-
 /// Release notes from the commits since the last release (`polish`: the
 /// text the user wrote, tidied).
 #[tauri::command]
@@ -1515,7 +1432,6 @@ pub async fn github_releases_ai_notes(
         model: answer.model,
     })
 }
-
 #[tauri::command]
 pub async fn github_releases_release(
     state: State<'_, GithubReleasesState>,
@@ -1532,7 +1448,6 @@ pub async fn github_releases_release(
     };
     Ok(release::run(request, entry, command, running.cancel.clone(), &sink).await)
 }
-
 #[tauri::command]
 pub async fn github_releases_resume(
     state: State<'_, GithubReleasesState>,
@@ -1557,7 +1472,6 @@ pub async fn github_releases_resume(
     };
     Ok(release::resume(entry, resume, running.cancel.clone(), &sink).await)
 }
-
 /// The remote's branches to merge before a release: all but the checked-out
 /// one and the default (main/master). Fetched first, quietly.
 #[tauri::command]
@@ -1578,7 +1492,6 @@ pub async fn github_releases_branches(repo_id: String) -> Result<Vec<String>, St
     branches.sort();
     Ok(branches)
 }
-
 /// Follows the newest workflow run of `commit` (the page was reopened).
 #[tauri::command]
 pub async fn github_releases_watch(
@@ -1598,9 +1511,7 @@ pub async fn github_releases_watch(
     };
     release::watch_commit(entry, commit, tag, running.cancel.clone(), &sink).await
 }
-
 // ─── Release history ───────────────────────────────────────────────────────
-
 async fn github_of(
     repo_id: &str,
 ) -> Result<(zeroize::Zeroizing<String>, String, String, PathBuf), String> {
@@ -1615,13 +1526,11 @@ async fn github_of(
         .ok_or_else(|| String::from(Problem::new("AUTH", "Connect your GitHub account first.")))?;
     Ok((token, owner, repo, root))
 }
-
 #[tauri::command]
 pub async fn github_releases_list_releases(repo_id: String) -> Result<Vec<Release>, String> {
     let (token, owner, repo, _) = github_of(&repo_id).await?;
     github::releases(&token, &owner, &repo, 100).await
 }
-
 #[tauri::command]
 pub async fn github_releases_update_release(
     repo_id: String,
@@ -1640,7 +1549,6 @@ pub async fn github_releases_update_release(
     )
     .await
 }
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deleted {
@@ -1653,7 +1561,6 @@ pub struct Deleted {
     pub tag_kept: Option<String>,
     pub error: Option<String>,
 }
-
 /// The tags that must stay when the releases `deleting` go: the ones the
 /// other releases use, and `keep` (the release a combine saved its notes on).
 fn tags_to_keep(
@@ -1667,7 +1574,6 @@ fn tags_to_keep(
         .chain(keep.map(str::to_string))
         .collect()
 }
-
 /// Deletes the tag `tag` on GitHub (gone already counts as deleted) and
 /// here, if it is here.
 async fn delete_tag_everywhere(
@@ -1695,7 +1601,6 @@ async fn delete_tag_everywhere(
         Err(error) => Err(format!("Deleted on GitHub, not on this PC: {error}")),
     }
 }
-
 /// Deletes one release and, with `with_tag`, its tag unless `keep` has it.
 #[allow(clippy::too_many_arguments)]
 async fn delete_release_and_tag(
@@ -1736,7 +1641,6 @@ async fn delete_release_and_tag(
     }
     result
 }
-
 /// Deletes releases (the page asked first); with `delete_tags`, their tags
 /// too, on GitHub and here, except a tag another release still uses.
 #[tauri::command]
@@ -1775,14 +1679,12 @@ pub async fn github_releases_delete_releases(
     }
     Ok(results)
 }
-
 /// The same notes, as GitHub keeps them (it may change line endings and
 /// trim the ends).
 fn same_notes(saved: &str, sent: &str) -> bool {
     let normal = |text: &str| text.replace("\r\n", "\n").trim().to_string();
     normal(saved) == normal(sent)
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Combined {
@@ -1790,7 +1692,6 @@ pub struct Combined {
     pub release: Release,
     pub deleted: Vec<Deleted>,
 }
-
 /// Combines releases into one (the page asked first, naming all of them):
 /// saves the notes on `target_id`, checks GitHub kept them, and only then
 /// deletes the releases `delete_ids` and their tags, on GitHub and here. The
@@ -1873,7 +1774,6 @@ pub async fn github_releases_combine(
         deleted,
     })
 }
-
 /// Tries again what a combine couldn't delete: the releases `release_ids`
 /// (with their tags) and the tags `tags` whose release is gone. The tag of
 /// `target_id`, and any tag a release still uses, stays.
@@ -1928,7 +1828,6 @@ pub async fn github_releases_combine_retry(
     }
     Ok(results)
 }
-
 /// A tag no release uses, on GitHub, here, or both.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1939,7 +1838,6 @@ pub struct LoneTag {
     /// Unix seconds, from the tag here.
     pub date: Option<i64>,
 }
-
 /// The tags no release (drafts included) uses: the ones here first, newest
 /// first, then the ones only on GitHub.
 fn lone_tags(
@@ -1969,7 +1867,6 @@ fn lone_tags(
     }
     lone
 }
-
 /// Tags without a release, for the Releases tab.
 #[tauri::command]
 pub async fn github_releases_lone_tags(repo_id: String) -> Result<Vec<LoneTag>, String> {
@@ -1979,7 +1876,6 @@ pub async fn github_releases_lone_tags(repo_id: String) -> Result<Vec<LoneTag>, 
     let local = git::tags(&root).await.unwrap_or_default();
     Ok(lone_tags(&released, &remote, &local))
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagDeleted {
@@ -1988,7 +1884,6 @@ pub struct TagDeleted {
     pub local_deleted: bool,
     pub error: Option<String>,
 }
-
 /// Deletes tags that have no release (the page asked first), on GitHub and
 /// here. Looked up again first: a tag a release uses is never deleted here.
 #[tauri::command]
@@ -2038,7 +1933,6 @@ pub async fn github_releases_delete_tags(
     }
     Ok(results)
 }
-
 /// One set of notes from several releases.
 #[tauri::command]
 pub async fn github_releases_ai_combine(
@@ -2084,16 +1978,13 @@ pub async fn github_releases_ai_combine(
         model: answer.model,
     })
 }
-
 // ─── Account ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhStatus {
     pub installed: bool,
     pub signed_in: bool,
 }
-
 async fn gh_token() -> Option<zeroize::Zeroizing<String>> {
     let gh = git::gh_exe()?;
     let output = crate::apps::process::hidden(gh)
@@ -2105,7 +1996,6 @@ async fn gh_token() -> Option<zeroize::Zeroizing<String>> {
     let token = zeroize::Zeroizing::new(String::from_utf8_lossy(&output.stdout).trim().to_string());
     (output.status.success() && !token.is_empty()).then_some(token)
 }
-
 #[tauri::command]
 pub async fn github_releases_gh_status() -> Result<GhStatus, String> {
     Ok(GhStatus {
@@ -2113,7 +2003,6 @@ pub async fn github_releases_gh_status() -> Result<GhStatus, String> {
         signed_in: gh_token().await.is_some(),
     })
 }
-
 async fn connect(token: &str, source: &str) -> Result<PageState, String> {
     let mut account = github::whoami(token).await?;
     account.source = source.into();
@@ -2127,7 +2016,6 @@ async fn connect(token: &str, source: &str) -> Result<PageState, String> {
     })
     .await?
 }
-
 /// Uses the GitHub CLI's sign-in: its token is checked and kept sealed.
 #[tauri::command]
 pub async fn github_releases_connect_gh() -> Result<PageState, String> {
@@ -2142,14 +2030,12 @@ pub async fn github_releases_connect_gh() -> Result<PageState, String> {
     })?;
     connect(&token, "gh").await
 }
-
 /// Uses a pasted personal access token.
 #[tauri::command]
 pub async fn github_releases_connect_token(token: String) -> Result<PageState, String> {
     let token = zeroize::Zeroizing::new(secrets::check_secret(&token, "GitHub token")?);
     connect(&token, "token").await
 }
-
 #[tauri::command]
 pub async fn github_releases_disconnect() -> Result<PageState, String> {
     secrets::remove_token();
@@ -2162,9 +2048,7 @@ pub async fn github_releases_disconnect() -> Result<PageState, String> {
     })
     .await?
 }
-
 const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-
 /// Opens a terminal window where the GitHub CLI signs in (in the browser).
 #[tauri::command]
 pub async fn github_releases_gh_login() -> Result<(), String> {
@@ -2186,7 +2070,6 @@ pub async fn github_releases_gh_login() -> Result<(), String> {
         .map(|_| ())
         .map_err(|error| format!("Can't start the GitHub CLI: {error}"))
 }
-
 /// Installs the GitHub CLI or Git with winget, in a window of its own so
 /// the user sees it happen (nothing is installed silently).
 #[tauri::command]
@@ -2213,9 +2096,7 @@ pub async fn github_releases_install_tool(tool: String) -> Result<(), String> {
         .map(|_| ())
         .map_err(|error| format!("Can't start winget: {error}"))
 }
-
 // ─── AI settings ───────────────────────────────────────────────────────────
-
 /// Checks a key with its provider and keeps it sealed.
 #[tauri::command]
 pub async fn github_releases_ai_set_key(
@@ -2231,14 +2112,12 @@ pub async fn github_releases_ai_set_key(
     secrets::save_ai_key(provider, &key)?;
     Ok(ai_view(&settings))
 }
-
 #[tauri::command]
 pub async fn github_releases_ai_remove_key(provider: ProviderId) -> Result<AiView, String> {
     secrets::remove_ai_key(provider);
     let settings = blocking(store::load).await??;
     Ok(ai_view(&settings))
 }
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChanges {
@@ -2248,7 +2127,6 @@ pub struct AiChanges {
     pub ollama_url: Option<Option<String>>,
     pub ollama_enabled: Option<bool>,
 }
-
 #[tauri::command]
 pub async fn github_releases_ai_set_settings(changes: AiChanges) -> Result<AiView, String> {
     if let Some(Some(url)) = &changes.ollama_url
@@ -2290,13 +2168,11 @@ pub async fn github_releases_ai_set_settings(changes: AiChanges) -> Result<AiVie
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn github_releases_ai_ollama_models() -> Result<Vec<String>, String> {
     let settings = blocking(store::load).await??;
     ai::ollama_models(&settings.ai).await
 }
-
 /// Tries a provider with a tiny request.
 #[tauri::command]
 pub async fn github_releases_ai_test(provider: ProviderId) -> Result<Answer, String> {
@@ -2310,11 +2186,9 @@ pub async fn github_releases_ai_test(provider: ProviderId) -> Result<Answer, Str
     )
     .await
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn the_notes_folder_a_release_workflow_reads() {
         let myle = std::fs::read_to_string(
@@ -2339,7 +2213,6 @@ mod tests {
         assert_eq!(notes_dir_of("# nothing about notes"), None);
         assert_eq!(notes_dir_of("x: ../release-notes/$V.md"), None);
     }
-
     #[test]
     fn tags_without_a_release() {
         let released: std::collections::HashSet<String> = ["v9.7.0", "v9.6.0", "mobile-v1.0.0"]
@@ -2392,7 +2265,6 @@ mod tests {
         assert_eq!(lone[1].date, Some(20));
         assert_eq!(lone[3].date, None);
     }
-
     #[test]
     fn a_combine_keeps_the_target_tag_and_tags_other_releases_use() {
         let with_id = |id: u64, tag: &str| Release {
@@ -2415,7 +2287,6 @@ mod tests {
         // The target's tag stays even when the target is in the list.
         assert!(tags_to_keep(&all, &[1, 4], Some("v1.3.0")).contains("v1.3.0"));
     }
-
     #[test]
     fn the_combined_notes_are_checked_the_way_github_keeps_them() {
         assert!(same_notes("### New\n- a\n", "### New\r\n- a"));
@@ -2423,7 +2294,6 @@ mod tests {
         assert!(!same_notes("", "### New\n- a"));
         assert!(!same_notes("### New\n- a", "### New\n- b"));
     }
-
     fn release(tag: &str, draft: bool) -> Release {
         serde_json::from_value(json!({
             "id": 1, "tag_name": tag, "name": tag, "body": "", "draft": draft, "prerelease": false,
@@ -2431,7 +2301,6 @@ mod tests {
         }))
         .unwrap()
     }
-
     #[test]
     fn missing_null_and_set_fields_differ() {
         let missing: EntrySettings = serde_json::from_value(json!({})).unwrap();
@@ -2444,7 +2313,6 @@ mod tests {
         assert_eq!(ai.order.unwrap(), [ProviderId::OpenRouter, ProviderId::Groq]);
         assert_eq!(ai.models.unwrap()[&ProviderId::Groq], "x");
     }
-
     #[test]
     fn the_last_release_of_each_project() {
         let releases = vec![

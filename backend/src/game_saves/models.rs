@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BackupSchedule {
@@ -8,7 +7,6 @@ pub enum BackupSchedule {
     Daily,
     Weekly,
 }
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScheduleWeekday {
@@ -21,7 +19,6 @@ pub enum ScheduleWeekday {
     Friday,
     Saturday,
 }
-
 impl BackupSchedule {
     pub(crate) fn interval_seconds(self) -> Option<u64> {
         match self {
@@ -31,7 +28,6 @@ impl BackupSchedule {
         }
     }
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RootStore {
@@ -43,7 +39,6 @@ pub enum RootStore {
     Origin,
     OtherWindows,
 }
-
 impl RootStore {
     pub(crate) fn ludusavi_name(self) -> &'static str {
         match self {
@@ -53,21 +48,17 @@ impl RootStore {
             Self::GogGalaxy => "gogGalaxy",
             Self::Uplay => "uplay",
             Self::Origin => "origin",
-            // Ludusavi's `otherWindows` root represents a mounted offline
-            // Windows installation. The UI option is an ordinary extra game
-            // folder, whose engine store identifier is `other`.
+            // Ludusavi's `otherWindows` root represents a mounted offline Windows installation. The UI option is an ordinary extra game folder, whose engine store identifier is `other`.
             Self::OtherWindows => "other",
         }
     }
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RootSource {
     Automatic,
     Manual,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameRoot {
@@ -76,7 +67,6 @@ pub struct GameRoot {
     pub store: RootStore,
     pub source: RootSource,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomGame {
@@ -89,11 +79,9 @@ pub struct CustomGame {
     #[serde(default = "default_true")]
     pub auto_backup: bool,
 }
-
 fn default_true() -> bool {
     true
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSavesSettings {
@@ -135,17 +123,13 @@ pub struct GameSavesSettings {
     #[serde(default)]
     pub database_updated_at: Option<u64>,
 }
-
 fn default_schedule_time() -> String {
     "03:00".into()
 }
-
 pub(crate) const GAME_SAVES_SETTINGS_VERSION: u32 = 1;
-
 const fn settings_version() -> u32 {
     GAME_SAVES_SETTINGS_VERSION
 }
-
 impl Default for GameSavesSettings {
     fn default() -> Self {
         Self {
@@ -168,7 +152,6 @@ impl Default for GameSavesSettings {
         }
     }
 }
-
 /// The part of the Game Saves settings that follows the user's account to
 /// other PCs. The backup folder is a recovery hint, used only when a local
 /// choice is absent and real history exists there. Library and restore paths
@@ -186,7 +169,6 @@ pub struct SyncedGameSaves {
     #[serde(default)]
     pub custom_games: Vec<CustomGame>,
 }
-
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledBackupResult {
@@ -196,9 +178,7 @@ pub struct ScheduledBackupResult {
     pub failed_games: Vec<String>,
     pub error: Option<String>,
 }
-
 pub use crate::cloud::CloudProvider;
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedFolder {
@@ -210,7 +190,6 @@ pub struct DetectedFolder {
     /// Where backups go inside it (created when chosen).
     pub backup_path: String,
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OperationKind {
@@ -220,7 +199,6 @@ pub enum OperationKind {
     Restore,
     ScheduledBackup,
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OperationStage {
@@ -234,7 +212,6 @@ pub enum OperationStage {
     Restoring,
     Finishing,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum GameSavesEvent {
@@ -250,7 +227,6 @@ pub enum GameSavesEvent {
         text: String,
     },
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GameSaveStatus {
@@ -262,7 +238,6 @@ pub enum GameSaveStatus {
     Unknown,
     Error,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestorePathMapping {
@@ -270,7 +245,6 @@ pub struct RestorePathMapping {
     pub source: String,
     pub target: String,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSaveEntry {
@@ -299,7 +273,6 @@ pub struct GameSaveEntry {
     #[serde(default)]
     pub suggested_target: Option<String>,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSaveSnapshot {
@@ -311,14 +284,12 @@ pub struct GameSaveSnapshot {
     pub label: Option<String>,
     pub is_safety: bool,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreSelection {
     pub game_id: String,
     pub snapshot_id: String,
 }
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSavesStats {
@@ -327,7 +298,6 @@ pub struct GameSavesStats {
     pub total_bytes: u64,
     pub database_games: u64,
 }
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSavesScan {
@@ -356,7 +326,6 @@ pub struct GameSavesScan {
     #[serde(default)]
     pub backup_unreachable: Option<String>,
 }
-
 impl GameSavesScan {
     /// With the backup folder out of reach, no game can be said to have no
     /// backup: its status is not known until the folder is back.
@@ -369,7 +338,6 @@ impl GameSavesScan {
         self.backup_unreachable = Some(folder.to_string());
     }
 }
-
 /// How much a scan looks at: only the games already found (seconds), or
 /// every game in the database (close to a minute with large libraries).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -379,7 +347,6 @@ pub enum ScanMode {
     #[default]
     Full,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSavesOperationResult {
@@ -396,7 +363,6 @@ pub struct GameSavesOperationResult {
     #[serde(default)]
     pub rolled_back: Vec<String>,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameFailure {
@@ -406,14 +372,12 @@ pub struct GameFailure {
     #[serde(default)]
     pub file: Option<String>,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseUpdate {
     pub games: u64,
     pub updated_at: u64,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameSavesPageState {
@@ -428,7 +392,6 @@ pub struct GameSavesPageState {
     /// The last scan saved on disk, shown while a fresh one runs.
     pub cached_scan: Option<GameSavesScan>,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoRestore {
@@ -438,15 +401,12 @@ pub struct UndoRestore {
     pub expires_at: u64,
     pub games: Vec<String>,
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn reinstall_account_settings_retain_the_existing_backup_destination() {
-        // A clean install has no settings.json or scan-cache.json. The account
-        // payload must retain the location that the next engine scan will read.
+        // A clean install has no settings.json or scan-cache.json. The account payload must retain the location that the next engine scan will read.
         let synced: SyncedGameSaves = serde_json::from_value(serde_json::json!({
             "schedule": "off",
             "scheduleTime": "03:00",
@@ -462,7 +422,6 @@ mod tests {
             "signing in after data deletion must retain where the real snapshots live"
         );
     }
-
     #[test]
     fn reinstall_old_account_settings_without_a_destination_still_load() {
         let synced: SyncedGameSaves = serde_json::from_value(serde_json::json!({
@@ -471,7 +430,6 @@ mod tests {
         })).unwrap();
         assert_eq!(synced.backup_folder, None);
     }
-
     fn game(status: GameSaveStatus) -> GameSaveEntry {
         GameSaveEntry {
             id: "game".into(),
@@ -493,7 +451,6 @@ mod tests {
             suggested_target: None,
         }
     }
-
     #[test]
     fn without_its_backups_no_game_is_said_to_have_none() {
         let mut scan = GameSavesScan {

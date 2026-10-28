@@ -1,6 +1,4 @@
-//! Backend of the Install Apps page: winget packages, custom (direct-download)
-//! apps, job control and app-list import/export.
-
+// ! Backend of the Install Apps page: winget packages, custom (direct-download) ! apps, job control and app-list import/export.
 pub mod creative;
 pub mod custom;
 pub mod io;
@@ -8,16 +6,12 @@ mod jobs;
 pub(crate) mod process;
 mod resolver;
 pub mod winget;
-
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
 use serde::Serialize;
 use tauri::{AppHandle, State};
-
 pub(crate) use jobs::JobHandle;
 pub use jobs::Jobs;
-
 /// Files and folders to remove when the app closes: downloaded packages and
 /// the folders they were unpacked into. They stay while the app runs, so an
 /// installer that relaunches itself keeps working.
@@ -27,13 +21,11 @@ pub use jobs::Jobs;
 /// could not be removed is deleted on the next start instead.
 #[derive(Clone, Default)]
 pub struct Cleanup(Arc<Mutex<CleanupState>>);
-
 #[derive(Default)]
 struct CleanupState {
     paths: Vec<PathBuf>,
     file: Option<PathBuf>,
 }
-
 impl Cleanup {
     /// Loads the pending list and removes whatever is now free.
     pub fn init(&self, file: PathBuf) {
@@ -52,7 +44,6 @@ impl Cleanup {
         }
         self.run();
     }
-
     pub fn add(&self, path: PathBuf) {
         let mut state = self.lock();
         if !state.paths.contains(&path) {
@@ -60,7 +51,6 @@ impl Cleanup {
         }
         Self::save(&state);
     }
-
     /// Deletes what it can; anything still locked stays on the list for next time.
     /// MYLE's own download folders go as a whole too, so a file a job did not
     /// put on the list (or one left by a crash) does not stay behind.
@@ -73,7 +63,6 @@ impl Cleanup {
             remove(&dir);
         }
     }
-
     fn save(state: &CleanupState) {
         let Some(file) = &state.file else { return };
         if let Some(dir) = file.parent() {
@@ -84,12 +73,10 @@ impl Cleanup {
             Err(_) => drop(std::fs::remove_file(file)),
         }
     }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, CleanupState> {
         self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
-
 /// The folders MYLE downloads and unpacks into, and nothing else: app
 /// installers, and Spotify Hub's staging. Only folders named for MYLE, under
 /// the temporary folder and Local AppData. The update folder is left to the
@@ -101,7 +88,6 @@ pub fn work_dirs() -> Vec<PathBuf> {
     }
     dirs
 }
-
 /// True when the path is gone (deleted now, or never there).
 fn remove(path: &std::path::Path) -> bool {
     for attempt in 0..3 {
@@ -120,7 +106,6 @@ fn remove(path: &std::path::Path) -> bool {
     }
     !path.exists()
 }
-
 /// Progress events streamed to the page while an app installs or updates.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -143,7 +128,6 @@ pub enum JobEvent {
         text: String,
     },
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Stage {
@@ -153,7 +137,6 @@ pub enum Stage {
     Extracting,
     Installing,
 }
-
 /// How a finished job ended. Failures are returned as `Err(message)`.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "result", rename_all = "camelCase")]
@@ -167,7 +150,6 @@ pub enum JobOutcome {
     HashMismatch,
     Cancelled,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledReport {
@@ -176,7 +158,6 @@ pub struct InstalledReport {
     winget_error: Option<String>,
     custom: Vec<custom::CustomStatus>,
 }
-
 /// Installed state of every winget package plus the custom apps.
 #[tauri::command]
 pub async fn apps_installed(app: AppHandle) -> Result<InstalledReport, String> {
@@ -191,18 +172,15 @@ pub async fn apps_installed(app: AppHandle) -> Result<InstalledReport, String> {
         custom,
     })
 }
-
 /// Stops the running job for `id`: its process tree is killed and the job
 /// reports `Cancelled`.
 #[tauri::command(async)]
 pub fn apps_cancel(jobs: State<'_, Jobs>, id: String) {
     jobs.cancel(&id);
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn cleanup_removes_files_and_folders_and_survives_a_restart() {
         let root = std::env::temp_dir().join(format!("myle-cleanup-test-{}", std::process::id()));
@@ -215,14 +193,12 @@ mod tests {
         )
         .unwrap();
         let list = root.join("pending-cleanup.json");
-
         let cleanup = Cleanup::default();
         cleanup.init(list.clone());
         cleanup.add(root.join("package.zip"));
         cleanup.add(root.join("unpacked"));
         // Registered paths are remembered on disk in case the app is killed.
         assert!(std::fs::read_to_string(&list).unwrap().contains("unpacked"));
-
         cleanup.run();
         assert!(!root.join("package.zip").exists());
         assert!(
@@ -230,7 +206,6 @@ mod tests {
             "the whole folder goes, not just the zip"
         );
         assert_eq!(std::fs::read_to_string(&list).unwrap(), "[]");
-
         // A fresh start sweeps leftovers from a previous run.
         std::fs::write(root.join("left-over.zip"), b"zip").unwrap();
         std::fs::write(
@@ -240,7 +215,6 @@ mod tests {
         .unwrap();
         Cleanup::default().init(list.clone());
         assert!(!root.join("left-over.zip").exists());
-
         let _ = std::fs::remove_dir_all(&root);
     }
 }

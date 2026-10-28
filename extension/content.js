@@ -1,38 +1,15 @@
-// MYLE Passwords: on the page.
-//
-// Finds login fields, and when one is clicked shows the logins saved for
-// this site; a click on one fills it in. Nothing is filled without a click.
-// After a login form is sent, the next page offers to save it.
-//
-// The page's own scripts share this document, so this assumes they may be
-// hostile:
-// - only the user's real input counts (event.isTrusted), never events a
-//   script makes up;
-// - the menu is drawn in a closed shadow root in the browser's top layer,
-//   styled so the page cannot hide or restyle it, and a click on it counts
-//   only once it has been on screen, still and untouched, for half a second,
-//   and (where the browser can tell) while nothing is drawn over it;
-// - nothing is filled into hidden fields or into a form that sends over
-//   plain http, and only a password the user typed (or picked in the menu)
-//   is offered for saving.
+// MYLE Passwords: on the page. Finds login fields, and when one is clicked shows the logins saved for this site; a click on one fills it in. Nothing is filled without a click. After a login form is sent, the next page offers to save it. The page's own scripts share this document, so this assumes they may be hostile: - only the user's real input counts (event.isTrusted), never events a script makes up; - the menu is drawn in a closed shadow root in the browser's top layer, styled so the page cannot hide or restyle it, and a click on it counts only once it has been on screen, still and untouched, for half a second, and (where the browser can tell) while nothing is drawn over it; - nothing is filled into hidden fields or into a form that sends over plain http, and only a password the user typed (or picked in the menu) is offered for saving.
 (() => {
   const ext = globalThis.browser ?? globalThis.chrome;
   if (window.__myleFill || !(document.documentElement instanceof HTMLHtmlElement)) return;
   window.__myleFill = true;
-  // Two copies installed (the store's, and one loaded from a folder): the
-  // first one in a page serves it, so nothing shows twice.
-  // A copy left behind by an update of this same extension (its value is our
-  // id) has lost its extension, so this one takes the page over.
+  // Two copies installed (the store's, and one loaded from a folder): the first one in a page serves it, so nothing shows twice. A copy left behind by an update of this same extension (its value is our id) has lost its extension, so this one takes the page over.
   const COPY = "data-myle-passwords";
   const owner = document.documentElement.getAttribute(COPY);
   if (owner !== null && owner !== ext.runtime.id) return;
   document.documentElement.setAttribute(COPY, ext.runtime.id);
 
-  /** After the extension is updated or reloaded, this copy in a page that was
-   *  already open has no extension any more: the browser refuses it at once
-   *  ("Extension context invalidated"). Every request then answers
-   *  "reloaded" (passkey calls go back to the browser's own instead of
-   *  waiting forever), and a fresh copy may take the page over. */
+  /* After the extension is updated or reloaded, this copy in a page that was already open has no extension any more: the browser refuses it at once ("Extension context invalidated"). Every request then answers "reloaded" (passkey calls go back to the browser's own instead of waiting forever), and a fresh copy may take the page over. */
   function orphaned() {
     try {
       if (document.documentElement.getAttribute(COPY) === owned) document.documentElement.removeAttribute(COPY);
@@ -52,8 +29,7 @@
     }
   }
 
-  /** Signs in or makes a passkey on a port of its own: the browser closes the
-   *  port when this page goes away, which cancels the request in MYLE. */
+  /* Signs in or makes a passkey on a port of its own: the browser closes the port when this page goes away, which cancels the request in MYLE. */
   function passkeyCall(message) {
     return new Promise((resolve) => {
       let port;
@@ -85,11 +61,7 @@
     });
   }
 
-  // --- Debug log --------------------------------------------------------------
-  //
-  // Off unless "Debug log" is on in the toolbar popup. Then every passkey
-  // step shows in this page's console (F12 → Console), as "[MYLE passkeys]":
-  // never a challenge, a key or a password.
+  // --- Debug log -------------------------------------------------------------- Off unless "Debug log" is on in the toolbar popup. Then every passkey step shows in this page's console (F12 → Console), as "[MYLE passkeys]": never a challenge, a key or a password.
   let debugging = false;
   const VERSION = ext.runtime.getManifest?.().version ?? "?";
   const debug = (...parts) => debugging && console.info("%c[MYLE passkeys]", "color:#848ede;font-weight:600", ...parts);
@@ -105,26 +77,20 @@
   const LOCAL = ["localhost", "127.0.0.1", "[::1]"];
   const siteName = location.hostname.replace(/^www\./, "");
 
-  // A page can shadow a form's methods and properties with fields named after
-  // them (<input name="action">), so these come from the prototypes.
+  // A page can shadow a form's methods and properties with fields named after them (<input name="action">), so these come from the prototypes.
   const getAttr = (el, name) => Element.prototype.getAttribute.call(el, name);
   const queryAll = (scope, selector) => [
     ...(scope instanceof Document ? Document.prototype : scope instanceof DocumentFragment ?
       DocumentFragment.prototype : Element.prototype).querySelectorAll.call(scope, selector),
   ];
 
-  // --- Web components -------------------------------------------------------
-  //
-  // Sign-in forms built of web components keep their fields in shadow roots,
-  // out of reach of a plain query. These look inside them too, a few levels
-  // down and over a bounded number of elements, once per task.
+  // --- Web components ------------------------------------------------------- Sign-in forms built of web components keep their fields in shadow roots, out of reach of a plain query. These look inside them too, a few levels down and over a bounded number of elements, once per task.
 
   const SHADOW_DEPTH = 6;
   const SHADOW_BUDGET = 15_000;
   let knownRoots = null;
 
-  /** An element's shadow root: open ones, and closed ones where the browser
-   *  shows them to extensions. */
+  /* An element's shadow root: open ones, and closed ones where the browser shows them to extensions. */
   function openRoot(el) {
     try {
       return el.openOrClosedShadowRoot ?? ext.dom?.openOrClosedShadowRoot?.(el) ?? el.shadowRoot ?? null;
@@ -206,8 +172,7 @@
 
   const marked = (el, token) => new RegExp(`\\b${token}\\b`, "i").test(getAttr(el, "autocomplete") ?? "");
 
-  /** The page's password fields, web components' included. A one-time code
-   *  field typed as a password is a 2FA field, not one of them. */
+  /* The page's password fields, web components' included. A one-time code field typed as a password is a 2FA field, not one of them. */
   const passwordFields = () =>
     deepAll('input[type="password"]').filter((el) => usable(el) && !marked(el, "one-time-code"));
 
@@ -218,8 +183,7 @@
     return /search|query/i.test(`${el.id} ${el.name} ${el.placeholder} ${getAttr(el, "aria-label") ?? ""}`);
   }
 
-  /** For a field outside any form: the part of the page it belongs to (its
-   *  dialog, or the nearest box with another field in it). */
+  /* For a field outside any form: the part of the page it belongs to (its dialog, or the nearest box with another field in it). */
   function containerOf(field) {
     const dialog = closestDeep(field, 'dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]');
     let scope = field.parentElement;
@@ -240,10 +204,7 @@
       (marked(field, "username") || field.type === "email" || /user|mail|login|account/i.test(hint));
   }
 
-  /** The user name field that goes with a password field: the nearest
-   *  visible text or email field before it, in the same form; outside a form,
-   *  in the same part of the page and only one that looks like a user name
-   *  (never the site's search box). */
+  /* The user name field that goes with a password field: the nearest visible text or email field before it, in the same form; outside a form, in the same part of the page and only one that looks like a user name (never the site's search box). */
   function usernameFor(password) {
     const fields = queryAll(password.form ?? containerOf(password), "input").filter(
       (el) => ["text", "email", "tel"].includes(el.type) && usable(el) && !isSearch(el),
@@ -266,14 +227,11 @@
     if (marked(field, "webauthn")) return true;
     const passwords = passwordFields();
     if (passwords.includes(field) || passwords.some((p) => usernameFor(p) === field)) return true;
-    // An email-first sign-in step: no password field beside it (yet), even
-    // with an unrelated password form elsewhere on the page.
+    // An email-first sign-in step: no password field beside it (yet), even with an unrelated password form elsewhere on the page.
     return isUsernameOnly(field) && !passwords.some((p) => together(p, field));
   }
 
-  /** In a sign-up or password-change form, the fields a new password goes
-   *  into (the new one and its repeat), when the clicked field is one of
-   *  them. `marked`: the site says so (autocomplete="new-password"). */
+  /* In a sign-up or password-change form, the fields a new password goes into (the new one and its repeat), when the clicked field is one of them. `marked`: the site says so (autocomplete="new-password"). */
   function newPasswordFields(field) {
     const none = { fields: [], marked: false };
     if (!(field instanceof HTMLInputElement) || field.type !== "password") return none;
@@ -285,12 +243,10 @@
     return fields.includes(field) ? { fields, marked: false } : none;
   }
 
-  // A 2FA code field: the site says so, or its name says so, or it is a row
-  // of one-digit boxes.
+  // A 2FA code field: the site says so, or its name says so, or it is a row of one-digit boxes.
   const CODE_WORDS = /one.?time|otp|2fa|mfa|two.?factor|authenticator|verification.?code|security.?code|auth.?code|passcode/i;
 
-  /** A box of a code split into one-character boxes: `maxlength=1`, or a
-   *  narrow box among others of the same width. */
+  /* A box of a code split into one-character boxes: `maxlength=1`, or a narrow box among others of the same width. */
   const narrow = (el) => el.getBoundingClientRect().width <= 64;
 
   /** The row of one-character boxes a code is split into, around `field`. */
@@ -315,8 +271,7 @@
     if (codeBoxes(field).length) return true;
     const hint = `${field.name} ${field.id} ${field.placeholder} ${getAttr(field, "aria-label") ?? ""}`;
     if (CODE_WORDS.test(hint)) return true;
-    // A short numeric field on its own: 6 to 8 digits, as codes are, and not
-    // named as a postal code, a phone number or a card's.
+    // A short numeric field on its own: 6 to 8 digits, as codes are, and not named as a postal code, a phone number or a card's.
     if (/zip|postal|post.?code|phone|mobile|card|cvc|cvv|amount|year|price|qty|quantity/i.test(hint)) return false;
     const numeric = field.inputMode === "numeric" || field.type !== "text" || /\\d|0-9/.test(getAttr(field, "pattern") ?? "");
     return numeric && field.maxLength >= 6 && field.maxLength <= 8;
@@ -350,10 +305,7 @@
     });
   }
 
-  /** Sets a value the way typing does, so the page's own code notices:
-   *  through the browser's own setter (React's value tracking sees it),
-   *  between the key and input events frameworks listen to (Vue, Angular,
-   *  jQuery handlers), then change. The field keeps the focus. */
+  /* Sets a value the way typing does, so the page's own code notices: through the browser's own setter (React's value tracking sees it), between the key and input events frameworks listen to (Vue, Angular, jQuery handlers), then change. The field keeps the focus. */
   function setValue(input, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     input.focus();
@@ -369,8 +321,7 @@
 
   function fill(credentials, chosen) {
     const passwords = passwordFields();
-    // From the toolbar, the focused field counts only when it is a sign-in
-    // field: the site's search box having the focus changes nothing.
+    // From the toolbar, the focused field counts only when it is a sign-in field: the site's search box having the focus changes nothing.
     const focused = deepActive();
     const selected = [chosen, focused].find((el) =>
       usable(el) && (el === chosen || el.type === "password" || isLoginField(el)));
@@ -387,11 +338,9 @@
         const candidates = deepAll("input").filter(isUsernameOnly);
         return candidates.length === 1 ? candidates[0] : null;
       })());
-    // An email-only sign-in step can coexist with an unrelated password form.
-    // A clicked email field in its own form is still an unambiguous target.
+    // An email-only sign-in step can coexist with an unrelated password form. A clicked email field in its own form is still an unambiguous target.
     const emailOnlyStep = selected?.form && isUsernameOnly(selected) && inForm.length === 0;
-    // Other multi-password pages may be registration or password-change
-    // forms. Filling only the user name there would falsely report success.
+    // Other multi-password pages may be registration or password-change forms. Filling only the user name there would falsely report success.
     if (passwords.length > 0 && credentials.password && !password && !emailOnlyStep)
       return { applied: false, error: "ambiguousFields" };
     if (insecureForm(password ?? username)) return { applied: false, error: "insecureForm" };
@@ -525,15 +474,13 @@
   const panel = root.querySelector(".panel");
   const bar = root.querySelector(".bar");
   const badge = root.querySelector(".badge");
-  // A click on MYLE's menu is not a click on the page: dialogs that close on
-  // an outside click (Radix, Headless UI) never hear of it.
+  // A click on MYLE's menu is not a click on the page: dialogs that close on an outside click (Radix, Headless UI) never hear of it.
   for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "touchstart"]) {
     host.addEventListener(type, (event) => event.stopPropagation());
   }
   /** When each part last appeared, moved or changed. */
   const since = new Map([[panel, 0], [bar, 0]]);
-  /** The parts the browser last saw fully visible, nothing over them
-   *  (Chromium's IntersectionObserver v2; other browsers cannot tell). */
+  /* The parts the browser last saw fully visible, nothing over them (Chromium's IntersectionObserver v2; other browsers cannot tell). */
   const unobscured = new Set();
   const tracker = "isVisible" in (globalThis.IntersectionObserverEntry?.prototype ?? {}) ?
     new IntersectionObserver((entries) => {
@@ -547,9 +494,7 @@
   let spot = "";
 
   function mount(field) {
-    // A login form in a modal dialog: the menu goes inside the dialog, or the
-    // dialog (or its focus trap) would leave it unclickable. It stays in the
-    // top layer, drawn over everything wherever it sits.
+    // A login form in a modal dialog: the menu goes inside the dialog, or the dialog (or its focus trap) would leave it unclickable. It stays in the top layer, drawn over everything wherever it sits.
     let parent = document.documentElement;
     try {
       const dialog = field ? closestDeep(field, 'dialog,[aria-modal="true"],[role="dialog"],[role="alertdialog"]') : null;
@@ -585,8 +530,7 @@
 
   const armTimers = new Map();
 
-  /** A part just shown or moved waits ARM_MS before a click on it counts,
-   *  and looks it: its items are dimmed until then. */
+  /* A part just shown or moved waits ARM_MS before a click on it counts, and looks it: its items are dimmed until then. */
   function rearm(part) {
     since.set(part, performance.now());
     part.classList.add("arming");
@@ -617,8 +561,7 @@
     spot = "";
   }
 
-  // The page changing the menu's element (its style, or its place in the top
-  // layer) closes the menu, and the element is put back as it was.
+  // The page changing the menu's element (its style, or its place in the top layer) closes the menu, and the element is put back as it was.
   const guard = new MutationObserver(() => {
     guard.disconnect();
     for (const name of host.getAttributeNames()) if (name !== "popover") host.removeAttribute(name);
@@ -632,9 +575,7 @@
     if (event.isTrusted && topLayer && !host.matches(":popover-open") && !(panel.hidden && bar.hidden && badge.hidden)) interfered();
   });
 
-  /** The page changed or closed MYLE's element. A passkey request whose prompt
-   *  was up is answered (refused) rather than left waiting with no prompt;
-   *  anything else simply closes. */
+  /* The page changed or closed MYLE's element. A passkey request whose prompt was up is answered (refused) rather than left waiting with no prompt; anything else simply closes. */
   function interfered() {
     hidePanel();
     hideBadge();
@@ -666,20 +607,14 @@
     }
   }
 
-  // --- The badge in the field -------------------------------------------------
-  //
-  // MYLE's mark, drawn over the right end of the focused sign-in or 2FA field
-  // (in MYLE's own layer: the page's layout never changes). A click on it
-  // opens the menu; it fills nothing itself.
+  // --- The badge in the field ------------------------------------------------- MYLE's mark, drawn over the right end of the focused sign-in or 2FA field (in MYLE's own layer: the page's layout never changes). A click on it opens the menu; it fills nothing itself.
 
   let badgeFor = null;
   let badgeTimer = 0;
   let following = 0;
   const BADGE = 22;
 
-  /** Where the badge goes in `field`, or null when it has no room. A field
-   *  with room kept on its right holds the page's own icon there (show
-   *  password, say): the badge sits just left of it. */
+  /* Where the badge goes in `field`, or null when it has no room. A field with room kept on its right holds the page's own icon there (show password, say): the badge sits just left of it. */
   function badgeSpot(field) {
     const r = field.getBoundingClientRect();
     if (r.width < 90 || r.height < 18 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return null;
@@ -715,8 +650,7 @@
     hide(badge);
   }
 
-  /** While the badge or the menu shows: keeps them on their field, and
-   *  closes them when the field goes away. Stops as soon as neither shows. */
+  /* While the badge or the menu shows: keeps them on their field, and closes them when the field goes away. Stops as soon as neither shows. */
   function follow() {
     if (following) return;
     const step = () => {
@@ -754,11 +688,7 @@
     else void showFor(field, true);
   });
 
-  /** Why a click (or Enter) on the menu does not count, or "" when it is the
-   *  user's own, on the menu as they could see it: not made up by a script,
-   *  not the second click of a double click, not on a menu that just
-   *  appeared or moved under the pointer, and not through something drawn
-   *  over it ("covered"). */
+  /* Why a click (or Enter) on the menu does not count, or "" when it is the user's own, on the menu as they could see it: not made up by a script, not the second click of a double click, not on a menu that just appeared or moved under the pointer, and not through something drawn over it ("covered"). */
   function refusal(event, part, button) {
     if (!event.isTrusted || event.detail > 1) return "fake";
     if (part.hidden || performance.now() - since.get(part) < ARM_MS) return "early";
@@ -773,8 +703,7 @@
     return document.elementFromPoint(event.clientX, event.clientY) === host ? "" : "covered";
   }
 
-  /** Whether a click on the menu counts; if something covered the menu, says
-   *  so (shown again, the menu comes back on top). */
+  /* Whether a click on the menu counts; if something covered the menu, says so (shown again, the menu comes back on top). */
   function genuine(event, part, button) {
     const why = refusal(event, part, button);
     if (why === "early") {
@@ -797,8 +726,7 @@
     return hash % 360;
   }
 
-  /** A login's avatar: its website's icon when the app has one, else its
-   *  first letter on its site's colour. */
+  /* A login's avatar: its website's icon when the app has one, else its first letter on its site's colour. */
   function avatarFor(login, title) {
     const avatar = document.createElement("span");
     avatar.className = "avatar";
@@ -922,8 +850,7 @@
     return button;
   }
 
-  /** A code with this few seconds left is not worth typing: the next one is
-   *  waited for (sites refuse a code that expired on the way). */
+  /* A code with this few seconds left is not worth typing: the next one is waited for (sites refuse a code that expired on the way). */
   const CODE_ENDING = 3;
 
   /** The login's current 2FA code, a fresh one when it is about to change. */
@@ -951,12 +878,10 @@
     return button;
   }
 
-  /** Fields that showed a menu with nothing to click (only a note): it is
-   *  not shown again on every click there; the badge still shows it. */
+  /* Fields that showed a menu with nothing to click (only a note): it is not shown again on every click there; the badge still shows it. */
   const noted = new WeakSet();
 
-  /** Shows `items` for `field`, unless they are only a note already shown
-   *  there (`forced`: asked from the badge, shown anyway). */
+  /* Shows `items` for `field`, unless they are only a note already shown there (`forced`: asked from the badge, shown anyway). */
   function offer(field, items, forced) {
     const notesOnly = items.every((el) => el.classList?.contains("note"));
     if (notesOnly && !forced && noted.has(field)) return hidePanel();
@@ -997,8 +922,7 @@
     }
   }
 
-  /** On a 2FA code field: the codes of this site's logins that have a key.
-   *  Nothing at all when none has (the code may come by SMS or email). */
+  /* On a 2FA code field: the codes of this site's logins that have a key. Nothing at all when none has (the code may come by SMS or email). */
   async function showCodesFor(field, forced = false) {
     anchor = field;
     const answer = await send({ type: "logins" });
@@ -1040,8 +964,7 @@
     return button;
   }
 
-  /** Opens MYLE; with `field`, the menu comes back on its own, with the
-   *  logins (and passkeys), as soon as the vault is unlocked. */
+  /* Opens MYLE; with `field`, the menu comes back on its own, with the logins (and passkeys), as soon as the vault is unlocked. */
   function openButton(label, glyphName, field = null) {
     const button = item(label, field ? "Opens MYLE · this menu comes back once it is unlocked" : "Opens MYLE on this PC",
       glyphAvatar(glyphName));
@@ -1064,9 +987,7 @@
     return button;
   }
 
-  /** The logins whose user name this page already shows: on a password step
-   *  (Google's, say) the account chosen before, from a user name field,
-   *  visible or hidden, or the page's own text. Empty when none, or all. */
+  /* The logins whose user name this page already shows: on a password step (Google's, say) the account chosen before, from a user name field, visible or hidden, or the page's own text. Empty when none, or all. */
   function accountsOnPage(logins, field) {
     const typed = deepAll("input")
       .filter((el) => el !== field && el.type !== "password" && el.value &&
@@ -1153,8 +1074,7 @@
       const field = path.find((el) => el instanceof HTMLInputElement);
       if (clicked(field)) return;
       hidePanel();
-      // Some sign-in forms keep their fields read-only until they get the
-      // focus (against the browser's own autofill): looked at again then.
+      // Some sign-in forms keep their fields read-only until they get the focus (against the browser's own autofill): looked at again then.
       if (field?.readOnly && ["text", "email", "tel", "password"].includes(field.type)) {
         setTimeout(() => !field.readOnly && deepActive() === field && clicked(field), 0);
       }
@@ -1162,8 +1082,7 @@
     true,
   );
 
-  // The badge shows in the field that has the focus, when a click there
-  // would open the menu; it goes when the focus does.
+  // The badge shows in the field that has the focus, when a click there would open the menu; it goes when the focus does.
   document.addEventListener(
     "focusin",
     (event) => {
@@ -1234,8 +1153,7 @@
   addEventListener("scroll", () => !panel.hidden && anchor && place(anchor), true);
   addEventListener("resize", () => !panel.hidden && anchor && place(anchor));
   addEventListener("pagehide", (event) => {
-    // Kept in the back/forward cache, the page's waiting sign-in form (a
-    // conditional request) is still there when the user comes back.
+    // Kept in the back/forward cache, the page's waiting sign-in form (a conditional request) is still there when the user comes back.
     const kept = event?.persisted === true;
     const requests = new Set([prompted, kept ? null : waitingPasskey?.id].filter(Boolean));
     prompted = null;
@@ -1265,9 +1183,7 @@
   ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== ext.runtime.id) return;
     if (message?.type === "census" && typeof message.round === "string") {
-      // Answered with a message of our own, so the browser tells the
-      // extension which frame and address this is; never through
-      // sendResponse, which would end the census at the first frame.
+      // Answered with a message of our own, so the browser tells the extension which frame and address this is; never through sendResponse, which would end the census at the first frame.
       void send({ type: "present", round: message.round, ...inspection() });
     } else if (message?.type === "inspect") {
       sendResponse(inspection());
@@ -1277,11 +1193,7 @@
     }
   });
 
-  // --- Passkeys --------------------------------------------------------------
-  //
-  // The site's navigator.credentials calls come from passkeys.js, in the
-  // page's world. The user decides here, in MYLE's own prompt; the app answers
-  // for the address the browser reports, never one the page names.
+  // --- Passkeys -------------------------------------------------------------- The site's navigator.credentials calls come from passkeys.js, in the page's world. The user decides here, in MYLE's own prompt; the app answers for the address the browser reports, never one the page names.
 
   const FROM_PAGE = "myle-passkeys/page";
   const TO_PAGE = "myle-passkeys/extension";
@@ -1290,12 +1202,9 @@
   let waitingPasskey = null;
   /** The request MYLE's prompt is for. */
   let prompted = null;
-  /** Each time the prompt is drawn: a wait started for an earlier drawing ends
-   *  when the prompt is drawn again ("Try again"), so a request is never
-   *  carried on twice. */
+  /* Each time the prompt is drawn: a wait started for an earlier drawing ends when the prompt is drawn again ("Try again"), so a request is never carried on twice. */
   let promptToken = {};
-  /** The save-login offer the prompt took the place of, shown again after it;
-   *  and whether an offer came while the prompt was up. */
+  /* The save-login offer the prompt took the place of, shown again after it; and whether an offer came while the prompt was up. */
   let shownOffer = null;
   let displacedOffer = null;
   let offerAfterPrompt = false;
@@ -1324,8 +1233,7 @@
     hide(bar);
     if (requestId) void send({ type: "passkeyCancel", requestId });
     void send({ type: "stopWaiting" });
-    // A save-login offer the prompt covered comes back; one that arrived
-    // meanwhile is shown now.
+    // A save-login offer the prompt covered comes back; one that arrived meanwhile is shown now.
     const offer = displacedOffer;
     displacedOffer = null;
     if (offer) offer();
@@ -1335,8 +1243,7 @@
     }
   }
 
-  /** MYLE's prompt: a title, a line, what goes between, then the buttons
-   *  ([label, primary, run]). Returns the line, to say what happens. */
+  /* MYLE's prompt: a title, a line, what goes between, then the buttons ([label, primary, run]). Returns the line, to say what happens. */
   function prompt(id, title, line, buttons, between = []) {
     if (!prompted && shownOffer && !bar.hidden) displacedOffer = shownOffer;
     prompted = id;
@@ -1390,9 +1297,7 @@
     noVault: "MYLE has no vault on this PC yet. Make one, then try again.",
   };
 
-  /** Waits for the vault to be unlocked while prompt `id` is up, then carries
-   *  on with `retry`: the user only has to unlock MYLE. Asks in rounds, so the
-   *  prompt says how far MYLE is; the page's request stays open all the while. */
+  /* Waits for the vault to be unlocked while prompt `id` is up, then carries on with `retry`: the user only has to unlock MYLE. Asks in rounds, so the prompt says how far MYLE is; the page's request stays open all the while. */
   async function carryOnWhenUnlocked(id, text, retry) {
     const started = Date.now();
     const token = promptToken;
@@ -1412,8 +1317,7 @@
         return retry();
       }
       const state = waited.state;
-      // MYLE answered, but not the way this extension knows, or with nothing to
-      // unlock: saying "still locked" would send the user after an open vault.
+      // MYLE answered, but not the way this extension knows, or with nothing to unlock: saying "still locked" would send the user after an open vault.
       if (WAIT_ENDINGS[state]) {
         debug("MYLE answered without a vault to unlock", state, waited?.detail ?? "");
         text.textContent = WAIT_ENDINGS[state];
@@ -1433,10 +1337,7 @@
     text.textContent = "MYLE did not open in time. Open and unlock it, then press Try again.";
   }
 
-  /** Whether MYLE takes part for this site; else the browser's own passkeys.
-   *  With MYLE closed or locked the user is asked to open it, and the request
-   *  goes on by itself after: the vault may hold this site's passkey, and not
-   *  asking at all is what makes it look like MYLE has none. */
+  /* Whether MYLE takes part for this site; else the browser's own passkeys. With MYLE closed or locked the user is asked to open it, and the request goes on by itself after: the vault may hold this site's passkey, and not asking at all is what makes it look like MYLE has none. */
   async function passkeysHere(id, options, retry) {
     const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [], wake: true });
     debug("MYLE's list", listed?.ok ?
@@ -1448,9 +1349,7 @@
     const closed = listed?.error === "notRunning";
     const locked = listed?.error === "locked";
     if (locked || closed) {
-      // Asked before MYLE knows this site: "there may be one" is enough. It is
-      // the answer, not the question, that has to be accurate: MYLE leaves the
-      // sign-in to the browser when it turns out to have nothing.
+      // Asked before MYLE knows this site: "there may be one" is enough. It is the answer, not the question, that has to be accurate: MYLE leaves the sign-in to the browser when it turns out to have nothing.
       const title = listed?.known
         ? `Your passkey for ${site} is in MYLE`
         : closed
@@ -1475,9 +1374,7 @@
           }
         }],
       ]);
-      // MYLE has this site's passkey (or is merely locked): it is started and
-      // brought forward at once, asks to be unlocked (Windows Hello when it
-      // is on), and the sign-in carries on by itself.
+      // MYLE has this site's passkey (or is merely locked): it is started and brought forward at once, asks to be unlocked (Windows Hello when it is on), and the sign-in carries on by itself.
       if (!closed || listed?.known) {
         if (closed || locked) void send({ type: "open" });
         waiting = true;
@@ -1486,8 +1383,7 @@
     } else {
       prompted = null;
       debug(`leaving it to the browser: ${listed?.error ?? "no answer"}`);
-      // MYLE keeps its strict RP scope. The browser may also validate related
-      // origins, so a scope MYLE cannot serve is left to its original API.
+      // MYLE keeps its strict RP scope. The browser may also validate related origins, so a scope MYLE cannot serve is left to its original API.
       answerPage(id, { result: "native" });
     }
     return null;
@@ -1495,9 +1391,7 @@
 
   // --- Passkey naming -------------------------------------------------------
 
-  // A site's display name is separate from WebAuthn's random credential id.
-  // After a creation the user chose in MYLE, fill an explicit new naming
-  // field if the site offers one. Never submit it or guess an existing key.
+  // A site's display name is separate from WebAuthn's random credential id. After a creation the user chose in MYLE, fill an explicit new naming field if the site offers one. Never submit it or guess an existing key.
   const PASSKEY_NAMING_FOR = 120_000;
   let passkeyNaming = null;
 
@@ -1532,13 +1426,11 @@
     const title = passkeyNamingTitle(dialog);
     if (!/(?:pass\s*key|security\s*key|κλειδι.{0,30}(?:προσβα|ασφαλ))/u.test(title) ||
         !/\b(?:name|rename|nickname|label)\b|ονομα/u.test(title)) return null;
-    // A rename editor might belong to an older key. Only an explicit
-    // credential-id match makes that editor eligible for this creation.
+    // A rename editor might belong to an older key. Only an explicit credential-id match makes that editor eligible for this creation.
     const identifiers = [dialog, ...dialog.querySelectorAll("[data-credential-id]")]
       .map((element) => getAttr(element, "data-credential-id")).filter(Boolean);
     if (identifiers.some((id) => id !== pending.credentialId)) return null;
-    // A newly mounted editor can still belong to an old credential. Without an
-    // exact ID, accept only a prompt explicitly naming a newly created key.
+    // A newly mounted editor can still belong to an old credential. Without an exact ID, accept only a prompt explicitly naming a newly created key.
     const explicitlyNew = /\bnew(?:ly created)?\s+pass\s*key\b|\bpass\s*key\s+(?:you\s+)?just created\b|(?:^|\s)νεο(?:υ)?\s+κλειδι/u.test(title);
     if (!identifiers.includes(pending.credentialId) &&
         (!explicitlyNew || /\brename\b|μετονομα/u.test(title))) return null;
@@ -1659,8 +1551,7 @@
     userVerification: options.userVerification,
   });
 
-  /** `afterUnlock`: the user just opened MYLE for this sign-in; with one
-   *  passkey for it, that is the choice, and it is used at once. */
+  /* `afterUnlock`: the user just opened MYLE for this sign-in; with one passkey for it, that is the choice, and it is used at once. */
   async function offerSignIn(id, options, afterUnlock = false) {
     const listed = await passkeysHere(id, options, () => offerSignIn(id, options, true));
     if (!listed) return;
@@ -1706,9 +1597,7 @@
     }
   }
 
-  /** MYLE has a passkey for the site, but the site asked only for others
-   *  (its sign-in lists the passkeys it knows for the account): said, rather
-   *  than stepping aside without a word. */
+  /* MYLE has a passkey for the site, but the site asked only for others (its sign-in lists the passkeys it knows for the account): said, rather than stepping aside without a word. */
   function notAskedFor(id, listed) {
     const many = listed.unlisted > 1;
     prompt(id, `${listed.rpId} did not ask for MYLE's passkey`,
@@ -1720,16 +1609,14 @@
       ]);
   }
 
-  /** For the menu on a sign-in field: the passkeys a waiting sign-in form
-   *  (mediation: "conditional") can use. */
+  /* For the menu on a sign-in field: the passkeys a waiting sign-in form (mediation: "conditional") can use. */
   async function passkeyChoices() {
     const none = { items: [], locked: false };
     const waiting = waitingPasskey;
     if (!waiting) return none;
     const listed = await send({ type: "passkeyList", rpId: waiting.options.rpId, allow: waiting.options.allow ?? [] });
     if (waitingPasskey !== waiting) return none;
-    // MYLE has a passkey here but is locked or closed: the menu's own
-    // "Unlock MYLE" says so, and shows it once the vault opens.
+    // MYLE has a passkey here but is locked or closed: the menu's own "Unlock MYLE" says so, and shows it once the vault opens.
     if (!listed?.ok) return { items: [], locked: listed?.known === true };
     if (!Array.isArray(listed.passkeys)) return none;
     const items = listed.passkeys.slice(0, 4).map((key) => {
@@ -1763,8 +1650,7 @@
       if (event.source !== window || event.data?.source !== FROM_PAGE || event.data.kind === "trace") return;
       const { id, kind, options } = event.data;
       if (typeof id !== "string" || id.length > 80) return;
-      // A question asked before this script started comes again when it says
-      // hello; one that was heard anyway is answered once.
+      // A question asked before this script started comes again when it says hello; one that was heard anyway is answered once.
       if (kind !== "abort") {
         if (heard.has(id)) return;
         heard.add(id);
@@ -1797,8 +1683,7 @@
         answerPage(id, { result: "native" });
       }
     });
-    // Listening now: the page-world part asks again what it asked before. It
-    // also learns that this copy says when it heard a question.
+    // Listening now: the page-world part asks again what it asked before. It also learns that this copy says when it heard a question.
     window.postMessage({ source: TO_PAGE, kind: "hello", acks: true }, location.origin);
   }
 
@@ -1844,8 +1729,7 @@
     void send({ type: "submitted", username, password: password.value }).then(() => {
       // A 2FA step that comes on this same page (a web app): watched for.
       void watchForCode();
-      // A sign-in that stays on this page (a web app changing its own view):
-      // once the form is gone or the address changed, the offer shows here.
+      // A sign-in that stays on this page (a web app changing its own view): once the form is gone or the address changed, the offer shows here.
       if (window !== window.top) return;
       setTimeout(() => {
         if (location.href !== sentFrom || !password.isConnected || !visible(password)) void offerSave();
@@ -1861,8 +1745,7 @@
   /** What a button that sends a sign-in or sign-up says. */
   const SEND_WORDS = /log ?in|sign ?in|sign ?on|continue|next|sign ?up|register|create (?:an |your )?account|σύνδεση|είσοδος|εγγραφή|συνέχεια/i;
 
-  /** The part of the page around `el` that holds a password field, if any
-   *  (a link or a div acting as the button of a formless sign-in). */
+  /* The part of the page around `el` that holds a password field, if any (a link or a div acting as the button of a formless sign-in). */
   function passwordGroupOf(el) {
     let scope = el.parentElement;
     for (let depth = 0; scope && depth < 6; depth++, scope = scope.parentElement) {
@@ -1871,9 +1754,7 @@
     return null;
   }
 
-  // Many sign-in pages send with a script, not a form: a click on a submit
-  // button, on a link or element acting as one, or Enter in the password
-  // field, counts too.
+  // Many sign-in pages send with a script, not a form: a click on a submit button, on a link or element acting as one, or Enter in the password field, counts too.
   document.addEventListener(
     "click",
     (event) => {
@@ -1903,8 +1784,7 @@
       offerAfterPrompt = true;
       return;
     }
-    // The sign-in form is shown again: the password was most likely refused.
-    // The login waits (for the next page) rather than being offered now.
+    // The sign-in form is shown again: the password was most likely refused. The login waits (for the next page) rather than being offered now.
     if (passwordFields().length) return;
     const pending = await send({ type: "pending" });
     if (typeof pending?.nonce !== "string" || offerShown === pending.nonce) return;
@@ -1960,8 +1840,7 @@
       show(bar);
       if (settled) return;
       settled = true;
-      // Still here after a moment (not a page that redirects on): the offer is
-      // made, and not shown again on a reload or another page.
+      // Still here after a moment (not a page that redirects on): the offer is made, and not shown again on a reload or another page.
       setTimeout(() => !document.hidden && void send({ type: "offerSettled", nonce: pending.nonce }), 2000);
     }
     // A prompt came up while MYLE was asked: the offer is shown after it.
@@ -1972,11 +1851,7 @@
   // The offer shows once, in the page itself, not in its frames.
   if (window === window.top) void offerSave();
 
-  // --- 2FA right after signing in ---------------------------------------------
-  //
-  // A password was sent or filled on this site in this tab a moment ago: for
-  // a minute, the first 2FA code field that gets the focus opens the codes
-  // menu by itself, once. Filling still takes the user's click.
+  // --- 2FA right after signing in --------------------------------------------- A password was sent or filled on this site in this tab a moment ago: for a minute, the first 2FA code field that gets the focus opens the codes menu by itself, once. Filling still takes the user's click.
 
   const CODE_WATCH_MS = 60_000;
   let codeWatch = null;
@@ -2011,8 +1886,7 @@
     const onFocus = (event) => {
       if (event.isTrusted) offerFor(event.composedPath().find((el) => el instanceof HTMLInputElement));
     };
-    // The page changing (the 2FA step drawn): the focused field looked at,
-    // at most a few times a second.
+    // The page changing (the 2FA step drawn): the focused field looked at, at most a few times a second.
     const observer = new MutationObserver(() => {
       if (!pending) pending = setTimeout(() => {
         pending = 0;
@@ -2027,15 +1901,9 @@
 
   void watchForCode();
 
-  // --- 2FA keys on a setup page -----------------------------------------------
-  //
-  // A site turning on 2FA shows its key: a QR code, and mostly the key as text
-  // too ("Can't scan it?"). MYLE offers to keep the key with the site's login,
-  // so it fills the codes from then on. A QR code alone is read from the
-  // toolbar popup.
+  // --- 2FA keys on a setup page ----------------------------------------------- A site turning on 2FA shows its key: a QR code, and mostly the key as text too ("Can't scan it?"). MYLE offers to keep the key with the site's login, so it fills the codes from then on. A QR code alone is read from the toolbar popup.
 
-  // Whole words only: "2fa" inside a hex or base64 blob, or a "one-time
-  // purchase", is no 2FA setup.
+  // Whole words only: "2fa" inside a hex or base64 blob, or a "one-time purchase", is no 2FA setup.
   const SETUP_WORDS = /authenticator|two.?factor|two.?step|\b2fa\b|\bmfa\b|setup key|secret key|can.?t scan|scan (?:the|this) (?:qr|code)|enter (?:this|the) (?:key|code)|one.?time (?:code|password|passcode|pin)|\btotp\b/i;
   /** Words that go with a QR code to scan, in the key's own part of the page. */
   const SCAN_WORDS = /scan|authenticator|setup key|secret key|can.?t scan|manual|2fa|two.?factor|totp/i;
@@ -2052,8 +1920,7 @@
     if (plain.length < 16 || plain.length > 160) return null;
     const bare = plain.replace(/[\s-]/g, "").replace(/=+$/, "");
     if (bare.length < 16 || bare.length > 128 || !/^[A-Z2-7]+$/i.test(bare)) return null;
-    // Letters alone and short: more likely a word or an id than a key; and
-    // keys are written in one case.
+    // Letters alone and short: more likely a word or an id than a key; and keys are written in one case.
     if (!/[2-7]/.test(bare) && bare.length < 26) return null;
     if (bare !== bare.toUpperCase() && bare !== bare.toLowerCase()) return null;
     return plain;
@@ -2062,9 +1929,7 @@
   /** Pictures read already, and whether each was a QR code. */
   const readPictures = new WeakMap();
 
-  /** A picture shaped like a QR code: square, 90–600 px, not rounded (an
-   *  avatar) and not named as something else; one read and found not to be
-   *  a QR code is not. */
+  /* A picture shaped like a QR code: square, 90–600 px, not rounded (an avatar) and not named as something else; one read and found not to be a QR code is not. */
   function qrShaped(el) {
     if (readPictures.get(el) === false) return false;
     const r = el.getBoundingClientRect();
@@ -2074,8 +1939,7 @@
     return (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0) < r.width * 0.15;
   }
 
-  /** The grey levels of a picture on the page, when the page lets them be
-   *  read (not an image from another site), at most 480 px wide. */
+  /* The grey levels of a picture on the page, when the page lets them be read (not an image from another site), at most 480 px wide. */
   async function greyOf(el) {
     const r = el.getBoundingClientRect();
     const scale = Math.min(1, 480 / Math.max(r.width, r.height));
@@ -2122,9 +1986,7 @@
     return false;
   }
 
-  /** A QR code on the page that holds a 2FA link: read by MYLE. Only a
-   *  QR-shaped picture with words about scanning near it is read at all, and
-   *  each picture once. */
+  /* A QR code on the page that holds a 2FA link: read by MYLE. Only a QR-shaped picture with words about scanning near it is read at all, and each picture once. */
   async function linkInQr() {
     for (const el of queryAll(document, "img, canvas, svg").slice(0, 60)) {
       if (readPictures.has(el) || !qrShaped(el)) continue;
@@ -2146,8 +2008,7 @@
     return null;
   }
 
-  /** A 2FA setup is a QR code with its key written right beside it, and
-   *  words about scanning it; a key alone in a page about 2FA is not. */
+  /* A 2FA setup is a QR code with its key written right beside it, and words about scanning it; a key alone in a page about 2FA is not. */
   function besideQr(el) {
     let scope = el.parentElement;
     for (let depth = 0; scope && depth < 3; depth++, scope = scope.parentElement) {
@@ -2205,8 +2066,7 @@
     void send({ type: "keyDismiss", secret });
   };
 
-  /** Says how it went, then closes, unless another prompt (a passkey
-   *  sign-in) has taken its place meanwhile. */
+  /* Says how it went, then closes, unless another prompt (a passkey sign-in) has taken its place meanwhile. */
   function settleKey(text, words, id) {
     text.textContent = words;
     setTimeout(() => prompted === id && closePrompt(), 3200);
@@ -2284,8 +2144,7 @@
   }
 
   let scanning = false;
-  /** A page that keeps changing is looked at every 2 seconds at most, and a
-   *  limited number of times; then (or once a key was offered) no more. */
+  /* A page that keeps changing is looked at every 2 seconds at most, and a limited number of times; then (or once a key was offered) no more. */
   const KEY_SCAN_EVERY = 2000;
   const KEY_SCANS = 80;
   let keyWatcher = null;

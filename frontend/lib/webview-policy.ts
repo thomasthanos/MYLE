@@ -5,7 +5,6 @@ interface Shortcut {
   altKey: boolean;
   metaKey: boolean;
 }
-
 /** Release windows keep editing shortcuts, but expose no browser tools. */
 export function blockedWebviewShortcut(event: Shortcut, development: boolean): boolean {
   if (development) return false;

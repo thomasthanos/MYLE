@@ -1,17 +1,8 @@
-//! Built-in Windows Auto-Logon support.
-//!
-//! The webview never supplies an account, registry path, command, or secret.
-//! The non-elevated process identifies its own token SID and launches this
-//! executable in a narrowly-scoped helper mode. The helper re-derives the SID
-//! from the original parent process, validates a password with `LogonUserW`,
-//! and writes the password only to the documented LSA `DefaultPassword`
-//! private-data slot.
-
+// ! Built-in Windows Auto-Logon support. ! ! The webview never supplies an account, registry path, command, or secret. ! The non-elevated process identifies its own token SID and launches this ! executable in a narrowly-scoped helper mode. The helper re-derives the SID ! from the original parent process, validates a password with `LogonUserW`, ! and writes the password only to the documented LSA `DefaultPassword` ! private-data slot.
 use std::borrow::Cow;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::AppHandle;
@@ -21,7 +12,6 @@ use winreg::enums::{
     REG_SZ, RegType,
 };
 use winreg::{RegKey, RegValue};
-
 use super::models::{
     AutoLogonAccountType, AutoLogonOperation, AutoLogonOutcome, AutoLogonSetResult,
     AutoLogonSnapshot, AutoLogonStatus,
@@ -34,7 +24,6 @@ const REQUEST_FILE: &str = "request.json";
 const HELPER_ARGUMENT: &str = "--windows-autologon-helper";
 const REQUEST_ARGUMENT: &str = "--request";
 const FORMAT_VERSION: u32 = 1;
-
 const HELPER_OK: i32 = 0;
 const HELPER_CANCELLED: i32 = 20;
 const HELPER_CONFLICT: i32 = 21;
@@ -42,7 +31,6 @@ const HELPER_UNSUPPORTED: i32 = 22;
 const HELPER_FAILED: i32 = 23;
 const HELPER_INVALID_CREDENTIALS: i32 = 24;
 const HELPER_SID_MISMATCH: i32 = 25;
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HelperRequest {
@@ -53,7 +41,6 @@ struct HelperRequest {
     target_sid: String,
     state_fingerprint: String,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OwnershipMetadata {
@@ -64,37 +51,31 @@ struct OwnershipMetadata {
     previous_user: Option<StoredRegistryValue>,
     previous_domain: Option<StoredRegistryValue>,
 }
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredRegistryValue {
     kind: StoredRegistryKind,
     bytes: Vec<u8>,
 }
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum StoredRegistryKind {
     String,
     ExpandString,
 }
-
 struct SecretRegistryValue {
     kind: RegType,
     bytes: Vec<u8>,
 }
-
 impl Drop for SecretRegistryValue {
     fn drop(&mut self) {
         for byte in &mut self.bytes {
-            // SAFETY: the byte reference is valid and the volatile write keeps
-            // plaintext rollback material from being optimized back in.
+            // SAFETY: the byte reference is valid and the volatile write keeps plaintext rollback material from being optimized back in.
             unsafe { std::ptr::write_volatile(byte, 0) };
         }
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
-
 #[derive(Clone, Debug)]
 struct Identity {
     sid: String,
@@ -104,7 +85,6 @@ struct Identity {
     display_name: String,
     account_type: AutoLogonAccountType,
 }
-
 impl Identity {
     fn account_name(&self) -> String {
         match self.account_type {
@@ -119,7 +99,6 @@ impl Identity {
             _ => qualified_name(&self.domain, &self.name),
         }
     }
-
     fn credential_name(&self) -> String {
         match (self.account_type, self.upn.as_deref()) {
             (AutoLogonAccountType::Microsoft, Some(upn)) => {
@@ -131,7 +110,6 @@ impl Identity {
         }
     }
 }
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistrySnapshot {
@@ -144,14 +122,12 @@ struct RegistrySnapshot {
     legal_notice_caption: Option<String>,
     legal_notice_text: Option<String>,
 }
-
 impl RegistrySnapshot {
     fn enabled(&self) -> bool {
         self.auto_admin_logon
             .as_deref()
             .is_some_and(|value| value.trim() == "1")
     }
-
     fn configured_user(&self) -> Option<String> {
         self.default_user_name.as_deref().and_then(|user| {
             let user = user.trim();
@@ -165,7 +141,6 @@ impl RegistrySnapshot {
             }
         })
     }
-
     fn blocker(&self) -> Option<String> {
         if self
             .force_auto_logon
@@ -202,7 +177,6 @@ impl RegistrySnapshot {
         None
     }
 }
-
 fn qualified_name(domain: &str, user: &str) -> String {
     if domain.trim().is_empty() {
         user.to_string()
@@ -210,11 +184,9 @@ fn qualified_name(domain: &str, user: &str) -> String {
         format!("{}\\{}", domain.trim(), user.trim())
     }
 }
-
 fn same_text(left: &str, right: &str) -> bool {
     left.trim().eq_ignore_ascii_case(right.trim())
 }
-
 fn ownership_matches(
     ownership: Option<&OwnershipMetadata>,
     identity: &Identity,
@@ -234,7 +206,6 @@ fn ownership_matches(
                 .eq_ignore_ascii_case(owner.applied_domain.trim())
     })
 }
-
 fn ownership_belongs_to_identity(
     ownership: Option<&OwnershipMetadata>,
     identity: &Identity,
@@ -243,7 +214,6 @@ fn ownership_belongs_to_identity(
         owner.version == FORMAT_VERSION && same_text(&owner.sid, &identity.sid)
     })
 }
-
 fn configured_matches_identity(
     identity: &Identity,
     registry: &RegistrySnapshot,
@@ -283,7 +253,6 @@ fn configured_matches_identity(
         .and_then(|account| lookup_account_sid(&account).ok())
         .is_some_and(|sid| same_text(&sid, &identity.sid))
 }
-
 fn derive_snapshot(
     identity: &Identity,
     registry: &RegistrySnapshot,
@@ -332,7 +301,6 @@ fn derive_snapshot(
     } else {
         (AutoLogonStatus::Disabled, None)
     };
-
     AutoLogonSnapshot {
         status,
         display_name: identity.display_name.clone(),
@@ -340,13 +308,11 @@ fn derive_snapshot(
         account_type: identity.account_type,
         configured_user: registry.configured_user(),
         blocked_reason,
-        // Also true for a pending recovery marker whose identity writes were
-        // only partially completed. The frontend uses this to offer cleanup.
+        // Also true for a pending recovery marker whose identity writes were only partially completed. The frontend uses this to offer cleanup.
         owned_by_app: belongs_to_current,
         active_operation: operation,
     }
 }
-
 fn unavailable_snapshot(reason: impl Into<String>) -> AutoLogonSnapshot {
     AutoLogonSnapshot {
         status: AutoLogonStatus::Unavailable,
@@ -359,7 +325,6 @@ fn unavailable_snapshot(reason: impl Into<String>) -> AutoLogonSnapshot {
         active_operation: None,
     }
 }
-
 pub fn snapshot(app: &AppHandle, operation: Option<AutoLogonOperation>) -> AutoLogonSnapshot {
     match inspect(app) {
         Ok(inspected) => derive_snapshot(
@@ -379,13 +344,11 @@ pub fn snapshot(app: &AppHandle, operation: Option<AutoLogonOperation>) -> AutoL
         }
     }
 }
-
 struct Inspected {
     identity: Identity,
     registry: RegistrySnapshot,
     ownership: Option<OwnershipMetadata>,
 }
-
 fn inspect(_app: &AppHandle) -> Result<Inspected, String> {
     let identity = current_identity()?;
     let registry = read_registry()?;
@@ -396,7 +359,6 @@ fn inspect(_app: &AppHandle) -> Result<Inspected, String> {
         ownership,
     })
 }
-
 pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonOutcome, String> {
     let inspected = inspect(app)?;
     let current = derive_snapshot(
@@ -405,7 +367,6 @@ pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonO
         inspected.ownership.as_ref(),
         None,
     );
-
     if enabled {
         match current.status {
             AutoLogonStatus::Enabled => {
@@ -437,7 +398,6 @@ pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonO
             }
         }
     }
-
     let workspace = HelperWorkspace::create()?;
     let request_path = workspace.request_path();
     let action = if enabled {
@@ -453,11 +413,8 @@ pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonO
         target_sid: inspected.identity.sid.clone(),
         state_fingerprint: state_fingerprint(&inspected.identity.sid, &inspected.registry)?,
     };
-    // Keep a no-share-write handle open until the helper exits. The elevated
-    // process can read the request, while same-user processes cannot race in
-    // and change the requested action after the UAC confirmation appears.
+    // Keep a no-share-write handle open until the helper exits. The elevated process can read the request, while same-user processes cannot race in and change the requested action after the UAC confirmation appears.
     let _request_lock = write_new_json(request_path, &request)?;
-
     let executable = std::env::current_exe()
         .map_err(|error| format!("Could not locate the application executable: {error}"))?;
     let args = vec![
@@ -514,14 +471,12 @@ pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonO
         )),
     }
 }
-
 fn outcome(result: AutoLogonSetResult, note: impl Into<String>) -> AutoLogonOutcome {
     AutoLogonOutcome {
         result,
         note: Some(note.into()),
     }
 }
-
 pub fn run_helper_from_args() -> Option<i32> {
     let mut arguments = std::env::args_os();
     let _ = arguments.next();
@@ -539,7 +494,6 @@ pub fn run_helper_from_args() -> Option<i32> {
     }
     Some(run_helper(&request_path))
 }
-
 fn run_helper(request_path: &Path) -> i32 {
     let _helper_lock = match HelperMutex::acquire() {
         Ok(Some(lock)) => lock,
@@ -555,7 +509,6 @@ fn run_helper(request_path: &Path) -> i32 {
         Ok(_) => return HELPER_UNSUPPORTED,
         Err(_) => return HELPER_FAILED,
     };
-
     let parent_identity = match identity_from_process(request.parent_pid) {
         Ok(identity) => identity,
         Err(_) => return HELPER_CANCELLED,
@@ -568,7 +521,6 @@ fn run_helper(request_path: &Path) -> i32 {
     {
         return HELPER_CONFLICT;
     }
-
     let registry = match read_registry() {
         Ok(registry) => registry,
         Err(_) => return HELPER_FAILED,
@@ -580,7 +532,6 @@ fn run_helper(request_path: &Path) -> i32 {
     if fingerprint != request.state_fingerprint {
         return HELPER_CONFLICT;
     }
-
     let operation = match request.action {
         AutoLogonOperation::Enable => helper_enable(
             request.parent_pid,
@@ -617,16 +568,13 @@ fn run_helper(request_path: &Path) -> i32 {
         }
     }
 }
-
 struct HelperMutex(windows_sys::Win32::Foundation::HANDLE);
-
 impl HelperMutex {
     fn acquire() -> Result<Option<Self>, String> {
         use windows_sys::Win32::Foundation::{
             CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
         };
         use windows_sys::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
-
         let name = wide_null(std::ffi::OsStr::new(
             "Global\\MakeYourLifeEasier.AutoLogon.Helper.v1",
         ));
@@ -647,7 +595,6 @@ impl HelperMutex {
         }
     }
 }
-
 impl Drop for HelperMutex {
     fn drop(&mut self) {
         unsafe {
@@ -656,7 +603,6 @@ impl Drop for HelperMutex {
         }
     }
 }
-
 enum HelperError {
     Cancelled(String),
     Conflict(String),
@@ -665,7 +611,6 @@ enum HelperError {
     SidMismatch,
     Failed(String),
 }
-
 fn helper_enable(
     parent_pid: u32,
     parent_started: u64,
@@ -690,7 +635,6 @@ fn helper_enable(
                 ))
             };
         }
-
         let lsa_secret_present = LsaPolicy::open()
             .and_then(|policy| policy.retrieve_default_password())
             .map_err(HelperError::Failed)?
@@ -712,7 +656,6 @@ fn helper_enable(
             "Auto-Logon is configured for another Windows account.".into(),
         ));
     }
-
     let credential = match prompt_for_password(identity) {
         Ok(credential) => credential,
         Err(PromptError::Cancelled) => {
@@ -724,9 +667,7 @@ fn helper_enable(
         Err(PromptError::SidMismatch) => return Err(HelperError::SidMismatch),
         Err(PromptError::Failed(error)) => return Err(HelperError::Failed(error)),
     };
-
-    // The prompt may remain open while the app exits or external software
-    // changes Winlogon. Re-check both facts immediately before the first write.
+    // The prompt may remain open while the app exits or external software changes Winlogon. Re-check both facts immediately before the first write.
     if !parent_process_matches(parent_pid, parent_started, &identity.sid) {
         return Err(HelperError::Cancelled(
             "The requesting application was closed.".into(),
@@ -740,7 +681,6 @@ fn helper_enable(
             "Auto-Logon settings changed while credentials were requested.".into(),
         ));
     }
-
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let winlogon = machine
         .open_subkey_with_flags(WINLOGON_KEY, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY)
@@ -766,7 +706,6 @@ fn helper_enable(
     )
     .map_err(HelperError::Failed)
 }
-
 fn helper_disable(
     parent_pid: u32,
     parent_started: u64,
@@ -786,7 +725,6 @@ fn helper_disable(
             "Auto-Logon settings changed before it could be disabled.".into(),
         ));
     }
-
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let winlogon = machine
         .open_subkey_with_flags(WINLOGON_KEY, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY)
@@ -797,20 +735,17 @@ fn helper_disable(
     apply_disable(&mut mutator, identity, registry, read_ownership().as_ref())
         .map_err(HelperError::Failed)
 }
-
 struct VerifiedCredential {
     user: String,
     domain: String,
     password: SecretWide,
 }
-
 enum PromptError {
     Cancelled,
     InvalidCredentials,
     SidMismatch,
     Failed(String),
 }
-
 fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, PromptError> {
     use windows_sys::Win32::Foundation::ERROR_CANCELLED;
     use windows_sys::Win32::Security::Credentials::{
@@ -819,7 +754,6 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
         CREDUI_FLAGS_KEEP_USERNAME, CREDUI_FLAGS_PASSWORD_ONLY_OK, CREDUI_INFOW,
         CREDUI_MAX_USERNAME_LENGTH, CredUIParseUserNameW, CredUIPromptForCredentialsW,
     };
-
     let caption = wide_null(std::ffi::OsStr::new("Enable Windows Auto-Logon"));
     let message = wide_null(std::ffi::OsStr::new(
         "Enter the password for the current Windows account. PIN and Windows Hello credentials cannot be used.",
@@ -841,9 +775,7 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
         | CREDUI_FLAGS_GENERIC_CREDENTIALS
         | CREDUI_FLAGS_KEEP_USERNAME
         | CREDUI_FLAGS_PASSWORD_ONLY_OK;
-    // SAFETY: buffers are writable, NUL-terminated, and their element counts
-    // are passed exactly. No save checkbox is requested and no credential is
-    // persisted by CredUI.
+    // SAFETY: buffers are writable, NUL-terminated, and their element counts are passed exactly. No save checkbox is requested and no credential is persisted by CredUI.
     let status = unsafe {
         CredUIPromptForCredentialsW(
             &info,
@@ -867,7 +799,6 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
         )));
     }
     password.commit_from_nul();
-
     let mut parsed_user = vec![0u16; CREDUI_MAX_USERNAME_LENGTH as usize + 1];
     let mut parsed_domain = vec![0u16; 338];
     let parsed = unsafe {
@@ -888,9 +819,7 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
         split_credential_name(&wide_slice_to_string(&user_name))
     };
     let validated = validate_credential_sid(&user, &domain, &password, &identity.sid)?;
-    // Do not trust text returned by the dialog, even though KEEP_USERNAME and
-    // PASSWORD_ONLY_OK lock that field. Rebuild the Winlogon identity from the
-    // token returned by LogonUserW after its SID has been matched.
+    // Do not trust text returned by the dialog, even though KEEP_USERNAME and PASSWORD_ONLY_OK lock that field. Rebuild the Winlogon identity from the token returned by LogonUserW after its SID has been matched.
     let (user, domain) = split_credential_name(&validated.credential_name());
     Ok(VerifiedCredential {
         user,
@@ -898,7 +827,6 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
         password,
     })
 }
-
 fn split_credential_name(value: &str) -> (String, String) {
     if let Some((domain, user)) = value.split_once('\\') {
         (user.to_string(), domain.to_string())
@@ -906,7 +834,6 @@ fn split_credential_name(value: &str) -> (String, String) {
         (value.to_string(), String::new())
     }
 }
-
 fn validate_credential_sid(
     user: &str,
     domain: &str,
@@ -916,7 +843,6 @@ fn validate_credential_sid(
     use windows_sys::Win32::Security::{
         LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, LogonUserW,
     };
-
     let user = wide_null(std::ffi::OsStr::new(user));
     let domain = (!domain.is_empty()).then(|| wide_null(std::ffi::OsStr::new(domain)));
     let mut token = std::ptr::null_mut();
@@ -943,7 +869,6 @@ fn validate_credential_sid(
     }
     Ok(identity)
 }
-
 fn copy_wide(value: &str, destination: &mut [u16]) -> Result<(), String> {
     let encoded: Vec<u16> = value.encode_utf16().collect();
     if encoded.len() + 1 > destination.len() {
@@ -953,26 +878,20 @@ fn copy_wide(value: &str, destination: &mut [u16]) -> Result<(), String> {
     destination[encoded.len()] = 0;
     Ok(())
 }
-
 struct SecretWide(Vec<u16>);
-
 impl SecretWide {
     fn with_capacity(words: usize) -> Self {
         Self(vec![0; words])
     }
-
     fn as_ptr(&self) -> *const u16 {
         self.0.as_ptr()
     }
-
     fn as_mut_ptr(&mut self) -> *mut u16 {
         self.0.as_mut_ptr()
     }
-
     fn capacity(&self) -> usize {
         self.0.len()
     }
-
     fn commit_from_nul(&mut self) {
         let length = self
             .0
@@ -981,30 +900,25 @@ impl SecretWide {
             .unwrap_or(self.0.len());
         self.0.truncate(length);
     }
-
     fn words(&self) -> &[u16] {
         &self.0
     }
 }
-
 impl Drop for SecretWide {
     fn drop(&mut self) {
         for word in &mut self.0 {
-            // SAFETY: each reference is valid and volatile writes prevent the
-            // compiler from optimizing away secret zeroization.
+            // SAFETY: each reference is valid and volatile writes prevent the compiler from optimizing away secret zeroization.
             unsafe { std::ptr::write_volatile(word, 0) };
         }
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
-
 struct PreviousState {
     auto_admin_logon: Option<StoredRegistryValue>,
     default_user_name: Option<StoredRegistryValue>,
     default_domain_name: Option<StoredRegistryValue>,
     ownership: Option<OwnershipMetadata>,
 }
-
 trait Mutation {
     fn retrieve_secret(&mut self) -> Result<Option<SecretWide>, String>;
     fn set_secret(&mut self, value: Option<&[u16]>) -> Result<(), String>;
@@ -1023,12 +937,10 @@ trait Mutation {
     fn write_ownership(&mut self, value: &OwnershipMetadata) -> Result<(), String>;
     fn clear_ownership(&mut self) -> Result<(), String>;
 }
-
 struct SystemMutator {
     winlogon: RegKey,
     policy: LsaPolicy,
 }
-
 impl SystemMutator {
     fn open(winlogon: RegKey) -> Result<Self, String> {
         Ok(Self {
@@ -1037,37 +949,30 @@ impl SystemMutator {
         })
     }
 }
-
 impl Mutation for SystemMutator {
     fn retrieve_secret(&mut self) -> Result<Option<SecretWide>, String> {
         self.policy.retrieve_default_password()
     }
-
     fn set_secret(&mut self, value: Option<&[u16]>) -> Result<(), String> {
         self.policy.store_default_password(value)
     }
-
     fn retrieve_plaintext_password(&mut self) -> Result<Option<SecretRegistryValue>, String> {
         secret_registry_value(&self.winlogon, "DefaultPassword")
     }
-
     fn delete_plaintext_password(&mut self) -> Result<(), String> {
         delete_value_if_present(&self.winlogon, "DefaultPassword")
     }
-
     fn restore_plaintext_password(
         &mut self,
         value: Option<&SecretRegistryValue>,
     ) -> Result<(), String> {
         restore_secret_registry_value(&self.winlogon, "DefaultPassword", value)
     }
-
     fn set_string(&mut self, name: &'static str, value: &str) -> Result<(), String> {
         self.winlogon
             .set_value(name, &value)
             .map_err(|error| format!("Could not set Windows sign-in value {name}: {error}"))
     }
-
     fn restore_value(
         &mut self,
         name: &'static str,
@@ -1075,16 +980,13 @@ impl Mutation for SystemMutator {
     ) -> Result<(), String> {
         restore_value(&self.winlogon, name, value)
     }
-
     fn write_ownership(&mut self, value: &OwnershipMetadata) -> Result<(), String> {
         write_ownership(value)
     }
-
     fn clear_ownership(&mut self) -> Result<(), String> {
         clear_ownership()
     }
 }
-
 fn apply_enable<M: Mutation>(
     mutation: &mut M,
     password: &SecretWide,
@@ -1114,9 +1016,7 @@ fn apply_enable<M: Mutation>(
     };
     let previous_secret = mutation.retrieve_secret()?;
     let previous_plaintext = mutation.retrieve_plaintext_password()?;
-    // This machine-owned marker is deliberately the first mutation. If the
-    // process or PC stops at any later point, the next launch can offer a
-    // deterministic Disable/cleanup path.
+    // This machine-owned marker is deliberately the first mutation. If the process or PC stops at any later point, the next launch can offer a deterministic Disable/cleanup path.
     mutation.write_ownership(&pending_ownership)?;
     if let Err(error) = mutation.set_secret(Some(password.words())) {
         let auto_off = mutation.set_string("AutoAdminLogon", "0").is_ok();
@@ -1138,20 +1038,15 @@ fn apply_enable<M: Mutation>(
         }
         return Err(error);
     }
-
     let result = (|| {
         mutation.delete_plaintext_password()?;
         mutation.set_string("DefaultUserName", user)?;
         mutation.set_string("DefaultDomainName", domain)?;
-        // This is intentionally the final write. A crash before here cannot
-        // activate a partially configured Auto-Logon identity.
+        // This is intentionally the final write. A crash before here cannot activate a partially configured Auto-Logon identity.
         mutation.set_string("AutoAdminLogon", "1")
     })();
-
     if let Err(error) = result {
-        // Force the activation switch off before attempting any restoration.
-        // If a rollback step fails, leave it off instead of restoring an
-        // ambiguous prior representation.
+        // Force the activation switch off before attempting any restoration. If a rollback step fails, leave it off instead of restoring an ambiguous prior representation.
         let mut rollback_ok = mutation.set_string("AutoAdminLogon", "0").is_ok();
         rollback_ok &= mutation
             .restore_value("DefaultUserName", previous.default_user_name.as_ref())
@@ -1165,8 +1060,7 @@ fn apply_enable<M: Mutation>(
         rollback_ok &= mutation
             .set_secret(previous_secret.as_ref().map(SecretWide::words))
             .is_ok();
-        // Keep the pending marker if any core rollback step failed so cleanup
-        // remains reachable. Restore the older marker only after recovery.
+        // Keep the pending marker if any core rollback step failed so cleanup remains reachable. Restore the older marker only after recovery.
         if rollback_ok {
             rollback_ok &= match previous.ownership.as_ref() {
                 Some(owner) => mutation.write_ownership(owner).is_ok(),
@@ -1188,25 +1082,20 @@ fn apply_enable<M: Mutation>(
     }
     Ok(())
 }
-
 fn apply_disable<M: Mutation>(
     mutation: &mut M,
     identity: &Identity,
     registry: &RegistrySnapshot,
     ownership: Option<&OwnershipMetadata>,
 ) -> Result<(), String> {
-    // Disabling first is fail-safe: any later partial cleanup cannot cause an
-    // automatic sign-in on the next boot.
+    // Disabling first is fail-safe: any later partial cleanup cannot cause an automatic sign-in on the next boot.
     mutation.set_string("AutoAdminLogon", "0")?;
     mutation.set_secret(None)?;
     mutation.delete_plaintext_password()?;
-
     if let Some(owner) = ownership
         .filter(|owner| owner.version == FORMAT_VERSION && same_text(&owner.sid, &identity.sid))
     {
-        // Each value is restored only while it still equals the value written
-        // by this app. This supports retry after a partial restore without
-        // overwriting a later external change.
+        // Each value is restored only while it still equals the value written by this app. This supports retry after a partial restore without overwriting a later external change.
         if registry
             .default_user_name
             .as_deref()
@@ -1223,18 +1112,14 @@ fn apply_disable<M: Mutation>(
     }
     mutation.clear_ownership()
 }
-
 struct LsaPolicy(windows_sys::Win32::Security::Authentication::Identity::LSA_HANDLE);
-
 impl LsaPolicy {
     fn open() -> Result<Self, String> {
         use windows_sys::Win32::Security::Authentication::Identity::{
             LSA_OBJECT_ATTRIBUTES, LsaOpenPolicy, POLICY_CREATE_SECRET,
             POLICY_GET_PRIVATE_INFORMATION,
         };
-
-        // Microsoft documents these attributes as reserved for LsaOpenPolicy
-        // and requires every member to be zero-initialized.
+        // Microsoft documents these attributes as reserved for LsaOpenPolicy and requires every member to be zero-initialized.
         let attributes = LSA_OBJECT_ATTRIBUTES::default();
         let mut handle = 0;
         let status = unsafe {
@@ -1248,13 +1133,11 @@ impl LsaPolicy {
         lsa_result(status, "open the Windows LSA policy")?;
         Ok(Self(handle))
     }
-
     fn retrieve_default_password(&self) -> Result<Option<SecretWide>, String> {
         use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
         use windows_sys::Win32::Security::Authentication::Identity::{
             LSA_UNICODE_STRING, LsaFreeMemory, LsaNtStatusToWinError, LsaRetrievePrivateData,
         };
-
         let key = LsaText::new("DefaultPassword")?;
         let mut data: *mut LSA_UNICODE_STRING = std::ptr::null_mut();
         let status = unsafe { LsaRetrievePrivateData(self.0, key.as_ptr(), &mut data) };
@@ -1284,8 +1167,7 @@ impl LsaPolicy {
         }
         let words = (length / 2) as usize;
         let value = unsafe { SecretWide(std::slice::from_raw_parts(buffer, words).to_vec()) };
-        // LSA owns this allocation. Clear the secret bytes before releasing it
-        // in addition to keeping our Rust copy in a zeroizing wrapper.
+        // LSA owns this allocation. Clear the secret bytes before releasing it in addition to keeping our Rust copy in a zeroizing wrapper.
         unsafe {
             for index in 0..words {
                 std::ptr::write_volatile(buffer.add(index), 0);
@@ -1294,10 +1176,8 @@ impl LsaPolicy {
         unsafe { LsaFreeMemory(data.cast()) };
         Ok(Some(value))
     }
-
     fn store_default_password(&self, value: Option<&[u16]>) -> Result<(), String> {
         use windows_sys::Win32::Security::Authentication::Identity::LsaStorePrivateData;
-
         let key = LsaText::new("DefaultPassword")?;
         let data = value.map(LsaText::from_words).transpose()?;
         let status = unsafe {
@@ -1310,7 +1190,6 @@ impl LsaPolicy {
         lsa_result(status, "update the Auto-Logon secret")
     }
 }
-
 impl Drop for LsaPolicy {
     fn drop(&mut self) {
         unsafe {
@@ -1318,12 +1197,10 @@ impl Drop for LsaPolicy {
         }
     }
 }
-
 struct LsaText {
     words: Vec<u16>,
     value: windows_sys::Win32::Security::Authentication::Identity::LSA_UNICODE_STRING,
 }
-
 impl Drop for LsaText {
     fn drop(&mut self) {
         for word in &mut self.words {
@@ -1332,12 +1209,10 @@ impl Drop for LsaText {
         std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
-
 impl LsaText {
     fn new(value: &str) -> Result<Self, String> {
         Self::from_words(&value.encode_utf16().collect::<Vec<_>>())
     }
-
     fn from_words(words: &[u16]) -> Result<Self, String> {
         let bytes = words
             .len()
@@ -1363,7 +1238,6 @@ impl LsaText {
             value,
         })
     }
-
     fn as_ptr(
         &self,
     ) -> *const windows_sys::Win32::Security::Authentication::Identity::LSA_UNICODE_STRING {
@@ -1371,7 +1245,6 @@ impl LsaText {
         &self.value
     }
 }
-
 fn lsa_result(status: i32, action: &str) -> Result<(), String> {
     if status == 0 {
         return Ok(());
@@ -1381,12 +1254,10 @@ fn lsa_result(status: i32, action: &str) -> Result<(), String> {
     };
     Err(format!("Could not {action} (Windows error {error})."))
 }
-
 struct HelperWorkspace {
     directory: PathBuf,
     request: PathBuf,
 }
-
 impl HelperWorkspace {
     fn create() -> Result<Self, String> {
         let root = std::env::temp_dir().join("myle-autologon");
@@ -1398,21 +1269,17 @@ impl HelperWorkspace {
         let request = directory.join(REQUEST_FILE);
         Ok(Self { directory, request })
     }
-
     fn request_path(&self) -> &Path {
         &self.request
     }
 }
-
 impl Drop for HelperWorkspace {
     fn drop(&mut self) {
-        // The helper treats the request as read-only. Cleanup always happens
-        // in the unelevated parent, including setup and UAC failure paths.
+        // The helper treats the request as read-only. Cleanup always happens in the unelevated parent, including setup and UAC failure paths.
         let _ = fs::remove_file(&self.request);
         let _ = fs::remove_dir(&self.directory);
     }
 }
-
 fn validate_request_path(path: &Path) -> Result<(), String> {
     if path.file_name().and_then(|name| name.to_str()) != Some(REQUEST_FILE) {
         return Err("Invalid Auto-Logon request name.".into());
@@ -1458,11 +1325,9 @@ fn validate_request_path(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn reject_reparse_point(path: &Path) -> Result<(), String> {
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
     if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -1470,7 +1335,6 @@ fn reject_reparse_point(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
 fn state_fingerprint(sid: &str, registry: &RegistrySnapshot) -> Result<String, String> {
     let encoded = serde_json::to_vec(&(FORMAT_VERSION, sid, registry))
         .map_err(|error| format!("Could not fingerprint Auto-Logon state: {error}"))?;
@@ -1479,11 +1343,9 @@ fn state_fingerprint(sid: &str, registry: &RegistrySnapshot) -> Result<String, S
         .map(|byte| format!("{byte:02x}"))
         .collect())
 }
-
 fn write_new_json<T: Serialize>(path: &Path, value: &T) -> Result<fs::File, String> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
-
     let bytes = serde_json::to_vec(value)
         .map_err(|error| format!("Could not encode Auto-Logon data: {error}"))?;
     let mut file = OpenOptions::new()
@@ -1497,7 +1359,6 @@ fn write_new_json<T: Serialize>(path: &Path, value: &T) -> Result<fs::File, Stri
         .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
     Ok(file)
 }
-
 fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path, maximum: u64) -> Result<T, String> {
     let file = fs::File::open(path)
         .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
@@ -1511,7 +1372,6 @@ fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path, maximum: u64) ->
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("Could not parse {}: {error}", path.display()))
 }
-
 fn read_registry() -> Result<RegistrySnapshot, String> {
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let winlogon = machine
@@ -1535,11 +1395,9 @@ fn read_registry() -> Result<RegistrySnapshot, String> {
             .and_then(|key| optional_string(key, "legalnoticetext")),
     })
 }
-
 fn optional_string(key: &RegKey, name: &str) -> Option<String> {
     key.get_value::<String, _>(name).ok()
 }
-
 fn optional_scalar(key: &RegKey, name: &str) -> Option<String> {
     let raw = key.get_raw_value(name).ok()?;
     match raw.vtype {
@@ -1550,7 +1408,6 @@ fn optional_scalar(key: &RegKey, name: &str) -> Option<String> {
         _ => None,
     }
 }
-
 fn stored_value(key: &RegKey, name: &str) -> Result<Option<StoredRegistryValue>, String> {
     match key.get_raw_value(name) {
         Ok(value) if value.bytes.len() <= 16 * 1024 => {
@@ -1571,7 +1428,6 @@ fn stored_value(key: &RegKey, name: &str) -> Result<Option<StoredRegistryValue>,
         )),
     }
 }
-
 fn secret_registry_value(key: &RegKey, name: &str) -> Result<Option<SecretRegistryValue>, String> {
     match key.get_raw_value(name) {
         Ok(value) if value.bytes.len() <= 64 * 1024 => Ok(Some(SecretRegistryValue {
@@ -1587,7 +1443,6 @@ fn secret_registry_value(key: &RegKey, name: &str) -> Result<Option<SecretRegist
         )),
     }
 }
-
 fn restore_secret_registry_value(
     key: &RegKey,
     name: &str,
@@ -1606,7 +1461,6 @@ fn restore_secret_registry_value(
         delete_value_if_present(key, name)
     }
 }
-
 fn restore_value(
     key: &RegKey,
     name: &str,
@@ -1632,7 +1486,6 @@ fn restore_value(
         delete_value_if_present(key, name)
     }
 }
-
 fn delete_value_if_present(key: &RegKey, name: &str) -> Result<(), String> {
     match key.delete_value(name) {
         Ok(()) => Ok(()),
@@ -1642,7 +1495,6 @@ fn delete_value_if_present(key: &RegKey, name: &str) -> Result<(), String> {
         )),
     }
 }
-
 fn read_ownership() -> Option<OwnershipMetadata> {
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = machine
@@ -1658,7 +1510,6 @@ fn read_ownership() -> Option<OwnershipMetadata> {
         && value.applied_domain.encode_utf16().count() <= 336)
         .then_some(value)
 }
-
 fn write_ownership(value: &OwnershipMetadata) -> Result<(), String> {
     let encoded = serde_json::to_vec(value)
         .map_err(|error| format!("Could not encode Auto-Logon ownership: {error}"))?;
@@ -1678,7 +1529,6 @@ fn write_ownership(value: &OwnershipMetadata) -> Result<(), String> {
     )
     .map_err(|error| format!("Could not save Auto-Logon ownership: {error}"))
 }
-
 fn clear_ownership() -> Result<(), String> {
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = match machine
@@ -1698,21 +1548,17 @@ fn clear_ownership() -> Result<(), String> {
         Err(error) => Err(format!("Could not clear Auto-Logon ownership: {error}")),
     }
 }
-
 #[cfg(windows)]
 fn wide_null(value: &std::ffi::OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     value.encode_wide().chain(Some(0)).collect()
 }
-
 fn current_identity() -> Result<Identity, String> {
     use windows_sys::Win32::Security::TOKEN_QUERY;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::System::Threading::OpenProcessToken;
-
     let mut token = std::ptr::null_mut();
-    // SAFETY: GetCurrentProcess returns a process pseudo-handle valid in the
-    // current process; only the real token handle returned here is closed.
+    // SAFETY: GetCurrentProcess returns a process pseudo-handle valid in the current process; only the real token handle returned here is closed.
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err("Could not read the Windows account token.".into());
     }
@@ -1733,14 +1579,11 @@ fn current_identity() -> Result<Identity, String> {
     unsafe { windows_sys::Win32::Foundation::CloseHandle(token) };
     result
 }
-
 fn identity_from_process(process_id: u32) -> Result<Identity, String> {
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     };
-
-    // SAFETY: OpenProcess is called with a concrete PID and read/synchronize
-    // rights only. The returned handle is closed before returning.
+    // SAFETY: OpenProcess is called with a concrete PID and read/synchronize rights only. The returned handle is closed before returning.
     let process = unsafe {
         OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -1755,16 +1598,13 @@ fn identity_from_process(process_id: u32) -> Result<Identity, String> {
     unsafe { windows_sys::Win32::Foundation::CloseHandle(process) };
     identity
 }
-
 fn identity_from_process_handle(
     process: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<Identity, String> {
     use windows_sys::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
     use windows_sys::Win32::System::Threading::OpenProcessToken;
-
     let mut token = std::ptr::null_mut();
-    // SAFETY: process is a valid process handle or pseudo-handle; token is an
-    // out pointer and the resulting handle is closed below.
+    // SAFETY: process is a valid process handle or pseudo-handle; token is an out pointer and the resulting handle is closed below.
     if unsafe { OpenProcessToken(process, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token) } == 0 {
         return Err("Could not read the Windows account token.".into());
     }
@@ -1772,7 +1612,6 @@ fn identity_from_process_handle(
     unsafe { windows_sys::Win32::Foundation::CloseHandle(token) };
     result
 }
-
 fn identity_from_token_handle(
     token: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<Identity, String> {
@@ -1783,12 +1622,10 @@ fn identity_from_token_handle(
     identity.account_type = classify_account(&identity.domain, identity.upn.as_deref());
     Ok(identity)
 }
-
 fn base_identity_from_token(
     token: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<Identity, String> {
     use windows_sys::Win32::Security::{TOKEN_USER, TokenUser};
-
     let buffer = token_information(token, TokenUser)?;
     // The Vec<usize> used by token_information is pointer-aligned.
     let user = unsafe { &*(buffer.as_ptr().cast::<TOKEN_USER>()) };
@@ -1803,16 +1640,12 @@ fn base_identity_from_token(
         account_type: AutoLogonAccountType::Unknown,
     })
 }
-
 fn extended_names_for_token(
     token: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<(Option<String>, Option<String>), String> {
     use windows_sys::Win32::Security::Authentication::Identity::{NameDisplay, NameUserPrincipal};
     use windows_sys::Win32::Security::{ImpersonateLoggedOnUser, RevertToSelf};
-
-    // GetUserNameExW reads the current thread security context. Temporarily
-    // impersonating lets an elevated helper resolve the original caller's UPN
-    // instead of accidentally using the administrator account that approved UAC.
+    // GetUserNameExW reads the current thread security context. Temporarily impersonating lets an elevated helper resolve the original caller's UPN instead of accidentally using the administrator account that approved UAC.
     if unsafe { ImpersonateLoggedOnUser(token) } == 0 {
         return Ok((None, None));
     }
@@ -1823,13 +1656,11 @@ fn extended_names_for_token(
     }
     Ok((display, upn))
 }
-
 fn token_information(
     token: windows_sys::Win32::Foundation::HANDLE,
     class: windows_sys::Win32::Security::TOKEN_INFORMATION_CLASS,
 ) -> Result<Vec<usize>, String> {
     use windows_sys::Win32::Security::GetTokenInformation;
-
     let mut bytes = 0u32;
     unsafe { GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut bytes) };
     if bytes == 0 {
@@ -1844,10 +1675,8 @@ fn token_information(
     }
     Ok(buffer)
 }
-
 fn sid_to_string(sid: windows_sys::Win32::Security::PSID) -> Result<String, String> {
     use windows_sys::Win32::Security::{Authorization::ConvertSidToStringSidW, IsValidSid};
-
     if sid.is_null() || unsafe { IsValidSid(sid) } == 0 {
         return Err("Windows returned an invalid account SID.".into());
     }
@@ -1861,10 +1690,8 @@ fn sid_to_string(sid: windows_sys::Win32::Security::PSID) -> Result<String, Stri
     }
     Ok(value)
 }
-
 fn lookup_sid_name(sid: windows_sys::Win32::Security::PSID) -> Result<(String, String), String> {
     use windows_sys::Win32::Security::{LookupAccountSidW, SID_NAME_USE};
-
     let mut name_length = 0u32;
     let mut domain_length = 0u32;
     let mut use_type: SID_NAME_USE = 0;
@@ -1900,10 +1727,8 @@ fn lookup_sid_name(sid: windows_sys::Win32::Security::PSID) -> Result<(String, S
     }
     Ok((wide_slice_to_string(&name), wide_slice_to_string(&domain)))
 }
-
 fn lookup_account_sid(account: &str) -> Result<String, String> {
     use windows_sys::Win32::Security::{LookupAccountNameW, SID_NAME_USE};
-
     let account = wide_null(std::ffi::OsStr::new(account));
     let mut sid_length = 0u32;
     let mut domain_length = 0u32;
@@ -1941,10 +1766,8 @@ fn lookup_account_sid(account: &str) -> Result<String, String> {
     }
     sid_to_string(sid.as_mut_ptr().cast())
 }
-
 fn extended_user_name(format: i32) -> Option<String> {
     use windows_sys::Win32::Security::Authentication::Identity::GetUserNameExW;
-
     let mut length = 0u32;
     unsafe { GetUserNameExW(format, std::ptr::null_mut(), &mut length) };
     if length == 0 {
@@ -1957,7 +1780,6 @@ fn extended_user_name(format: i32) -> Option<String> {
         None
     }
 }
-
 fn classify_account(domain: &str, upn: Option<&str>) -> AutoLogonAccountType {
     if same_text(domain, "MicrosoftAccount") {
         AutoLogonAccountType::Microsoft
@@ -1977,10 +1799,8 @@ fn classify_account(domain: &str, upn: Option<&str>) -> AutoLogonAccountType {
         AutoLogonAccountType::Unknown
     }
 }
-
 fn computer_name() -> Option<String> {
     use windows_sys::Win32::System::WindowsProgramming::GetComputerNameW;
-
     let mut value = vec![0u16; 256];
     let mut length = value.len() as u32;
     if unsafe { GetComputerNameW(value.as_mut_ptr(), &mut length) } != 0 {
@@ -1990,17 +1810,13 @@ fn computer_name() -> Option<String> {
         None
     }
 }
-
 fn current_process_creation_time() -> Result<u64, String> {
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
     process_creation_time(unsafe { GetCurrentProcess() })
 }
-
 fn process_creation_time(process: windows_sys::Win32::Foundation::HANDLE) -> Result<u64, String> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::GetProcessTimes;
-
     let mut created = FILETIME::default();
     let mut exited = FILETIME::default();
     let mut kernel = FILETIME::default();
@@ -2010,14 +1826,12 @@ fn process_creation_time(process: windows_sys::Win32::Foundation::HANDLE) -> Res
     }
     Ok(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
 }
-
 fn parent_process_matches(process_id: u32, expected_started: u64, expected_sid: &str) -> bool {
     use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
         QueryFullProcessImageNameW, WaitForSingleObject,
     };
-
     let process = unsafe {
         OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -2028,8 +1842,7 @@ fn parent_process_matches(process_id: u32, expected_started: u64, expected_sid: 
     if process.is_null() {
         return false;
     }
-    // A PID may be reused while the credential dialog is open. Use the same
-    // live process handle for the liveness, SID and image checks.
+    // A PID may be reused while the credential dialog is open. Use the same live process handle for the liveness, SID and image checks.
     if unsafe { WaitForSingleObject(process, 0) } != WAIT_TIMEOUT {
         unsafe { windows_sys::Win32::Foundation::CloseHandle(process) };
         return false;
@@ -2057,7 +1870,6 @@ fn parent_process_matches(process_id: u32, expected_started: u64, expected_sid: 
         _ => false,
     }
 }
-
 fn wide_slice_to_string(value: &[u16]) -> String {
     let length = value
         .iter()
@@ -2065,7 +1877,6 @@ fn wide_slice_to_string(value: &[u16]) -> String {
         .unwrap_or(value.len());
     String::from_utf16_lossy(&value[..length])
 }
-
 unsafe fn wide_pointer_to_string(value: *const u16) -> String {
     let mut length = 0usize;
     while unsafe { *value.add(length) } != 0 {
@@ -2073,13 +1884,10 @@ unsafe fn wide_pointer_to_string(value: *const u16) -> String {
     }
     String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(value, length) })
 }
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-
     use super::*;
-
     fn identity() -> Identity {
         Identity {
             sid: "S-1-5-21-1000".into(),
@@ -2090,7 +1898,6 @@ mod tests {
             account_type: AutoLogonAccountType::Local,
         }
     }
-
     fn registry(enabled: bool) -> RegistrySnapshot {
         RegistrySnapshot {
             auto_admin_logon: Some(if enabled { "1" } else { "0" }.into()),
@@ -2099,7 +1906,6 @@ mod tests {
             ..RegistrySnapshot::default()
         }
     }
-
     fn stored_text(value: &str) -> StoredRegistryValue {
         let bytes = value
             .encode_utf16()
@@ -2111,7 +1917,6 @@ mod tests {
             bytes,
         }
     }
-
     fn ownership() -> OwnershipMetadata {
         OwnershipMetadata {
             version: FORMAT_VERSION,
@@ -2122,7 +1927,6 @@ mod tests {
             previous_domain: Some(stored_text("BeforeDomain")),
         }
     }
-
     #[test]
     fn status_precedence_keeps_enabled_configuration_removable() {
         let identity = identity();
@@ -2131,19 +1935,16 @@ mod tests {
             derive_snapshot(&identity, &clean, None, None).status,
             AutoLogonStatus::Disabled
         );
-
         let mut enabled = registry(true);
         enabled.force_auto_logon = Some("1".into());
         let snapshot = derive_snapshot(&identity, &enabled, None, None);
         assert_eq!(snapshot.status, AutoLogonStatus::Unavailable);
         assert!(snapshot.blocked_reason.is_some());
-
         enabled.default_user_name = Some("SomeoneElse".into());
         assert_eq!(
             derive_snapshot(&identity, &enabled, None, None).status,
             AutoLogonStatus::Conflict
         );
-
         let mut blocked = registry(false);
         blocked.auto_logon_count = Some("0".into());
         assert_eq!(
@@ -2154,20 +1955,17 @@ mod tests {
             derive_snapshot(&identity, &blocked, None, Some(AutoLogonOperation::Enable),).status,
             AutoLogonStatus::Working
         );
-
         let pending_owner = ownership();
         let pending = derive_snapshot(&identity, &clean, Some(&pending_owner), None);
         assert_eq!(pending.status, AutoLogonStatus::Unavailable);
         assert!(pending.owned_by_app);
         assert!(pending.blocked_reason.is_some());
-
         let mut foreign_owner = pending_owner;
         foreign_owner.sid = "S-1-5-21-OTHER".into();
         let foreign = derive_snapshot(&identity, &clean, Some(&foreign_owner), None);
         assert_eq!(foreign.status, AutoLogonStatus::Conflict);
         assert!(!foreign.owned_by_app);
     }
-
     #[test]
     fn account_classification_handles_cloud_and_domain_identities() {
         assert_eq!(
@@ -2188,7 +1986,6 @@ mod tests {
         );
         assert_eq!(classify_account("", None), AutoLogonAccountType::Local);
     }
-
     struct MockMutation {
         events: Vec<String>,
         fail_once: Option<String>,
@@ -2197,7 +1994,6 @@ mod tests {
         strings: HashMap<&'static str, String>,
         ownership: Option<OwnershipMetadata>,
     }
-
     impl Default for MockMutation {
         fn default() -> Self {
             Self {
@@ -2216,7 +2012,6 @@ mod tests {
             }
         }
     }
-
     impl MockMutation {
         fn step(&mut self, event: impl Into<String>) -> Result<(), String> {
             let event = event.into();
@@ -2229,13 +2024,11 @@ mod tests {
             }
         }
     }
-
     impl Mutation for MockMutation {
         fn retrieve_secret(&mut self) -> Result<Option<SecretWide>, String> {
             self.step("retrieve-secret")?;
             Ok(self.secret.take().map(SecretWide))
         }
-
         fn set_secret(&mut self, value: Option<&[u16]>) -> Result<(), String> {
             self.step(if value.is_some() {
                 "set-secret"
@@ -2245,7 +2038,6 @@ mod tests {
             self.secret = value.map(ToOwned::to_owned);
             Ok(())
         }
-
         fn retrieve_plaintext_password(&mut self) -> Result<Option<SecretRegistryValue>, String> {
             self.step("retrieve-plaintext")?;
             Ok(self
@@ -2253,13 +2045,11 @@ mod tests {
                 .take()
                 .map(|(kind, bytes)| SecretRegistryValue { kind, bytes }))
         }
-
         fn delete_plaintext_password(&mut self) -> Result<(), String> {
             self.step("delete-plaintext")?;
             self.plaintext = None;
             Ok(())
         }
-
         fn restore_plaintext_password(
             &mut self,
             value: Option<&SecretRegistryValue>,
@@ -2268,13 +2058,11 @@ mod tests {
             self.plaintext = value.map(|value| (value.kind.clone(), value.bytes.clone()));
             Ok(())
         }
-
         fn set_string(&mut self, name: &'static str, value: &str) -> Result<(), String> {
             self.step(format!("set:{name}={value}"))?;
             self.strings.insert(name, value.into());
             Ok(())
         }
-
         fn restore_value(
             &mut self,
             name: &'static str,
@@ -2288,20 +2076,17 @@ mod tests {
             }
             Ok(())
         }
-
         fn write_ownership(&mut self, value: &OwnershipMetadata) -> Result<(), String> {
             self.step("write-ownership")?;
             self.ownership = Some(value.clone());
             Ok(())
         }
-
         fn clear_ownership(&mut self) -> Result<(), String> {
             self.step("clear-ownership")?;
             self.ownership = None;
             Ok(())
         }
     }
-
     fn previous_state() -> PreviousState {
         PreviousState {
             auto_admin_logon: Some(stored_text("0")),
@@ -2310,7 +2095,6 @@ mod tests {
             ownership: None,
         }
     }
-
     #[test]
     fn enable_writes_activation_switch_last() {
         let mut mutation = MockMutation::default();
@@ -2337,7 +2121,6 @@ mod tests {
             ]
         );
     }
-
     #[test]
     fn failed_enable_forces_off_then_rolls_back_secrets_and_identity() {
         let mut mutation = MockMutation {
@@ -2367,7 +2150,6 @@ mod tests {
         );
         assert!(mutation.plaintext.is_some());
     }
-
     #[test]
     fn failed_initial_secret_write_restores_old_secret_and_keeps_auto_logon_off() {
         let mut mutation = MockMutation {
@@ -2400,7 +2182,6 @@ mod tests {
             Some("old-secret".encode_utf16().collect::<Vec<_>>().as_slice())
         );
     }
-
     #[test]
     fn disable_is_fail_safe_and_restores_only_owned_names() {
         let mut mutation = MockMutation::default();
@@ -2418,7 +2199,6 @@ mod tests {
                 "clear-ownership",
             ]
         );
-
         let mut foreign = MockMutation::default();
         let mut foreign_owner = ownership();
         foreign_owner.sid = "S-1-5-21-OTHER".into();
@@ -2431,7 +2211,6 @@ mod tests {
         );
         assert_eq!(foreign.events.last().unwrap(), "clear-ownership");
     }
-
     #[test]
     fn partial_disable_keeps_recovery_marker_and_retry_converges() {
         let identity = identity();
@@ -2441,12 +2220,10 @@ mod tests {
             ownership: Some(owner.clone()),
             ..MockMutation::default()
         };
-
         let result = apply_disable(&mut first, &identity, &registry(true), Some(&owner));
         assert!(result.is_err());
         assert!(first.ownership.is_some());
         assert!(!first.events.iter().any(|event| event == "clear-ownership"));
-
         let mut retry_registry = registry(false);
         retry_registry.default_user_name = Some("BeforeUser".into());
         let mut retry = MockMutation {
@@ -2454,7 +2231,6 @@ mod tests {
             ..MockMutation::default()
         };
         apply_disable(&mut retry, &identity, &retry_registry, Some(&owner)).unwrap();
-
         assert!(
             !retry
                 .events
@@ -2470,7 +2246,6 @@ mod tests {
         assert_eq!(retry.events.last().unwrap(), "clear-ownership");
         assert!(retry.ownership.is_none());
     }
-
     #[test]
     fn helper_workspace_cleans_request_on_drop() {
         let request;

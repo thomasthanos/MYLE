@@ -5,7 +5,6 @@ import { createRequire } from "node:module";
 import vm from "node:vm";
 import { compileModule } from "svelte/compiler";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
-
 const source = readFileSync(new URL("../../frontend/mobile/account.svelte.ts", import.meta.url), "utf8")
   .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/^export /gm, "");
 const transpile = (text, module = ModuleKind.ESNext) => transpileModule(text, {
@@ -56,7 +55,6 @@ test("cleanup failure keeps a locked retryable account and reports the error", a
   assert.equal(h.account.signingOut, false);
   assert.match(h.errors[0], /Could not sign out/);
 });
-
 test("a delayed sign-in response cannot restore an account after sign out", async () => {
   let answer;
   const h = harness({ signIn: () => new Promise((resolve) => { answer = resolve; }) });
@@ -67,7 +65,6 @@ test("a delayed sign-in response cannot restore an account after sign out", asyn
   assert.equal(h.account.profile, null);
   assert.equal(h.errors.length, 0);
 });
-
 test("a cancelled sign-in response is ignored", async () => {
   let answer;
   const h = harness({ signIn: () => new Promise((resolve) => { answer = resolve; }) });

@@ -5,9 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { compileModule } from "svelte/compiler";
-
-// The real page state, with only the native calls and the browser bits Node
-// does not have replaced; see the Game Saves tests for the same pattern.
+// The real page state, with only the native calls and the browser bits Node does not have replaced; see the Game Saves tests for the same pattern.
 const storage = new Map();
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
@@ -17,7 +15,6 @@ Object.defineProperty(globalThis, "localStorage", {
   },
 });
 Object.defineProperty(globalThis, "isTauri", { configurable: true, value: true });
-
 const hooks = registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "svelte/reactivity") {
@@ -43,17 +40,14 @@ const hooks = registerHooks({
     };
   },
 });
-
 const { projectBackupsState: state } = await import("../../frontend/app/pages/project-backups/state.svelte.ts");
 const { projectBackupsApi: api } = await import("../../frontend/app/pages/project-backups/api.ts");
 const { badges } = await import("../../frontend/lib/badges.svelte.ts");
 const { toast } = await import("../../frontend/lib/toast.svelte.ts");
 const { nav } = await import("../../frontend/lib/nav.svelte.ts");
 hooks.deregister();
-
 const DAY = 86_400_000;
 const now = Date.UTC(2026, 9, 8, 12, 0, 0);
-
 const project = (id, extra = {}) => ({
   id,
   name: id,
@@ -71,7 +65,6 @@ const backedUp = (id, daysAgo, zipSize = 1_000) =>
     lastBackup: { name: `${id}_D1_V1`, createdAt: now - daysAgo * DAY, fileCount: 3, zipSize },
     lastResult: { at: now - daysAgo * DAY, ok: true, cancelled: false, code: null, error: null },
   });
-
 function setup(projects, missing = []) {
   state.page = {
     ...state.page,
@@ -80,19 +73,15 @@ function setup(projects, missing = []) {
     backupRoot: "G:\\My Drive\\Projects Backup",
   };
   state.clock = now;
-  // These age/group fixtures describe completed discovery. Reinstall cases
-  // below use a fresh state with no check results or local history at all.
+  // These age/group fixtures describe completed discovery. Reinstall cases below use a fresh state with no check results or local history at all.
   state.changes = Object.fromEntries(projects.filter((one) => !one.lastBackup).map((one) => [one.id, answer(one.id, "noBackup", now)]));
   state.query = "";
   state.filter = "all";
 }
-
 const keys = (groups) => groups.map((group) => group.key);
-
 test.beforeEach(() => {
   setup([]);
 });
-
 test("a project is placed by what happened to it last", () => {
   setup(
     [
@@ -118,14 +107,12 @@ test("a project is placed by what happened to it last", () => {
   assert.equal(state.needsAttention(state.projects[1]), false, "ten days old is not a problem yet");
   assert.equal(state.needsAttention(state.projects[2]), true);
 });
-
 test("a cancelled attempt is told apart from a failed one", () => {
   setup([project("stopped", { lastResult: { at: now - 3_600_000, ok: false, cancelled: true, code: "CANCELLED", error: null } })]);
   assert.equal(state.health(state.projects[0]), "cancelled");
   assert.equal(state.needsAttention(state.projects[0]), true, "it has no backup at all");
   assert.deepEqual(keys(state.groups), ["never"], "…and it lands in the group that has no backup yet");
 });
-
 test("the summary counts what the page says about itself", () => {
   setup([
     backedUp("a", 1, 2_000),
@@ -145,7 +132,6 @@ test("the summary counts what the page says about itself", () => {
   assert.equal(summary.newest, now - DAY);
   assert.equal(summary.oldest, now - 60 * DAY);
 });
-
 test("the groups come in the order the user should read them", () => {
   setup(
     [
@@ -162,7 +148,6 @@ test("the groups come in the order the user should read them", () => {
   assert.equal(state.groups[0].projects[0].id, "broken");
   assert.equal(state.groups[4].projects[0].id, "gone");
 });
-
 test("a search filters inside the groups, not across them", () => {
   setup([backedUp("alpha", 1), backedUp("beta", 40), project("gamma")]);
   assert.equal(state.filtered.length, 3);
@@ -183,7 +168,6 @@ const deferred = () => {
   const promise = new Promise((yes) => (resolve = yes));
   return { promise, resolve };
 };
-
 test("reinstalled projects stay unknown until their surviving backup folder is checked", () => {
   const reinstalled = new state.constructor();
   reinstalled.page = {
@@ -194,7 +178,6 @@ test("reinstalled projects stay unknown until their surviving backup folder is c
   assert.equal(reinstalled.health(reinstalled.projects[0]), "unknown", "a missing local history record is not proof that the cloud has no backups");
   assert.equal(reinstalled.summary.never, 0);
 });
-
 test("failed discovery after reinstall does not claim that projects were never backed up", () => {
   const reinstalled = new state.constructor();
   reinstalled.page = {
@@ -211,7 +194,6 @@ test("failed discovery after reinstall does not claim that projects were never b
   assert.equal(reinstalled.summary.never, 1, "only a completed empty-history check establishes Never");
   assert.deepEqual(reinstalled.changedIds, ["empty"], "unknown projects are never automatically selected for backup");
 });
-
 test("a surviving archive recognized by detection cannot coexist with Never backed up", () => {
   const reinstalled = new state.constructor();
   reinstalled.page = {
@@ -227,7 +209,6 @@ test("a surviving archive recognized by detection cannot coexist with Never back
   assert.equal(reinstalled.summary.never, 0);
   assert.deepEqual(reinstalled.changedIds, ["edited"], "existing content is compared, not marked clean merely because its local cache was lost");
 });
-
 test("a failed backup list after reinstall remains unknown until a successful retry", async () => {
   const original = api.list;
   const reinstalled = new state.constructor();
@@ -245,7 +226,6 @@ test("a failed backup list after reinstall remains unknown until a successful re
     while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   }
 });
-
 test("a check started before a backup never replaces the answer after it", async () => {
   const original = api.changes;
   const pending = [];
@@ -257,8 +237,7 @@ test("a check started before a backup never replaces the answer after it", async
   try {
     state.changes = {};
     const stale = state.checkChanges(["A"]);
-    // The backup of A ended: its check is always asked for, even while the
-    // older one still runs.
+    // The backup of A ended: its check is always asked for, even while the older one still runs.
     const fresh = state.checkChanges(["A"], true);
     assert.equal(pending.length, 2, "the check after the backup is not dropped");
     pending[1].resolve([answer("A", "upToDate", 2_000)]);
@@ -271,7 +250,6 @@ test("a check started before a backup never replaces the answer after it", async
     api.changes = original;
   }
 });
-
 test("a backups folder out of reach or a failed check is not a change", () => {
   state.page = { ...state.page, settings: { ...state.page.settings, projects: ["A", "B", "C", "D", "E"].map((id) => project(id)) } };
   state.changes = {};
@@ -286,7 +264,6 @@ test("a backups folder out of reach or a failed check is not a change", () => {
   assert.equal(state.changedCount, 1);
   assert.equal(badges.of("project-backups"), 1, "the sidebar shows the changed projects");
 });
-
 test("more changed projects while another page is open are told once", () => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   state.page = { ...state.page, settings: { ...state.page.settings, projects: ["A", "B"].map((id) => project(id)) } };
@@ -302,7 +279,6 @@ test("more changed projects while another page is open are told once", () => {
   assert.equal(badges.of("project-backups"), 1);
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
 });
-
 test("the three-day check reads every current project and reminds about unchanged pending work without backing up", async () => {
   const original = { getState: api.getState, changes: api.changes, backup: api.backup };
   const calls = [];
@@ -336,7 +312,6 @@ test("the three-day check reads every current project and reminds about unchange
     while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   }
 });
-
 test("a three-day check skips a busy app, does not overlap and retries a failed native request", async () => {
   const original = { getState: api.getState, changes: api.changes };
   setup([project("A")]);
@@ -371,7 +346,6 @@ test("a three-day check skips a busy app, does not overlap and retries a failed 
     state.busy = null;
   }
 });
-
 test("the three-day deadline survives restarting, and invalid or future dates recover", async () => {
   const original = { getState: api.getState, changes: api.changes };
   setup([project("A")]);
@@ -397,7 +371,6 @@ test("the three-day deadline survives restarting, and invalid or future dates re
     state.lastChangeCheck = null;
   }
 });
-
 test("the three-day reminder excludes unknown states, includes missing backups, and preserves a later check", async () => {
   const original = { getState: api.getState, changes: api.changes };
   setup([project("A"), project("B"), project("C")]);
@@ -429,7 +402,6 @@ test("the three-day reminder excludes unknown states, includes missing backups, 
     while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   }
 });
-
 test("the three-day scheduler retries even when native watcher startup fails", async () => {
   const originalInterval = globalThis.setInterval;
   const freshState = new state.constructor();
@@ -442,8 +414,7 @@ test("the three-day scheduler retries even when native watcher startup fails", a
   };
   freshState.checkScheduledChanges = async () => { checks++; };
   try {
-    // No native event bridge in Node: listen() fails just as an unavailable
-    // event bridge can at startup; scheduled checks must still be armed.
+    // No native event bridge in Node: listen() fails just as an unavailable event bridge can at startup; scheduled checks must still be armed.
     await freshState.startDetection();
     assert.equal(checks, 1, "an overdue check is attempted at startup");
     assert.equal(typeof tick, "function", "a startup failure does not lose all future attempts");
@@ -453,7 +424,6 @@ test("the three-day scheduler retries even when native watcher startup fails", a
     globalThis.setInterval = originalInterval;
   }
 });
-
 test("backing up the changes asks for an increment, Back up all does not", async () => {
   const original = { backup: api.backup, getState: api.getState, changes: api.changes };
   const asked = [];
@@ -472,7 +442,6 @@ test("backing up the changes asks for an increment, Back up all does not", async
     Object.assign(api, original);
   }
 });
-
 test("a restore names what it was put together from", async () => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   const original = { restore: api.restore, pickFolder: api.pickFolder };

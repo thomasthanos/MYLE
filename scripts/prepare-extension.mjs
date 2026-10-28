@@ -1,13 +1,10 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
-
 const source = new URL("../extension/", import.meta.url);
 const firefox = new URL("../extension/firefox/", import.meta.url);
 const sharedFiles = ["psl.js", "background.js", "content.js", "passkeys.js", "popup.html", "popup.css", "popup.js", "icons/32.png", "icons/128.png"];
-
 await mkdir(new URL("icons/", firefox), { recursive: true });
 for (const file of sharedFiles) await copyFile(new URL(file, source), new URL(file, firefox));
-
 function buildZip(entries) {
   const localParts = [], centralParts = [];
   let offset = 0;
@@ -63,11 +60,7 @@ function buildZip(entries) {
   end.writeUInt16LE(0, 20);
   return Buffer.concat([...localParts, ...centralParts, end]);
 }
-
-// The two manifests are edited by hand: they must say the same about what the
-// extension may do and runs, or one store gets a build the code does not fit.
-// webNavigation stays out: it would bring back an install warning and a longer
-// store review, and nothing needs it (background.js learns frames by census).
+// The two manifests are edited by hand: they must say the same about what the extension may do and runs, or one store gets a build the code does not fit. webNavigation stays out: it would bring back an install warning and a longer store review, and nothing needs it (background.js learns frames by census).
 const chromeSource = JSON.parse(await readFile(new URL("manifest.json", source), "utf8"));
 const firefoxSource = JSON.parse(await readFile(new URL("manifest.json", firefox), "utf8"));
 for (const key of ["version", "permissions", "content_scripts", "action", "commands", "host_permissions", "optional_permissions"]) {
@@ -88,7 +81,6 @@ for (const file of sharedFiles) {
     if (!bundled.includes(`${folder}${file}`)) throw new Error(`backend/tauri.conf.json does not bundle ${folder}${file}`);
   }
 }
-
 const loadedShared = await Promise.all(sharedFiles.map(async (name) => ({ name, data: await readFile(new URL(name, source)) })));
 // Chrome Web Store & Edge Add-ons reject the unpacked `key` field on upload.
 const chromeManifest = JSON.parse(await readFile(new URL("manifest.json", source), "utf8"));
@@ -100,7 +92,6 @@ const chromeZip = buildZip([{ name: "manifest.json", data: chromeManifestBuf }, 
 const firefoxZip = buildZip([{ name: "manifest.json", data: firefoxManifestBuf }, ...loadedShared]);
 await writeFile(new URL("myle-passwords-chrome.zip", source), chromeZip);
 await writeFile(new URL("myle-passwords-firefox.zip", source), firefoxZip);
-
 /** The manifest a package carries: deflated, so it is read back out of the zip. */
 function packedManifest(zip) {
   const local = zip.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04])); // the first entry is the manifest
@@ -108,9 +99,7 @@ function packedManifest(zip) {
   const at = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
   return JSON.parse(inflateRawSync(zip.subarray(at, at + zip.readUInt32LE(local + 18))).toString("utf8"));
 }
-
-// What is uploaded must not carry the unpacked `key` (the stores answer "the key
-// field does not match the current item"); checked, so it fails at build time.
+// What is uploaded must not carry the unpacked `key` (the stores answer "the key field does not match the current item"); checked, so it fails at build time.
 for (const [label, expected, zip] of [["chrome", chromeManifest, chromeZip], ["firefox", JSON.parse(firefoxManifestBuf.toString("utf8")), firefoxZip]]) {
   const packed = packedManifest(zip);
   if ("key" in packed) throw new Error(`the ${label} package still has a "key": the stores refuse that on upload`);

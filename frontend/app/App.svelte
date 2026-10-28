@@ -23,8 +23,7 @@
 
   let maximized = $state(false);
 
-  // Notices changed project folders for the owner, whichever page is open.
-  // Only the page's state is loaded here; the page itself stays lazy.
+  // Notices changed project folders for the owner, whichever page is open. Only the page's state is loaded here; the page itself stays lazy.
   let projectBackupsStarted = false;
   $effect(() => {
     if (!account.owner || projectBackupsStarted || !isTauri()) return;
@@ -44,8 +43,7 @@
     void preloadApp();
     // The notes of the versions an update brought, once per version.
     void whatsNew.checkAfterStart();
-    // The browser extension asked for the vault (to unlock it, or when it
-    // started the app), or a scheduled backup's notice asked for Game Saves.
+    // The browser extension asked for the vault (to unlock it, or when it started the app), or a scheduled backup's notice asked for Game Saves.
     void invoke<PageId | null>("start_page").then((page) => {
       if (!page) return;
       nav.go(page);

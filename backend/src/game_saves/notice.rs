@@ -1,17 +1,10 @@
-//! What a scheduled backup leaves on the screen: a small window of MYLE's
-//! own at the bottom right, over every other window, with a chime. The
-//! headless backup starts `MYLE.exe --game-saves-notice=<data>`, a run of
-//! the app with only this window, which exits when it closes. Clicking it
-//! opens MYLE at Game Saves.
-
+// ! What a scheduled backup leaves on the screen: a small window of MYLE's ! own at the bottom right, over every other window, with a chime. The ! headless backup starts `MYLE.exe --game-saves-notice=<data>`, a run of ! the app with only this window, which exits when it closes. Clicking it ! opens MYLE at Game Saves.
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use tauri::{App, WebviewUrl, WebviewWindowBuilder};
-
 const FLAG: &str = "--game-saves-notice=";
 /// Starts MYLE at Game Saves; a running MYLE is told to go there.
 pub const OPEN_FLAG: &str = "--open-game-saves";
@@ -21,7 +14,6 @@ const HEIGHT: f64 = 112.0;
 /// From the work area's edges (above the taskbar).
 const MARGIN: f64 = 14.0;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NoticeKind {
@@ -29,7 +21,6 @@ pub enum NoticeKind {
     NothingNew,
     Failed,
 }
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Notice {
@@ -43,7 +34,6 @@ pub struct Notice {
     /// Unix seconds.
     pub at: u64,
 }
-
 impl Notice {
     /// From a scheduled run's outcome: games backed up and games that failed,
     /// or why it could not run.
@@ -71,17 +61,14 @@ impl Notice {
             },
         }
     }
-
     fn encode(&self) -> Option<String> {
         serde_json::to_vec(self).ok().map(|json| URL_SAFE_NO_PAD.encode(json))
     }
-
     fn decode(data: &str) -> Option<Self> {
         let json = URL_SAFE_NO_PAD.decode(data).ok()?;
         serde_json::from_slice(&json).ok()
     }
 }
-
 /// Puts the notice on the screen from the headless backup. It never holds
 /// the backup up, and a notice that cannot start is simply not shown.
 pub fn show(notice: &Notice) {
@@ -93,12 +80,10 @@ pub fn show(notice: &Notice) {
         .creation_flags(DETACHED_PROCESS)
         .spawn();
 }
-
 /// The notice this run was started to show, if any.
 pub fn from_args() -> Option<Notice> {
     std::env::args().find_map(|arg| arg.strip_prefix(FLAG).and_then(Notice::decode))
 }
-
 /// The notice's window: bottom right of the main screen's work area, on
 /// top, out of the taskbar, and without taking the focus from what the user
 /// is doing. The page slides itself in once it has loaded.
@@ -132,7 +117,6 @@ pub fn create_window(app: &App) -> tauri::Result<()> {
     crate::webview_policy::harden(&window)?;
     Ok(())
 }
-
 /// Opens MYLE at Game Saves: a running MYLE is focused and goes there.
 pub fn open_game_saves() {
     if let Ok(exe) = std::env::current_exe() {
@@ -143,11 +127,9 @@ pub fn open_game_saves() {
             .spawn();
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn a_notice_survives_the_command_line() {
         let notice = Notice::from_result(&Ok((3, vec!["Hades \"II\"".into()])), 1_790_000_000);
@@ -157,7 +139,6 @@ mod tests {
         assert_eq!(Notice::decode(&data), Some(notice));
         assert_eq!(Notice::decode("not base64!"), None);
     }
-
     #[test]
     fn what_a_scheduled_run_says() {
         assert_eq!(Notice::from_result(&Ok((2, vec![])), 0).kind, NoticeKind::BackedUp);

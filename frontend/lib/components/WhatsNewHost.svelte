@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The "What's new" dialog: the release notes of each version an update
-  // brought, newest first (lib/whats-new.svelte.ts).
+  // The "What's new" dialog: the release notes of each version an update brought, newest first (lib/whats-new.svelte.ts).
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ExternalLink from "@lucide/svelte/icons/external-link";

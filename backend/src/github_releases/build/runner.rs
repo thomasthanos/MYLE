@@ -1,34 +1,21 @@
-//! Runs a build command and streams what it prints.
-//!
-//! The command runs through `cmd.exe /d /s /c` (so `npm run build && …`
-//! works as typed) inside a Job Object that kills every process of the job
-//! when it closes: Cancel ends npm, node, cargo, rustc and the installer
-//! compiler together, not only the shell on top. Output is read from both
-//! streams with the console line splitter (progress lines repaint, the OEM
-//! code page is decoded), sent to the page in batches, kept in a log file,
-//! and read by `parse` for errors, warnings and stages.
-
+// ! Runs a build command and streams what it prints. ! ! The command runs through `cmd.exe /d /s /c` (so `npm run build && …` ! works as typed) inside a Job Object that kills every process of the job ! when it closes: Cancel ends npm, node, cargo, rustc and the installer ! compiler together, not only the shell on top. Output is read from both ! streams with the console line splitter (progress lines repaint, the OEM ! code page is decoded), sent to the page in batches, kept in a log file, ! and read by `parse` for errors, warnings and stages.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
-
 use super::parse::{Diagnostic, Parser, Severity, strip_ansi};
 use crate::apps::process::hidden;
 use crate::console::LineSplitter;
 use crate::github_releases::store::BuildStats;
-
 /// Diagnostics kept for the page at most (the log has them all).
 const MAX_DIAGNOSTICS: usize = 1000;
 /// How often lines are sent to the page.
 const BATCH: Duration = Duration::from_millis(120);
 /// How long output may stay open after the shell has ended.
 const LINGER: Duration = Duration::from_secs(3);
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogLine {
@@ -40,7 +27,6 @@ pub struct LogLine {
     pub replace: bool,
     pub severity: Option<Severity>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum BuildEvent {
@@ -66,7 +52,6 @@ pub enum BuildEvent {
         estimated: bool,
     },
 }
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildOutcome {
@@ -82,14 +67,11 @@ pub struct BuildOutcome {
     /// The build could not start (or another failure outside it).
     pub failure: Option<String>,
 }
-
 /// A Windows Job Object that kills its processes when closed.
 struct JobObject(windows_sys::Win32::Foundation::HANDLE);
-
 // SAFETY: a job handle may be used and closed from any thread.
 unsafe impl Send for JobObject {}
 unsafe impl Sync for JobObject {}
-
 impl JobObject {
     fn new() -> Option<JobObject> {
         use windows_sys::Win32::System::JobObjects::{
@@ -97,8 +79,7 @@ impl JobObject {
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
             SetInformationJobObject,
         };
-        // SAFETY: plain Win32 calls; the handle is owned by the returned
-        // value and closed in Drop; `info` lives across the call.
+        // SAFETY: plain Win32 calls; the handle is owned by the returned value and closed in Drop; `info` lives across the call.
         unsafe {
             let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if handle.is_null() {
@@ -116,14 +97,12 @@ impl JobObject {
             (ok != 0).then_some(job)
         }
     }
-
     fn assign(&self, process: windows_sys::Win32::Foundation::HANDLE) -> bool {
         // SAFETY: both handles are valid for the call.
         unsafe {
             windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.0, process) != 0
         }
     }
-
     fn kill(&self) {
         // SAFETY: the job handle is valid until Drop.
         unsafe {
@@ -131,7 +110,6 @@ impl JobObject {
         }
     }
 }
-
 impl Drop for JobObject {
     fn drop(&mut self) {
         // SAFETY: closing the handle we own; the job's processes end with it.
@@ -140,7 +118,6 @@ impl Drop for JobObject {
         }
     }
 }
-
 /// An estimate of how far a build is, from the last good one: its time and
 /// the lines it printed, never past 97 % before the end.
 pub(crate) fn estimate(last: &BuildStats, elapsed_ms: u64, lines: u64) -> f32 {
@@ -156,21 +133,18 @@ pub(crate) fn estimate(last: &BuildStats, elapsed_ms: u64, lines: u64) -> f32 {
     };
     ((by_time * 0.55 + by_lines * 0.45) * 100.0).clamp(0.0, 97.0)
 }
-
 pub(crate) struct Request<'a> {
     pub dir: &'a Path,
     pub command: &'a str,
     pub last: Option<BuildStats>,
     pub log_path: Option<PathBuf>,
 }
-
 enum Chunk {
     Out(Vec<u8>),
     Err(Vec<u8>),
     OutDone,
     ErrDone,
 }
-
 /// Runs `request.command` in `request.dir` until it ends or `cancel` is set.
 pub(crate) async fn run(
     request: Request<'_>,
@@ -204,7 +178,6 @@ pub(crate) async fn run(
         request.command,
         request.dir.display()
     ));
-
     let mut cmd = hidden(crate::apps::process::system32("cmd.exe"));
     cmd.raw_arg(format!("/d /s /c \"{}\"", request.command))
         .current_dir(request.dir)
@@ -234,7 +207,6 @@ pub(crate) async fn run(
     if let (Some(job), Some(handle)) = (job.as_ref(), child.raw_handle()) {
         job.assign(handle as _);
     }
-
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Chunk>();
     if let Some(mut stdout) = child.stdout.take() {
         let sender = sender.clone();
@@ -261,7 +233,6 @@ pub(crate) async fn run(
         });
     }
     drop(sender);
-
     let mut out_split = LineSplitter::default();
     let mut err_split = LineSplitter::default();
     let mut parser = Parser::default();
@@ -273,7 +244,6 @@ pub(crate) async fn run(
     // The line of each stream still being drawn: replaced, not appended.
     let mut provisional = [false, false];
     let mut open = 2;
-
     let mut handle_line = |text: String,
                            err: bool,
                            replace: bool,
@@ -324,10 +294,8 @@ pub(crate) async fn run(
             on_event(BuildEvent::Diagnostic { diagnostic });
         }
     };
-
     let mut cancelled = false;
-    // When the shell has ended but something it started still holds the
-    // output open (MSVC's mspdbsrv, a daemon), the pipes never close.
+    // When the shell has ended but something it started still holds the output open (MSVC's mspdbsrv, a daemon), the pipes never close.
     let mut exited: Option<(Instant, std::process::ExitStatus)> = None;
     let mut leftovers_killed = false;
     while open > 0 {
@@ -477,7 +445,6 @@ pub(crate) async fn run(
     ));
     outcome
 }
-
 fn record(outcome: &mut BuildOutcome, diagnostic: &Diagnostic) {
     match diagnostic.severity {
         Severity::Error => outcome.errors += 1,
@@ -487,11 +454,9 @@ fn record(outcome: &mut BuildOutcome, diagnostic: &Diagnostic) {
         outcome.diagnostics.push(diagnostic.clone());
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn the_estimate_blends_time_and_lines_and_never_claims_done() {
         let last = BuildStats {
@@ -505,7 +470,6 @@ mod tests {
         assert!((half - 50.0).abs() < 0.01);
         assert_eq!(estimate(&last, 500_000, 9000), 97.0);
     }
-
     #[test]
     fn a_command_runs_and_its_output_is_read() {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -539,7 +503,6 @@ mod tests {
             .collect();
         assert!(lines.contains(&"hello".to_string()), "{lines:?}");
     }
-
     #[test]
     fn a_build_ends_when_its_shell_does_even_if_a_child_keeps_the_output() {
         let runtime = tokio::runtime::Builder::new_current_thread()

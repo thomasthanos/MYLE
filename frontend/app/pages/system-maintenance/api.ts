@@ -1,8 +1,6 @@
 // Typed bridge to the maintenance commands in backend/src/maintenance/.
 import { Channel, invoke } from "@tauri-apps/api/core";
-
 export type SectionId = "network" | "health" | "software";
-
 export interface MaintenanceAction {
   id: string;
   label: string;
@@ -12,7 +10,6 @@ export interface MaintenanceAction {
   /** Shown before stopping a run in progress. */
   cancelConfirm: string | null;
 }
-
 export interface MaintenanceCard {
   id: string;
   section: SectionId;
@@ -25,25 +22,21 @@ export interface MaintenanceCard {
   console: boolean;
   actions: MaintenanceAction[];
 }
-
 export type TaskEvent =
   /** The UAC prompt is on screen; nothing is running yet. */
   | { event: "waiting" }
   | { event: "started" }
   | { event: "line"; data: { text: string; replace: boolean } };
-
 export type TaskOutcome =
   | { result: "done"; note: string | null }
   | { result: "rebootRequired" }
   | { result: "cancelled" }
   | { result: "needsAdmin" };
-
 function channel<T>(onEvent: (e: T) => void): Channel<T> {
   const ch = new Channel<T>();
   ch.onmessage = onEvent;
   return ch;
 }
-
 export const maintenanceApi = {
   cards: () => invoke<MaintenanceCard[]>("maintenance_cards"),
   run: (id: string, elevated: boolean, onEvent: (e: TaskEvent) => void) =>

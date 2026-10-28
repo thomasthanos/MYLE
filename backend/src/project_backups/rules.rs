@@ -1,34 +1,14 @@
-//! What a project backup leaves out.
-//!
-//! Patterns, one per line, in the spirit of `.gitignore`:
-//! - `node_modules/` – a folder with that name, anywhere
-//! - `*.log`, `Thumbs.db` – a file (or folder) with that name, anywhere
-//! - `docs/drafts/`, `/notes.txt`, `assets/**/*.psd` – a path from the
-//!   project's folder
-//!
-//! The default list skips version control, tool and editor folders,
-//! dependencies, build output and caches whose names are never sources.
-//! Folders whose names can be either (`build`, `target`, `bin`, `obj`, `out`,
-//! `Debug`, `packages`, …) are left out only when the files around them say
-//! they are output (`detect`: a `Cargo.toml` next to `target`, a `.csproj`
-//! next to `bin`), a `.gitignore` ignores them, or git tracks nothing inside.
-//! A folder git tracks files in is always kept. Following `.gitignore` for
-//! everything else is optional, and never drops `.env` files.
-
+// ! What a project backup leaves out. ! ! Patterns, one per line, in the spirit of `.gitignore`: ! - `node_modules/` – a folder with that name, anywhere ! - `*.log`, `Thumbs.db` – a file (or folder) with that name, anywhere ! - `docs/drafts/`, `/notes.txt`, `assets/**/*.psd` – a path from the ! project's folder ! ! The default list skips version control, tool and editor folders, ! dependencies, build output and caches whose names are never sources. ! Folders whose names can be either (`build`, `target`, `bin`, `obj`, `out`, ! `Debug`, `packages`, …) are left out only when the files around them say ! they are output (`detect`: a `Cargo.toml` next to `target`, a `.csproj` ! next to `bin`), a `.gitignore` ignores them, or git tracks nothing inside. ! A folder git tracks files in is always kept. Following `.gitignore` for ! everything else is optional, and never drops `.env` files.
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-
 use regex_lite::Regex;
-
 use super::{detect, gitindex};
-
 /// Written by every backup; never compared or treated as project content.
 pub(crate) const BACKUP_INFO_FILE: &str = ".backup-info.json";
 /// Half-written files of a backup in progress (also backup_projects').
 pub(crate) const PARTIAL_PREFIX: &str = "__partial__";
-
 /// Left out wherever they are: names that are never project sources. Folder
 /// names that can be either (`build`, `target`, `bin`, `out`, …) are decided
 /// by `detect` from the files around them.
@@ -131,7 +111,6 @@ pub(crate) const DEFAULT_PATTERNS: &[&str] = &[
     "desktop.ini",
     "$RECYCLE.BIN/",
 ];
-
 /// The 9.4.0 defaults, to bring saved lists up to date (`store::migrate`).
 pub(crate) const DEFAULT_PATTERNS_V1: &[&str] = &[
     ".git/",
@@ -179,7 +158,6 @@ pub(crate) const DEFAULT_PATTERNS_V1: &[&str] = &[
     "Thumbs.db",
     "desktop.ini",
 ];
-
 /// One compiled pattern.
 #[derive(Clone, Debug)]
 pub(crate) struct Pattern {
@@ -190,7 +168,6 @@ pub(crate) struct Pattern {
     /// Only folders (it ends with `/`).
     dir_only: bool,
 }
-
 impl Pattern {
     pub(crate) fn parse(raw: &str) -> Result<Pattern, String> {
         let source = raw.trim().to_string();
@@ -219,7 +196,6 @@ impl Pattern {
             dir_only,
         })
     }
-
     /// `rel` uses `/`; `name` is its last part.
     pub(crate) fn matches(&self, rel: &str, is_dir: bool) -> bool {
         if self.dir_only && !is_dir {
@@ -233,7 +209,6 @@ impl Pattern {
         }
     }
 }
-
 fn glob_to_regex(glob: &str) -> String {
     let chars: Vec<char> = glob.chars().collect();
     let mut out = String::new();
@@ -276,7 +251,6 @@ fn glob_to_regex(glob: &str) -> String {
     }
     out
 }
-
 /// The exclusion settings a backup runs with.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuleInput {
@@ -290,14 +264,12 @@ pub(crate) struct RuleInput {
     pub smart_build: bool,
     pub follow_gitignore: bool,
 }
-
 /// The lower-case names directly inside one folder.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DirNames {
     pub files: HashSet<String>,
     pub dirs: HashSet<String>,
 }
-
 impl DirNames {
     pub(crate) fn add(&mut self, name: &str, is_dir: bool) {
         let lower = name.to_lowercase();
@@ -307,26 +279,21 @@ impl DirNames {
             self.files.insert(lower);
         }
     }
-
     pub(crate) fn has_file(&self, name: &str) -> bool {
         self.files.contains(name)
     }
-
     pub(crate) fn has_dir(&self, name: &str) -> bool {
         self.dirs.contains(name)
     }
-
     pub(crate) fn has_any_file(&self, names: &[&str]) -> bool {
         names.iter().any(|name| self.files.contains(*name))
     }
-
     /// A file ending with one of `suffixes` (`.csproj`).
     pub(crate) fn has_file_ending(&self, suffixes: &[&str]) -> bool {
         self.files
             .iter()
             .any(|name| suffixes.iter().any(|suffix| name.ends_with(suffix)))
     }
-
     /// A folder ending with one of `suffixes` (`.xcodeproj`).
     pub(crate) fn has_dir_ending(&self, suffixes: &[&str]) -> bool {
         self.dirs
@@ -334,31 +301,26 @@ impl DirNames {
             .any(|name| suffixes.iter().any(|suffix| name.ends_with(suffix)))
     }
 }
-
 /// What is in the folders around a path: read from the disk while walking,
 /// or from the file list of a backup.
 pub(crate) trait Listing {
     /// The names in the folder `rel` (`""`: the project folder), when known.
     fn names(&self, rel: &str) -> Option<Arc<DirNames>>;
 }
-
 /// Nothing known: only patterns decide.
 #[cfg(test)]
 pub(crate) struct NoListing;
-
 #[cfg(test)]
 impl Listing for NoListing {
     fn names(&self, _rel: &str) -> Option<Arc<DirNames>> {
         None
     }
 }
-
 /// The folders of a list of file paths (a backup's content).
 #[derive(Default)]
 pub(crate) struct TreeListing {
     dirs: HashMap<String, Arc<DirNames>>,
 }
-
 impl TreeListing {
     pub(crate) fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> TreeListing {
         let mut dirs: HashMap<String, DirNames> = HashMap::new();
@@ -379,13 +341,11 @@ impl TreeListing {
         }
     }
 }
-
 impl Listing for TreeListing {
     fn names(&self, rel: &str) -> Option<Arc<DirNames>> {
         self.dirs.get(&rel.to_lowercase()).cloned()
     }
 }
-
 /// The rules for one project folder: patterns, `.gitignore` files and what
 /// git tracks, decided once per backup so the backup, its completeness check,
 /// the preview and a comparison agree.
@@ -404,7 +364,6 @@ pub(crate) struct Rules {
     /// Decisions about ambiguous folders and marker contents, by key.
     cache: std::sync::Mutex<HashMap<String, bool>>,
 }
-
 /// Why something was left out.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Exclusion {
@@ -415,7 +374,6 @@ pub(crate) enum Exclusion {
     Gitignore,
     Internal,
 }
-
 impl Exclusion {
     pub(crate) fn describe(&self) -> String {
         match self {
@@ -425,7 +383,6 @@ impl Exclusion {
             Exclusion::Internal => "backup file".into(),
         }
     }
-
     /// `pattern`, `detected`, `gitignore` or `internal`.
     pub(crate) fn kind(&self) -> &'static str {
         match self {
@@ -436,7 +393,6 @@ impl Exclusion {
         }
     }
 }
-
 /// The first, cheap decision about a folder (before its content is read).
 pub(crate) enum Early {
     /// A keep pattern: backed up whatever else says.
@@ -445,18 +401,15 @@ pub(crate) enum Early {
     /// Decided by `detected_dir` once the folder's names are known.
     Undecided,
 }
-
 /// The parent folder of `rel` (`""` for a top-level name).
 pub(crate) fn parent_of(rel: &str) -> &str {
     rel.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("")
 }
-
 impl Rules {
     /// No exclusions at all (reading an old folder backup as it is).
     pub(crate) fn none() -> Rules {
         Rules::default()
     }
-
     pub(crate) fn compile(input: &RuleInput, root: Option<&Path>) -> Result<Rules, String> {
         let exclude = input
             .patterns
@@ -494,7 +447,6 @@ impl Rules {
         }
         Ok(rules)
     }
-
     /// Internal files, keep patterns and the pattern list.
     pub(crate) fn early_dir(&self, rel: &str) -> Early {
         let name = rel.rsplit('/').next().unwrap_or(rel);
@@ -513,11 +465,9 @@ impl Rules {
         }
         Early::Undecided
     }
-
     /// What the files around the folder `rel` say, and `.gitignore`.
     pub(crate) fn detected_dir(&self, rel: &str, listing: &dyn Listing) -> Option<Exclusion> {
-        // Markers name the tool; a followed .gitignore comes next; the
-        // name-only guess (ambiguous names git leaves alone) comes last.
+        // Markers name the tool; a followed .gitignore comes next; the name-only guess (ambiguous names git leaves alone) comes last.
         let smart = self.smart_build && !self.tracks_inside(rel);
         let name = rel.rsplit('/').next().unwrap_or(rel).to_lowercase();
         if smart && let Some(rule) = detect::folder(rel, &name, listing, self) {
@@ -531,7 +481,6 @@ impl Rules {
         }
         None
     }
-
     /// Whether the folder at `rel` (relative, `/`) is left out, and why.
     pub(crate) fn excluded_dir(&self, rel: &str, listing: &dyn Listing) -> Option<Exclusion> {
         match self.early_dir(rel) {
@@ -540,7 +489,6 @@ impl Rules {
             Early::Undecided => self.detected_dir(rel, listing),
         }
     }
-
     /// Whether the file at `rel` is left out, and why.
     pub(crate) fn excluded_file(&self, rel: &str, listing: &dyn Listing) -> Option<Exclusion> {
         let name = rel.rsplit('/').next().unwrap_or(rel);
@@ -569,7 +517,6 @@ impl Rules {
         }
         None
     }
-
     /// A file path read back from a backup: left out when any folder on its
     /// way, or the file itself, is.
     pub(crate) fn excluded_path(&self, rel: &str, listing: &dyn Listing) -> bool {
@@ -584,7 +531,6 @@ impl Rules {
         }
         self.excluded_file(&parts.join("/"), listing).is_some()
     }
-
     /// Git tracks a file inside the folder `rel`: it holds sources, whatever
     /// its name.
     fn tracks_inside(&self, rel: &str) -> bool {
@@ -597,14 +543,12 @@ impl Rules {
             .get(start)
             .is_some_and(|path| path.starts_with(&prefix))
     }
-
     fn is_tracked(&self, rel: &str) -> bool {
         let Some(tracked) = &self.tracked else {
             return false;
         };
         tracked.binary_search(&rel.to_lowercase()).is_ok()
     }
-
     /// A folder with a name build tools use (`build`, `out`, `bin`, …) and no
     /// marker that says which tool: build output when a `.gitignore` ignores
     /// it, or, for the commonest names, when the project is a git work tree
@@ -639,7 +583,6 @@ impl Rules {
             None
         }
     }
-
     /// Whether the lower-case file `name` in the folder `dir` mentions
     /// `needle` (cached; small files only).
     pub(crate) fn file_mentions(&self, dir: &str, name: &str, needle: &str) -> bool {
@@ -668,7 +611,6 @@ impl Rules {
             .insert(key, found);
         found
     }
-
     /// `.gitignore` files apply to their own folder and below; later lines win
     /// and `!` lines take a path back.
     fn gitignored(&self, rel: &str, is_dir: bool) -> bool {
@@ -689,12 +631,10 @@ impl Rules {
         ignored
     }
 }
-
 /// `.env`, `.env.local`, `.env.production`, …: always backed up.
 pub(crate) fn is_env_file(lower_name: &str) -> bool {
     lower_name == ".env" || lower_name.starts_with(".env.")
 }
-
 /// `rel` below the folder `base` (both relative, `/`), compared the way
 /// Windows compares names.
 fn strip_base<'a>(rel: &'a str, base: &str) -> Option<&'a str> {
@@ -711,14 +651,12 @@ fn strip_base<'a>(rel: &'a str, base: &str) -> Option<&'a str> {
     }
     Some(rest)
 }
-
 #[derive(Debug)]
 struct GitignoreFile {
     /// The folder it is in, relative to the project (`""` for the root).
     base: String,
     patterns: Vec<(Pattern, bool)>,
 }
-
 /// Every `.gitignore` in the project, outside the folders the patterns or
 /// the markers already leave out.
 fn load_gitignores(root: &Path, rules: &Rules) -> Vec<GitignoreFile> {
@@ -795,32 +733,27 @@ fn load_gitignores(root: &Path, rules: &Rules) -> Vec<GitignoreFile> {
     found.sort_by_key(|file| file.base.matches('/').count() + usize::from(!file.base.is_empty()));
     found
 }
-
 /// The folders read so far by a walk, by lower-case relative path.
 #[derive(Default)]
 pub(crate) struct StackListing {
     dirs: std::cell::RefCell<HashMap<String, Arc<DirNames>>>,
 }
-
 impl StackListing {
     pub(crate) fn set(&self, rel: &str, names: DirNames) {
         self.dirs
             .borrow_mut()
             .insert(rel.to_lowercase(), Arc::new(names));
     }
-
     /// Forgets the folder `rel` once the walk is done with it.
     pub(crate) fn forget(&self, rel: &str) {
         self.dirs.borrow_mut().remove(&rel.to_lowercase());
     }
 }
-
 impl Listing for StackListing {
     fn names(&self, rel: &str) -> Option<Arc<DirNames>> {
         self.dirs.borrow().get(&rel.to_lowercase()).cloned()
     }
 }
-
 fn parse_gitignore(text: &str) -> Vec<(Pattern, bool)> {
     text.lines()
         .filter_map(|line| {
@@ -836,12 +769,10 @@ fn parse_gitignore(text: &str) -> Vec<(Pattern, bool)> {
         })
         .collect()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
     fn defaults() -> RuleInput {
         RuleInput {
             patterns: DEFAULT_PATTERNS.iter().map(|p| p.to_string()).collect(),
@@ -849,43 +780,35 @@ mod tests {
             ..RuleInput::default()
         }
     }
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-rules-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     #[test]
     fn patterns_match_names_anywhere_and_paths_from_the_root() {
         let folder = Pattern::parse("node_modules/").unwrap();
         assert!(folder.matches("node_modules", true));
         assert!(folder.matches("app/NODE_MODULES", true));
         assert!(!folder.matches("node_modules", false));
-
         let ext = Pattern::parse("*.log").unwrap();
         assert!(ext.matches("logs/debug.LOG", false));
         assert!(!ext.matches("logs/debug.log.txt", false));
-
         let anchored = Pattern::parse("backend/resources/ludusavi/*").unwrap();
         assert!(anchored.matches("backend/resources/ludusavi/ludusavi.exe", false));
         assert!(!anchored.matches("other/backend/resources/ludusavi/x", false));
-
         let deep = Pattern::parse("assets/**/*.psd").unwrap();
         assert!(deep.matches("assets/a.psd", false));
         assert!(deep.matches("assets/x/y/a.psd", false));
         assert!(!deep.matches("art/a.psd", false));
-
         let rooted = Pattern::parse("/notes.txt").unwrap();
         assert!(rooted.matches("notes.txt", false));
         assert!(!rooted.matches("docs/notes.txt", false));
-
         assert!(Pattern::parse("  ").is_err());
         assert!(Pattern::parse("../outside").is_err());
         assert!(Pattern::parse("[ab].txt").unwrap().matches("a.txt", false));
     }
-
     #[test]
     fn the_defaults_skip_agent_and_tool_folders_but_keep_env_files() {
         let rules = Rules::compile(&defaults(), None).unwrap();
@@ -918,7 +841,6 @@ mod tests {
         assert!(rules.excluded_path("web/node_modules/pkg/index.js", &NoListing));
         assert!(!rules.excluded_path("web/src/index.js", &NoListing));
     }
-
     #[test]
     fn keep_patterns_win_over_the_global_list() {
         let input = RuleInput {
@@ -941,7 +863,6 @@ mod tests {
             .is_err()
         );
     }
-
     #[test]
     fn build_is_skipped_only_when_it_is_build_output() {
         // A git work tree that tracks build/installer.nsh but not out/build.
@@ -964,7 +885,6 @@ mod tests {
             rules.excluded_dir("web/build", &NoListing),
             Some(Exclusion::Detected(detect::UNTRACKED_OUTPUT))
         );
-
         // No git: only a .gitignore says it is output.
         let plain = temp("build-plain");
         fs::create_dir_all(plain.join("build")).unwrap();
@@ -976,7 +896,6 @@ mod tests {
             rules.excluded_dir("app/build", &NoListing),
             Some(Exclusion::Detected(detect::IGNORED_OUTPUT))
         );
-
         // Turned off, every build folder is backed up.
         let off = Rules::compile(
             &RuleInput {
@@ -990,7 +909,6 @@ mod tests {
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(plain);
     }
-
     #[test]
     fn following_gitignore_is_optional_and_never_drops_env_files() {
         let root = temp("gitignore");
@@ -1001,7 +919,6 @@ mod tests {
         .unwrap();
         let off = Rules::compile(&defaults(), Some(&root)).unwrap();
         assert_eq!(off.excluded_file("a.secret", &NoListing), None);
-
         let on = Rules::compile(
             &RuleInput {
                 follow_gitignore: true,

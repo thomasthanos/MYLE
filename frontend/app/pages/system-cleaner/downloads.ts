@@ -3,10 +3,8 @@ export type Item = { path: string; name: string; isDir: boolean; size: number; c
 export type Kept = { name: string; isDir: boolean; reason: "document" | "recent" | "link"; changed: number };
 export type Preview = { folder: string; items: Item[]; total: number; kept: Kept[] };
 export type Outcome = { deleted: number; freed: number; skipped: string[] };
-
 /** The System Cleaner category id of the Downloads folder. */
 export const DOWNLOADS = "downloads";
-
 export const DOWNLOADS_CATEGORY = {
   id: DOWNLOADS,
   title: "Downloads folder",

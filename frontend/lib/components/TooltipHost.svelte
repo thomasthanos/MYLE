@@ -1,9 +1,5 @@
 <script lang="ts">
-  // Every `title` in the app, drawn by the app instead of by Windows: the
-  // native tooltip is small, square and light on a dark glass window. On the
-  // first hover an element's title moves to `data-tip` (so Windows shows
-  // nothing), and stays readable to screen readers as its label or
-  // description. Lines in a title ("\n") are kept, and long paths wrap.
+  // Every `title` in the app, drawn by the app instead of by Windows: the native tooltip is small, square and light on a dark glass window. On the first hover an element's title moves to `data-tip` (so Windows shows nothing), and stays readable to screen readers as its label or description. Lines in a title ("\n") are kept, and long paths wrap.
   import { onMount, untrack } from "svelte";
   import { pointerTip } from "../tooltip.svelte";
 
@@ -50,8 +46,7 @@
     return node.closest<HTMLElement>("[title], [data-tip]");
   }
 
-  /** Below the element, or above it without room; under the pointer, kept
-   *  inside the window. */
+  /* Below the element, or above it without room; under the pointer, kept inside the window. */
   function place() {
     if (!target || !box) return;
     const anchor = target.getBoundingClientRect();
@@ -115,8 +110,7 @@
     }
   }
 
-  // The pointer's own tooltip (lib/tooltip.svelte.ts): beside the pointer,
-  // flipped to the other side near the window's edges.
+  // The pointer's own tooltip (lib/tooltip.svelte.ts): beside the pointer, flipped to the other side near the window's edges.
   let pointerBox = $state<HTMLDivElement>();
   let pointerSize = $state({ width: 0, height: 0 });
   const pointerLeft = $derived(
@@ -147,8 +141,7 @@
       [window, "blur", hide],
       [window, "resize", hide],
     ];
-    // Removing a focused element can dispatch focusout during a Svelte
-    // render. Native event handlers must run outside that render's tracking.
+    // Removing a focused element can dispatch focusout during a Svelte render. Native event handlers must run outside that render's tracking.
     const removeListeners = listeners.map(([on, name, listener]) => {
       const handle: EventListener = (event) => untrack(() => listener(event));
       on.addEventListener(name, handle, options);

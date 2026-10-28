@@ -1,10 +1,7 @@
-//! Project paths use a sibling key so older MYLE clients updating `v7`
-//! cannot accidentally erase this newer section of the same private row.
+// ! Project paths use a sibling key so older MYLE clients updating `v7` ! cannot accidentally erase this newer section of the same private row.
 use crate::github_releases::sync::{SyncedProjects, validate};
 use serde_json::{Value, json};
-
 const PROJECTS_KEY: &str = "githubReleases";
-
 pub(super) fn read(data: Value) -> Option<Value> {
     let projects = data
         .get(PROJECTS_KEY)
@@ -26,7 +23,6 @@ pub(super) fn read(data: Value) -> Option<Value> {
     }
     Some(snapshot)
 }
-
 pub(super) fn write(row: Option<Value>, mut settings: Value) -> Result<Value, String> {
     let object = settings
         .as_object_mut()
@@ -46,8 +42,7 @@ pub(super) fn write(row: Option<Value>, mut settings: Value) -> Result<Value, St
             .and_then(Value::as_str)
             .filter(|time| !time.is_empty() && time.len() <= 64)
             .ok_or_else(|| "Synced project paths need a change timestamp.".to_string())?;
-        // A newer cloud list may have arrived since this PC last pulled.
-        // Pushing an unrelated preference must not replace it with stale paths.
+        // A newer cloud list may have arrived since this PC last pulled. Pushing an unrelated preference must not replace it with stale paths.
         let remote_changed = data
             .get(PROJECTS_KEY)
             .and_then(|section| section.get("updatedAt"))
@@ -62,14 +57,12 @@ pub(super) fn write(row: Option<Value>, mut settings: Value) -> Result<Value, St
     data.insert(super::DATA_KEY.into(), settings);
     Ok(Value::Object(data))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     fn snapshot() -> Value {
         json!({"version":1,"updatedAt":"2026-10-27T11:00:00Z","storage":{},"gameSaves":null})
     }
-
     #[test]
     fn private_row_round_trip_keeps_other_settings_and_strips_non_path_fields() {
         let mut settings = snapshot();
@@ -83,7 +76,6 @@ mod tests {
             json!({"version":1,"paths":["H:\\Code\\MYLE"]})
         );
     }
-
     #[test]
     fn old_clients_keep_the_sibling_projects_when_replacing_their_v7_snapshot() {
         let mut settings = snapshot();
@@ -95,7 +87,6 @@ mod tests {
             json!(["C:\\Code\\Project"])
         );
     }
-
     #[test]
     fn explicit_empty_list_clears_projects_and_a_paths_only_row_can_restore() {
         let data = json!({"githubReleases":{"updatedAt":"2026-10-27T11:00:00Z","projects":{"version":1,"paths":["C:\\Code\\One"]}}});
@@ -107,14 +98,12 @@ mod tests {
             json!([])
         );
     }
-
     #[test]
     fn invalid_incoming_paths_are_rejected_before_any_row_is_produced() {
         let mut settings = snapshot();
         settings[PROJECTS_KEY] = json!({"version":1,"paths":["relative"]});
         assert!(write(None, settings).is_err());
     }
-
     #[test]
     fn unrelated_preferences_do_not_change_the_project_lists_own_timestamp() {
         let mut settings = snapshot();
@@ -126,7 +115,6 @@ mod tests {
         assert_eq!(restored["githubReleasesUpdatedAt"], "2026-10-26T08:00:00Z");
         assert_eq!(restored["updatedAt"], "2026-10-27T11:00:00Z");
     }
-
     #[test]
     fn pushing_preferences_with_stale_paths_preserves_a_newer_cloud_list() {
         let remote = json!({"githubReleases":{"updatedAt":"2026-10-27T10:00:00Z","projects":{"version":1,"paths":["D:\\Newer\\Repo"]}}});
@@ -138,7 +126,6 @@ mod tests {
         assert_eq!(restored[PROJECTS_KEY]["paths"], json!(["D:\\Newer\\Repo"]));
         assert_eq!(restored["storage"]["myle.dark"], "1");
     }
-
     #[test]
     fn a_project_edit_does_not_make_older_preferences_appear_newer() {
         let restored = read(json!({

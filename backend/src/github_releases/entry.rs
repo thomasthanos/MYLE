@@ -1,12 +1,7 @@
-//! A project on the page: a whole repository, or one app folder of a
-//! monorepo. Its id is `<repo id>` or `<repo id>/<folder>`; the folder must
-//! be one the repository really has, so an id can't point anywhere else.
-
+// ! A project on the page: a whole repository, or one app folder of a ! monorepo. Its id is `<repo id>` or `<repo id>/<folder>`; the folder must ! be one the repository really has, so an id can't point anywhere else.
 use std::path::PathBuf;
-
 use super::project;
 use super::store::{EntryConfig, Repo, Settings};
-
 #[derive(Clone, Debug)]
 pub(crate) struct Entry {
     pub id: String,
@@ -22,13 +17,11 @@ pub(crate) struct Entry {
     pub tag_prefix: String,
     pub config: EntryConfig,
 }
-
 fn folder_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string())
 }
-
 /// The projects of `repo`: one per app folder of a monorepo, else itself.
 pub(crate) fn entries_of(settings: &Settings, repo: &Repo) -> Vec<Entry> {
     let root = PathBuf::from(&repo.path);
@@ -68,7 +61,6 @@ pub(crate) fn entries_of(settings: &Settings, repo: &Repo) -> Vec<Entry> {
         })
         .collect()
 }
-
 pub(crate) fn resolve(settings: &Settings, id: &str) -> Result<Entry, String> {
     let repo_id = id.split('/').next().unwrap_or(id);
     let repo = settings.repo(repo_id)?;
@@ -77,7 +69,6 @@ pub(crate) fn resolve(settings: &Settings, id: &str) -> Result<Entry, String> {
         .find(|entry| entry.id == id)
         .ok_or_else(|| "This project's folder is no longer there.".to_string())
 }
-
 impl Entry {
     /// A path from the project folder as a path from the repository's top.
     pub(crate) fn repo_path(&self, rel: &str) -> String {
@@ -86,7 +77,6 @@ impl Entry {
             None => rel.to_string(),
         }
     }
-
     /// Whether `path` (from the repository's top) is inside this project.
     pub(crate) fn contains(&self, path: &str) -> bool {
         match &self.sub {
@@ -95,11 +85,9 @@ impl Entry {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn a_monorepo_gives_one_project_per_app_with_its_own_tags() {
         let dir = std::env::temp_dir().join(format!("myle-gr-entry-{}", std::process::id()));
@@ -133,7 +121,6 @@ mod tests {
         // Only folders the repository really has.
         assert!(resolve(&settings, &format!("{id}/../elsewhere")).is_err());
         assert!(resolve(&settings, &id).is_err());
-
         // A single project is the repository itself, tagged v….
         std::fs::write(dir.join("package.json"), "{\"version\":\"9.5.0\"}").unwrap();
         let entries = entries_of(&settings, &repo);

@@ -19,8 +19,7 @@
   let { size = 24 }: { size?: number } = $props();
   const uid = $props.id();
 
-  // Below this the fine code lines turn to mush: draw fewer, bolder ones and
-  // skip the soft glows.
+  // Below this the fine code lines turn to mush: draw fewer, bolder ones and skip the soft glows.
   const compact = $derived(size < 40);
   const code = $derived(compact ? CODE_COMPACT : CODE);
   const stroke = $derived(compact ? CODE_COMPACT_STROKE : CODE_STROKE);

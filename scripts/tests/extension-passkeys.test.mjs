@@ -1,17 +1,12 @@
-// The extension's page-world part for passkeys (passkeys.js), run in a
-// stand-in for the page: `node --test scripts/tests/`.
+// The extension's page-world part for passkeys (passkeys.js), run in a stand-in for the page: `node --test scripts/tests/`.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 const source = await readFile(new URL("../../extension/passkeys.js", import.meta.url), "utf8");
 const EXTENSION = "myle-passkeys/extension";
-
 const b64 = (bytes) => Buffer.from(bytes).toString("base64url");
-
-/** A page with the browser's own passkeys, and MYLE's part listening.
- *  `timers` (optional) stands in for the page's setTimeout/clearTimeout. */
+/* A page with the browser's own passkeys, and MYLE's part listening. `timers` (optional) stands in for the page's setTimeout/clearTimeout. */
 function page(timers) {
   const posted = [];
   const window = new EventTarget();
@@ -64,7 +59,6 @@ function page(timers) {
   };
   return { context, posted, answer, window, traces };
 }
-
 const made = {
   id: b64([1, 2, 3]),
   rawId: b64([1, 2, 3]),
@@ -78,7 +72,6 @@ const made = {
     transports: ["hybrid", "internal"],
   },
 };
-
 const createOptions = () => ({
   publicKey: {
     rp: { id: "example.com", name: "Example" },
@@ -90,7 +83,6 @@ const createOptions = () => ({
     extensions: { credProps: true },
   },
 });
-
 test("a new passkey is asked of MYLE and comes back as a PublicKeyCredential", async () => {
   const { context, posted, answer } = page();
   const pending = context.navigator.credentials.create(createOptions());
@@ -122,7 +114,6 @@ test("a new passkey is asked of MYLE and comes back as a PublicKeyCredential", a
   assert.deepEqual(JSON.parse(JSON.stringify(credential.getClientExtensionResults())), { credProps: { rk: true } });
   assert.equal(JSON.parse(JSON.stringify(credential)).response.attestationObject, made.response.attestationObject);
 });
-
 test("signing in returns an assertion, and the user handle as bytes", async () => {
   const { context, posted, answer } = page();
   const pending = context.navigator.credentials.get({
@@ -141,7 +132,6 @@ test("signing in returns an assertion, and the user handle as bytes", async () =
   assert.deepEqual([...new Uint8Array(credential.response.userHandle)], [7, 7]);
   assert.deepEqual({ ...credential.getClientExtensionResults() }, {});
 });
-
 test("another device, or nothing in MYLE, leaves it to the browser", async () => {
   const { context, answer } = page();
   const pending = context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } });
@@ -150,14 +140,12 @@ test("another device, or nothing in MYLE, leaves it to the browser", async () =>
   // Calls without publicKey (passwords, federated) never come to MYLE.
   assert.equal((await context.navigator.credentials.get({ password: true })).native, "get");
 });
-
 test("a refusal reaches the page as the DOMException WebAuthn names", async () => {
   const { context, answer } = page();
   const pending = context.navigator.credentials.create(createOptions());
   answer({ result: "error", name: "InvalidStateError", message: "Already there." });
   await assert.rejects(pending, (error) => error.name === "InvalidStateError" && error.message === "Already there.");
 });
-
 test("the page can withdraw its question", async () => {
   const { context, posted } = page();
   const controller = new AbortController();
@@ -167,7 +155,6 @@ test("the page can withdraw its question", async () => {
   assert.equal(posted.at(-1).kind, "abort");
   assert.equal(posted.at(-1).id, posted[0].id);
 });
-
 test("a sign-in form waits for MYLE's menu and the browser's own at once", async () => {
   // MYLE's passkey picked first: the browser's own request is withdrawn.
   let { context, posted, answer, window } = page();
@@ -176,7 +163,6 @@ test("a sign-in form waits for MYLE's menu and the browser's own at once", async
   answer({ result: "credential", credential: { ...made, response: { clientDataJSON: made.response.clientDataJSON, authenticatorData: b64([1]), signature: b64([2]) } } }, 0);
   assert.equal((await pending).id, made.id);
   assert.equal(posted.length, 1, "MYLE's part answered, so it knows the form is done");
-
   // The browser's own picked first.
   ({ context, posted, answer, window } = page());
   pending = context.navigator.credentials.get({ mediation: "conditional", publicKey: { challenge: new Uint8Array([1]) } });
@@ -185,7 +171,6 @@ test("a sign-in form waits for MYLE's menu and the browser's own at once", async
   assert.equal((await pending).native, "conditional");
   assert.equal(posted.at(-1).kind, "abort");
 });
-
 test("a site asking for its old U2F keys (appid) hears that a MYLE passkey is not one", async () => {
   const { context, posted, answer } = page();
   const pending = context.navigator.credentials.get({
@@ -200,7 +185,6 @@ test("a site asking for its old U2F keys (appid) hears that a MYLE passkey is no
   assert.deepEqual({ ...credential.getClientExtensionResults() }, { appid: false });
   assert.deepEqual(JSON.parse(JSON.stringify(credential)).clientExtensionResults, { appid: false });
 });
-
 test("an empty helper frame of the page's own origin asks MYLE through the page", async () => {
   const parent = page();
   const frame = (origin) => {
@@ -239,12 +223,10 @@ test("an empty helper frame of the page's own origin asks MYLE through the page"
   assert.equal((await pending).native, "get", "and the page's answer came back");
   // Passwords and the like stay the frame's own.
   assert.equal((await same.navigator.credentials.get({ password: true })).native, "frame");
-
   // Another origin: the browser's own, untouched.
   const other = frame("https://evil.example");
   assert.equal((await other.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } })).native, "frame");
 });
-
 test("MYLE's wrappers read as the browser's own functions", () => {
   const { context } = page();
   const read = vm.runInContext("Function.prototype.toString.call(navigator.credentials.get)", context);
@@ -252,8 +234,6 @@ test("MYLE's wrappers read as the browser's own functions", () => {
   assert.equal(vm.runInContext("navigator.credentials.get === CredentialsContainer.prototype.get", context), true);
   assert.equal(vm.runInContext("String(Function.prototype.toString).includes('__myle')", context), false);
 });
-
-
 test("a sign-in asked before MYLE's part of the page started is asked again on its hello", async () => {
   const { context, posted, answer, window } = page();
   const pending = context.navigator.credentials.get({ publicKey: { challenge: new Uint8Array([1]) } });
@@ -270,12 +250,10 @@ test("a sign-in asked before MYLE's part of the page started is asked again on i
   window.dispatchEvent(Object.assign(new Event("message"), { source: window, data: { source: EXTENSION, kind: "hello" } }));
   assert.equal(posted.length, 3);
 });
-
 test("a site asking for a platform authenticator hears MYLE is one", async () => {
   const { context } = page();
   assert.equal(await context.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(), true);
 });
-
 /** Timers that run only when the test says so. */
 function fakeTimers() {
   const pending = new Map();
@@ -294,7 +272,6 @@ function fakeTimers() {
     },
   };
 }
-
 const hello = (window, acks) => {
   const event = new Event("message");
   Object.assign(event, { source: window, data: { source: EXTENSION, kind: "hello", ...(acks ? { acks: true } : {}) } });
@@ -306,7 +283,6 @@ const ack = (window, id) => {
   window.dispatchEvent(event);
 };
 const signIn = { publicKey: { challenge: new Uint8Array([1]), rpId: "example.com", timeout: 60_000 } };
-
 test("a sign-in MYLE never answers ends at the page's own timeout, as the browser's would", async () => {
   const timers = fakeTimers();
   const { context, posted, window } = page(timers);
@@ -318,7 +294,6 @@ test("a sign-in MYLE never answers ends at the page's own timeout, as the browse
   assert.equal(posted.at(-1).kind, "abort", "MYLE's prompt is closed too");
   assert.equal(timers.pending.size, 0);
 });
-
 test("the page's timeout is kept within sane bounds", async () => {
   const timers = fakeTimers();
   const { context, window } = page(timers);
@@ -328,7 +303,6 @@ test("the page's timeout is kept within sane bounds", async () => {
   const delays = [...timers.pending.values()].map((timer) => timer.ms).sort((a, b) => a - b);
   assert.deepEqual(delays, [30_000, 300_000]);
 });
-
 test("a question MYLE's part of the page never hears goes to the browser's own passkeys", async () => {
   const timers = fakeTimers();
   const { context, posted, window } = page(timers);
@@ -339,7 +313,6 @@ test("a question MYLE's part of the page never hears goes to the browser's own p
   const answer = await pending;
   assert.equal(answer.native, "get", "the browser's own get was called");
 });
-
 test("an older MYLE part of the page (no acks) is waited for as before", async () => {
   const timers = fakeTimers();
   const { context, posted, window, answer } = page(timers);
@@ -350,7 +323,6 @@ test("an older MYLE part of the page (no acks) is waited for as before", async (
   assert.equal((await pending).native, "get");
   assert.equal(posted.filter((message) => message.kind === "abort").length, 0);
 });
-
 test("a question asked before MYLE's part of the page starts goes native if it never starts", async () => {
   const timers = fakeTimers();
   const { context } = page(timers);
@@ -358,7 +330,6 @@ test("a question asked before MYLE's part of the page starts goes native if it n
   timers.fire(10_000);
   assert.equal((await pending).native, "get");
 });
-
 test("a page put in the back/forward cache refuses its modal sign-in but keeps a waiting form", async () => {
   const timers = fakeTimers();
   const { context, posted, window } = page(timers);
@@ -373,7 +344,6 @@ test("a page put in the back/forward cache refuses its modal sign-in but keeps a
   const state = await Promise.race([conditional.then(() => "settled", () => "settled"), new Promise((resolve) => setImmediate(() => resolve("waiting")))]);
   assert.equal(state, "waiting");
 });
-
 test("a conditional create is left to the browser", async () => {
   const { context, posted } = page();
   const made = await context.navigator.credentials.create({ ...createOptions(), mediation: "conditional" });

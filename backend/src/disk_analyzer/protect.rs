@@ -1,23 +1,8 @@
-//! What the Disk Analyzer never moves to the Recycle Bin, whatever the page
-//! sends: drives, the scanned folder, Windows, user profiles and their main
-//! folders, Program Files and ProgramData themselves, the file system's own
-//! files at a drive's root, MYLE itself, the folders installed programs live
-//! in, and programs that are running. A folder that holds any of them is
-//! refused too, since recycling it would take them along.
-//!
-//! Some things may go, but not without a word: what is inside an installed
-//! program or Program Files, the folder a running program came from, browser
-//! data and the save games MYLE found. The warning names what it is.
-//!
-//! Paths are compared by their parts, without regard to case, after taking
-//! off `\\?\` and working out `.` and `..`: never as plain text prefixes.
-
+// ! What the Disk Analyzer never moves to the Recycle Bin, whatever the page ! sends: drives, the scanned folder, Windows, user profiles and their main ! folders, Program Files and ProgramData themselves, the file system's own ! files at a drive's root, MYLE itself, the folders installed programs live ! in, and programs that are running. A folder that holds any of them is ! refused too, since recycling it would take them along. ! ! Some things may go, but not without a word: what is inside an installed ! program or Program Files, the folder a running program came from, browser ! data and the save games MYLE found. The warning names what it is. ! ! Paths are compared by their parts, without regard to case, after taking ! off `\\?\` and working out `.` and `..`: never as plain text prefixes.
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-
 /// Why something is refused or needs a warning.
 pub type Why = Cow<'static, str>;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Allowed,
@@ -26,7 +11,6 @@ pub enum Verdict {
     /// Refused, and why.
     Protected(Why),
 }
-
 const DRIVE: &str = "A whole drive is never moved to the Recycle Bin.";
 const SCANNED: &str = "This is the folder you scanned.";
 const WINDOWS: &str = "Windows needs this.";
@@ -35,7 +19,6 @@ const PROGRAMS: &str = "Windows keeps programs here. What is inside can go.";
 const MYLE: &str = "MYLE needs this.";
 const HOLDS: &str = "It holds something Windows, a user or MYLE needs.";
 const IN_PROGRAMS: &str = "Inside Program Files or ProgramData: a program may stop working without it. Uninstalling the program is safer.";
-
 /// Directly under a drive's root: refused themselves.
 const ROOT_NAMES: &[&str] = &[
     "system volume information",
@@ -86,7 +69,6 @@ const BROWSER_DATA: &[(&str, &str, &str)] = &[
     (r"AppData\Roaming\Thunderbird\Profiles", "Thunderbird", "your mail, accounts and settings"),
 ];
 const BROWSER_WHAT: &str = "saved passwords, history, bookmarks and extensions";
-
 /// The places of this PC the rules are about.
 #[derive(Default)]
 pub struct Places {
@@ -108,7 +90,6 @@ pub struct Places {
     /// The save folders Game Saves found, and each game's title.
     pub saves: Vec<(PathBuf, String)>,
 }
-
 impl Places {
     pub fn of_this_pc() -> Self {
         use windows::Win32::UI::Shell::{
@@ -173,7 +154,6 @@ impl Places {
         places
     }
 }
-
 fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
@@ -185,7 +165,6 @@ fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
         text.ok().map(PathBuf::from)
     }
 }
-
 /// The program files of the processes running now that can be asked (most
 /// of the user's own and many of the system's).
 fn running_programs() -> Vec<PathBuf> {
@@ -214,9 +193,7 @@ fn running_programs() -> Vec<PathBuf> {
     paths.dedup();
     paths
 }
-
 type Parts = Vec<String>;
-
 /// A place that is refused itself and makes a folder holding it refused too.
 struct Held {
     parts: Parts,
@@ -225,7 +202,6 @@ struct Held {
     /// What is inside it goes with this warning, when there is one.
     inside: Option<String>,
 }
-
 /// A place that, with everything inside, goes only with a warning, and makes
 /// a folder holding it need one too.
 struct Careful {
@@ -233,7 +209,6 @@ struct Careful {
     why: String,
     holds: String,
 }
-
 pub struct Guard {
     root: Parts,
     /// Refused with everything inside.
@@ -247,7 +222,6 @@ pub struct Guard {
     /// Inside them: allowed with a warning.
     caution: Vec<Parts>,
 }
-
 impl Guard {
     pub fn new(scan_root: &Path, places: &Places) -> Self {
         let mut whole: Vec<(Parts, &'static str)> = Vec::new();
@@ -261,10 +235,7 @@ impl Guard {
             exact.extend(PROFILE_FOLDERS.iter().map(|sub| (parts(&profile.join(sub)), PROFILE)));
         }
         exact.extend(places.programs.iter().map(|p| (parts(p), PROGRAMS)));
-
-        // A program or a game that names a drive, a profile or Documents as
-        // its folder would make all of it its own: such a place (or one that
-        // holds it) keeps its usual rule only.
+        // A program or a game that names a drive, a profile or Documents as its folder would make all of it its own: such a place (or one that holds it) keeps its usual rule only.
         let general = |p: &Parts| p.len() <= 1 || whole.iter().chain(&exact).any(|(q, _)| starts_with(q, p));
         let mut held = Vec::new();
         for (path, name) in &places.installed {
@@ -300,7 +271,6 @@ impl Guard {
                 });
             }
         }
-
         let mut careful = Vec::new();
         for profile in &places.profiles {
             for (sub, browser, what) in BROWSER_DATA {
@@ -321,7 +291,6 @@ impl Guard {
                 });
             }
         }
-
         Self {
             root: parts(scan_root),
             whole,
@@ -331,11 +300,9 @@ impl Guard {
             caution: places.programs.iter().map(|p| parts(p)).collect(),
         }
     }
-
     pub fn for_this_pc(scan_root: &Path) -> Self {
         Self::new(scan_root, &Places::of_this_pc())
     }
-
     /// Whether `path` may go to the Recycle Bin. `system`: it has
     /// FILE_ATTRIBUTE_SYSTEM.
     pub fn check(&self, path: &Path, system: bool) -> Verdict {
@@ -375,8 +342,7 @@ impl Guard {
         if let Some(held) = self.held.iter().find(|h| h.parts.len() > path.len() && starts_with(&h.parts, &path)) {
             return Verdict::Protected(held.holds.clone().into());
         }
-        // The closest warning wins: a game's saves inside a launcher's folder
-        // are the game's saves.
+        // The closest warning wins: a game's saves inside a launcher's folder are the game's saves.
         let mut warning: Option<(usize, &String)> = None;
         for held in &self.held {
             if let Some(inside) = &held.inside
@@ -404,11 +370,9 @@ impl Guard {
         Verdict::Allowed
     }
 }
-
 fn starts_with(path: &[String], prefix: &[String]) -> bool {
     path.len() >= prefix.len() && path[..prefix.len()] == *prefix
 }
-
 /// The parts of a path, lower case: `["c:", "users", "ann"]`, or
 /// `[r"\\server\share", …]` for a network path. `.` and `..` are worked out,
 /// and Windows' trailing dots and spaces are dropped as Windows does.
@@ -451,11 +415,9 @@ pub fn parts(path: &Path) -> Parts {
     }
     out
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn places() -> Places {
         Places {
             windows: vec![r"C:\Windows".into()],
@@ -467,19 +429,15 @@ mod tests {
             ..Places::default()
         }
     }
-
     fn check(root: &str, path: &str) -> Verdict {
         Guard::new(Path::new(root), &places()).check(Path::new(path), false)
     }
-
     fn refused(root: &str, path: &str) -> bool {
         matches!(check(root, path), Verdict::Protected(_))
     }
-
     fn protected(why: &'static str) -> Verdict {
         Verdict::Protected(why.into())
     }
-
     /// The warning, or the reason it is refused, or "" when it may go freely.
     fn says(guard: &Guard, path: &str) -> String {
         match guard.check(Path::new(path), false) {
@@ -487,7 +445,6 @@ mod tests {
             Verdict::Caution(why) | Verdict::Protected(why) => why.into_owned(),
         }
     }
-
     #[test]
     fn drives_and_the_scanned_folder_are_refused() {
         assert_eq!(check(r"C:\", r"C:\"), protected(DRIVE));
@@ -498,7 +455,6 @@ mod tests {
         assert_eq!(check(r"\\srv\share\x", r"\\?\UNC\srv\share\x"), protected(SCANNED));
         assert_eq!(check(r"D:\Data", r"D:\Data\old.zip"), Verdict::Allowed);
     }
-
     #[test]
     fn windows_and_everything_inside_it_are_refused() {
         assert!(refused(r"C:\", r"C:\Windows"));
@@ -508,7 +464,6 @@ mod tests {
         assert!(refused(r"C:\", r"C:\Windows.\explorer.exe"), "Windows drops trailing dots");
         assert!(!refused(r"C:\", r"C:\Windows.old\x"));
     }
-
     #[test]
     fn program_folders_are_refused_and_their_contents_need_a_warning() {
         assert_eq!(check(r"C:\", r"C:\Program Files"), protected(PROGRAMS));
@@ -519,7 +474,6 @@ mod tests {
         assert!(refused(r"D:\", r"D:\Program Files"));
         assert_eq!(check(r"D:\", r"D:\Program Files\Game"), Verdict::Caution(IN_PROGRAMS.into()));
     }
-
     #[test]
     fn the_file_systems_own_files_at_a_root_are_refused() {
         for name in [
@@ -549,7 +503,6 @@ mod tests {
         assert!(matches!(guard.check(Path::new(r"D:\odd.bin"), true), Verdict::Protected(_)));
         assert_eq!(guard.check(Path::new(r"D:\Data\odd.bin"), true), Verdict::Allowed);
     }
-
     #[test]
     fn profiles_and_their_main_folders_are_refused_but_not_what_is_inside() {
         assert!(refused(r"C:\", r"C:\Users"));
@@ -566,7 +519,6 @@ mod tests {
         assert!(refused(r"D:\", r"D:\OneDrive\Documents"));
         assert_eq!(check(r"D:\", r"D:\OneDrive\Documents\old.docx"), Verdict::Allowed);
     }
-
     #[test]
     fn myle_and_folders_that_hold_protected_ones_are_refused() {
         assert_eq!(check(r"C:\", r"C:\Users\Ann\AppData\Local\Programs\MYLE\MYLE.exe"), protected(MYLE));
@@ -575,7 +527,6 @@ mod tests {
         assert_eq!(check(r"D:\", r"D:\OneDrive"), protected(HOLDS), "it holds a known folder");
         assert_eq!(check(r"C:\", r"C:\Users\Ann\AppData\Roaming\Other App"), Verdict::Allowed);
     }
-
     #[test]
     fn installed_programs_are_refused_with_what_holds_them_and_their_files_need_a_warning() {
         let places = Places {
@@ -605,7 +556,6 @@ mod tests {
         assert_eq!(guard.check(Path::new(r"C:\Data\x"), false), Verdict::Allowed);
         assert_eq!(says(&guard, r"C:\Program Files\Other\x.dll"), IN_PROGRAMS);
     }
-
     #[test]
     fn running_programs_and_their_folders_are_refused() {
         let places = Places {
@@ -627,7 +577,6 @@ mod tests {
         assert_eq!(guard.check(Path::new(r"C:\Users\Ann\Downloads\movie.mkv"), false), Verdict::Allowed);
         assert_eq!(says(&guard, r"C:\Windows\explorer.exe"), WINDOWS);
     }
-
     #[test]
     fn browser_data_and_save_games_go_only_with_a_warning() {
         let places = Places {
@@ -652,7 +601,6 @@ mod tests {
         assert!(says(&guard, r"C:\Program Files (x86)\Steam\userdata\1\620\remote\save1.sav").starts_with("Save games of Portal 2."), "the game's saves, not Steam's files");
         assert_eq!(guard.check(Path::new(r"C:\Users\Ann\Documents\letter.docx"), false), Verdict::Allowed);
     }
-
     #[test]
     fn paths_are_compared_by_their_parts() {
         assert_eq!(parts(Path::new(r"\\?\C:\Users\.\Ann\..\Bob\")), ["c:", "users", "bob"]);
@@ -664,7 +612,6 @@ mod tests {
         assert_eq!(check(r"C:\", r"C:\Users2"), Verdict::Allowed);
         assert_eq!(check(r"C:\", r"C:\Windows2\x"), Verdict::Allowed);
     }
-
     #[test]
     fn this_pcs_own_places_are_found() {
         let temp = std::env::temp_dir();
@@ -676,10 +623,7 @@ mod tests {
         assert!(matches!(guard.check(&profile.join("Documents"), false), Verdict::Protected(_)));
         let exe = std::env::current_exe().unwrap();
         assert_eq!(guard.check(&exe, false), protected(MYLE));
-        // A real Temp folder is not a protected Windows/profile folder, but
-        // a running installer or the CI runner itself may legitimately give
-        // its contents a warning. Deterministic fixtures above check Allowed
-        // and the running-program warnings separately.
+        // A real Temp folder is not a protected Windows/profile folder, but a running installer or the CI runner itself may legitimately give its contents a warning. Deterministic fixtures above check Allowed and the running-program warnings separately.
         assert!(matches!(guard.check(&temp.join("some-file.tmp"), false), Verdict::Allowed | Verdict::Caution(_)));
         // This test runner is running, and found as such.
         assert!(Places::of_this_pc().running.iter().any(|p| parts(p) == parts(&exe)));

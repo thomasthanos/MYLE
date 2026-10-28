@@ -1,5 +1,4 @@
-// Page state of Project Backups: the settings, a running backup and its
-// progress, and the open dialogs.
+// Page state of Project Backups: the settings, a running backup and its progress, and the open dialogs.
 import { badges } from "../../../lib/badges.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { confirm } from "../../../lib/confirm.svelte";
@@ -91,8 +90,7 @@ class ProjectBackupsState {
   filter = $state<"all" | Group["key"]>("all");
   /** Ticks every 30 s so "5 minutes ago" stays true. */
   clock = $state(Date.now());
-  /** Each project's folder against its newest backup; `checking`: the
-   *  projects being checked now (once per check asked for). */
+  /* Each project's folder against its newest backup; `checking`: the projects being checked now (once per check asked for). */
   changes = $state<Record<string, ProjectChanges>>({});
   checking = $state<string[]>([]);
   /** Local to this PC; opening MYLE again keeps the same three-day deadline. */
@@ -105,13 +103,11 @@ class ProjectBackupsState {
   /** The count the last toast was about (null: none shown yet). */
   #announced: number | null = null;
   private loaded = $state(false);
-  /** The projects the answers are about: before the page state is read (at
-   *  the app's start), every project an answer came for. */
+  /* The projects the answers are about: before the page state is read (at the app's start), every project an answer came for. */
   private get knownIds(): string[] {
     return this.loaded ? this.projects.map((p) => p.id) : Object.keys(this.changes);
   }
-  /** Projects with changes not in a backup yet (or no backup at all). Out of
-   *  reach or not checked is not a change. */
+  /* Projects with changes not in a backup yet (or no backup at all). Out of reach or not checked is not a change. */
   get changedIds(): string[] {
     return this.knownIds.filter((id) => ["changed", "noBackup"].includes(this.changes[id]?.state ?? ""));
   }
@@ -119,8 +115,7 @@ class ProjectBackupsState {
   get changedCount(): number {
     return this.knownIds.filter((id) => this.changes[id]?.state === "changed").length;
   }
-  /** Takes answers in: one started earlier than the answer already shown
-   *  (a check that was still running during a backup) never replaces it. */
+  /* Takes answers in: one started earlier than the answer already shown (a check that was still running during a backup) never replaces it. */
   applyChanges(results: ProjectChanges[], announce = true) {
     for (const result of results) {
       const known = this.changes[result.projectId];
@@ -128,8 +123,7 @@ class ProjectBackupsState {
     }
     this.#updateBadge(announce);
   }
-  /** Sidebar count of changed projects, and a toast when it goes up while
-   *  another page is open. */
+  /* Sidebar count of changed projects, and a toast when it goes up while another page is open. */
   #updateBadge(announce = true) {
     const changed = this.changedCount;
     badges.set("project-backups", changed);
@@ -141,17 +135,14 @@ class ProjectBackupsState {
     }
     this.#announced = changed;
   }
-  /** Every three days, compare all current projects afresh and remind about
-   *  pending changes even when their count is unchanged. An overdue check
-   *  runs on startup; no backups are created by this check. */
+  /* Every three days, compare all current projects afresh and remind about pending changes even when their count is unchanged. An overdue check runs on startup; no backups are created by this check. */
   async checkScheduledChanges(now = Date.now()) {
     if (!isTauri() || this.#scheduledChecking || this.locked || this.checking.length) return;
     if (this.lastChangeCheck !== null && this.lastChangeCheck <= now && now - this.lastChangeCheck < CHANGE_CHECK_EVERY) return;
     this.#scheduledChecking = true;
     let ids: string[] = [];
     try {
-      // Detection starts without opening this page: use the saved list,
-      // including projects added since the page was last looked at.
+      // Detection starts without opening this page: use the saved list, including projects added since the page was last looked at.
       const page = await api.getState();
       if (page.running || this.locked || this.checking.length) return;
       ids = page.settings.projects.map((project) => project.id);
@@ -183,8 +174,7 @@ class ProjectBackupsState {
         });
       }
     } catch {
-      // Native requests may be refused while access is being restored.
-      // Keep the deadline overdue and retry on the next timer tick.
+      // Native requests may be refused while access is being restored. Keep the deadline overdue and retry on the next timer tick.
     } finally {
       const done = [...ids];
       this.checking = this.checking.filter((id) => {
@@ -196,8 +186,7 @@ class ProjectBackupsState {
       this.#scheduledChecking = false;
     }
   }
-  /** Checks `ids` (all projects by default) now. `fresh`: compare again even
-   *  where the folder looks as it did. */
+  /* Checks `ids` (all projects by default) now. `fresh`: compare again even where the folder looks as it did. */
   async checkChanges(ids: string[] = this.projects.map((p) => p.id), fresh = false) {
     if (!isTauri() || !ids.length) return;
     this.checking = [...this.checking, ...ids];
@@ -215,14 +204,11 @@ class ProjectBackupsState {
       });
     }
   }
-  /** The app's background detection (started once, for the owner, whichever
-   *  page is open): it checks a project after its folder changes and every
-   *  project every few minutes; its answers arrive here. */
+  /* The app's background detection (started once, for the owner, whichever page is open): it checks a project after its folder changes and every project every few minutes; its answers arrive here. */
   async startDetection() {
     if (!isTauri() || this.#detecting) return;
     this.#detecting = true;
-    // The reminder retries independently if the native watcher or the
-    // owner-access check is temporarily unavailable during startup.
+    // The reminder retries independently if the native watcher or the owner-access check is temporarily unavailable during startup.
     this.#scheduledTimer ??= setInterval(() => void this.checkScheduledChanges(), 60_000);
     void this.checkScheduledChanges();
     let stop: (() => void) | undefined;
@@ -236,8 +222,7 @@ class ProjectBackupsState {
       // The page checks by itself when opened.
     }
   }
-  /** Opening the page: detection runs, and projects it has no answer for
-   *  yet (it just started) are checked now. */
+  /* Opening the page: detection runs, and projects it has no answer for yet (it just started) are checked now. */
   async showChanges() {
     await this.startDetection();
     const unknown = this.projects.filter((p) => !this.changes[p.id]).map((p) => p.id);
@@ -287,8 +272,7 @@ class ProjectBackupsState {
     if (!project.lastBackup) {
       const checked = this.changes[project.id];
       if (checked?.backupId && (checked.state === "upToDate" || checked.state === "changed")) return "backedUp";
-      // Imported configuration has no local history. Only a completed
-      // discovery can establish that the backup folder really is empty.
+      // Imported configuration has no local history. Only a completed discovery can establish that the backup folder really is empty.
       return checked?.state === "noBackup" ? "never" : "unknown";
     }
     const days = this.daysSinceBackup(project) ?? 0;
@@ -440,8 +424,7 @@ class ProjectBackupsState {
       return null;
     }
   }
-  /** Backs up `projectIds`; `incremental`: only what changed where an
-   *  increment fits (the app makes a full backup otherwise). */
+  /* Backs up `projectIds`; `incremental`: only what changed where an increment fits (the app makes a full backup otherwise). */
   async backup(projectIds: string[], incremental = false) {
     if (this.locked || !projectIds.length) return;
     if (!this.provider) {
@@ -458,8 +441,7 @@ class ProjectBackupsState {
       const failed = run.results.filter((result) => !result.ok && result.code !== "CANCELLED");
       this.failures = failed;
       if (run.cancelled) toast.info("Backup cancelled.");
-      // One toast per project for a few; a long run gets one line, not a queue
-      // of toasts that takes minutes to go by.
+      // One toast per project for a few; a long run gets one line, not a queue of toasts that takes minutes to go by.
       if (done.length > 3) {
         const files = done.reduce((sum, result) => sum + (result.outcome?.fileCount ?? 0), 0);
         const late = done.filter((result) => !result.outcome?.finalCheckOk).length;
@@ -492,8 +474,7 @@ class ProjectBackupsState {
       this.operation = null;
       this.cancelling = false;
       void this.refresh();
-      // What was just backed up is shown up to date right away (writes made
-      // meanwhile, elsewhere too, are checked by the app after the backup).
+      // What was just backed up is shown up to date right away (writes made meanwhile, elsewhere too, are checked by the app after the backup).
       void this.checkChanges(projectIds, true);
     }
   }
@@ -547,8 +528,7 @@ class ProjectBackupsState {
     if (text) toast.info(`${text} Try the backup again once it is signed in.`);
     await this.refresh();
   }
-  /** Puts the project as last backed up (its full backup and the increments
-   *  on it) into an empty folder the user picks; every file is checked. */
+  /* Puts the project as last backed up (its full backup and the increments on it) into an empty folder the user picks; every file is checked. */
   async restore(project: Project) {
     const folder = await this.pickFolder(`Restore ${project.name} into an empty folder`);
     if (!folder) return;

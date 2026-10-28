@@ -1,14 +1,5 @@
-//! The debloater's fixed tables: every tweak and every Store app it can
-//! touch. The page sends only ids from here, and the administrator helper
-//! acts only on what these tables name, never on paths or commands it is
-//! sent.
-//!
-//! Values come from what Chris Titus's WinUtil, Raphire's Win11Debloat and
-//! Sparkle do, checked against Microsoft's documentation, with their known
-//! mistakes left out (see `docs/DEVELOPMENT.md`).
-
+// ! The debloater's fixed tables: every tweak and every Store app it can ! touch. The page sends only ids from here, and the administrator helper ! acts only on what these tables name, never on paths or commands it is ! sent. ! ! Values come from what Chris Titus's WinUtil, Raphire's Win11Debloat and ! Sparkle do, checked against Microsoft's documentation, with their known ! mistakes left out (see `docs/DEVELOPMENT.md`).
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Category {
@@ -21,7 +12,6 @@ pub enum Category {
     /// Parts of Windows itself (Features on Demand), removed whole.
     Features,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Risk {
@@ -29,7 +19,6 @@ pub enum Risk {
     /// Harder to take back, or changes more than it seems.
     Caution,
 }
-
 /// The Quick setup profile a tweak or an app first belongs to. A profile
 /// takes in everything up to its own level: Recommended includes Light.
 /// `None` (outside every profile) is for personal taste and for what is
@@ -44,13 +33,11 @@ pub enum Level {
     /// Everything else that makes Windows leaner, with small trade-offs.
     Maximum,
 }
-
 pub const LIGHT: Option<Level> = Some(Level::Light);
 pub const RECOMMENDED: Option<Level> = Some(Level::Recommended);
 pub const MAXIMUM: Option<Level> = Some(Level::Maximum);
 /// Never part of a profile: only when the user picks it.
 pub const OPT_IN: Option<Level> = None;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hive {
     /// HKEY_CURRENT_USER: written by the app itself, as the user.
@@ -58,13 +45,11 @@ pub enum Hive {
     /// HKEY_LOCAL_MACHINE: written by the administrator helper.
     Machine,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Data {
     Dword(u32),
     Sz(&'static str),
 }
-
 /// A service's start type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +59,6 @@ pub enum Start {
     Manual,
     Disabled,
 }
-
 impl Start {
     /// How far the service is from running by itself: Disabled is the most.
     pub fn rank(self) -> u8 {
@@ -86,7 +70,6 @@ impl Start {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     /// A registry value. `name` "" is the key's default value.
@@ -126,25 +109,21 @@ pub enum Op {
     /// whether it is installed.
     Capability { name: &'static str, package: &'static str },
 }
-
 /// Windows builds a tweak is for: `min` inclusive, `max` exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Builds {
     pub min: u32,
     pub max: u32,
 }
-
 pub const ANY: Builds = Builds { min: 0, max: u32::MAX };
 pub const WIN11: Builds = Builds { min: 22000, max: u32::MAX };
 /// Windows 11 23H2 and later.
 pub const WIN11_23H2: Builds = Builds { min: 22631, max: u32::MAX };
-
 impl Builds {
     pub fn contains(self, build: u32) -> bool {
         build >= self.min && build < self.max
     }
 }
-
 #[derive(Debug)]
 pub struct Tweak {
     pub id: &'static str,
@@ -166,25 +145,19 @@ pub struct Tweak {
     pub confirm: Option<&'static str>,
     pub ops: &'static [Op],
 }
-
 const fn user(path: &'static str, name: &'static str, data: Data) -> Op {
     Op::Reg { hive: Hive::User, path, name, data, best_effort: false }
 }
-
 const fn machine(path: &'static str, name: &'static str, data: Data) -> Op {
     Op::Reg { hive: Hive::Machine, path, name, data, best_effort: false }
 }
-
 const fn user_best_effort(path: &'static str, name: &'static str, data: Data) -> Op {
     Op::Reg { hive: Hive::User, path, name, data, best_effort: true }
 }
-
 const fn task(folder: &'static str, name: &'static str) -> Op {
     Op::Task { folder, name }
 }
-
 use Data::{Dword, Sz};
-
 const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const SEARCH: &str = r"Software\Microsoft\Windows\CurrentVersion\Search";
 const APP_EXPERIENCE: &str = r"\Microsoft\Windows\Application Experience";
@@ -192,7 +165,6 @@ const CEIP: &str = r"\Microsoft\Windows\Customer Experience Improvement Program"
 const CONTENT_DELIVERY: &str = r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager";
 const AUTO_START: &[Start] = &[Start::Auto, Start::AutoDelayed];
 const NOT_DISABLED: &[Start] = &[Start::Auto, Start::AutoDelayed, Start::Manual];
-
 pub const TWEAKS: &[Tweak] = &[
     Tweak {
         id: "telemetry",
@@ -388,8 +360,7 @@ pub const TWEAKS: &[Tweak] = &[
             // Windows 11 protects TaskbarDa; the policy works regardless.
             user_best_effort(ADVANCED, "TaskbarDa", Dword(0)),
             machine(r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests", Dword(0)),
-            // Windows 10's "News and interests": Windows 11 24H2 refuses it
-            // (access denied); the policy below works regardless.
+            // Windows 10's "News and interests": Windows 11 24H2 refuses it (access denied); the policy below works regardless.
             user_best_effort(r"Software\Microsoft\Windows\CurrentVersion\Feeds", "ShellFeedsTaskbarViewMode", Dword(2)),
             machine(r"SOFTWARE\Policies\Microsoft\Windows\Windows Feeds", "EnableFeeds", Dword(0)),
         ],
@@ -706,11 +677,9 @@ pub const TWEAKS: &[Tweak] = &[
         ops: &[Op::Capability { name: "Print.Fax.Scan~~~~", package: "Microsoft-Windows-Fax-Common-FoD-Package~" }],
     },
 ];
-
 pub fn find(id: &str) -> Option<&'static Tweak> {
     TWEAKS.iter().find(|tweak| tweak.id == id)
 }
-
 /// Values the administrator helper may write back on undo for a machine
 /// string: an undo record is the app's file, so it could have been edited.
 pub fn allowed_machine_strings(path: &str, name: &str) -> &'static [&'static str] {
@@ -720,10 +689,7 @@ pub fn allowed_machine_strings(path: &str, name: &str) -> &'static [&'static str
         &[]
     }
 }
-
-// ---------------------------------------------------------------------------
-// Store apps
-
+// --------------------------------------------------------------------------- Store apps
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AppGroup {
@@ -732,7 +698,6 @@ pub enum AppGroup {
     Xbox,
     ThirdParty,
 }
-
 /// How an app's package name is recognised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Name {
@@ -743,7 +708,6 @@ pub enum Name {
     /// For the few whose package name changes between releases.
     Contains(&'static str),
 }
-
 impl Name {
     pub fn matches(self, package: &str) -> bool {
         match self {
@@ -757,7 +721,6 @@ impl Name {
         }
     }
 }
-
 #[derive(Debug)]
 pub struct App {
     /// Stable id for the page.
@@ -774,27 +737,21 @@ pub struct App {
     /// Why someone might keep it, when there is a reason.
     pub keep: Option<&'static str>,
 }
-
 impl App {
     const fn about(self, about: &'static str) -> App {
         App { about, ..self }
     }
-
     const fn keep(self, keep: &'static str) -> App {
         App { keep: Some(keep), ..self }
     }
 }
-
 const fn app(id: &'static str, title: &'static str, name: &'static str, group: AppGroup, level: Option<Level>, store_id: Option<&'static str>) -> App {
     App { id, title, name: Name::Exact(name), group, level, store_id, about: "", keep: None }
 }
-
 const fn promo(id: &'static str, title: &'static str, suffix: &'static str, store_id: Option<&'static str>) -> App {
     App { id, title, name: Name::Suffix(suffix), group: AppGroup::ThirdParty, level: LIGHT, store_id, about: "", keep: None }
 }
-
 use AppGroup::{Bing, Microsoft, Xbox};
-
 pub const APPS: &[App] = &[
     // Microsoft, removed by the one-click Debloat.
     app("clipchamp", "Clipchamp", "Clipchamp.Clipchamp", Microsoft, RECOMMENDED, Some("9P1J8S7CCWWT")).about("Video editor."),
@@ -911,7 +868,6 @@ pub const APPS: &[App] = &[
     App { id: "dolby-access", title: "Dolby Access", name: Name::Exact("DolbyLaboratories.DolbyAccess"), group: AppGroup::ThirdParty, level: OPT_IN, store_id: Some("9N0866FS04W8"), about: "Dolby Atmos sound settings.", keep: Some("Keep it if your PC uses Dolby Atmos.") },
     App { id: "spotify", title: "Spotify", name: Name::Exact("SpotifyAB.SpotifyMusic"), group: AppGroup::ThirdParty, level: MAXIMUM, store_id: Some("9NCBCSZSJRSB"), about: "Music streaming.", keep: Some("Keep it if you listen to Spotify.") },
 ];
-
 /// Packages that are never removed, whatever the tables above say: Windows
 /// or MYLE itself needs them, or they cannot easily be installed again.
 pub const NEVER: &[&str] = &[
@@ -949,7 +905,6 @@ pub const NEVER: &[&str] = &[
     "Microsoft.RawImageExtension",
     "Microsoft.ApplicationCompatibilityEnhancements",
 ];
-
 /// Whether `package` may be removed at all: it is in the table, and is not
 /// something Windows or MYLE needs. The administrator helper checks this
 /// for every name it is sent.
@@ -962,7 +917,6 @@ pub fn removable(package: &str) -> Option<&'static App> {
     }
     APPS.iter().find(|app| app.name.matches(package))
 }
-
 fn is_never(package: &str) -> bool {
     let lower = package.to_ascii_lowercase();
     NEVER.iter().any(|never| lower == never.to_ascii_lowercase())
@@ -974,16 +928,13 @@ fn is_never(package: &str) -> bool {
         || lower.ends_with("extension")
         || lower.ends_with("extensions")
 }
-
 pub fn find_app(id: &str) -> Option<&'static App> {
     APPS.iter().find(|app| app.id == id)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
-
     #[test]
     fn ids_are_unique_and_tidy() {
         let mut seen = HashSet::new();
@@ -997,7 +948,6 @@ mod tests {
             assert!(seen.insert(app.id), "duplicate app {}", app.id);
         }
     }
-
     #[test]
     fn registry_paths_are_relative_and_values_sane() {
         for tweak in TWEAKS {
@@ -1018,7 +968,6 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn windows_features_name_only_their_own_capability() {
         let mut features = 0;
@@ -1034,7 +983,6 @@ mod tests {
         }
         assert!(features >= 6);
     }
-
     #[test]
     fn every_app_says_what_it_is() {
         for app in APPS {
@@ -1048,7 +996,6 @@ mod tests {
             assert!(find_app(id).unwrap().keep.is_some(), "{id}");
         }
     }
-
     #[test]
     fn nothing_windows_or_myle_needs_can_be_removed() {
         for never in NEVER {
@@ -1065,7 +1012,6 @@ mod tests {
         assert!(removable("Evil;rm -rf").is_none());
         assert!(removable("").is_none());
     }
-
     #[test]
     fn third_party_names_match_only_their_own_package() {
         assert!(removable("king.com.CandyCrushSaga").is_some());
@@ -1074,7 +1020,6 @@ mod tests {
         assert!(removable("Netflix").is_none(), "a bare suffix is not a package");
         assert!(removable("Microsoft.WindowsCalculator").is_some_and(|app| app.level.is_none()));
     }
-
     #[test]
     fn the_maximum_profile_keeps_what_the_one_click_debloat_did() {
         let maximum: Vec<&str> = TWEAKS.iter().filter(|t| t.level.is_some()).map(|t| t.id).collect();
@@ -1088,7 +1033,6 @@ mod tests {
         assert_eq!(find("edge").unwrap().level, None);
         assert!(find("edge").unwrap().confirm.is_some(), "Edge asks again");
     }
-
     #[test]
     fn profiles_build_on_each_other_and_stay_careful() {
         assert!(Level::Light < Level::Recommended && Level::Recommended < Level::Maximum);

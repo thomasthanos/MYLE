@@ -1,7 +1,5 @@
 <script lang="ts">
-  // The GitHub account (the GitHub CLI's sign-in, or a pasted token) and the
-  // AI providers: their keys (checked, then kept encrypted on this PC),
-  // order and models.
+  // The GitHub account (the GitHub CLI's sign-in, or a pasted token) and the AI providers: their keys (checked, then kept encrypted on this PC), order and models.
   import { onDestroy, onMount, untrack } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";

@@ -1,5 +1,4 @@
-// What the right-click menu offers for an item, wherever it was clicked:
-// the folder list, the largest files or the treemap.
+// What the right-click menu offers for an item, wherever it was clicked: the folder list, the largest files or the treemap.
 import Copy from "@lucide/svelte/icons/copy";
 import FolderOpen from "@lucide/svelte/icons/folder-open";
 import ListTree from "@lucide/svelte/icons/list-tree";
@@ -8,13 +7,11 @@ import ZoomIn from "@lucide/svelte/icons/zoom-in";
 import type { PageAction } from "../../../lib/context-menu";
 import { SMALLER_ID } from "./api";
 import { diskState as d } from "./state.svelte";
-
 export interface ItemInfo {
   kind?: string;
   /** Known to be protected (the backend refuses it anyway). */
   locked?: boolean;
 }
-
 /** The menu for `id`. A right-click outside the selection selects it alone. */
 export function itemActions(id: number, info: ItemInfo, from: "tree" | "files" | "map"): PageAction[] {
   if (id === SMALLER_ID || d.scanId === null) return [];

@@ -1,5 +1,4 @@
 import type { AppGroup, Category } from "./api";
-
 export interface ChoiceOption { value: string; label: string }
 export const tweakCategories: readonly { id: Category; title: string }[] = [
   { id: "privacy", title: "Privacy" }, { id: "system", title: "System" },

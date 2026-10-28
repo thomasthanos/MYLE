@@ -1,16 +1,12 @@
 //! Registry of running install jobs, so the page can cancel them.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
 use super::process;
-
 #[derive(Default)]
 struct JobState {
     pid: Option<u32>,
     cancelled: bool,
 }
-
 #[derive(Default)]
 struct Registry {
     jobs: HashMap<String, JobState>,
@@ -18,10 +14,8 @@ struct Registry {
     /// purge, which must never overlap an app installer.
     exclusive_owner: Option<String>,
 }
-
 #[derive(Clone, Default)]
 pub struct Jobs(Arc<Mutex<Registry>>);
-
 impl Jobs {
     /// Registers a job; it is removed again when the handle is dropped.
     pub fn start(&self, id: &str) -> Result<JobHandle, String> {
@@ -39,7 +33,6 @@ impl Jobs {
             exclusive: false,
         })
     }
-
     /// Atomically reserves the whole registry. This closes the check/start
     /// race that would otherwise let an Install Apps job begin during a
     /// destructive maintenance operation.
@@ -56,7 +49,6 @@ impl Jobs {
             exclusive: true,
         })
     }
-
     pub fn cancel(&self, id: &str) {
         let pid = {
             let mut jobs = self.lock();
@@ -70,33 +62,28 @@ impl Jobs {
             process::kill_tree(pid);
         }
     }
-
     /// True when nothing is installing or updating, so a bulk winget run on
     /// another page cannot collide with one started here.
     pub fn is_idle(&self) -> bool {
         self.lock().jobs.is_empty()
     }
-
     pub fn cancel_all(&self) {
         let ids: Vec<String> = self.lock().jobs.keys().cloned().collect();
         for id in ids {
             self.cancel(&id);
         }
     }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
-
 pub struct JobHandle {
     jobs: Jobs,
     id: String,
     exclusive: bool,
 }
-
 impl JobHandle {
     /// Remembers the process to kill on cancel (None once it has exited).
     pub fn set_pid(&self, pid: Option<u32>) {
@@ -104,7 +91,6 @@ impl JobHandle {
             job.pid = pid;
         }
     }
-
     pub fn is_cancelled(&self) -> bool {
         self.jobs
             .lock()
@@ -113,7 +99,6 @@ impl JobHandle {
             .is_some_and(|job| job.cancelled)
     }
 }
-
 impl Drop for JobHandle {
     fn drop(&mut self) {
         let mut registry = self.jobs.lock();
@@ -123,11 +108,9 @@ impl Drop for JobHandle {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn cancel_marks_only_that_job_and_handles_are_cleaned_up() {
         let jobs = Jobs::default();
@@ -140,14 +123,12 @@ mod tests {
         assert!(!jobs.lock().jobs.contains_key("A"));
         jobs.cancel("unknown"); // no-op
     }
-
     #[test]
     fn exclusive_job_blocks_both_directions_atomically() {
         let jobs = Jobs::default();
         let ordinary = jobs.start("installer").unwrap();
         assert!(jobs.start_exclusive("purge").is_err());
         drop(ordinary);
-
         let exclusive = jobs.start_exclusive("purge").unwrap();
         assert!(jobs.start("installer").is_err());
         assert!(jobs.start_exclusive("other").is_err());

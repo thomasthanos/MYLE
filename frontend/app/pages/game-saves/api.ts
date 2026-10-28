@@ -1,6 +1,4 @@
-// Typed bridge to the Game Saves commands in backend/src/game_saves/.
-// Filesystem paths are discovered and validated by the backend; destructive
-// actions are addressed by stable game/root/snapshot ids.
+// Typed bridge to the Game Saves commands in backend/src/game_saves/. Filesystem paths are discovered and validated by the backend; destructive actions are addressed by stable game/root/snapshot ids.
 import { Channel, invoke } from "@tauri-apps/api/core";
 export type GameSavesTab = "pc" | "backup";
 export type GameSaveStatus =
@@ -136,8 +134,7 @@ export interface GameSaveEntry {
   snapshots: BackupSnapshot[];
   /** Its Steam app id in the save database, for its cover. */
   steamId?: number | null;
-  /** Save folders that have no place on this PC yet, and for one under
-   *  another Documents, where this PC's Documents puts it. */
+  /* Save folders that have no place on this PC yet, and for one under another Documents, where this PC's Documents puts it. */
   unmappedPaths?: string[];
   suggestedTarget?: string | null;
 }
@@ -174,8 +171,7 @@ export interface GameSavesOperationResult {
   /** Why each failed game failed, as far as the engine said. */
   failures: GameFailure[];
   safetyBackupPath: string | null;
-  /** Games whose restore did not finish cleanly and were put back as they
-   *  were, from the safety copy. */
+  /* Games whose restore did not finish cleanly and were put back as they were, from the safety copy. */
   rolledBack?: string[];
 }
 export interface DatabaseUpdate {
@@ -194,8 +190,7 @@ function channel(onEvent: (event: GameSavesEvent) => void): Channel<GameSavesEve
 export const gameSavesApi = {
   getState: () => invoke<GameSavesPageState>("game_saves_get_state"),
   pickBackupFolder: () => invoke<GameSavesSettings | null>("game_saves_pick_backup_folder"),
-  /** Backs up into `<folder>\\Make Your Life Easier\\Game Saves Backups`, creating it. Without a
-   *  detected `path` the user is asked where the provider's folder is; null when cancelled. */
+  /* Backs up into `<folder>\\Make Your Life Easier\\Game Saves Backups`, creating it. Without a detected `path` the user is asked where the provider's folder is; null when cancelled. */
   useCloudFolder: (provider: CloudProvider, path: string | null) =>
     invoke<GameSavesSettings | null>("game_saves_use_cloud_folder", { provider, path }),
   openBackupFolder: () => invoke<void>("game_saves_open_backup_folder"),

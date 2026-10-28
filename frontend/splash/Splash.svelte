@@ -16,8 +16,7 @@
   } from "../lib/updater";
   import SplashLogo from "./SplashLogo.svelte";
 
-  /** After an update the previous version was on screen until now: long
-   *  enough to read "Updated to …". Otherwise the app opens as soon as it can. */
+  /* After an update the previous version was on screen until now: long enough to read "Updated to …". Otherwise the app opens as soon as it can. */
   const JUST_UPDATED_MS = 700;
   /** How long an error stays on screen before the app starts anyway. */
   const ERROR_HOLD_MS = 2200;
@@ -64,8 +63,7 @@
       }
       return;
     }
-    // Show the window only after the first frame is painted (no blank flash),
-    // and only then let the main window load, so the two don't compete.
+    // Show the window only after the first frame is painted (no blank flash), and only then let the main window load, so the two don't compete.
     requestAnimationFrame(() =>
       requestAnimationFrame(() => void getCurrentWindow().show().finally(() => void splashShown())),
     );
@@ -94,14 +92,12 @@
     percent = null;
     transfer = "";
     rate = "";
-    // Just updated: the previous version was on screen until now, so only
-    // long enough to read the line.
+    // Just updated: the previous version was on screen until now, so only long enough to read the line.
     if (justUpdated) await sleep(Math.max(JUST_UPDATED_MS - (performance.now() - startedAt), 0));
     await updater.finishStartup();
   }
 
-  // In a real update the app exits once the installer launches, so this only
-  // returns in demo mode.
+  // In a real update the app exits once the installer launches, so this only returns in demo mode.
   async function applyUpdate(current: string, latest: string, asset: UpdateAsset) {
     phase = "downloading";
     title = "Downloading update";
@@ -162,8 +158,7 @@
     progress = size ? Math.min(downloaded / size, 1) : null;
     total = size;
 
-    // The ring and the percentage follow every event; speed and bytes
-    // settle at a readable pace.
+    // The ring and the percentage follow every event; speed and bytes settle at a readable pace.
     percent = progress === null ? null : Math.floor(progress * 100);
     const finished = total !== null && downloaded >= total;
     if (now - lastMeta < META_EVERY_MS && !finished) return;
@@ -309,8 +304,7 @@
 
 
 
-  /* A glint running along the filled part; it is scaled with the fill, so it
-     never shows past it. */
+  /* A glint running along the filled part; it is scaled with the fill, so it never shows past it. */
 
 
 

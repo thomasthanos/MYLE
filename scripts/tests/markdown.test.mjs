@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseInline, parseMarkdown, safeHref, stripHtml } from "../../frontend/lib/markdown.ts";
-
 const text = (inlines) => inlines.map((i) => (i.t === "text" || i.t === "code" ? i.v : i.t === "br" ? "\n" : text(i.c ?? []))).join("");
-
 test("only web addresses become links", () => {
   assert.equal(safeHref("https://github.com/x"), "https://github.com/x");
   assert.equal(safeHref("javascript:alert(1)"), null);
@@ -16,7 +14,6 @@ test("only web addresses become links", () => {
   assert.equal(text(bad), "click and ok");
   assert.equal(parseInline("[wiki](https://en.wikipedia.org/wiki/Rust_(language))")[0].href, "https://en.wikipedia.org/wiki/Rust_(language)");
 });
-
 test("raw HTML never survives, its text does", () => {
   const blocks = parseMarkdown(
     '<p align="center"><img src="https://x/hero.svg" alt="hero" /></p>\n\n<p align="center"><strong>Big line.</strong><br />Second.</p>\n\n<script>alert(1)</script>\n<img src=x onerror="alert(1)">\n<a href="https://dl"><img src="badge.svg"></a>\n\n<iframe src="https://evil"></iframe>Text after',
@@ -27,7 +24,6 @@ test("raw HTML never survives, its text does", () => {
   assert.ok(json.includes("Text after"));
   assert.equal(stripHtml('<a href="https://x">go</a>'), "[go](https://x)");
 });
-
 test("release notes: headings, tables, lists and code", () => {
   const md = [
     "## ✨ Highlights",
@@ -65,7 +61,6 @@ test("release notes: headings, tables, lists and code", () => {
   assert.ok(last.some((i) => i.t === "text" && i.v.includes("snake_case_name")));
   assert.equal(last.find((i) => i.t === "link").href, "https://downloads.thomast.uk/MYLE.exe");
 });
-
 test("the 9.8.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.8.0.md", import.meta.url), "utf8");
@@ -75,7 +70,6 @@ test("the 9.8.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "table"));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.9.0 notes, the first the What's new window shows, read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.9.0.md", import.meta.url), "utf8");
@@ -85,7 +79,6 @@ test("the 9.9.0 notes, the first the What's new window shows, read cleanly", asy
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("What's new window")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.10.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.10.0.md", import.meta.url), "utf8");
@@ -95,7 +88,6 @@ test("the 9.10.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Sidebar")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.11.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.11.0.md", import.meta.url), "utf8");
@@ -105,7 +97,6 @@ test("the 9.11.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Password Manager")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.12.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.12.0.md", import.meta.url), "utf8");
@@ -116,7 +107,6 @@ test("the 9.12.0 notes read cleanly", async () => {
   assert.ok(JSON.stringify(blocks).includes("Wand Enhancer"));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.12.1 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.12.1.md", import.meta.url), "utf8");
@@ -126,7 +116,6 @@ test("the 9.12.1 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Browser extension (1.4.1)")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.13.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.13.0.md", import.meta.url), "utf8");
@@ -136,7 +125,6 @@ test("the 9.13.0 notes read cleanly", async () => {
   assert.ok(blocks.some((b) => b.t === "h" && text(b.c).includes("Browser extension (1.5.0)")));
   assert.ok(!JSON.stringify(blocks).includes("<"));
 });
-
 test("the 9.14.0 notes read cleanly", async () => {
   const { readFile } = await import("node:fs/promises");
   const md = await readFile(new URL("../../docs/release-notes/9.14.0.md", import.meta.url), "utf8");

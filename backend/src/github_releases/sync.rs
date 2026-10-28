@@ -3,14 +3,12 @@ use super::store::Settings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Component, Path, Prefix};
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncedProjects {
     pub version: u32,
     pub paths: Vec<String>,
 }
-
 fn key(path: &str) -> Result<String, String> {
     if path.len() > 32767
         || path.chars().any(char::is_control)
@@ -48,7 +46,6 @@ fn key(path: &str) -> Result<String, String> {
         });
     Ok(normalized.trim_end_matches('\\').to_string())
 }
-
 pub(crate) fn validate(synced: &SyncedProjects) -> Result<(), String> {
     if synced.version != 1 {
         return Err("This project-path sync version is not supported.".into());
@@ -61,7 +58,6 @@ pub(crate) fn validate(synced: &SyncedProjects) -> Result<(), String> {
     }
     Ok(())
 }
-
 pub(crate) fn export(settings: &Settings) -> Result<SyncedProjects, String> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
@@ -74,7 +70,6 @@ pub(crate) fn export(settings: &Settings) -> Result<SyncedProjects, String> {
     validate(&synced)?;
     Ok(synced)
 }
-
 /// Reconcile without touching any project folder. Missing paths are retained
 /// for another PC/reinstall; only the ordinary page refresh inspects them.
 pub(crate) fn reconcile(settings: &mut Settings, synced: &SyncedProjects) -> Result<(), String> {
@@ -116,19 +111,16 @@ pub(crate) fn reconcile(settings: &mut Settings, synced: &SyncedProjects) -> Res
     *settings = next;
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::super::store::{Account, EntryConfig};
     use super::*;
-
     fn synced(paths: &[&str]) -> SyncedProjects {
         SyncedProjects {
             version: 1,
             paths: paths.iter().map(|path| (*path).into()).collect(),
         }
     }
-
     #[test]
     fn paths_restore_without_accessing_folders_and_keep_local_ids_and_commands() {
         let mut settings = Settings::default();
@@ -165,7 +157,6 @@ mod tests {
         assert_eq!(settings.account.unwrap().login, "local-account");
         assert_eq!(settings.ai, ai);
     }
-
     #[test]
     fn empty_cloud_list_explicitly_removes_projects_but_not_account_settings() {
         let mut settings = Settings::default();
@@ -173,7 +164,6 @@ mod tests {
         reconcile(&mut settings, &synced(&[])).unwrap();
         assert!(settings.repos.is_empty());
     }
-
     #[test]
     fn paths_are_deduplicated_and_export_contains_no_local_configuration() {
         let mut settings = Settings::default();
@@ -187,7 +177,6 @@ mod tests {
         assert_eq!(value.as_object().unwrap().len(), 2);
         assert_eq!(value["paths"].as_array().unwrap().len(), 1);
     }
-
     #[test]
     fn malformed_cloud_input_never_partially_changes_settings() {
         for path in [

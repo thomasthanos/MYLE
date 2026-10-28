@@ -28,8 +28,7 @@
   };
   const Icon = $derived(icons[card.icon] ?? Stethoscope);
   const status = $derived(s.statusOf(card));
-  // One clear action gets the accent — except on a card that warns you first,
-  // where the button should not be the most inviting thing on the page.
+  // One clear action gets the accent — except on a card that warns you first, where the button should not be the most inviting thing on the page.
   const single = $derived(card.actions.length === 1 && card.caution === null);
 </script>
 

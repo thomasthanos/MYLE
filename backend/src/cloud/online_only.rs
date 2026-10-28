@@ -1,29 +1,21 @@
-//! Provider-managed online-only requests, for every cloud app that allows
-//! them. Apps on the Windows cloud files API (OneDrive, Dropbox, iCloud,
-//! Box…) get one request per uploaded file; Google Drive gets its own "Online
-//! only" command per Drive folder. No content is read or deleted.
+// ! Provider-managed online-only requests, for every cloud app that allows ! them. Apps on the Windows cloud files API (OneDrive, Dropbox, iCloud, ! Box…) get one request per uploaded file; Google Drive gets its own "Online ! only" command per Drive folder. No content is read or deleted.
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-
 use std::time::{Duration, Instant};
-
 use serde::Serialize;
-
 use super::google_drive::{self, CacheClear};
 use super::sync_roots::{self, SyncRoot};
 use super::{CloudFolder, CloudProvider};
-
 const MAX_ERRORS: usize = 20;
 const CHANGED: &str =
     "The cloud folders changed. Refresh Disk Analyzer before requesting online-only files.";
 /// How long a request waits for Google Drive's storage window to be opened.
 const DRIVE_WAIT: Duration = Duration::from_secs(120);
 const DRIVE_POLL: Duration = if cfg!(test) { Duration::from_millis(1) } else { Duration::from_secs(1) };
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Counts {
@@ -38,7 +30,6 @@ struct Counts {
     /// Google Drive folders that were online-only already.
     pub folders_already_online: u64,
 }
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudOnlyProgress {
@@ -48,7 +39,6 @@ pub struct CloudOnlyProgress {
     /// Waiting for Google Drive's storage window, to press Clear cache there.
     waiting_for_drive: bool,
 }
-
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudOnlyOutcome {
@@ -59,14 +49,12 @@ pub struct CloudOnlyOutcome {
     /// Google Drive's cache, when Drive was part of the request.
     drive_cache: Option<CacheClear>,
 }
-
 #[derive(Clone)]
 struct Registration {
     root_id: u64,
     hydration: u16,
     provider_name: String,
 }
-
 #[derive(Clone)]
 struct Placeholder {
     root_id: u64,
@@ -75,7 +63,6 @@ struct Placeholder {
     on_disk: i64,
     pin: i32,
 }
-
 #[derive(Clone)]
 struct Metadata {
     volume: u32,
@@ -85,7 +72,6 @@ struct Metadata {
     links: u32,
     cloud: Option<Placeholder>,
 }
-
 trait CloudFiles {
     type Handle;
     fn open_root(&mut self, path: &Path) -> Result<Self::Handle, String>;
@@ -99,7 +85,6 @@ trait CloudFiles {
     ) -> Result<Box<dyn Iterator<Item = Result<PathBuf, String>>>, String>;
     fn request_unpin(&mut self, handle: &Self::Handle) -> Result<(), String>;
 }
-
 /// Google Drive's "Online only" command (see google_drive.rs).
 trait DriveMenu {
     fn is_online_only(&mut self, path: &Path) -> Result<bool, String>;
@@ -107,9 +92,7 @@ trait DriveMenu {
     fn make_online_only(&mut self, path: &Path) -> Result<bool, String>;
     fn clear_cache(&mut self) -> Result<CacheClear, String>;
 }
-
 struct DriveShell;
-
 impl DriveMenu for DriveShell {
     fn is_online_only(&mut self, path: &Path) -> Result<bool, String> {
         google_drive::is_online_only(path)
@@ -121,7 +104,6 @@ impl DriveMenu for DriveShell {
         google_drive::clear_cache()
     }
 }
-
 /// How a cloud app's files can be made online-only.
 #[derive(Clone, Debug)]
 enum Action {
@@ -133,7 +115,6 @@ enum Action {
     Guided(&'static str),
     Unavailable,
 }
-
 /// A cloud app on this PC.
 #[derive(Clone, Debug)]
 struct Cloud {
@@ -145,11 +126,9 @@ struct Cloud {
     folders: Vec<(String, PathBuf)>,
     action: Action,
 }
-
 const UNAVAILABLE: &str =
     "No local cloud folder was detected. Check the desktop app's account and folder settings.";
 const UNVERIFIED: &str = "Compatible Windows online-only support could not be verified for these folders. Use this cloud app's own storage controls.";
-
 fn key(provider: CloudProvider) -> &'static str {
     match provider {
         CloudProvider::Dropbox => "dropbox",
@@ -158,7 +137,6 @@ fn key(provider: CloudProvider) -> &'static str {
         CloudProvider::OneDrive => "oneDrive",
     }
 }
-
 /// The cloud apps on this PC: the four the app knows by name (always listed,
 /// as the page shows them), then every other app with a Windows sync root.
 fn clouds(
@@ -234,7 +212,6 @@ fn clouds(
     }
     out
 }
-
 /// An app on the Windows cloud files API: its sync roots that pass every
 /// check, or the app's own controls when none does.
 fn native_cloud(
@@ -267,7 +244,6 @@ fn native_cloud(
     let action = if folders.is_empty() { Action::Unavailable } else { Action::Guided(UNVERIFIED) };
     Cloud { id, name, folders, action }
 }
-
 /// What one request covers.
 #[derive(Debug, Default)]
 struct Plan {
@@ -277,7 +253,6 @@ struct Plan {
     /// How long to wait for Drive's storage window to clear its cache.
     drive_wait: Duration,
 }
-
 /// The request for the apps `wanted`, when their folders are still exactly
 /// the `expected` ones the page showed.
 fn plan(clouds: &[Cloud], wanted: &[String], expected: &[String]) -> Result<Plan, String> {
@@ -308,7 +283,6 @@ fn plan(clouds: &[Cloud], wanted: &[String], expected: &[String]) -> Result<Plan
     plan.drive_wait = DRIVE_WAIT;
     Ok(plan)
 }
-
 fn execute_with(
     files: &mut impl CloudFiles,
     drive: &mut impl DriveMenu,
@@ -322,8 +296,7 @@ fn execute_with(
             ..Default::default()
         });
     }
-    // Validate and hold every root before changing any file. Handles also hold
-    // the ancestors against rename/reparse replacement throughout traversal.
+    // Validate and hold every root before changing any file. Handles also hold the ancestors against rename/reparse replacement throughout traversal.
     let prepared: Vec<_> = plan
         .roots
         .iter()
@@ -367,8 +340,7 @@ fn execute_with(
             cancel.store(true, Ordering::Relaxed);
         }
     }
-    // Online-only files still fill Drive's cache, and only Drive's own
-    // storage window empties it: wait for it to be opened, then press.
+    // Online-only files still fill Drive's cache, and only Drive's own storage window empties it: wait for it to be opened, then press.
     let deadline = Instant::now() + plan.drive_wait;
     while !plan.drive.is_empty() && !cancel.load(Ordering::Relaxed) {
         match drive.clear_cache() {
@@ -400,7 +372,6 @@ fn execute_with(
     });
     Ok(outcome)
 }
-
 /// A sync root opened and held, once it is the registered root it claims to be.
 fn verified<F: CloudFiles>(files: &mut F, root: &SyncRoot) -> Result<(F::Handle, Metadata), String> {
     let handle = files.open_root(&root.path)?;
@@ -419,14 +390,12 @@ fn verified<F: CloudFiles>(files: &mut F, root: &SyncRoot) -> Result<(F::Handle,
     }
     Ok((handle, metadata))
 }
-
 fn record_error(outcome: &mut CloudOnlyOutcome, path: &Path, error: String) {
     outcome.counts.failed += 1;
     if outcome.errors.len() < MAX_ERRORS {
         outcome.errors.push(format!("{}: {error}", path.display()));
     }
 }
-
 fn root_key(path: &Path) -> Result<String, String> {
     use std::path::{Component, Prefix};
     let mut components = path.components();
@@ -447,18 +416,15 @@ fn root_key(path: &Path) -> Result<String, String> {
         .trim_end_matches('\\')
         .to_lowercase())
 }
-
 fn compatible(root: &SyncRoot, registration: &Registration) -> bool {
     let engine = registration.provider_name.to_lowercase();
-    // OneDrive and Dropbox name their sync engines after themselves: another
-    // engine registered on their folder is left alone.
+    // OneDrive and Dropbox name their sync engines after themselves: another engine registered on their folder is left alone.
     matches!(registration.hydration, 1 | 2)
         && ["onedrive", "dropbox"]
             .into_iter()
             .find(|known| root.provider.eq_ignore_ascii_case(known))
             .is_none_or(|known| engine.contains(known))
 }
-
 struct Walker<'a, F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> {
     files: &'a mut F,
     root: &'a SyncRoot,
@@ -469,12 +435,10 @@ struct Walker<'a, F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> {
     seen: &'a mut HashSet<(u32, u64)>,
     outcome: &'a mut CloudOnlyOutcome,
 }
-
 impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
     fn error(&mut self, path: &Path, error: String) {
         record_error(self.outcome, path, error);
     }
-
     fn emit(&mut self, path: &Path) {
         if !(self.progress)(&CloudOnlyProgress {
             counts: self.outcome.counts.clone(),
@@ -484,7 +448,6 @@ impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
             self.cancel.store(true, Ordering::Relaxed);
         }
     }
-
     fn permitted(&mut self, handle: &F::Handle, metadata: &Metadata) -> bool {
         !metadata.unsafe_reparse
             && metadata.volume == self.volume
@@ -493,7 +456,6 @@ impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
                 registration.root_id == self.root_id && compatible(self.root, &registration)
             })
     }
-
     fn visit(&mut self, path: &Path, handle: &F::Handle, depth: usize) {
         if self.cancel.load(Ordering::Relaxed) {
             return;
@@ -547,8 +509,7 @@ impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
                 }
             }
         } else {
-            // Recheck the same held object immediately before the request. A
-            // path-based second open could inspect a different file.
+            // Recheck the same held object immediately before the request. A path-based second open could inspect a different file.
             match self.files.metadata(handle) {
                 Err(error) => self.error(path, error),
                 Ok(current) => {
@@ -583,31 +544,24 @@ impl<F: CloudFiles, P: FnMut(&CloudOnlyProgress) -> bool> Walker<'_, F, P> {
         self.emit(path);
     }
 }
-
-// A request remains owned by the blocking worker even if its IPC future is
-// dropped. Cancelling an old request can never affect a subsequent request.
+// A request remains owned by the blocking worker even if its IPC future is dropped. Cancelling an old request can never affect a subsequent request.
 #[derive(Clone, Default)]
 pub struct OnlineOnlyState(Arc<Mutex<Jobs>>);
-
 #[derive(Default)]
 struct Jobs {
     active: Option<Job>,
-    // A synchronous Stop IPC can arrive before the async Start is first polled.
-    // Remember its UUID without allowing unlimited retained cancellation data.
+    // A synchronous Stop IPC can arrive before the async Start is first polled. Remember its UUID without allowing unlimited retained cancellation data.
     early_stops: VecDeque<String>,
 }
-
 struct Job {
     id: String,
     cancel: Arc<AtomicBool>,
 }
-
 struct JobGuard {
     state: OnlineOnlyState,
     id: String,
     cancel: Arc<AtomicBool>,
 }
-
 impl OnlineOnlyState {
     fn begin(&self, id: String) -> Result<JobGuard, String> {
         uuid::Uuid::parse_str(&id).map_err(|_| "Invalid cloud request ID.".to_string())?;
@@ -636,7 +590,6 @@ impl OnlineOnlyState {
             cancel,
         })
     }
-
     fn cancel(&self, id: &str) -> Result<(), String> {
         uuid::Uuid::parse_str(id).map_err(|_| "Invalid cloud request ID.".to_string())?;
         let mut job = self
@@ -654,7 +607,6 @@ impl OnlineOnlyState {
         Ok(())
     }
 }
-
 impl Drop for JobGuard {
     fn drop(&mut self) {
         if let Ok(mut job) = self.state.0.lock()
@@ -667,13 +619,11 @@ impl Drop for JobGuard {
         }
     }
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageStatus {
     providers: Vec<ProviderStatus>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderStatus {
@@ -684,13 +634,11 @@ struct ProviderStatus {
     mode: &'static str,
     detail: &'static str,
 }
-
 #[derive(Serialize)]
 struct FolderStatus {
     path: String,
     label: String,
 }
-
 impl From<Cloud> for ProviderStatus {
     fn from(cloud: Cloud) -> Self {
         let (mode, detail) = match cloud.action {
@@ -721,7 +669,6 @@ impl From<Cloud> for ProviderStatus {
         }
     }
 }
-
 /// The cloud apps on this PC, checked now.
 fn current_clouds() -> Vec<Cloud> {
     clouds(
@@ -731,7 +678,6 @@ fn current_clouds() -> Vec<Cloud> {
         &mut DriveShell,
     )
 }
-
 #[tauri::command]
 pub async fn cloud_storage_status() -> Result<StorageStatus, String> {
     tauri::async_runtime::spawn_blocking(|| StorageStatus {
@@ -740,7 +686,6 @@ pub async fn cloud_storage_status() -> Result<StorageStatus, String> {
     .await
     .map_err(|error| error.to_string())
 }
-
 /// Online-only requests for the cloud apps `clouds` (their IDs), all at once.
 #[tauri::command]
 pub async fn cloud_storage_online_only(
@@ -780,7 +725,6 @@ pub async fn cloud_storage_online_only(
     .await
     .map_err(|error| error.to_string())?
 }
-
 #[tauri::command]
 pub fn cloud_storage_cancel(
     request_id: String,
@@ -788,20 +732,17 @@ pub fn cloud_storage_cancel(
 ) -> Result<(), String> {
     state.cancel(&request_id)
 }
-
 mod native {
     use super::*;
     use std::fs::{File, OpenOptions};
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::Storage::{CloudFilters::*, FileSystem::*};
-
     pub(super) struct WindowsFiles;
     pub(super) struct HeldFile {
         file: File,
         // Deny rename/delete of each ancestor while any child is inspected.
         _ancestors: Vec<File>,
     }
-
     fn open_attributes(path: &Path) -> Result<File, String> {
         OpenOptions::new()
             .access_mode(FILE_READ_ATTRIBUTES)
@@ -810,7 +751,6 @@ mod native {
             .open(path)
             .map_err(|error| error.to_string())
     }
-
     fn attribute_tag(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO, String> {
         let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
         // SAFETY: valid attribute-only handle, writable fixed-size output.
@@ -827,14 +767,11 @@ mod native {
         }
         Ok(info)
     }
-
     fn unsafe_reparse(info: &FILE_ATTRIBUTE_TAG_INFO) -> bool {
-        // CLOUD and CLOUD_1..CLOUD_F are placeholders, not name-surrogate
-        // links. Everything else (including junctions and symlinks) is refused.
+        // CLOUD and CLOUD_1..CLOUD_F are placeholders, not name-surrogate links. Everything else (including junctions and symlinks) is refused.
         info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
             && (info.ReparseTag & !0x0000_f000) != 0x9000_001a
     }
-
     fn hresult(result: i32) -> Result<(), String> {
         if result < 0 {
             Err(format!(
@@ -845,10 +782,8 @@ mod native {
             Ok(())
         }
     }
-
     fn placeholder(file: &File) -> Option<Placeholder> {
-        // Aligned storage for the fixed prefix and bounded variable identity.
-        // Query errors mean "unverified", never permission to change a file.
+        // Aligned storage for the fixed prefix and bounded variable identity. Query errors mean "unverified", never permission to change a file.
         let mut buffer = vec![0u64; 8192];
         let mut returned = 0;
         // SAFETY: owned, aligned output, explicit buffer length, valid handle.
@@ -877,10 +812,8 @@ mod native {
             pin: info.PinState,
         })
     }
-
     impl CloudFiles for WindowsFiles {
         type Handle = HeldFile;
-
         fn open_root(&mut self, path: &Path) -> Result<HeldFile, String> {
             root_key(path)?;
             let mut current = PathBuf::new();
@@ -905,14 +838,12 @@ mod native {
                 _ancestors: ancestors,
             })
         }
-
         fn open_child(&mut self, path: &Path) -> Result<HeldFile, String> {
             Ok(HeldFile {
                 file: open_attributes(path)?,
                 _ancestors: Vec::new(),
             })
         }
-
         fn metadata(&mut self, handle: &HeldFile) -> Result<Metadata, String> {
             let mut info = BY_HANDLE_FILE_INFORMATION::default();
             // SAFETY: live handle and writable correctly sized structure.
@@ -929,7 +860,6 @@ mod native {
                 cloud: placeholder(&handle.file),
             })
         }
-
         fn registration(&mut self, handle: &HeldFile) -> Result<Registration, String> {
             let mut buffer = vec![0u64; 8192];
             let mut returned = 0;
@@ -961,7 +891,6 @@ mod native {
                 provider_name: String::from_utf16_lossy(&info.ProviderName[..end]),
             })
         }
-
         fn entries(
             &mut self,
             _: &HeldFile,
@@ -975,11 +904,8 @@ mod native {
                     .map_err(|error| error.to_string())
             })))
         }
-
         fn request_unpin(&mut self, handle: &HeldFile) -> Result<(), String> {
-            // This is user intent only. The provider owns upload consistency
-            // and any eventual eviction; never force-dehydrate or delete data.
-            // SAFETY: held, verified placeholder handle; no recursive flag.
+            // This is user intent only. The provider owns upload consistency and any eventual eviction; never force-dehydrate or delete data. SAFETY: held, verified placeholder handle; no recursive flag.
             hresult(unsafe {
                 CfSetPinState(
                     handle.file.as_raw_handle(),
@@ -991,12 +917,10 @@ mod native {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
-
     struct FakeFiles {
         nodes: HashMap<PathBuf, Metadata>,
         children: HashMap<PathBuf, Vec<PathBuf>>,
@@ -1007,7 +931,6 @@ mod tests {
         unsafe_root: bool,
         fail_requests: bool,
     }
-
     impl FakeFiles {
         fn new() -> Self {
             Self {
@@ -1038,7 +961,6 @@ mod tests {
             execute_with(self, &mut FakeDrive::default(), &native_plan(&[r"C:\cloud"]), cancel, |_| true)
         }
     }
-
     #[derive(Default)]
     struct FakeDrive {
         online: HashSet<PathBuf>,
@@ -1048,7 +970,6 @@ mod tests {
         storage: VecDeque<Result<CacheClear, String>>,
         storage_looks: usize,
     }
-
     impl DriveMenu for FakeDrive {
         fn is_online_only(&mut self, path: &Path) -> Result<bool, String> {
             if self.failing.contains(path) {
@@ -1068,14 +989,12 @@ mod tests {
             self.storage.pop_front().unwrap_or(Ok(CacheClear::Empty))
         }
     }
-
     fn with_storage(looks: impl IntoIterator<Item = Result<CacheClear, String>>) -> FakeDrive {
         FakeDrive {
             storage: looks.into_iter().collect(),
             ..FakeDrive::default()
         }
     }
-
     #[test]
     fn drive_s_cache_is_cleared_once_its_storage_window_opens_and_never_waited_on_forever() {
         let mut files = FakeFiles::new();
@@ -1117,7 +1036,6 @@ mod tests {
         execute_with(&mut files, &mut drive, &native_plan(&[r"C:\cloud"]), &AtomicBool::new(false), |_| true).unwrap();
         assert_eq!(drive.storage_looks, 0);
     }
-
     fn root(provider: &str, path: &str) -> SyncRoot {
         SyncRoot {
             provider: provider.into(),
@@ -1131,7 +1049,6 @@ mod tests {
             ..Plan::default()
         }
     }
-
     impl CloudFiles for FakeFiles {
         type Handle = PathBuf;
         fn open_root(&mut self, path: &Path) -> Result<PathBuf, String> {
@@ -1184,7 +1101,6 @@ mod tests {
             Ok(())
         }
     }
-
     fn folder(id: u64) -> Metadata {
         Metadata {
             volume: 7,
@@ -1218,7 +1134,6 @@ mod tests {
             path: path.into(),
         }
     }
-
     #[test]
     fn only_uploaded_verified_placeholders_receive_requests_not_a_freed_success() {
         let mut files = FakeFiles::new();
@@ -1257,7 +1172,6 @@ mod tests {
         let json = serde_json::to_value(result).unwrap();
         assert!(json.get("freed").is_none() && json.get("completedBytes").is_none());
     }
-
     #[test]
     fn stale_or_arbitrary_expected_roots_are_rejected_before_any_request() {
         let mut files = FakeFiles::new();
@@ -1271,7 +1185,6 @@ mod tests {
         assert!(plan(&clouds, &["oneDrive".into(), "sync:Box".into()], &[r"C:\cloud".into()]).is_err());
         assert!(plan(&clouds, &[], &[]).is_err());
     }
-
     #[test]
     fn junctions_cross_root_files_and_hardlinks_are_skipped() {
         let mut files = FakeFiles::new();
@@ -1292,7 +1205,6 @@ mod tests {
         assert!(!files.reads.keys().any(|path| path.ends_with("outside.txt")));
         assert_eq!(outcome.counts.skipped, 3);
     }
-
     #[test]
     fn upload_state_is_rechecked_on_the_same_handle_before_requesting() {
         let mut files = FakeFiles::new();
@@ -1304,7 +1216,6 @@ mod tests {
         assert!(files.requested.is_empty());
         assert_eq!(result.counts.pending_uploads, 1);
     }
-
     #[test]
     fn cancellation_stops_before_the_next_request_and_never_claims_completion() {
         let mut files = FakeFiles::new();
@@ -1331,7 +1242,6 @@ mod tests {
         assert!(drive.changed.is_empty(), "Google Drive is not asked after Stop");
         assert!(outcome.cancelled);
     }
-
     #[test]
     fn duplicate_roots_and_file_ids_never_issue_duplicate_requests() {
         let mut files = FakeFiles::new();
@@ -1348,7 +1258,6 @@ mod tests {
         assert_eq!(result.counts.requested, 1);
         assert_eq!(files.requested.len(), 1);
     }
-
     #[test]
     fn unsafe_or_changed_root_registration_is_rejected_before_requests() {
         for case in 0..4 {
@@ -1364,7 +1273,6 @@ mod tests {
             assert!(files.requested.is_empty());
         }
     }
-
     #[test]
     fn errors_are_bounded_and_failed_requests_are_not_counted_as_requested() {
         let mut files = FakeFiles::new();
@@ -1377,7 +1285,6 @@ mod tests {
         assert_eq!(result.counts.requested, 0);
         assert_eq!(result.errors.len(), MAX_ERRORS);
     }
-
     #[test]
     fn mega_is_refused_and_google_drive_uses_its_own_menu_per_folder() {
         let mut files = FakeFiles::new();
@@ -1405,7 +1312,6 @@ mod tests {
         assert_eq!((outcome.counts.failed, outcome.counts.folders_already_online), (1, 1));
         assert!(outcome.errors[0].contains("menu changed"));
     }
-
     #[test]
     #[ignore = "reads this PC's cloud apps and Google Drive's menu; changes nothing"]
     fn this_pc_s_cloud_apps() {
@@ -1414,7 +1320,6 @@ mod tests {
             println!("{} ({}): {} {folders:?}", cloud.name, cloud.provider, cloud.mode);
         }
     }
-
     #[test]
     fn every_sync_root_is_offered_under_its_app_and_unverified_ones_are_guided() {
         let mut files = FakeFiles::new();
@@ -1443,7 +1348,6 @@ mod tests {
             expected.map(|(id, name, mode, folders)| (id.to_string(), name.to_string(), mode, folders))
         );
     }
-
     #[test]
     fn job_ownership_serializes_workers_and_old_cancellation_cannot_touch_a_new_job() {
         let state = OnlineOnlyState::default();
@@ -1462,7 +1366,6 @@ mod tests {
         drop(second);
         assert!(state.0.lock().unwrap().active.is_none());
     }
-
     #[test]
     fn stop_received_before_the_async_start_is_not_lost() {
         let state = OnlineOnlyState::default();
@@ -1479,7 +1382,6 @@ mod tests {
         assert!(outcome.cancelled);
         assert!(files.requested.is_empty());
     }
-
     #[test]
     fn early_stops_are_bounded_deduplicated_and_never_pre_cancel_another_job() {
         let state = OnlineOnlyState::default();
@@ -1498,7 +1400,6 @@ mod tests {
         assert!(stopped.cancel.load(Ordering::Relaxed));
         assert_eq!(state.0.lock().unwrap().early_stops.len(), 63);
     }
-
     #[test]
     fn invalid_paths_and_traversal_are_refused_instead_of_becoming_scan_roots() {
         for path in [
@@ -1515,7 +1416,6 @@ mod tests {
             root_key(Path::new("c:/cloud/")).unwrap()
         );
     }
-
     #[test]
     fn the_native_adapter_only_reads_metadata_and_refuses_an_ordinary_folder_as_a_sync_root() {
         let root = std::env::temp_dir().join(format!("myle-cloud-test-{}", uuid::Uuid::new_v4()));

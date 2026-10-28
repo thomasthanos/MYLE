@@ -1,8 +1,6 @@
-// "What's new" after an update (backend/src/whats_new.rs): asked once at
-// startup, and on request from Settings.
+// "What's new" after an update (backend/src/whats_new.rs): asked once at startup, and on request from Settings.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { toast } from "./toast.svelte";
-
 export interface VersionNotes {
   version: string;
   /** Markdown; null when no notes could be found. */
@@ -11,7 +9,6 @@ export interface VersionNotes {
   url: string;
   date: string | null;
 }
-
 export interface WhatsNew {
   current: string;
   previous: string | null;
@@ -19,14 +16,12 @@ export interface WhatsNew {
   versions: VersionNotes[];
   offline: boolean;
 }
-
 class WhatsNewState {
   shown = $state<WhatsNew | null>(null);
   loading = $state(false);
   /** Shown because of an update: closing it marks this version seen. */
   #afterUpdate = false;
   #asked = false;
-
   /** Once per run: the notes of the versions an update brought, if any. */
   async checkAfterStart() {
     if (!isTauri() || this.#asked) return;
@@ -41,7 +36,6 @@ class WhatsNewState {
       // Not worth a message: the notes are on GitHub, and Settings can show them.
     }
   }
-
   /** This version's notes (Settings). */
   async showCurrent() {
     if (!isTauri() || this.loading) return;
@@ -55,12 +49,10 @@ class WhatsNewState {
       this.loading = false;
     }
   }
-
   close() {
     if (this.#afterUpdate) void invoke("whats_new_seen").catch(() => {});
     this.#afterUpdate = false;
     this.shown = null;
   }
 }
-
 export const whatsNew = new WhatsNewState();

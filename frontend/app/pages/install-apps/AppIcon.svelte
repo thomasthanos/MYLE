@@ -15,8 +15,7 @@
     if (src && !rejectedSources.includes(src)) rejectedSources = [...rejectedSources, src];
   }
 
-  // A small raster becomes visibly soft in the 44px glass tile. Try the next
-  // high-resolution provider, then use the crisp local letter tile.
+  // A small raster becomes visibly soft in the 44px glass tile. Try the next high-resolution provider, then use the crisp local letter tile.
   function onLoad(e: Event) {
     const image = e.currentTarget as HTMLImageElement;
     if (isResolvedFavicon && Math.min(image.naturalWidth, image.naturalHeight) < 48) rejectSource();

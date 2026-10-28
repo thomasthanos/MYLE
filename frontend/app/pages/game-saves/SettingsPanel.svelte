@@ -30,8 +30,7 @@
     const times = current && !BASE_TIMES.includes(current) ? [...BASE_TIMES, current].sort() : BASE_TIMES;
     return times.map((time) => ({ value: time, label: time }));
   });
-  /** One tile per detected folder (a provider can have several accounts), and
-   *  one for each provider not found, which asks where its folder is. */
+  /* One tile per detected folder (a provider can have several accounts), and one for each provider not found, which asks where its folder is. */
   interface CloudTile { key: string; provider: CloudProvider; name: string; folder: DetectedFolder | null }
   const cloudTiles = $derived.by(() =>
     CLOUD_PROVIDERS.flatMap(({ id, name }): CloudTile[] => {

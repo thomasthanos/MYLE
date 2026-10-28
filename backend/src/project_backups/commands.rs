@@ -1,16 +1,11 @@
-//! The Tauri commands of the Project Backups page. Every path the page sends
-//! is checked here: projects are addressed by id, backups by an id from
-//! their list, and the folders come from the settings.
-
+// ! The Tauri commands of the Project Backups page. Every path the page sends ! is checked here: projects are addressed by id, backups by an id from ! their list, and the folders come from the settings.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-
 use super::archive::{self, RETRY_DELAYS};
 use super::compare::{self, Comparison, FileDiff, Side};
 use super::engine::{self, BackupEntry, BackupOutcome, BackupRequest, Preview};
@@ -20,14 +15,12 @@ use super::store::{self, ImportReport, LastBackup, LastResult, Project, Settings
 use super::{Failure, Sink, Stage};
 use crate::cloud::launch::{self, Started};
 use crate::cloud::{CloudProvider, detection, onedrive};
-
 /// How long to wait for Google Drive's drive to appear after starting it.
 const DRIVE_WAIT: Duration = Duration::from_secs(120);
 /// How long to wait for an online-only file once its cloud app starts.
 const OFFLINE_WAIT: Duration = Duration::from_secs(60);
 /// Stands for the project folder itself in a comparison.
 const SOURCE_ID: &str = "source";
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum ProjectBackupsEvent {
@@ -52,7 +45,6 @@ pub enum ProjectBackupsEvent {
         text: String,
     },
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudChoice {
@@ -61,7 +53,6 @@ pub struct CloudChoice {
     pub path: String,
     pub available: bool,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PageState {
@@ -76,7 +67,6 @@ pub struct PageState {
     /// Set on the first start, when backup_projects' projects were brought in.
     pub imported: Option<ImportReport>,
 }
-
 fn clouds() -> Vec<CloudChoice> {
     detection::detect_folders()
         .into_iter()
@@ -94,7 +84,6 @@ fn clouds() -> Vec<CloudChoice> {
         })
         .collect()
 }
-
 fn page_state(
     state: &ProjectBackupsState,
     mut settings: Settings,
@@ -115,7 +104,6 @@ fn page_state(
         imported,
     }
 }
-
 fn missing_sources(settings: &Settings) -> Vec<String> {
     settings
         .projects
@@ -126,7 +114,6 @@ fn missing_sources(settings: &Settings) -> Vec<String> {
         .map(|project| project.id.clone())
         .collect()
 }
-
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
@@ -134,7 +121,6 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|error| error.to_string())
 }
-
 /// The page's data. On the first start this also picks Google Drive when it
 /// is set up and brings in the projects backup_projects knows.
 #[tauri::command]
@@ -169,8 +155,7 @@ pub async fn project_backups_get_state(
         }
         let missing = missing_sources(&settings);
         let before = settings.clone();
-        // Archive metadata may be online-only: keep all discovery off the
-        // async/UI thread and persist only a successfully recovered record.
+        // Archive metadata may be online-only: keep all discovery off the async/UI thread and persist only a successfully recovered record.
         let page = page_state(&state, settings, imported, clouds, missing);
         if page.settings != before {
             store::save(&page.settings)?;
@@ -179,7 +164,6 @@ pub async fn project_backups_get_state(
     })
     .await?
 }
-
 /// Brings in backup_projects' projects again (those not here yet).
 #[tauri::command]
 pub async fn project_backups_import() -> Result<(Settings, ImportReport), String> {
@@ -198,7 +182,6 @@ pub async fn project_backups_import() -> Result<(Settings, ImportReport), String
     })
     .await?
 }
-
 /// Backs up to `provider`: its folder `path` when it is one of the detected
 /// ones, otherwise a folder the user picks.
 #[tauri::command]
@@ -248,7 +231,6 @@ pub async fn project_backups_set_provider(
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn project_backups_pick_folder(
     app: AppHandle,
@@ -258,7 +240,6 @@ pub async fn project_backups_pick_folder(
         .await?
         .map(|path| path.display().to_string()))
 }
-
 async fn pick_folder(app: AppHandle, title: String) -> Result<Option<PathBuf>, String> {
     blocking(move || {
         app.dialog()
@@ -270,7 +251,6 @@ async fn pick_folder(app: AppHandle, title: String) -> Result<Option<PathBuf>, S
     })
     .await?
 }
-
 /// Adds (empty id) or changes a project. `require_existing_source`: the
 /// project folder must exist (the editor opened for a missing folder).
 #[tauri::command]
@@ -297,7 +277,6 @@ pub async fn project_backups_save_project(
     })
     .await?
 }
-
 /// Forgets a project. Its backups stay where they are.
 #[tauri::command]
 pub async fn project_backups_remove_project(project_id: String) -> Result<Settings, String> {
@@ -310,7 +289,6 @@ pub async fn project_backups_remove_project(project_id: String) -> Result<Settin
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn project_backups_set_exclusions(
     patterns: Vec<String>,
@@ -328,7 +306,6 @@ pub async fn project_backups_set_exclusions(
     })
     .await?
 }
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewRequest {
@@ -342,7 +319,6 @@ pub struct PreviewRequest {
     pub smart_build: Option<bool>,
     pub follow_gitignore: Option<bool>,
 }
-
 /// What a backup of a folder would hold and leave out, with the exclusions
 /// being edited. A newer preview (or `project_backups_cancel_preview`)
 /// stops this one.
@@ -396,14 +372,11 @@ pub async fn project_backups_preview(
     })
     .await?
 }
-
 #[tauri::command]
 pub fn project_backups_cancel_preview(state: State<'_, ProjectBackupsState>) {
     state.cancel_preview();
 }
-
 // ─── Backing up ────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectResult {
@@ -416,7 +389,6 @@ pub struct ProjectResult {
     pub error: Option<String>,
     pub outcome: Option<BackupOutcome>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupRun {
@@ -424,19 +396,16 @@ pub struct BackupRun {
     pub cancelled: bool,
     pub settings: Settings,
 }
-
 struct ChannelSink<'a> {
     channel: &'a Channel<ProjectBackupsEvent>,
     running: &'a Running,
     last: std::sync::Mutex<Option<Instant>>,
 }
-
 impl Sink for ChannelSink<'_> {
     fn stage(&self, stage: Stage) {
         *self.last.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let _ = self.channel.send(ProjectBackupsEvent::Stage { stage });
     }
-
     fn progress(&self, done_bytes: u64, total_bytes: u64, done_files: u64, total_files: u64) {
         let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
         let finished = done_bytes >= total_bytes;
@@ -451,12 +420,10 @@ impl Sink for ChannelSink<'_> {
             total_files,
         });
     }
-
     fn cancelled(&self) -> bool {
         self.running.cancelled()
     }
 }
-
 impl<'a> ChannelSink<'a> {
     fn new(channel: &'a Channel<ProjectBackupsEvent>, running: &'a Running) -> Self {
         ChannelSink {
@@ -465,14 +432,12 @@ impl<'a> ChannelSink<'a> {
             last: std::sync::Mutex::new(None),
         }
     }
-
     fn message(&self, text: impl Into<String>) {
         let _ = self
             .channel
             .send(ProjectBackupsEvent::Message { text: text.into() });
     }
 }
-
 /// Waits for `ready`, up to `limit`, unless cancelled.
 fn wait_until(limit: Duration, sink: &dyn Sink, ready: impl Fn() -> bool) -> Result<bool, Failure> {
     let start = Instant::now();
@@ -489,7 +454,6 @@ fn wait_until(limit: Duration, sink: &dyn Sink, ready: impl Fn() -> bool) -> Res
         std::thread::sleep(Duration::from_millis(500));
     }
 }
-
 /// The `Projects Backup` folder, ready to write to: starts Google Drive (and
 /// waits for its drive) or Dropbox when needed.
 fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, Failure> {
@@ -580,7 +544,6 @@ fn ensure_destination(sink: &ChannelSink) -> Result<PathBuf, Failure> {
     })?;
     Ok(root)
 }
-
 /// Starts the cloud app that keeps the online-only file `path` and waits
 /// until the file can be read.
 fn bring_online(path: &Path, sink: &ChannelSink) -> Result<bool, Failure> {
@@ -608,7 +571,6 @@ fn bring_online(path: &Path, sink: &ChannelSink) -> Result<bool, Failure> {
     sink.message("Starting the cloud app that keeps the project's online-only files…");
     wait_until(OFFLINE_WAIT, sink, || onedrive::readable(path))
 }
-
 /// Closes `exe` (asking first, then forcing), never MYLE itself.
 async fn close_program(exe: &str) {
     if store::is_own_program(exe) || !launch::process_running(exe) {
@@ -637,7 +599,6 @@ async fn close_program(exe: &str) {
     let _ = run(true).status().await;
     tokio::time::sleep(Duration::from_millis(1000)).await;
 }
-
 /// The result code the page acts on for a failure.
 fn code_of(failure: &Failure) -> Option<&'static str> {
     match failure {
@@ -648,7 +609,6 @@ fn code_of(failure: &Failure) -> Option<&'static str> {
         Failure::Message(_) => None,
     }
 }
-
 /// Backs up the given projects one after another. For each: the project
 /// folder is checked, the destination made ready (a cloud app started),
 /// only then is its program closed, and the backup made.
@@ -719,8 +679,7 @@ pub async fn project_backups_backup(
     }
     let cancelled = running.cancelled();
     drop(running);
-    // What was just backed up is checked again at once (and anything that
-    // changed meanwhile, which waited for the backup to end).
+    // What was just backed up is checked again at once (and anything that changed meanwhile, which waited for the backup to end).
     super::changes::recheck(results.iter().map(|result| result.project_id.clone()).collect());
     let now = super::naming::unix_millis(std::time::SystemTime::now());
     let finished: Vec<(String, Option<LastBackup>, LastResult)> = results
@@ -768,7 +727,6 @@ pub async fn project_backups_backup(
         settings,
     })
 }
-
 async fn backup_one(
     project: &Project,
     version: &str,
@@ -803,7 +761,6 @@ async fn backup_one(
         .await
         .map_err(Failure::Message)?
 }
-
 fn run_one(
     project: &Project,
     backup_root: &Path,
@@ -843,7 +800,6 @@ fn run_one(
         other => other,
     }
 }
-
 /// Puts the project as last backed up (its newest full backup and the
 /// increments on it) into an empty folder, checking every file it writes.
 #[tauri::command]
@@ -867,7 +823,6 @@ pub async fn project_backups_restore(
     })
     .await?
 }
-
 /// Cancels the running backup (`job` = `backup`) or comparison (`compare`).
 #[tauri::command]
 pub fn project_backups_cancel(state: State<'_, ProjectBackupsState>, job: Option<String>) -> bool {
@@ -879,7 +834,6 @@ pub fn project_backups_cancel(state: State<'_, ProjectBackupsState>, job: Option
     };
     state.cancel(job)
 }
-
 /// Starts the cloud app of `provider` (an action on a failed backup).
 #[tauri::command]
 pub async fn project_backups_start_cloud(provider: CloudProvider) -> Result<String, String> {
@@ -899,9 +853,7 @@ pub async fn project_backups_start_cloud(provider: CloudProvider) -> Result<Stri
     })
     .await?
 }
-
 // ─── Listing and comparing ─────────────────────────────────────────────────
-
 fn project_and_dir(project_id: &str) -> Result<(Settings, Project, PathBuf), String> {
     let settings = store::load()?;
     let project = settings.project(project_id)?.clone();
@@ -911,7 +863,6 @@ fn project_and_dir(project_id: &str) -> Result<(Settings, Project, PathBuf), Str
     let dir = engine::app_dir(&root, &project.app_name).map_err(|failure| failure.text())?;
     Ok((settings, project, dir))
 }
-
 /// Whether each project's folder differs from its newest backup. A check
 /// that fails answers `error` with the reason, never nothing.
 #[tauri::command]
@@ -926,20 +877,17 @@ pub async fn project_backups_changes(project_ids: Vec<String>, fresh: bool) -> R
     })
     .await?
 }
-
 /// The latest answer of the background detection for every project.
 #[tauri::command]
 pub async fn project_backups_latest_changes() -> Result<Vec<super::changes::ProjectChanges>, String> {
     blocking(move || store::load().map(|settings| super::changes::latest(&settings))).await?
 }
-
 /// Starts the background detection of changes, or after the project list
 /// changed, watches the folders again and checks every project.
 #[tauri::command]
 pub async fn project_backups_watch(app: AppHandle) -> Result<(), String> {
     super::changes::start(app)
 }
-
 #[tauri::command]
 pub async fn project_backups_list(project_id: String) -> Result<Vec<BackupEntry>, String> {
     blocking(move || {
@@ -954,7 +902,6 @@ pub async fn project_backups_list(project_id: String) -> Result<Vec<BackupEntry>
     })
     .await?
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompareResult {
@@ -963,7 +910,6 @@ pub struct CompareResult {
     pub new_id: String,
     pub comparison: Comparison,
 }
-
 /// The side of a comparison: a backup by id, or `source`.
 fn side(project: &Project, dir: &Path, id: &str) -> Result<Side, String> {
     if id == SOURCE_ID {
@@ -975,7 +921,6 @@ fn side(project: &Project, dir: &Path, id: &str) -> Result<Side, String> {
     }
     compare::side_for(&engine::resolve_backup(dir, &project.app_name, id)?)
 }
-
 /// Puts the older backup first: by version, the project folder last.
 fn order(dir: &Path, app_name: &str, a: String, b: String) -> (String, String) {
     if a == SOURCE_ID {
@@ -996,14 +941,12 @@ fn order(dir: &Path, app_name: &str, a: String, b: String) -> (String, String) {
         _ => (a, b),
     }
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompareProgress {
     pub done: u64,
     pub total: u64,
 }
-
 #[tauri::command]
 pub async fn project_backups_compare(
     state: State<'_, ProjectBackupsState>,
@@ -1042,7 +985,6 @@ pub async fn project_backups_compare(
     })
     .await?
 }
-
 #[tauri::command]
 pub async fn project_backups_file_diff(
     project_id: String,
@@ -1059,7 +1001,6 @@ pub async fn project_backups_file_diff(
     })
     .await?
 }
-
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OpenTarget {
@@ -1069,7 +1010,6 @@ pub enum OpenTarget {
     Backups,
     Source,
 }
-
 #[tauri::command]
 pub async fn project_backups_open(
     target: OpenTarget,
@@ -1113,20 +1053,17 @@ pub async fn project_backups_open(
         tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| error.to_string())
     }
 }
-
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
     use crate::project_backups::compare::tests::make_zip;
     use crate::project_backups::naming::CONFIG_MIRROR_FILE;
     use std::fs;
-
     struct Reinstalled {
         root: PathBuf,
         settings: Settings,
         zip: PathBuf,
     }
-
     impl Reinstalled {
         fn new(label: &str) -> Self {
             let root = std::env::temp_dir().join(format!("myle-project-reinstall-{label}-{}", uuid::Uuid::new_v4()));
@@ -1137,9 +1074,7 @@ mod recovery_tests {
             fs::create_dir_all(&source).unwrap();
             fs::create_dir_all(&month).unwrap();
             fs::write(source.join("a.txt"), b"one").unwrap();
-            // All MYLE local settings and caches are gone. Only the external
-            // project and cloud folder (including backup_projects' mirror)
-            // survive. This is the actual import route on a clean install.
+            // All MYLE local settings and caches are gone. Only the external project and cloud folder (including backup_projects' mirror) survive. This is the actual import route on a clean install.
             fs::write(backups.join(CONFIG_MIRROR_FILE), serde_json::to_vec(&serde_json::json!({
                 "projects": [{"name":"App", "appName":"App", "sourcePath":source}]
             })).unwrap()).unwrap();
@@ -1158,18 +1093,15 @@ mod recovery_tests {
             settings.imported = true;
             Self { root, settings, zip }
         }
-
         fn page(&self) -> PageState {
             page_state(&ProjectBackupsState::default(), self.settings.clone(), None, vec![], vec![])
         }
     }
-
     impl Drop for Reinstalled {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
-
     #[test]
     fn reinstall_recovers_history_from_existing_archives_without_a_local_backup_record() {
         let scene = Reinstalled::new("history");
@@ -1185,7 +1117,6 @@ mod recovery_tests {
         assert_eq!(fs::read(&scene.zip).unwrap(), before, "history discovery is read-only");
         assert!(page.settings.projects[0].last_result.is_none(), "discovery must not invent a successful backup attempt");
     }
-
     #[test]
     fn reinstall_compares_surviving_sources_to_archives_instead_of_seeding_a_clean_baseline() {
         let scene = Reinstalled::new("changes");
@@ -1194,15 +1125,13 @@ mod recovery_tests {
         let unchanged = super::super::changes::check_with(&scene.settings, project, &skip, true);
         assert_eq!(unchanged.state, super::super::changes::ChangeState::UpToDate);
         assert_eq!(unchanged.backup_id.as_deref(), Some("2026-10 Οκτώβριος/App_D23_V12.zip"));
-        // Same-size edits expose code that simply captures today's source as
-        // the new baseline after its old local cache was removed.
+        // Same-size edits expose code that simply captures today's source as the new baseline after its old local cache was removed.
         fs::write(Path::new(&project.source_path).join("a.txt"), b"two").unwrap();
         let changed = super::super::changes::check_with(&scene.settings, project, &skip, true);
         assert_eq!(changed.state, super::super::changes::ChangeState::Changed);
         assert_eq!((changed.added, changed.modified, changed.deleted), (0, 1, 0));
         assert!(scene.page().settings.projects[0].last_backup.is_some(), "both clean and edited projects retain their recovered history");
     }
-
     #[test]
     fn reinstall_recovers_the_newest_increment_and_preserves_a_failed_attempt() {
         let mut scene = Reinstalled::new("increment");

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The installed apps MYLE can remove, by who made them. Ticking one only
-  // chooses it; the bar below removes the chosen ones, with the rest.
+  // The installed apps MYLE can remove, by who made them. Ticking one only chooses it; the bar below removes the chosen ones, with the rest.
   import Store from "@lucide/svelte/icons/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import CategoryCard from "./CategoryCard.svelte";

@@ -1,20 +1,13 @@
-//! Reads a build's output as it comes: errors and warnings with their file,
-//! line and column (Rust, TypeScript, svelte-check, ESLint, Vite / Rollup /
-//! esbuild, MSBuild and C#, electron-builder, NSIS, npm, Python, Go), the
-//! stage the build is in, and a percentage where a tool prints one.
-
+// ! Reads a build's output as it comes: errors and warnings with their file, ! line and column (Rust, TypeScript, svelte-check, ESLint, Vite / Rollup / ! esbuild, MSBuild and C#, electron-builder, NSIS, npm, Python, Go), the ! stage the build is in, and a percentage where a tool prints one.
 use std::sync::OnceLock;
-
 use regex_lite::Regex;
 use serde::Serialize;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     Error,
     Warning,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
@@ -31,7 +24,6 @@ pub struct Diagnostic {
     /// The log line it was read from (0-based).
     pub log_line: usize,
 }
-
 /// What one line told.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineInfo {
@@ -39,7 +31,6 @@ pub struct LineInfo {
     pub stage: Option<String>,
     pub percent: Option<f32>,
 }
-
 /// Removes ANSI color and cursor codes.
 pub fn strip_ansi(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -78,7 +69,6 @@ pub fn strip_ansi(text: &str) -> String {
     }
     out
 }
-
 struct Patterns {
     rust_head: Regex,
     rust_at: Regex,
@@ -106,7 +96,6 @@ struct Patterns {
     eb_target: Regex,
     tauri_bundling: Regex,
 }
-
 fn patterns() -> &'static Patterns {
     static PATTERNS: OnceLock<Patterns> = OnceLock::new();
     PATTERNS.get_or_init(|| {
@@ -141,7 +130,6 @@ fn patterns() -> &'static Patterns {
         }
     })
 }
-
 /// npm prints these around a failed script; they say nothing of the error.
 const NPM_NOISE: &[&str] = &[
     "a complete log of this run",
@@ -157,11 +145,9 @@ const NPM_NOISE: &[&str] = &[
     "signal ",
     "command ",
 ];
-
 fn num(text: &str) -> Option<u32> {
     text.parse().ok()
 }
-
 /// Reads one build's output, line by line.
 #[derive(Default)]
 pub struct Parser {
@@ -176,7 +162,6 @@ pub struct Parser {
     /// Messages seen, so a repeated one (npm prints some twice) counts once.
     seen: std::collections::HashSet<String>,
 }
-
 impl Parser {
     /// Reads the line `index` of the output.
     pub fn line(&mut self, raw: &str, index: usize) -> LineInfo {
@@ -184,9 +169,7 @@ impl Parser {
         let p = patterns();
         let mut info = LineInfo::default();
         let trimmed = text.trim();
-
-        // A pending Rust / esbuild diagnostic takes its location, or is
-        // finished by the first line that is not part of it.
+        // A pending Rust / esbuild diagnostic takes its location, or is finished by the first line that is not part of it.
         if let Some(mut pending) = self.pending.take() {
             let at = p
                 .rust_at
@@ -212,7 +195,6 @@ impl Parser {
         if trimmed.is_empty() {
             return info;
         }
-
         // Stages and progress.
         if let Some(step) = trimmed
             .strip_prefix("==> ")
@@ -272,7 +254,6 @@ impl Parser {
         {
             info.percent = Some(value);
         }
-
         // Diagnostics, most specific first.
         if let Some(c) = p.svelte_machine.captures(trimmed) {
             self.push(
@@ -537,12 +518,10 @@ impl Parser {
         }
         info
     }
-
     /// The output ended: a diagnostic still waiting for its location.
     pub fn finish(&mut self) -> Option<Diagnostic> {
         self.pending.take()
     }
-
     fn push(&mut self, info: &mut LineInfo, diagnostic: Diagnostic) {
         let key = format!(
             "{}|{}|{:?}|{:?}|{:?}",
@@ -557,7 +536,6 @@ impl Parser {
         }
     }
 }
-
 #[allow(clippy::too_many_arguments)]
 fn diag(
     severity: &str,
@@ -585,11 +563,9 @@ fn diag(
         log_line,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn run(lines: &[&str]) -> (Vec<Diagnostic>, Vec<String>) {
         let mut parser = Parser::default();
         let mut diags = Vec::new();
@@ -602,7 +578,6 @@ mod tests {
         diags.extend(parser.finish());
         (diags, stages)
     }
-
     #[test]
     fn rust_errors_and_warnings_with_their_location() {
         let (diags, stages) = run(&[
@@ -629,7 +604,6 @@ mod tests {
         assert_eq!(diags[1].file.as_deref(), Some("src/lib.rs"));
         assert!(stages.last().unwrap().contains("2 crates"));
     }
-
     #[test]
     fn typescript_msbuild_and_svelte_check() {
         let (diags, _) = run(&[
@@ -656,7 +630,6 @@ mod tests {
         assert_eq!(diags[5].severity, Severity::Warning);
         assert_eq!(diags[5].file.as_deref(), Some("/home/x/src/Page.svelte"));
     }
-
     #[test]
     fn eslint_vite_esbuild_and_electron_builder() {
         let (diags, stages) = run(&[
@@ -706,7 +679,6 @@ mod tests {
             |s| s == "Building the target=nsis installer" || s == "Building the nsis installer"
         ));
     }
-
     #[test]
     fn nsis_npm_python_go_and_colors() {
         let (diags, stages) = run(&[
@@ -744,7 +716,6 @@ mod tests {
             "ok done"
         );
     }
-
     #[test]
     fn percentages_from_progress_lines() {
         let mut parser = Parser::default();

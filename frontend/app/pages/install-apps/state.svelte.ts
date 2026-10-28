@@ -1,6 +1,4 @@
-// State of the Install Apps page. A module-level singleton, so everything
-// survives leaving and returning to the page; the user's choices are also
-// persisted to localStorage.
+// State of the Install Apps page. A module-level singleton, so everything survives leaving and returning to the page; the user's choices are also persisted to localStorage.
 import { isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SvelteSet } from "svelte/reactivity";
@@ -69,8 +67,7 @@ const LINK_CONCURRENCY = 3;
 const SEARCH_DEBOUNCE_MS = 250;
 /** A visit to the page re-reads what is installed after this long. */
 const RECHECK_AFTER_MS = 2 * 60 * 1000;
-/** Coming back to the window re-reads it after this long: apps installed or
- *  removed outside the app show up without a manual refresh. */
+/* Coming back to the window re-reads it after this long: apps installed or removed outside the app show up without a manual refresh. */
 const FOCUS_RECHECK_MS = 45 * 1000;
 /** Installers that hand off to a second process finish after winget returns. */
 const LATE_RECHECK_MS = 20 * 1000;
@@ -128,8 +125,7 @@ class InstallAppsState {
   #linkPending = new Set<string>();
   #linkQueue: string[] = [];
   #linkActive = 0;
-  /** Finished in this visit: shown whatever the status filter, so an app
-   *  installed from "Not installed" does not vanish the moment it is done. */
+  /* Finished in this visit: shown whatever the status filter, so an app installed from "Not installed" does not vanish the moment it is done. */
   readonly recent = new SvelteSet<string>();
   #watching = false;
   #lateCheck: ReturnType<typeof setTimeout> | undefined;
@@ -260,8 +256,7 @@ class InstallAppsState {
     window.addEventListener("focus", recheck);
     document.addEventListener("visibilitychange", recheck);
   }
-  /** Leaving the page (or changing what is shown) ends the grace period of
-   *  apps that just finished, and unpins checked-out catalog apps with it. */
+  /* Leaving the page (or changing what is shown) ends the grace period of apps that just finished, and unpins checked-out catalog apps with it. */
   forgetRecent() {
     if (!this.recent.size) return;
     this.recent.clear();
@@ -292,9 +287,7 @@ class InstallAppsState {
       this.checkedOnce = true;
       this.#lastCheck = Date.now();
       writeJson(KEY.statuses, next);
-      // Shown on the page itself, not as a toast: without winget (LTSC,
-      // Windows Sandbox) an error that stays would greet every start, on
-      // whatever page is open.
+      // Shown on the page itself, not as a toast: without winget (LTSC, Windows Sandbox) an error that stays would greet every start, on whatever page is open.
       this.wingetError = report.wingetError;
       if (announce) toast.info("Installed apps refreshed.");
     } catch (err) {
@@ -332,9 +325,7 @@ class InstallAppsState {
     const app = this.all.find((entry) => key(entry.id) === key(id));
     if (!app) return false;
     clearTimeout(this.#searchTimer);
-    // A targeted handoff must not accidentally carry unrelated apps into the
-    // next Install click. Filter to the requested app so it is visible at the
-    // restored top-of-page scroll position as well as selected.
+    // A targeted handoff must not accidentally carry unrelated apps into the next Install click. Filter to the requested app so it is visible at the restored top-of-page scroll position as well as selected.
     this.query = app.name;
     this.appliedQuery = app.name;
     this.catalogResults = [];
@@ -418,8 +409,7 @@ class InstallAppsState {
     }
   }
   // ---------------------------------------------------------------- catalog links
-  /** Gives a catalog result its website and favicon (called when its card
-   *  scrolls into view). Results are cached across sessions. */
+  /* Gives a catalog result its website and favicon (called when its card scrolls into view). Results are cached across sessions. */
   resolveLinks(app: AppEntry) {
     if (app.source !== "catalog" || app.site || !isTauri()) return;
     const k = key(app.id);
@@ -500,8 +490,7 @@ class InstallAppsState {
       this.#releaseGate();
     }
   }
-  /** Lets other pages have the installer slot once nothing here needs it:
-   *  an activation finishing must not free it under a running install. */
+  /* Lets other pages have the installer slot once nothing here needs it: an activation finishing must not free it under a running install. */
   #releaseGate() {
     if (this.#running || this.#selecting || this.#activations > 0 || this.#queue.length) return;
     operationGate.end("install-apps");
@@ -513,8 +502,7 @@ class InstallAppsState {
       toast.info("Finish the Spotify Hub action before installing apps.");
       return;
     }
-    // Conflict questions are awaited in the loop: a batch that finishes in
-    // the meantime must not free the slot before this one is queued.
+    // Conflict questions are awaited in the loop: a batch that finishes in the meantime must not free the slot before this one is queued.
     this.#selecting = true;
     try {
       await this.#queueSelected();
@@ -593,8 +581,7 @@ class InstallAppsState {
       this.#running = false;
       this.#releaseGate();
     }
-    // Pick up exact versions after a batch, and again a little later for
-    // installers that were still finishing when winget returned.
+    // Pick up exact versions after a batch, and again a little later for installers that were still finishing when winget returned.
     if (changed) {
       void this.checkInstalled();
       clearTimeout(this.#lateCheck);

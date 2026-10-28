@@ -1,13 +1,9 @@
 //! Website icons for the vault's list (`myle_vault::icons`).
-
 use std::collections::HashMap;
-
 use tauri::{AppHandle, Emitter, State};
-
 use super::PasswordsState;
 pub use myle_vault::icons::icon_host;
 use myle_vault::icons::{ICON_EVENT, lookup};
-
 /// The icons already known for the vault's websites, but those the page has
 /// (`skip`). The missing and the old ones are fetched in the background and
 /// sent as `passwords-icon`.

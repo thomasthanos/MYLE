@@ -3,9 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 import { transpileModule } from "typescript";
-
 const source = await readFile(new URL("../../frontend/app/pages/password-manager/VerifyPasskey.svelte", import.meta.url), "utf8");
-
 async function verification(api = {}) {
   let verify;
   let cancelled;
@@ -31,7 +29,6 @@ async function verification(api = {}) {
   await new Promise((resolve) => setImmediate(resolve));
   return { view: context.view, verify, cancelled, cleanup };
 }
-
 test("cancelling master verification closes its own modal and preserves a newer request", async () => {
   const { view, verify, cancelled } = await verification();
   verify({ id: 2, site: "new.example" });
@@ -43,7 +40,6 @@ test("cancelling master verification closes its own modal and preserves a newer 
   assert.equal(view.request, null);
   assert.equal(view.master, "");
 });
-
 for (const rejected of [false, true]) {
   test(`an old master answer ${rejected ? "failure" : "success"} cannot alter a newer prompt`, async () => {
     let finish;
@@ -63,7 +59,6 @@ for (const rejected of [false, true]) {
     assert.equal(view.error, null);
   });
 }
-
 test("an in-flight initial pending lookup cannot restore a cancelled modal", async () => {
   let release;
   const { view, cancelled } = await verification({ verifyPending: () => new Promise((resolve) => { release = resolve; }) });
@@ -72,7 +67,6 @@ test("an in-flight initial pending lookup cannot restore a cancelled modal", asy
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(view.request, null);
 });
-
 test("initial state clears a modal cancelled before its cancellation listener was installed", async () => {
   const { view } = await verification({ onVerify: async (handler) => {
     handler({ id: 1, site: "old.example" });

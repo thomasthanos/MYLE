@@ -1,20 +1,7 @@
-//! System Cleaner's "Downloads folder": old downloads that are not documents.
-//!
-//! The folder is Windows' own Downloads (the known folder, wherever the user
-//! moved it). Kept: documents by their extension, and anything changed or
-//! modified in the last seven days (Date modified, as Explorer shows it; not
-//! created or accessed, which copying, unpacking and scanning reset). A
-//! folder is judged by its own date, like in Explorer. Hidden and system
-//! files (desktop.ini) are left out. Links and junctions are never followed
-//! or removed. Deleting is
-//! permanent, and only what the preview listed and still qualifies goes:
-//! every path is checked again just before it is removed.
-
+// ! System Cleaner's "Downloads folder": old downloads that are not documents. ! ! The folder is Windows' own Downloads (the known folder, wherever the user ! moved it). Kept: documents by their extension, and anything changed or ! modified in the last seven days (Date modified, as Explorer shows it; not ! created or accessed, which copying, unpacking and scanning reset). A ! folder is judged by its own date, like in Explorer. Hidden and system ! files (desktop.ini) are left out. Links and junctions are never followed ! or removed. Deleting is ! permanent, and only what the preview listed and still qualifies goes: ! every path is checked again just before it is removed.
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use serde::Serialize;
-
 /// Kept however old: documents people download to keep.
 const DOCUMENTS: &[&str] = &[
     "pdf", "doc", "docx", "docm", "dot", "dotx", "xls", "xlsx", "xlsm", "xlsb", "ppt", "pptx", "pptm", "pps",
@@ -22,12 +9,10 @@ const DOCUMENTS: &[&str] = &[
     "djvu", "xps", "oxps", "pages", "numbers", "key", "tex", "one", "vsdx",
     "pub", "wpd", "wps", "ott", "ots", "otp", "fb2", "cbz", "cbr",
 ];
-
 /// Anything this new stays.
 const RECENT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// A folder deeper than this is kept rather than walked.
 const MAX_DEPTH: usize = 24;
-
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
@@ -38,7 +23,6 @@ pub struct Item {
     /// Date modified, seconds since 1970.
     changed: u64,
 }
-
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Kept {
@@ -48,7 +32,6 @@ pub struct Kept {
     reason: &'static str,
     changed: u64,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preview {
@@ -58,7 +41,6 @@ pub struct Preview {
     /// Entries left alone, and why.
     kept: Vec<Kept>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
@@ -67,7 +49,6 @@ pub struct Outcome {
     /// In use, or no longer what the preview showed: left in place.
     skipped: Vec<String>,
 }
-
 /// Windows' Downloads folder (FOLDERID_Downloads).
 #[cfg(windows)]
 pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
@@ -82,22 +63,18 @@ pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
         Ok(PathBuf::from(text))
     }
 }
-
 #[cfg(not(windows))]
 pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
     Err("Only on Windows.".into())
 }
-
 fn is_document(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| DOCUMENTS.iter().any(|d| d.eq_ignore_ascii_case(e)))
 }
-
 fn changed(meta: &std::fs::Metadata) -> SystemTime {
     meta.modified().unwrap_or(SystemTime::now())
 }
-
 /// desktop.ini and the like: never listed, never touched.
 fn is_hidden(meta: &std::fs::Metadata, name: &str) -> bool {
     if name.eq_ignore_ascii_case("desktop.ini") || name.eq_ignore_ascii_case("thumbs.db") {
@@ -115,11 +92,9 @@ fn is_hidden(meta: &std::fs::Metadata, name: &str) -> bool {
         name.starts_with('.')
     }
 }
-
 fn recent(meta: &std::fs::Metadata, now: SystemTime) -> bool {
     now.duration_since(changed(meta)).map_or(true, |age| age < RECENT)
 }
-
 /// A link, junction or other reparse point: never followed, never removed.
 fn is_link(meta: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
@@ -133,7 +108,6 @@ fn is_link(meta: &std::fs::Metadata) -> bool {
         meta.file_type().is_symlink()
     }
 }
-
 /// Why an entry directly in Downloads stays, or `None` when it may go.
 fn keep_reason(path: &Path, meta: &std::fs::Metadata, now: SystemTime) -> Option<&'static str> {
     if is_link(meta) || !(meta.is_file() || meta.is_dir()) {
@@ -146,7 +120,6 @@ fn keep_reason(path: &Path, meta: &std::fs::Metadata, now: SystemTime) -> Option
         None
     }
 }
-
 /// Bytes in a file or folder; links inside are not followed.
 fn size_of(path: &Path, meta: &std::fs::Metadata, depth: usize) -> u64 {
     if meta.is_file() {
@@ -167,7 +140,6 @@ fn size_of(path: &Path, meta: &std::fs::Metadata, depth: usize) -> u64 {
         })
         .unwrap_or(0)
 }
-
 /// The size of an entry of Downloads if it may go now.
 fn removable(path: &Path, now: SystemTime) -> Option<u64> {
     let meta = std::fs::symlink_metadata(path).ok()?;
@@ -177,11 +149,9 @@ fn removable(path: &Path, now: SystemTime) -> Option<u64> {
     }
     Some(size_of(path, &meta, 0))
 }
-
 fn epoch(time: SystemTime) -> u64 {
     time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
-
 fn preview_in(folder: &Path, now: SystemTime) -> Result<Preview, String> {
     let mut items = Vec::new();
     let mut kept = Vec::new();
@@ -210,7 +180,6 @@ fn preview_in(folder: &Path, now: SystemTime) -> Result<Preview, String> {
     let total = items.iter().map(|item| item.size).sum();
     Ok(Preview { folder: folder.to_string_lossy().into_owned(), items, total, kept })
 }
-
 fn delete_in(folder: &Path, paths: &[String], now: SystemTime) -> Outcome {
     let mut outcome = Outcome { deleted: 0, freed: 0, skipped: Vec::new() };
     for text in paths {
@@ -234,7 +203,6 @@ fn delete_in(folder: &Path, paths: &[String], now: SystemTime) -> Outcome {
     }
     outcome
 }
-
 /// What would go, for the preview.
 #[tauri::command]
 pub async fn cleaner_downloads_preview() -> Result<Preview, String> {
@@ -242,7 +210,6 @@ pub async fn cleaner_downloads_preview() -> Result<Preview, String> {
         .await
         .map_err(|e| e.to_string())?
 }
-
 /// Deletes, permanently, the listed entries that still qualify.
 #[tauri::command]
 pub async fn cleaner_downloads_delete(paths: Vec<String>) -> Result<Outcome, String> {
@@ -253,11 +220,9 @@ pub async fn cleaner_downloads_delete(paths: Vec<String>) -> Result<Outcome, Str
         .await
         .map_err(|e| e.to_string())?
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn documents_new_files_and_folders_with_either_stay() {
         let root = std::env::temp_dir().join(format!("myle-downloads-{}", std::process::id()));

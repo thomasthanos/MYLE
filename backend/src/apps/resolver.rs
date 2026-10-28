@@ -1,20 +1,14 @@
-//! Finds the current download URL for an app, with a 6-hour cache.
-//! Shared by the custom apps of the Install Apps page and by Creative Hub.
-
+// ! Finds the current download URL for an app, with a 6-hour cache. ! Shared by the custom apps of the Install Apps page and by Creative Hub.
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-
 use crate::download::{self, err};
-
 const USER_AGENT: &str = "MakeYourLifeEasier-Apps";
 const CACHE_TTL_SECS: u64 = 6 * 60 * 60;
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(
     tag = "type",
@@ -37,7 +31,6 @@ pub enum Resolver {
         file_name: Option<String>,
     },
 }
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resolved {
     pub url: String,
@@ -47,28 +40,23 @@ pub struct Resolved {
     pub size: Option<u64>,
     pub fetched_at: u64,
 }
-
 static CACHE: LazyLock<Mutex<Option<HashMap<String, Resolved>>>> =
     LazyLock::new(|| Mutex::new(None));
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
-
 fn is_fresh(fetched_at: u64, now: u64) -> bool {
     now >= fetched_at && now - fetched_at < CACHE_TTL_SECS
 }
-
 fn cache_file(app: &AppHandle) -> Option<PathBuf> {
     let _ = app;
     crate::storage::local_dir()
         .ok()
         .map(|d| d.join("resolver-cache.json"))
 }
-
 fn cached(app: &AppHandle, key: &str, resolver: &Resolver) -> Option<Resolved> {
     let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let map = cache.get_or_insert_with(|| {
@@ -82,7 +70,6 @@ fn cached(app: &AppHandle, key: &str, resolver: &Resolver) -> Option<Resolved> {
         .filter(|r| conforms_to(r, resolver))
         .cloned()
 }
-
 /// Cache files are user-writable and therefore only a performance hint. A
 /// cached result must obey the same URL/name constraints as a live resolver.
 fn conforms_to(resolved: &Resolved, resolver: &Resolver) -> bool {
@@ -110,13 +97,11 @@ fn conforms_to(resolved: &Resolved, resolver: &Resolver) -> bool {
         }
     }
 }
-
 fn full_match(pattern: &Regex, value: &str) -> bool {
     pattern
         .find(value)
         .is_some_and(|matched| matched.start() == 0 && matched.end() == value.len())
 }
-
 fn store(app: &AppHandle, key: &str, resolved: &Resolved) {
     let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let map = cache.get_or_insert_with(HashMap::new);
@@ -128,7 +113,6 @@ fn store(app: &AppHandle, key: &str, resolved: &Resolved) {
         let _ = std::fs::write(file, json);
     }
 }
-
 pub async fn resolve(app: &AppHandle, key: &str, resolver: &Resolver) -> Result<Resolved, String> {
     if let Some(hit) = cached(app, key, resolver) {
         return Ok(hit);
@@ -192,7 +176,6 @@ pub async fn resolve(app: &AppHandle, key: &str, resolver: &Resolver) -> Result<
     store(app, key, &resolved);
     Ok(resolved)
 }
-
 /// Google Drive's direct-download endpoint. `confirm=t` skips the "can't scan
 /// this file for viruses" page that large files otherwise get.
 /// Accepts a bare file id or a pasted share link.
@@ -204,7 +187,6 @@ pub fn gdrive_url(file_id_or_link: &str) -> Result<String, String> {
         "https://drive.usercontent.google.com/download?id={id}&export=download&confirm=t"
     ))
 }
-
 /// `https://drive.google.com/file/d/<id>/view?usp=sharing` -> `<id>`, and
 /// `…?id=<id>` or a bare id are taken as they are.
 fn gdrive_file_id(input: &str) -> Option<String> {
@@ -230,7 +212,6 @@ fn gdrive_file_id(input: &str) -> Option<String> {
         .filter(|s| is_id(s))
         .map(str::to_string)
 }
-
 fn from_github(release_json: &str, asset_pattern: &str) -> Result<Resolved, String> {
     #[derive(Deserialize)]
     struct Release {
@@ -266,7 +247,6 @@ fn from_github(release_json: &str, asset_pattern: &str) -> Result<Resolved, Stri
         fetched_at: 0,
     })
 }
-
 fn from_page(html: &str, pattern: &str) -> Result<Resolved, String> {
     let re = Regex::new(pattern).map_err(err)?;
     let caps = re
@@ -282,11 +262,9 @@ fn from_page(html: &str, pattern: &str) -> Result<Resolved, String> {
         fetched_at: 0,
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn github_resolver_picks_the_matching_asset() {
         let json = r#"{"tag_name":"16.7","assets":[
@@ -298,7 +276,6 @@ mod tests {
         assert_eq!(r.size, Some(2048));
         assert!(from_github(json, r"^nothing$").is_err());
     }
-
     #[test]
     fn page_resolver_extracts_url_and_version() {
         let html = r#"<a href="https://us.download.nvidia.com/nvapp/client/11.0.9.251/NVIDIA_app_v11.0.9.251.exe">Download</a>"#;
@@ -308,7 +285,6 @@ mod tests {
         assert_eq!(r.file_name, "NVIDIA_app_v11.0.9.251.exe");
         assert!(from_page("<html></html>", pattern).is_err());
     }
-
     #[test]
     fn resolver_json_uses_camel_case_fields() {
         let gdrive: Resolver = serde_json::from_str(
@@ -321,7 +297,6 @@ mod tests {
         assert_eq!(file_id, "1-lMdu7mGgCr6arl8KlaQOrQyuNpJM9ho");
         assert_eq!(file_name.as_deref(), Some("a.zip"));
     }
-
     #[test]
     fn gdrive_urls_are_direct_downloads() {
         assert_eq!(
@@ -331,7 +306,6 @@ mod tests {
         assert!(gdrive_url("short").is_err());
         assert!(gdrive_url("../../etc&x=1").is_err());
     }
-
     #[test]
     fn gdrive_accepts_pasted_share_links() {
         let id = "1Czx07cO2thXO8zkjplye_da2_h8_WSqB";
@@ -354,7 +328,6 @@ mod tests {
         );
         assert_eq!(gdrive_file_id(""), None);
     }
-
     #[test]
     fn cache_freshness() {
         assert!(is_fresh(1000, 1000));
@@ -362,7 +335,6 @@ mod tests {
         assert!(!is_fresh(1000, 1000 + CACHE_TTL_SECS));
         assert!(!is_fresh(2000, 1000)); // clock went backwards
     }
-
     #[test]
     fn cached_results_must_still_match_the_configured_resolver() {
         let page = Resolver::Page {

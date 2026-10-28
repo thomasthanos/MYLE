@@ -1,7 +1,4 @@
-// State of the System Cleaner page: the fixed categories, their measured sizes,
-// and what the user picked. The page never sends a path, only category ids.
-// Administrator rights are asked for once, when a scan starts: the answer
-// decides whether the system folders are measured, and later cleaned.
+// State of the System Cleaner page: the fixed categories, their measured sizes, and what the user picked. The page never sends a path, only category ids. Administrator rights are asked for once, when a scan starts: the answer decides whether the system folders are measured, and later cleaned.
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../lib/confirm.svelte";
@@ -12,9 +9,7 @@ import { DOWNLOADS, DOWNLOADS_CATEGORY, type Preview } from "./downloads";
 const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned" };
 /** The backend's answer when the UAC prompt is declined. */
 const DECLINED = "Administrator approval was declined.";
-/** The bar moves for the eye, not for the clock: one step is kept on screen
- *  about this long, while the fill eases towards it. A slow step is never made
- *  slower, and the full bar is held for a moment at the end. */
+/* The bar moves for the eye, not for the clock: one step is kept on screen about this long, while the fill eases towards it. A slow step is never made slower, and the full bar is held for a moment at the end. */
 const STEP_MS = 210;
 const HOLD_MS = 420;
 export interface Measured { bytes: number; files: number; locked: boolean }
@@ -82,8 +77,7 @@ class CleanerState {
   async load() {
     if (!isTauri()) return;
     try {
-      // Downloads is measured and cleaned by its own commands, with the same
-      // card, tick and Clean button as the rest.
+      // Downloads is measured and cleaned by its own commands, with the same card, tick and Clean button as the rest.
       this.categories = [...(await cleanerApi.categories()), DOWNLOADS_CATEGORY];
       const known = new Set(this.categories.map((c) => c.id)); // drop ids of an older build
       for (const id of [...this.selected]) if (!known.has(id)) this.selected.delete(id);
@@ -108,9 +102,7 @@ class CleanerState {
     if (this.allSelected) this.selected.clear(); else for (const c of this.selectable) this.selected.add(c.id);
     this.#persistSelection();
   }
-  /** Measures everything. The UAC prompt for the system folders appears right
-   *  away and runs next to the normal pass; declining it only leaves those
-   *  folders out. When it is over everything found is ticked. */
+  /* Measures everything. The UAC prompt for the system folders appears right away and runs next to the normal pass; declining it only leaves those folders out. When it is over everything found is ticked. */
   async scan() {
     if (this.busy) return;
     this.phase = "scanning";
@@ -119,8 +111,7 @@ class CleanerState {
     this.cleaned.clear();
     this.outcome = {};
     this.autoSelected = false;
-    // The elevated pass reports the whole category (the user's folders
-    // included), so it wins over the normal pass whichever finishes first.
+    // The elevated pass reports the whole category (the user's folders included), so it wins over the normal pass whichever finishes first.
     const user: Record<string, Measured> = {};
     const admin: Record<string, Measured> = {};
     const show = (id: string) => (this.sizes[id] = admin[id] ?? user[id]);
@@ -248,11 +239,9 @@ class CleanerState {
         : empty;
       freed += summary.freed;
       skipped += summary.skipped;
-      // What the user pass left in the system folders is tried again below,
-      // when there is an administrator pass; without one it stays left.
+      // What the user pass left in the system folders is tried again below, when there is an administrator pass; without one it stays left.
       inUse += summary.skippedBytes - (withAdmin ? summary.adminSkippedBytes : 0);
-      // The first pass already deleted files; a declined or failed UAC step
-      // must not hide that, so it is reported on its own.
+      // The first pass already deleted files; a declined or failed UAC step must not hide that, so it is reported on its own.
       if (withAdmin) {
         pass = "administrator";
         passIds = adminIds;
@@ -270,8 +259,7 @@ class CleanerState {
           inUse += summary.adminSkippedBytes; // not tried again: what the user pass left there is still there
         }
       }
-      // What is really left, measured again, rather than the scan minus what
-      // was freed; the bytes of the skipped files are a lower bound.
+      // What is really left, measured again, rather than the scan minus what was freed; the bytes of the skipped files are a lower bound.
       this.#setBarTarget(1);
       this.settling = true;
       if (ids.length) await this.#remeasure(ids, withAdmin && adminNote === null);
@@ -306,9 +294,7 @@ class CleanerState {
     }
     toast.success(`Successfully freed up ${formatSize(freed)}!`);
   }
-  /** Subtracts what a pass freed from a measured size, and keeps what it
-   *  removed and left for the card. The administrator pass retries what the
-   *  first one left in its folders, so its count replaces that part. */
+  /* Subtracts what a pass freed from a measured size, and keeps what it removed and left for the card. The administrator pass retries what the first one left in its folders, so its count replaces that part. */
   #applyCleaned(
     { id, bytes, files, skipped, skippedBytes, adminSkipped, adminSkippedBytes }:
       { id: string; bytes: number; files: number; skipped: number; skippedBytes: number; adminSkipped: number; adminSkippedBytes: number },
@@ -326,8 +312,7 @@ class CleanerState {
     if (!before) return;
     this.sizes[id] = { bytes: Math.max(0, before.bytes - bytes), files: Math.max(0, before.files - files), locked: before.locked };
   }
-  /** Measures `ids` again after a clean; the system folders only through the
-   *  helper that is still running, so this never asks for approval. */
+  /* Measures `ids` again after a clean; the system folders only through the helper that is still running, so this never asks for approval. */
   async #remeasure(ids: string[], admin: boolean) {
     const wanted = new Set(ids);
     const next: Record<string, Measured> = {};

@@ -1,14 +1,8 @@
-//! What a repository holds: its projects (one, or one per app folder of a
-//! monorepo), what each is built with, its release tags, and the GitHub
-//! Actions workflows that release on a tag.
-
+// ! What a repository holds: its projects (one, or one per app folder of a ! monorepo), what each is built with, its release tags, and the GitHub ! Actions workflows that release on a tag.
 use std::path::{Path, PathBuf};
-
 use serde::Serialize;
-
 use super::git::Tag;
 use super::versions;
-
 /// Folders never searched for repositories or projects.
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -36,12 +30,10 @@ const SKIP_DIRS: &[&str] = &[
 const SCAN_DEPTH: usize = 4;
 /// At most this many repositories from one scan.
 const SCAN_MAX: usize = 400;
-
 fn skipped(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower.starts_with('.') || SKIP_DIRS.contains(&lower.as_str())
 }
-
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|entries| {
@@ -56,11 +48,9 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
     dirs.sort_by_key(|path| path.display().to_string().to_lowercase());
     dirs
 }
-
 pub(crate) fn is_repo(dir: &Path) -> bool {
     dir.join(".git").exists()
 }
-
 /// Git repositories in `parent` (itself included), not looking inside one.
 pub(crate) fn find_repos(parent: &Path, cancelled: &dyn Fn() -> bool) -> Vec<PathBuf> {
     let mut found = Vec::new();
@@ -82,7 +72,6 @@ pub(crate) fn find_repos(parent: &Path, cancelled: &dyn Fn() -> bool) -> Vec<Pat
     found.sort_by_key(|path| path.display().to_string().to_lowercase());
     found
 }
-
 /// A folder holds a project of its own: a manifest of some language.
 fn has_manifest(dir: &Path) -> bool {
     const FILES: &[&str] = &[
@@ -99,7 +88,6 @@ fn has_manifest(dir: &Path) -> bool {
         || std::fs::read_to_string(dir.join("manifest.json"))
             .is_ok_and(|text| text.contains("\"manifest_version\""))
 }
-
 fn has_extension(dir: &Path, extensions: &[&str]) -> bool {
     std::fs::read_dir(dir).is_ok_and(|entries| {
         entries.flatten().any(|entry| {
@@ -111,7 +99,6 @@ fn has_extension(dir: &Path, extensions: &[&str]) -> bool {
         })
     })
 }
-
 /// The app folders of a monorepo (from the repository's top folder, with
 /// `/`); empty when the repository is one project. A repository is one
 /// project when its top folder states a version (package.json without
@@ -148,9 +135,7 @@ pub(crate) fn sub_projects(root: &Path) -> Vec<String> {
     }
     found
 }
-
 // ─── Build types ───────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum BuildKind {
@@ -165,12 +150,10 @@ pub enum BuildKind {
     Flutter,
     Extension,
 }
-
 pub(crate) fn package_json(dir: &Path) -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(dir.join("package.json")).ok()?;
     serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()
 }
-
 /// Every dependency name of a package.json.
 pub(crate) fn dependencies(json: &serde_json::Value) -> Vec<String> {
     ["dependencies", "devDependencies", "optionalDependencies"]
@@ -179,7 +162,6 @@ pub(crate) fn dependencies(json: &serde_json::Value) -> Vec<String> {
         .flat_map(|deps| deps.keys().cloned())
         .collect()
 }
-
 /// The folders where a Tauri app keeps its config: the project folder and
 /// the folders right inside it.
 pub(crate) fn tauri_dir(dir: &Path) -> Option<PathBuf> {
@@ -190,7 +172,6 @@ pub(crate) fn tauri_dir(dir: &Path) -> Option<PathBuf> {
         .into_iter()
         .find(|sub| sub.join("tauri.conf.json").is_file())
 }
-
 pub(crate) fn build_kinds(dir: &Path) -> Vec<BuildKind> {
     let mut kinds = Vec::new();
     if let Some(json) = package_json(dir) {
@@ -237,15 +218,12 @@ pub(crate) fn build_kinds(dir: &Path) -> Vec<BuildKind> {
     kinds.dedup();
     kinds
 }
-
 // ─── Tags ──────────────────────────────────────────────────────────────────
-
 /// The tag of `version`: `v1.2.3`, or `backup_projects-v1.2.3` for an app
 /// of a monorepo.
 pub(crate) fn tag_name(prefix: &str, version: &str) -> String {
     format!("{prefix}{version}")
 }
-
 /// `v`, or `<folder>-v` for an app folder of a monorepo (its last part:
 /// `apps/web` → `web-v`).
 pub(crate) fn tag_prefix(sub: Option<&str>, monorepo: bool) -> String {
@@ -257,7 +235,6 @@ pub(crate) fn tag_prefix(sub: Option<&str>, monorepo: bool) -> String {
         _ => "v".into(),
     }
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LastTag {
@@ -266,7 +243,6 @@ pub struct LastTag {
     /// A shared `v…` tag from before the app had a prefix of its own.
     pub legacy: bool,
 }
-
 /// The newest release tag of a project. A monorepo app without tags of its
 /// own yet falls back to the newest shared `v…` tag of its major version
 /// that is not ahead of it (desktop-utils tagged its apps `v2.0.6`, `v3.7.3`).
@@ -299,9 +275,7 @@ pub(crate) fn last_tag(tags: &[Tag], prefix: &str, current: Option<&str>) -> Opt
             legacy: true,
         })
 }
-
 // ─── Release workflows ─────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workflow {
@@ -311,7 +285,6 @@ pub struct Workflow {
     /// The tag patterns that start it (`v*`).
     pub tags: Vec<String>,
 }
-
 /// The tag patterns under `on: push: tags:` of a workflow, read loosely
 /// (block and inline lists, quoted or not).
 pub(crate) fn workflow_tags(text: &str) -> Vec<String> {
@@ -381,14 +354,12 @@ pub(crate) fn workflow_tags(text: &str) -> Vec<String> {
     patterns.retain(|p| !p.is_empty() && !p.starts_with('!'));
     patterns
 }
-
 fn workflow_name(text: &str) -> Option<String> {
     text.lines()
         .find_map(|line| line.strip_prefix("name:"))
         .map(|name| name.trim().trim_matches(['"', '\'']).to_string())
         .filter(|name| !name.is_empty())
 }
-
 /// The workflows of the repository at `root` that run on a tag push.
 pub(crate) fn release_workflows(root: &Path) -> Vec<Workflow> {
     let dir = root.join(".github").join("workflows");
@@ -417,7 +388,6 @@ pub(crate) fn release_workflows(root: &Path) -> Vec<Workflow> {
     found.sort_by(|a, b| a.file.cmp(&b.file));
     found
 }
-
 /// GitHub's tag filter patterns: `*` (no `/`), `**`, `?`, `[…]` ranges are
 /// treated loosely as one character.
 pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
@@ -442,13 +412,11 @@ pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     let t: Vec<char> = text.chars().collect();
     go(&p, &t)
 }
-
 /// The workflow that makes the release when `tag` is pushed, if any: the
 /// first of `workflows_for_tag`.
 pub(crate) fn workflow_for_tag<'a>(workflows: &'a [Workflow], tag: &str) -> Option<&'a Workflow> {
     workflows_for_tag(workflows, tag).into_iter().next()
 }
-
 /// Every workflow a push of `tag` starts, the release workflow first. A tag
 /// can start several (MYLE's starts Release and MYLE Passwords): the one that
 /// runs only for this kind of tag comes first (MYLE Passwords also runs for
@@ -470,11 +438,9 @@ pub(crate) fn workflows_for_tag<'a>(workflows: &'a [Workflow], tag: &str) -> Vec
     });
     found
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn temp(name: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("myle-gr-project-{name}-{}", std::process::id()));
@@ -482,7 +448,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
-
     #[test]
     fn a_monorepo_like_desktop_utils_and_a_single_project() {
         let dir = temp("mono");
@@ -506,7 +471,6 @@ mod tests {
             sub_projects(&dir),
             ["backup_projects", "discord_bot", "Github-Build-Release"]
         );
-
         // npm workspaces under packages/.
         let ws = temp("ws");
         std::fs::write(
@@ -521,7 +485,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sub_projects(&ws), ["packages/web"]);
-
         // MYLE: the top folder has the version, so it is one project.
         let single = temp("single");
         std::fs::write(single.join("package.json"), "{\"version\":\"9.5.0\"}").unwrap();
@@ -536,7 +499,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
-
     #[test]
     fn scanning_finds_repositories_but_not_inside_them() {
         let dir = temp("scan");
@@ -558,7 +520,6 @@ mod tests {
         assert_eq!(names, ["a", "group/b"]);
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn build_kinds_of_common_projects() {
         let dir = temp("kinds");
@@ -583,7 +544,6 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn tags_per_app_with_the_shared_fallback() {
         let tags = vec![
@@ -638,7 +598,6 @@ mod tests {
             ("backup_projects-v2.0.7", false)
         );
     }
-
     #[test]
     fn release_workflows_and_tag_patterns() {
         let block = "name: Release\non:\n  push:\n    tags:\n      - 'v*'   # releases\n      - \"!v*-rc\"\n  workflow_dispatch:\njobs: {}\n";

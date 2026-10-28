@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { blockedWebviewShortcut } from "../../frontend/lib/webview-policy.ts";
-
 const key = (value, options = {}) => ({ key: value, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...options });
-
 test("release blocks DevTools shortcuts and browser actions", () => {
   for (const shortcut of [key("F12"), key("F5"), key("F7"), key("r", { ctrlKey: true }), key("u", { ctrlKey: true }), ...["I", "J", "C", "K"].map(value => key(value, { ctrlKey: true, shiftKey: true }))]) {
     assert.equal(blockedWebviewShortcut(shortcut, false), true, JSON.stringify(shortcut));

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // The preview of one changed file in a comparison: a text diff (side by
-  // side or unified), old and new images, or sizes and SHA-256 of binaries.
+  // The preview of one changed file in a comparison: a text diff (side by side or unified), old and new images, or sizes and SHA-256 of binaries.
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Code from "@lucide/svelte/icons/code";
   import Image from "@lucide/svelte/icons/image";

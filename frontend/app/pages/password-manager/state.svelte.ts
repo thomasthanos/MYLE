@@ -1,5 +1,4 @@
-// The Password Manager page's state. It lives outside the page component so
-// switching pages keeps the open entry and the search.
+// The Password Manager page's state. It lives outside the page component so switching pages keeps the open entry and the search.
 import { confirm } from "../../../lib/confirm.svelte";
 import { ANDROID, DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
 import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
@@ -49,8 +48,7 @@ export type Panel =
   | { kind: "view"; id: string }
   /** `program`: a new login, linked to the Windows program it is for. */
   | { kind: "edit"; id: string | null; program?: AppLink };
-/** The host an entry's address is known by, written the way the app writes
- *  it (lowercase, no `www.`): the key of its website icon. */
+/* The host an entry's address is known by, written the way the app writes it (lowercase, no `www.`): the key of its website icon. */
 export function iconHost(url: string): string | null {
   try {
     const parsed = new URL(url.includes("://") ? url : `https://${url}`);
@@ -97,12 +95,9 @@ class PasswordsState {
   /** Website icons (`data:` URLs) by host, while the vault is open. */
   icons = $state<Record<string, string>>({});
   websiteIcons = $state(true);
-  /** Until when opening the page asks Windows Hello by itself: only just
-   *  after the user came to the page, never when the vault locks while they
-   *  are on it (by hand, or after a while away). */
+  /* Until when opening the page asks Windows Hello by itself: only just after the user came to the page, never when the vault locks while they are on it (by hand, or after a while away). */
   #helloOnOpenUntil = 0;
-  /** A website's sign-in waits for the vault (the browser extension asked):
-   *  the lock screen says so and asks Windows Hello by itself, once. */
+  /* A website's sign-in waits for the vault (the browser extension asked): the lock screen says so and asks Windows Hello by itself, once. */
   siteWaiting = $state(false);
   helloForSite = $state(false);
   /** Hosts already asked about since the vault opened. */
@@ -218,8 +213,7 @@ class PasswordsState {
     this.#helloOnOpenUntil = Date.now() + 4000;
     void this.#loadIcons();
   }
-  /** Whether the lock screen should ask Windows Hello by itself: once, just
-   *  after the page was opened, with the window in front. */
+  /* Whether the lock screen should ask Windows Hello by itself: once, just after the page was opened, with the window in front. */
   takeHelloOnOpen() {
     if (MOBILE) {
       return this.hello.enabled && document.visibilityState === "visible";
@@ -228,8 +222,7 @@ class PasswordsState {
     this.#helloOnOpenUntil = 0;
     return due && this.hello.enabled && document.visibilityState === "visible" && document.hasFocus();
   }
-  /** Opens the vault with Windows Hello (PIN, fingerprint or face). `quiet`:
-   *  asked by itself, so a cancelled prompt leaves no error behind. */
+  /* Opens the vault with Windows Hello (PIN, fingerprint or face). `quiet`: asked by itself, so a cancelled prompt leaves no error behind. */
   async unlockWithHello(quiet = false) {
     const ok = await this.#run(() => api.helloUnlock().then(() => true));
     if (!ok && quiet) this.error = null;
@@ -333,8 +326,7 @@ class PasswordsState {
     }
     void this.#loadIcons();
   }
-  /** Asks for the icons of websites new to the page; the app fetches the
-   *  missing ones in the background and sends each as it arrives. */
+  /* Asks for the icons of websites new to the page; the app fetches the missing ones in the background and sends each as it arrives. */
   async #loadIcons() {
     if (!this.websiteIcons || this.status !== "unlocked") return;
     const hosts = [...new Set(this.entries.flatMap((e) => e.urls.map(iconHost)).filter((h): h is string => !!h))];
@@ -520,8 +512,7 @@ class PasswordsState {
       const password = await api.reveal(id);
       if (this.status !== "unlocked") return;
       this.revealed = { ...this.revealed, [id]: password };
-      // Hidden again after a while: a shown password is not left on screen.
-      // Its own timer, so one shown, hidden and shown again gets the full time.
+      // Hidden again after a while: a shown password is not left on screen. Its own timer, so one shown, hidden and shown again gets the full time.
       clearTimeout(this.#revealTimers.get(id));
       this.#revealTimers.set(
         id,

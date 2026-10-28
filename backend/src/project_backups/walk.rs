@@ -1,24 +1,10 @@
-//! Reading a project folder: which files a backup holds, which it leaves
-//! out, and which it can't hold.
-//!
-//! Windows marks many ordinary files with a reparse point: online-only and
-//! "always keep" files of OneDrive and Dropbox, files compressed with
-//! `compact`/CompactGUI (WOF), deduplicated files. Node.js (backup_projects
-//! up to 2.0.5) reported them as links and skipped them without a word, which
-//! made backups incomplete. Here a directory entry's type is trusted only for
-//! plain files and folders; anything else is decided from its metadata, and a
-//! second, independent walk (`audit`) checks the finished zip against the
-//! folder.
-
+// ! Reading a project folder: which files a backup holds, which it leaves ! out, and which it can't hold. ! ! Windows marks many ordinary files with a reparse point: online-only and ! "always keep" files of OneDrive and Dropbox, files compressed with ! `compact`/CompactGUI (WOF), deduplicated files. Node.js (backup_projects ! up to 2.0.5) reported them as links and skipped them without a word, which ! made backups incomplete. Here a directory entry's type is trusted only for ! plain files and folders; anything else is decided from its metadata, and a ! second, independent walk (`audit`) checks the finished zip against the ! folder.
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use serde::Serialize;
-
 use super::rules::{DirNames, Early, Exclusion, Rules, StackListing};
-
 #[derive(Clone, Debug)]
 pub(crate) struct SourceFile {
     /// Relative to the project folder, with `/`.
@@ -27,7 +13,6 @@ pub(crate) struct SourceFile {
     pub size: u64,
     pub modified: Option<SystemTime>,
 }
-
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum SkipReason {
@@ -38,7 +23,6 @@ pub(crate) enum SkipReason {
     /// A device or other entry that is neither a file nor a folder.
     NotAFile,
 }
-
 impl SkipReason {
     pub(crate) fn describe(self) -> &'static str {
         match self {
@@ -48,20 +32,17 @@ impl SkipReason {
         }
     }
 }
-
 #[derive(Clone, Debug)]
 pub(crate) struct Skipped {
     pub rel: String,
     pub reason: SkipReason,
 }
-
 #[derive(Clone, Debug)]
 pub(crate) struct Excluded {
     pub rel: String,
     pub is_dir: bool,
     pub why: Exclusion,
 }
-
 #[derive(Debug, Default)]
 pub(crate) struct Walk {
     pub files: Vec<SourceFile>,
@@ -72,19 +53,16 @@ pub(crate) struct Walk {
     /// Folders with nothing to back up inside; kept as folder entries.
     pub empty_dirs: Vec<String>,
 }
-
 impl Walk {
     pub(crate) fn total_bytes(&self) -> u64 {
         self.files.iter().map(|file| file.size).sum()
     }
 }
-
 enum Kind {
     Dir,
     File { link: bool },
     Skip(SkipReason),
 }
-
 /// The type of `path`, trusting the directory entry only when it says a
 /// plain file or folder.
 fn classify(entry_type: Option<fs::FileType>, path: &Path) -> Result<Kind, String> {
@@ -114,7 +92,6 @@ fn classify(entry_type: Option<fs::FileType>, path: &Path) -> Result<Kind, Strin
     }
     Ok(Kind::Skip(SkipReason::NotAFile))
 }
-
 pub(crate) fn join_rel(parent: &str, name: &str) -> String {
     if parent.is_empty() {
         name.to_string()
@@ -122,7 +99,6 @@ pub(crate) fn join_rel(parent: &str, name: &str) -> String {
         format!("{parent}/{name}")
     }
 }
-
 /// Same folder, the way Windows compares paths.
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     let text = |path: &Path| {
@@ -133,11 +109,9 @@ pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     };
     text(a) == text(b)
 }
-
 fn is_skipped_dir(path: &Path, skip: &[PathBuf]) -> bool {
     skip.iter().any(|dir| same_path(dir, path))
 }
-
 /// The entries of a folder, sorted by name.
 fn read_sorted(dir: &Path) -> Result<Vec<fs::DirEntry>, String> {
     let entries = fs::read_dir(dir)
@@ -148,7 +122,6 @@ fn read_sorted(dir: &Path) -> Result<Vec<fs::DirEntry>, String> {
     entries.sort_by_key(|entry| entry.file_name());
     Ok(entries)
 }
-
 fn names_of(entries: &[fs::DirEntry]) -> DirNames {
     let mut names = DirNames::default();
     for entry in entries {
@@ -157,7 +130,6 @@ fn names_of(entries: &[fs::DirEntry]) -> DirNames {
     }
     names
 }
-
 /// Every file of `root` a backup holds, in a stable order.
 pub(crate) fn walk(
     root: &Path,
@@ -182,14 +154,12 @@ pub(crate) fn walk(
     )?;
     Ok(out)
 }
-
 struct Walker<'a> {
     rules: &'a Rules,
     skip_dirs: &'a [PathBuf],
     cancelled: &'a dyn Fn() -> bool,
     listing: &'a StackListing,
 }
-
 fn walk_dir(
     walker: &Walker,
     rel: &str,
@@ -218,9 +188,7 @@ fn walk_dir(
                 if is_skipped_dir(&path, walker.skip_dirs) {
                     continue;
                 }
-                // Read before deciding: markers inside (CACHEDIR.TAG,
-                // pyvenv.cfg) tell output apart. A folder that can't be read
-                // only fails the backup when it is not left out anyway.
+                // Read before deciding: markers inside (CACHEDIR.TAG, pyvenv.cfg) tell output apart. A folder that can't be read only fails the backup when it is not left out anyway.
                 let inner = read_sorted(&path);
                 walker
                     .listing
@@ -296,7 +264,6 @@ fn walk_dir(
     }
     Ok(())
 }
-
 /// The files of `root` that should be in a backup but are not in `archived`
 /// (zip entry names). Walks again without trusting directory entry types at
 /// all; files written after `since` (the backup was already reading) don't
@@ -326,7 +293,6 @@ pub(crate) fn audit(
     missing.sort();
     missing
 }
-
 struct Auditor<'a> {
     rules: &'a Rules,
     skip_dirs: &'a [PathBuf],
@@ -334,7 +300,6 @@ struct Auditor<'a> {
     since: SystemTime,
     listing: &'a StackListing,
 }
-
 /// A folder's entries with their metadata, read without trusting entry types.
 struct AuditEntry {
     name: String,
@@ -342,7 +307,6 @@ struct AuditEntry {
     own: fs::Metadata,
     meta: fs::Metadata,
 }
-
 fn audit_entries(dir: &Path) -> Option<Vec<AuditEntry>> {
     let entries = fs::read_dir(dir).ok()?;
     Some(
@@ -364,7 +328,6 @@ fn audit_entries(dir: &Path) -> Option<Vec<AuditEntry>> {
             .collect(),
     )
 }
-
 fn audit_names(entries: &[AuditEntry]) -> DirNames {
     let mut names = DirNames::default();
     for entry in entries {
@@ -375,7 +338,6 @@ fn audit_names(entries: &[AuditEntry]) -> DirNames {
     }
     names
 }
-
 fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &mut Vec<String>) {
     let rules = auditor.rules;
     for entry in entries {
@@ -413,12 +375,10 @@ fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &m
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::project_backups::rules::{DEFAULT_PATTERNS, RuleInput};
-
     pub(crate) fn rules() -> Rules {
         Rules::compile(
             &RuleInput {
@@ -430,20 +390,17 @@ mod tests {
         )
         .unwrap()
     }
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-walk-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     fn put(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-
     #[test]
     fn excluded_folders_are_not_entered_and_files_come_in_order() {
         let root = temp("order");
@@ -464,7 +421,6 @@ mod tests {
         assert_eq!(result.empty_dirs, ["assets/empty"]);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn the_backup_folder_inside_the_project_is_never_backed_up() {
         let root = temp("skip");
@@ -476,7 +432,6 @@ mod tests {
         assert_eq!(names, ["src/a.rs"]);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn the_audit_finds_files_missing_from_an_archive() {
         let root = temp("audit");
@@ -504,7 +459,6 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn cancelling_stops_the_walk() {
         let root = temp("cancel");
@@ -512,7 +466,6 @@ mod tests {
         assert!(walk(&root, &rules(), &[], &|| true).is_err());
         let _ = fs::remove_dir_all(root);
     }
-
     /// Links to files are followed, links to folders (and junctions) and
     /// broken links are reported, never entered.
     #[cfg(windows)]
@@ -573,7 +526,6 @@ mod tests {
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
     }
-
     /// Files Windows marks with a reparse point that is not a link (cloud
     /// placeholders, `compact` (WOF) files, deduplicated files) are ordinary
     /// files to std and are backed up. Node.js up to backup_projects 2.0.5
@@ -584,8 +536,7 @@ mod tests {
         let root = temp("wof");
         put(&root, "app.exe", &"MZ".repeat(50_000));
         put(&root, "plain.txt", "p");
-        // WOF-compress one file, as CompactGUI does. Not every file system
-        // (or test runner) allows it; the walk must hold it either way.
+        // WOF-compress one file, as CompactGUI does. Not every file system (or test runner) allows it; the walk must hold it either way.
         let _ = std::process::Command::new("compact")
             .args(["/C", "/EXE:XPRESS4K"])
             .arg(root.join("app.exe"))

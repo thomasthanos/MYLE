@@ -2,13 +2,7 @@ import { readFlag, writeFlag } from "./storage";
 const DARK_KEY = "myle.dark";
 /** The old "Glass effects" switch: gone, so whatever it saved is dropped. */
 const OLD_GLASS_KEY = "myle.glass";
-/**
- * Visual preferences that apply to the whole document.
- *
- * Panels are always solid (`:root.solid`; the splash and the setup window
- * set it too). "Navy theme" uses matte navy layers and blurple actions
- * (`:root.dark`, tokens.css).
- */
+/* Visual preferences that apply to the whole document. Panels are always solid (`:root.solid`; the splash and the setup window set it too). "Navy theme" uses matte navy layers and blurple actions (`:root.dark`, tokens.css). */
 class Settings {
   dark = $state(readFlag(DARK_KEY, false));
   constructor() {

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Under every tab that records choices: how many there are, and the way
-  // to review and apply them.
+  // Under every tab that records choices: how many there are, and the way to review and apply them.
   import ListChecks from "@lucide/svelte/icons/list-checks";
   import { debloat } from "./state.svelte";
 

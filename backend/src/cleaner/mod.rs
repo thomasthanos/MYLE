@@ -1,23 +1,15 @@
-//! System Cleaner: measures and removes the usual Windows leftovers.
-//!
-//! The page sends category ids only. Paths, patterns and the elevated script
-//! all come from the fixed table in `targets.rs`.
-
+// ! System Cleaner: measures and removes the usual Windows leftovers. ! ! The page sends category ids only. Paths, patterns and the elevated script ! all come from the fixed table in `targets.rs`.
 pub mod downloads;
 pub mod health;
 mod elevated;
 mod recycle_bin;
 mod targets;
-
 pub use elevated::run_helper_from_args as run_elevated_helper_from_args;
-
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
-
 use crate::apps::Jobs;
 use targets::{Category, Kind};
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CategoryInfo {
@@ -29,7 +21,6 @@ pub struct CategoryInfo {
     /// At least one folder of this category is readable only as administrator.
     may_need_admin: bool,
 }
-
 /// Static card data, so the page can draw before any scanning happens.
 #[tauri::command]
 pub fn cleaner_categories() -> Vec<CategoryInfo> {
@@ -45,7 +36,6 @@ pub fn cleaner_categories() -> Vec<CategoryInfo> {
         })
         .collect()
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum ScanEvent {
@@ -57,7 +47,6 @@ pub enum ScanEvent {
         locked: bool,
     },
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CleanEvent {
@@ -80,7 +69,6 @@ pub enum CleanEvent {
         locked: bool,
     },
 }
-
 #[derive(Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanSummary {
@@ -88,7 +76,6 @@ pub struct ScanSummary {
     /// Categories that need administrator rights to be measured fully.
     locked: Vec<String>,
 }
-
 #[derive(Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanSummary {
@@ -106,14 +93,10 @@ pub struct CleanSummary {
     /// Categories that still hold data only an administrator can remove.
     locked: Vec<String>,
 }
-
 fn pick(ids: &[String]) -> Vec<&'static Category> {
     ids.iter().filter_map(|id| targets::find(id)).collect()
 }
-
-// ---------------------------------------------------------------------------
-// Scan
-
+// --------------------------------------------------------------------------- Scan
 #[tauri::command]
 pub async fn cleaner_scan(on_event: Channel<ScanEvent>) -> Result<ScanSummary, String> {
     let handle = tauri::async_runtime::spawn_blocking(move || {
@@ -135,14 +118,12 @@ pub async fn cleaner_scan(on_event: Channel<ScanEvent>) -> Result<ScanSummary, S
     });
     handle.await.map_err(|e| e.to_string())
 }
-
 /// Whether the administrator helper approved earlier is still running, so the
 /// next scan or clean will not ask again.
 #[tauri::command]
 pub async fn cleaner_admin_ready() -> bool {
     elevated::is_running().await
 }
-
 /// Second pass for the folders that needed administrator rights. The first
 /// one asks for approval; the helper then stays up for later scans and cleans.
 #[tauri::command]
@@ -152,7 +133,6 @@ pub async fn cleaner_scan_elevated(on_event: Channel<ScanEvent>) -> Result<ScanS
         .filter(|c| c.targets().iter().any(|t| t.admin))
         .collect();
     let totals = elevated::run(&locked, elevated::Action::Measure).await?;
-
     let mut summary = ScanSummary::default();
     for category in locked {
         // Everything the user can read, plus what the elevated pass found.
@@ -171,7 +151,6 @@ pub async fn cleaner_scan_elevated(on_event: Channel<ScanEvent>) -> Result<ScanS
     }
     Ok(summary)
 }
-
 fn measure(category: &Category) -> targets::Measured {
     match category.kind {
         Kind::RecycleBin => {
@@ -194,7 +173,6 @@ fn measure(category: &Category) -> targets::Measured {
             }),
     }
 }
-
 /// Only the folders this user can already read.
 fn measure_open(category: &Category) -> targets::Measured {
     category.targets().iter().filter(|t| !t.admin).fold(
@@ -207,19 +185,14 @@ fn measure_open(category: &Category) -> targets::Measured {
         },
     )
 }
-
-// ---------------------------------------------------------------------------
-// Clean
-
+// --------------------------------------------------------------------------- Clean
 #[tauri::command]
 pub async fn cleaner_clean(
     jobs: State<'_, Jobs>,
     ids: Vec<String>,
     on_event: Channel<CleanEvent>,
 ) -> Result<CleanSummary, String> {
-    // winget and our own downloads keep installers in %TEMP% between the
-    // download and the install; emptying it then breaks the install. Held
-    // until the cleaning ends, so no install can start meanwhile either.
+    // winget and our own downloads keep installers in %TEMP% between the download and the install; emptying it then breaks the install. Held until the cleaning ends, so no install can start meanwhile either.
     let reservation = reserve(&jobs)?;
     let categories = pick(&ids);
     let handle = tauri::async_runtime::spawn_blocking(move || {
@@ -262,7 +235,6 @@ pub async fn cleaner_clean(
     });
     handle.await.map_err(|e| e.to_string())
 }
-
 /// Removes what only an administrator can remove, in one UAC prompt.
 #[tauri::command]
 pub async fn cleaner_clean_elevated(
@@ -276,7 +248,6 @@ pub async fn cleaner_clean_elevated(
         .filter(|c| c.targets().iter().any(|t| t.admin))
         .collect();
     let totals = elevated::run(&categories, elevated::Action::Clean).await?;
-
     let mut summary = CleanSummary::default();
     for category in categories {
         let entry = totals.get(category.id).copied().unwrap_or_default();
@@ -297,14 +268,12 @@ pub async fn cleaner_clean_elevated(
     }
     Ok(summary)
 }
-
 /// The whole job registry, for as long as the cleaning takes: no app install
 /// or update is running, and none can start until this is dropped.
 fn reserve(jobs: &Jobs) -> Result<crate::apps::JobHandle, String> {
     jobs.start_exclusive(&format!("system-cleaner-{}", uuid::Uuid::new_v4().simple()))
         .map_err(|_| "Wait for the running app installs or updates to finish, then clean.".to_string())
 }
-
 fn clean(category: &Category) -> targets::Cleaned {
     match category.kind {
         Kind::RecycleBin => {
@@ -339,11 +308,9 @@ fn clean(category: &Category) -> targets::Cleaned {
             }),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn no_install_starts_while_cleaning_and_none_is_cut_short() {
         let jobs = Jobs::default();
@@ -355,7 +322,6 @@ mod tests {
         drop(install);
         assert!(reserve(&jobs).is_ok());
     }
-
     #[test]
     fn cards_describe_every_category_and_flag_the_admin_ones() {
         let cards = cleaner_categories();
@@ -369,13 +335,11 @@ mod tests {
         assert!(!by_id("recycle-bin").may_need_admin);
         assert!(!by_id("thumbnails").may_need_admin);
     }
-
     #[test]
     fn unknown_ids_are_dropped_rather_than_guessed() {
         assert_eq!(pick(&["temp".into(), "nope".into()]).len(), 1);
         assert!(pick(&[r"..\..\Windows".into()]).is_empty());
     }
-
     #[test]
     fn events_serialize_for_the_page() {
         let json = serde_json::to_value(ScanEvent::Category {

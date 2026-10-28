@@ -1,18 +1,4 @@
-//! The walker: lists folders without opening a single file.
-//!
-//! Each folder is opened once and read in large batches with
-//! `GetFileInformationByHandleEx` (FileIdExtdDirectoryInfo, or the older
-//! classes where a file system refuses it): one call returns many entries,
-//! each with its size, size on disk, attributes and reparse tag. A few
-//! worker threads share a stack of folders to read and hand each finished
-//! listing to this thread, the only one that touches the tree.
-//!
-//! Rules: junctions, symbolic links and mount points are listed as links and
-//! never followed. Cloud placeholders are counted as files and never opened,
-//! which would start a download. A folder that cannot be read is counted and
-//! the walk carries on. Hard links are not known without opening files, so
-//! a hard-linked file (WinSxS and the like) counts once per link.
-
+// ! The walker: lists folders without opening a single file. ! ! Each folder is opened once and read in large batches with ! `GetFileInformationByHandleEx` (FileIdExtdDirectoryInfo, or the older ! classes where a file system refuses it): one call returns many entries, ! each with its size, size on disk, attributes and reparse tag. A few ! worker threads share a stack of folders to read and hand each finished ! listing to this thread, the only one that touches the tree. ! ! Rules: junctions, symbolic links and mount points are listed as links and ! never followed. Cloud placeholders are counted as files and never opened, ! which would start a download. A folder that cannot be read is counted and ! the walk carries on. Hard links are not known without opening files, so ! a hard-linked file (WinSxS and the like) counts once per link.
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
@@ -20,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
-
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INVALID_FUNCTION, ERROR_INVALID_LEVEL, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
     ERROR_NOT_SUPPORTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
@@ -32,9 +17,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileFullDirectoryInfo, FileIdBothDirectoryInfo,
     FileIdExtdDirectoryInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
 };
-
 use super::tree::{Entry, Kind, Listing, Tree, display_path, unix_seconds};
-
 const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
 const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000_000C;
 const IO_REPARSE_TAG_APPEXECLINK: u32 = 0x8000_001B;
@@ -42,12 +25,10 @@ const IO_REPARSE_TAG_APPEXECLINK: u32 = 0x8000_001B;
 const CLOUD_TAG: u32 = 0x9000_001A;
 const CLOUD_TAG_MASK: u32 = 0xFFFF_0FFF;
 const RECALL: u32 = FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE;
-
 /// One listing call fills at most this much (256 KB allows large folders to be read in fewer syscalls).
 const BUFFER_BYTES: usize = 256 * 1024;
 /// At most this many progress events a second.
 pub const PROGRESS_EVERY: Duration = Duration::from_millis(100);
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Progress {
     pub files: u64,
@@ -57,19 +38,16 @@ pub struct Progress {
     /// The folder just read, as Windows shows it.
     pub current: String,
 }
-
 /// Lets a call through at most once every `every`, by an injectable clock.
 pub struct Throttle<C: FnMut() -> Instant> {
     every: Duration,
     last: Option<Instant>,
     clock: C,
 }
-
 impl<C: FnMut() -> Instant> Throttle<C> {
     pub fn new(every: Duration, clock: C) -> Self {
         Self { every, last: None, clock }
     }
-
     pub fn ready(&mut self) -> bool {
         let now = (self.clock)();
         match self.last {
@@ -81,29 +59,24 @@ impl<C: FnMut() -> Instant> Throttle<C> {
         }
     }
 }
-
 /// A folder to read: its node and its `\\?\` path (no terminating NUL).
 struct Job {
     id: u32,
     path: Vec<u16>,
 }
-
 struct Read {
     id: u32,
     path: Vec<u16>,
     listing: Result<Listing, u32>,
 }
-
 struct Work {
     stack: Vec<Job>,
     stop: bool,
 }
-
 /// How many threads list folders: scalable worker pool for fast SSD/NVMe I/O.
 fn workers() -> usize {
     std::thread::available_parallelism().map_or(8, |n| (n.get() * 2).clamp(4, 24))
 }
-
 /// Walks `root` (a `\\?\` path to a folder). `None` when cancelled; an error
 /// when the root itself cannot be read.
 pub fn scan(
@@ -114,7 +87,6 @@ pub fn scan(
 ) -> Result<Option<Tree>, String> {
     scan_with(root, scan_id, cancel, workers(), &mut on_progress)
 }
-
 fn scan_with(
     root: &Path,
     scan_id: u64,
@@ -141,7 +113,6 @@ fn scan_with(
     let (sender, results) = mpsc::channel::<Read>();
     let mut progress = Progress::default();
     let mut throttle = Throttle::new(PROGRESS_EVERY, Instant::now);
-
     let outcome = std::thread::scope(|scope| {
         for _ in 0..threads {
             let sender = sender.clone();
@@ -174,7 +145,6 @@ fn scan_with(
             });
         }
         drop(sender);
-
         let stop = || {
             work.lock().unwrap_or_else(|p| p.into_inner()).stop = true;
             ready.notify_all();
@@ -191,7 +161,6 @@ fn scan_with(
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-
             let mut batch = vec![first];
             while batch.len() < 32 {
                 match results.try_recv() {
@@ -199,10 +168,8 @@ fn scan_with(
                     Err(_) => break,
                 }
             }
-
             let mut all_jobs = Vec::new();
             let mut last_path = None;
-
             for read in batch {
                 pending -= 1;
                 match read.listing {
@@ -238,13 +205,11 @@ fn scan_with(
                     Err(_) => tree.mark_inaccessible(read.id),
                 }
             }
-
             if !all_jobs.is_empty() {
                 pending += all_jobs.len();
                 work.lock().unwrap_or_else(|p| p.into_inner()).stack.extend(all_jobs);
                 ready.notify_all();
             }
-
             if throttle.ready() {
                 if let Some(path) = last_path {
                     let path_units = if path.last() == Some(&0) {
@@ -269,7 +234,6 @@ fn scan_with(
         Err(error) => Err(error),
     }
 }
-
 fn child_path(parent: &[u16], name: &[u8]) -> Vec<u16> {
     let parent_units = if parent.last() == Some(&0) {
         &parent[..parent.len() - 1]
@@ -288,19 +252,15 @@ fn child_path(parent: &[u16], name: &[u8]) -> Vec<u16> {
     path.push(0);
     path
 }
-
 struct Handle(HANDLE);
-
 impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: an open handle of ours, closed once.
         unsafe { CloseHandle(self.0) };
     }
 }
-
 /// The listing classes, best first.
 const CLASSES: [FILE_INFO_BY_HANDLE_CLASS; 3] = [FileIdExtdDirectoryInfo, FileIdBothDirectoryInfo, FileFullDirectoryInfo];
-
 /// Reads a whole folder; a Win32 error code when it cannot be opened or read.
 fn read_dir(path: &[u16], buffer: &mut [u64]) -> Result<Listing, u32> {
     // SAFETY: path is already NUL-terminated; the handle is closed by `Handle`.
@@ -352,7 +312,6 @@ fn read_dir(path: &[u16], buffer: &mut [u64]) -> Result<Listing, u32> {
     }
     Ok(listing)
 }
-
 /// The fields every listing class has, read where `class` keeps them.
 struct Raw {
     next: u32,
@@ -364,7 +323,6 @@ struct Raw {
     name: *const u16,
     name_units: usize,
 }
-
 /// # Safety
 /// `at` points to a whole record of `class` inside the buffer.
 unsafe fn raw(at: *const u8, class: FILE_INFO_BY_HANDLE_CLASS) -> Raw {
@@ -402,7 +360,6 @@ unsafe fn raw(at: *const u8, class: FILE_INFO_BY_HANDLE_CLASS) -> Raw {
         fields!(FILE_FULL_DIR_INFO, ea_tag(offset_of!(FILE_FULL_DIR_INFO, EaSize)))
     }
 }
-
 /// # Safety
 /// `buffer` holds `bytes` bytes written by GetFileInformationByHandleEx.
 unsafe fn parse(buffer: *const u8, bytes: usize, class: FILE_INFO_BY_HANDLE_CLASS, listing: &mut Listing) {
@@ -436,7 +393,6 @@ unsafe fn parse(buffer: *const u8, bytes: usize, class: FILE_INFO_BY_HANDLE_CLAS
         offset += record.next as usize;
     }
 }
-
 /// UTF-16 to the encoded bytes of an `OsStr`: fast ASCII path when all units <= 0x7F,
 /// plain UTF-8 when the name is valid Unicode (it nearly always is), WTF-8 otherwise.
 pub(super) fn push_name(names: &mut Vec<u8>, units: &[u16]) {
@@ -461,15 +417,12 @@ pub(super) fn push_name(names: &mut Vec<u8>, units: &[u16]) {
         }
     }
 }
-
 /// What an entry is, by its attributes and reparse tag.
 pub(super) fn kind_of(attributes: u32, tag: u32) -> Kind {
     let reparse = attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
     let cloud_tag = reparse && tag & CLOUD_TAG_MASK == CLOUD_TAG;
     if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
-        // A cloud folder is listed like any folder: listing it reads no file.
-        // Every other reparse point on a folder (a junction, a mount point, a
-        // symbolic link) leads elsewhere and is not followed.
+        // A cloud folder is listed like any folder: listing it reads no file. Every other reparse point on a folder (a junction, a mount point, a symbolic link) leads elsewhere and is not followed.
         return if reparse && !cloud_tag { Kind::Link } else { Kind::Dir };
     }
     if reparse && matches!(tag, IO_REPARSE_TAG_SYMLINK | IO_REPARSE_TAG_MOUNT_POINT | IO_REPARSE_TAG_APPEXECLINK) {
@@ -480,7 +433,6 @@ pub(super) fn kind_of(attributes: u32, tag: u32) -> Kind {
     }
     Kind::File
 }
-
 #[cfg(test)]
 mod tests {
     use super::super::tree::{SizeMode, SortKey};
@@ -488,10 +440,8 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use std::sync::atomic::AtomicUsize;
-
     /// A folder under %TEMP% removed when the test ends.
     pub struct TempTree(pub PathBuf);
-
     impl TempTree {
         pub fn new(name: &str) -> Self {
             let root = std::env::temp_dir().join(format!("myle-disk-{name}-{}", std::process::id()));
@@ -500,26 +450,22 @@ mod tests {
             Self(root)
         }
     }
-
     impl Drop for TempTree {
         fn drop(&mut self) {
             let _ = remove_all(&self.0);
         }
     }
-
     /// Removes a test folder, long paths and junctions included (a junction
     /// is removed itself, never what it points at).
     fn remove_all(path: &Path) -> std::io::Result<()> {
         std::fs::remove_dir_all(super::super::tree::long_path(path))
     }
-
     fn write(path: &Path, bytes: usize) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(super::super::tree::long_path(parent)).unwrap();
         }
         std::fs::write(super::super::tree::long_path(path), vec![b'x'; bytes]).unwrap();
     }
-
     fn junction(link: &Path, target: &Path) -> bool {
         let cmd = crate::apps::process::system32("cmd.exe");
         Command::new(cmd)
@@ -529,16 +475,13 @@ mod tests {
             .output()
             .is_ok_and(|out| out.status.success())
     }
-
     fn run(root: &Path) -> Tree {
         let cancel = AtomicBool::new(false);
         scan(&super::super::tree::long_path(root), 1, &cancel, |_| {}).unwrap().unwrap()
     }
-
     fn find(tree: &Tree, name: &str) -> Option<u32> {
         (0..tree.len() as u32).find(|&i| tree.name(i) == name)
     }
-
     #[test]
     fn a_folder_tree_is_read_with_totals_names_and_order() {
         let temp = TempTree::new("walk");
@@ -554,7 +497,6 @@ mod tests {
             long.push("a-folder-with-a-long-name");
         }
         write(&long.join("deep.txt"), 7);
-
         let mut tree = run(root);
         assert_eq!(tree.files(0), 5);
         assert_eq!(tree.size(0, SizeMode::Size), 300_000 + 1_000 + 2_000 + 10 + 7);
@@ -571,7 +513,6 @@ mod tests {
         assert_eq!(tree.name(page.ids[0]), "big.bin", "largest first");
         assert!(tree.inaccessible.is_empty());
     }
-
     #[test]
     fn a_junction_is_listed_and_never_followed() {
         let outside = TempTree::new("outside");
@@ -588,7 +529,6 @@ mod tests {
         assert_eq!(tree.size(0, SizeMode::Size), 10, "nothing behind the junction is counted");
         assert!(find(&tree, "huge.bin").is_none());
     }
-
     #[test]
     fn a_folder_that_cannot_be_read_is_counted_and_the_walk_goes_on() {
         let temp = TempTree::new("denied");
@@ -612,14 +552,12 @@ mod tests {
         assert!(find(&tree, "seen.txt").is_some());
         assert!(find(&tree, "hidden.txt").is_none());
     }
-
     #[test]
     fn the_root_that_cannot_be_read_is_an_error() {
         let cancel = AtomicBool::new(false);
         let missing = std::env::temp_dir().join(format!("myle-disk-missing-{}", std::process::id()));
         assert!(scan(&super::super::tree::long_path(&missing), 1, &cancel, |_| {}).is_err());
     }
-
     #[test]
     fn cancelling_stops_the_scan_early() {
         let temp = TempTree::new("cancel");
@@ -640,7 +578,6 @@ mod tests {
         assert!(result.is_none());
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
-
     /// Run by hand for the numbers in the PR: a whole drive (MYLE_SCAN_ROOT,
     /// or C:\), its time, its counts and what the results hold in memory.
     #[test]
@@ -680,7 +617,6 @@ mod tests {
         // Time for the peak working set to be read from outside.
         std::thread::sleep(Duration::from_secs(4));
     }
-
     #[test]
     fn progress_is_throttled_to_ten_a_second() {
         let start = Instant::now();
@@ -690,12 +626,10 @@ mod tests {
             now
         });
         let sent = (0..10_000).filter(|_| throttle.ready()).count();
-        // 10,000 calls 7 ms apart: 70 seconds, so at most 701 events, and
-        // one every 15 calls (105 ms) in practice.
+        // 10,000 calls 7 ms apart: 70 seconds, so at most 701 events, and one every 15 calls (105 ms) in practice.
         assert!(sent <= 701, "{sent}");
         assert_eq!(sent, 10_000_usize.div_ceil(15));
     }
-
     #[test]
     fn entries_are_told_apart_by_attributes_and_tags() {
         const DIR: u32 = FILE_ATTRIBUTE_DIRECTORY;

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Renders Markdown as text nodes only (lib/markdown.ts): no HTML from the
-  // text is ever inserted, and links open in the default browser.
+  // Renders Markdown as text nodes only (lib/markdown.ts): no HTML from the text is ever inserted, and links open in the default browser.
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { parseMarkdown, type Block, type Inline } from "../markdown";
   import { toast } from "../toast.svelte";

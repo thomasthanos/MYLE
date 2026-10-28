@@ -80,7 +80,6 @@ test("turning website icons off cancels all pending retries", async () => {
   assert.equal(h.calls, 1);
   assert.equal(h.timers.size, 0);
 });
-
 test("clearing local data forgets decrypted UI state and ignores a late list", async () => {
   const h = harness(() => ({}));
   h.state.revealed = { fixture: "fictional password" };
@@ -104,7 +103,6 @@ test("clearing local data forgets decrypted UI state and ignores a late list", a
   assert.equal(h.state.panel.kind, "none");
   assert.equal(h.timers.size, 0);
 });
-
 test("a sync started before local reset cannot restore the previous account state", async () => {
   const h = harness(() => ({}));
   let resolve;

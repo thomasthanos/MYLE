@@ -1,16 +1,10 @@
-//! The local folders that cloud apps (Dropbox, Google Drive for desktop,
-//! MEGA, OneDrive) keep in sync, found without any cloud API or account.
-//! Shared by Game Saves and Project Backups.
-
+// ! The local folders that cloud apps (Dropbox, Google Drive for desktop, ! MEGA, OneDrive) keep in sync, found without any cloud API or account. ! Shared by Game Saves and Project Backups.
 use std::fs;
 use std::path::{Path, PathBuf};
-
 use serde_json::Value;
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
-
 use super::{CloudFolder, CloudProvider};
-
 /// The synced folders of the cloud apps installed for this user.
 pub(crate) fn detect_folders() -> Vec<CloudFolder> {
     let mut found = Vec::new();
@@ -18,15 +12,13 @@ pub(crate) fn detect_folders() -> Vec<CloudFolder> {
     detect_dropbox(&mut found);
     detect_google_drive(&mut found);
     detect_mega(&mut found);
-
     found.sort_by(|a, b| {
         a.provider
             .cmp(&b.provider)
             .then(a.label.cmp(&b.label))
             .then(a.path.cmp(&b.path))
     });
-    // OneDrive is usually reported twice (`OneDrive` and `OneDriveConsumer`),
-    // and every source below may find the same folder again.
+    // OneDrive is usually reported twice (`OneDrive` and `OneDriveConsumer`), and every source below may find the same folder again.
     let mut unique: Vec<CloudFolder> = Vec::with_capacity(found.len());
     for folder in found {
         if !unique
@@ -38,7 +30,6 @@ pub(crate) fn detect_folders() -> Vec<CloudFolder> {
     }
     unique
 }
-
 fn detect_onedrive(out: &mut Vec<CloudFolder>) {
     for (label, variable) in [
         ("OneDrive", "OneDrive"),
@@ -50,7 +41,6 @@ fn detect_onedrive(out: &mut Vec<CloudFolder>) {
         }
     }
 }
-
 /// Dropbox writes its folders to `info.json`: in `%LOCALAPPDATA%` since
 /// 2019, in `%APPDATA%` before that.
 fn detect_dropbox(out: &mut Vec<CloudFolder>) {
@@ -84,7 +74,6 @@ fn detect_dropbox(out: &mut Vec<CloudFolder>) {
         );
     }
 }
-
 /// "My Drive" as Google Drive names it in the languages it ships in most.
 const MY_DRIVE: &[&str] = &[
     "My Drive",
@@ -99,13 +88,11 @@ const MY_DRIVE: &[&str] = &[
     "Mój dysk",
     "Мой диск",
 ];
-
 /// Whether `name` is a top folder of Google Drive for desktop's drive: its
 /// "My Drive" (in any of the languages above) or "Shared drives".
 pub(crate) fn is_google_drive_folder(name: &str) -> bool {
     MY_DRIVE.iter().chain(&["Shared drives"]).any(|known| known.eq_ignore_ascii_case(name))
 }
-
 /// Drive for desktop shows the account as a drive of its own (usually
 /// `G:\My Drive`) or, in mirror mode, as a folder in the user's profile.
 /// The older Backup and Sync used `%USERPROFILE%\Google Drive`.
@@ -155,7 +142,6 @@ fn detect_google_drive(out: &mut Vec<CloudFolder>) {
     for mount in &mounts {
         push_google_drive(out, mount);
     }
-
     if let Some(profile) = std::env::var_os("USERPROFILE") {
         let profile = Path::new(&profile);
         for name in MY_DRIVE.iter().copied().chain(["Google Drive"]) {
@@ -168,7 +154,6 @@ fn detect_google_drive(out: &mut Vec<CloudFolder>) {
         }
     }
 }
-
 /// `G`, `G:` or `G:\` as the drive root; anything else as given.
 fn mount_path(value: &str) -> Option<PathBuf> {
     let value = value.trim().trim_matches('\0');
@@ -181,7 +166,6 @@ fn mount_path(value: &str) -> Option<PathBuf> {
         Some(PathBuf::from(value))
     }
 }
-
 fn collect_strings(value: &Value, key: &str, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
@@ -198,7 +182,6 @@ fn collect_strings(value: &Value, key: &str, out: &mut Vec<String>) {
         _ => {}
     }
 }
-
 /// Local drives labelled "Google Drive". Network and removable drives are
 /// not asked: a disconnected share can take many seconds to answer.
 fn google_drive_volumes() -> Vec<PathBuf> {
@@ -206,7 +189,6 @@ fn google_drive_volumes() -> Vec<PathBuf> {
         GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
     };
     use windows_sys::Win32::System::WindowsProgramming::DRIVE_FIXED;
-
     // SAFETY: no arguments; a bit mask of the drive letters in use.
     let drives = unsafe { GetLogicalDrives() };
     let mut found = Vec::new();
@@ -216,8 +198,7 @@ fn google_drive_volumes() -> Vec<PathBuf> {
         }
         let root = format!("{}:\\", char::from(b'A' + index));
         let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
-        // SAFETY: `wide` is NUL-terminated and outlives both calls; the
-        // label buffer's length is passed with it.
+        // SAFETY: `wide` is NUL-terminated and outlives both calls; the label buffer's length is passed with it.
         if unsafe { GetDriveTypeW(wide.as_ptr()) } != DRIVE_FIXED {
             continue;
         }
@@ -243,7 +224,6 @@ fn google_drive_volumes() -> Vec<PathBuf> {
     }
     found
 }
-
 /// The "My Drive" folder of a Google Drive mount, or the folder itself when
 /// it is one already. A drive root is never offered: Drive does not allow
 /// files there.
@@ -258,8 +238,7 @@ pub(crate) fn google_my_drive(mount: &Path) -> Option<PathBuf> {
     if mount.parent().is_some() {
         return mount.is_dir().then(|| mount.to_path_buf());
     }
-    // In another language: a personal account shows just the one folder
-    // (plus hidden ones, and "Shared drives" only for work accounts).
+    // In another language: a personal account shows just the one folder (plus hidden ones, and "Shared drives" only for work accounts).
     let folders: Vec<PathBuf> = fs::read_dir(mount)
         .ok()?
         .flatten()
@@ -273,13 +252,11 @@ pub(crate) fn google_my_drive(mount: &Path) -> Option<PathBuf> {
         _ => None,
     }
 }
-
 fn push_google_drive(out: &mut Vec<CloudFolder>, mount: &Path) {
     if let Some(path) = google_my_drive(mount) {
         push_cloud(out, CloudProvider::GoogleDrive, "Google Drive", &path);
     }
 }
-
 /// MEGA's desktop app keeps its settings encrypted, so its sync folder is
 /// found where the app suggests it: `MEGA` (older versions: `MEGAsync`) in
 /// the user's profile or Documents.
@@ -296,14 +273,12 @@ fn detect_mega(out: &mut Vec<CloudFolder>) {
         }
     }
 }
-
 /// The user's Documents folder, wherever it was moved (often into OneDrive).
 fn documents_folder() -> Option<PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath};
-
     let mut raw = std::ptr::null_mut();
     // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
     let result =
@@ -321,7 +296,6 @@ fn documents_folder() -> Option<PathBuf> {
     unsafe { CoTaskMemFree(raw as *const _) };
     path
 }
-
 fn push_cloud(out: &mut Vec<CloudFolder>, provider: CloudProvider, label: &str, path: &Path) {
     if path.parent().is_some() && path.is_dir() {
         out.push(CloudFolder {
@@ -331,7 +305,6 @@ fn push_cloud(out: &mut Vec<CloudFolder>, provider: CloudProvider, label: &str, 
         });
     }
 }
-
 /// Two folder paths name the same folder: case and trailing separators aside.
 fn same_folder(a: &Path, b: &Path) -> bool {
     let text = |path: &Path| {
@@ -341,7 +314,6 @@ fn same_folder(a: &Path, b: &Path) -> bool {
     };
     text(a) == text(b)
 }
-
 fn registry_string(hive: winreg::HKEY, flags: u32, key: &str, value: &str) -> Option<String> {
     RegKey::predef(hive)
         .open_subkey_with_flags(key, flags)
@@ -350,11 +322,9 @@ fn registry_string(hive: winreg::HKEY, flags: u32, key: &str, value: &str) -> Op
         .ok()
         .filter(|value| !value.trim().is_empty())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn drive_letters_from_google_drive_settings_become_drive_roots() {
         assert_eq!(mount_path("G"), Some(PathBuf::from(r"G:\")));
@@ -365,7 +335,6 @@ mod tests {
             Some(PathBuf::from(r"C:\Users\A\My Drive"))
         );
         assert_eq!(mount_path(" "), None);
-
         let json: Value = serde_json::from_str(
             r#"{"per_account_preferences":[{"key":"1","value":{"mount_point_path":"G"}},{"key":"2","value":{"mount_point_path":"H"}}]}"#,
         )
@@ -374,7 +343,6 @@ mod tests {
         collect_strings(&json, "mount_point_path", &mut found);
         assert_eq!(found, ["G", "H"]);
     }
-
     #[test]
     fn my_drive_is_found_inside_a_mount_in_any_language() {
         let root = std::env::temp_dir().join(format!("myle-gdrive-{}", std::process::id()));

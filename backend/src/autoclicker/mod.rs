@@ -139,9 +139,7 @@ impl AutoClickerState {
     fn configure(&self, config: Option<Config>) -> Result<(), String> {
         let checked = config.as_ref().map(Config::validate).transpose();
         let mut run = self.0.run.lock().unwrap_or_else(|e| e.into_inner());
-        // A worker owns an immutable snapshot. Edits arriving after an F6 start
-        // may update/disarm the next run without changing the current one.
-        // Invalid edits explicitly disarm the old snapshot used by the global hotkey.
+        // A worker owns an immutable snapshot. Edits arriving after an F6 start may update/disarm the next run without changing the current one. Invalid edits explicitly disarm the old snapshot used by the global hotkey.
         run.prepared = if checked.is_ok() { config } else { None };
         checked.map(|_| ())
     }

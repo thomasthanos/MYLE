@@ -1,37 +1,23 @@
-//! Runs one maintenance action and reports what it printed.
-//!
-//! Live output from an elevated program is the awkward part. `run_elevated`
-//! only hands back an exit code, and `Start-Process -RedirectStandardOutput`
-//! buffers through a .NET writer that never flushes until the process ends —
-//! a ten-minute `sfc` scan would show nothing and then everything. So the
-//! redirect is done by `cmd.exe` instead: the log file handle *is* the tool's
-//! stdout, every write lands immediately, and cmd opens it shareable, so this
-//! process can read the file while the tool is still writing to it.
-
+// ! Runs one maintenance action and reports what it printed. ! ! Live output from an elevated program is the awkward part. `run_elevated` ! only hands back an exit code, and `Start-Process -RedirectStandardOutput` ! buffers through a .NET writer that never flushes until the process ends — ! a ten-minute `sfc` scan would show nothing and then everything. So the ! redirect is done by `cmd.exe` instead: the log file handle *is* the tool's ! stdout, every write lands immediately, and cmd opens it shareable, so this ! process can read the file while the tool is still writing to it.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-
 use tokio::io::AsyncReadExt;
-
 use super::tasks::{Step, system32};
 use crate::apps::process::{encode_command, hidden, run_elevated};
 use crate::console::{Line, LineSplitter};
 use crate::download::err;
-
 const POLL: Duration = Duration::from_millis(180);
 /// How long to keep draining the log after the program exited, in case the
 /// last write lands just after the process does.
 const FINAL_DRAINS: usize = 6;
 const DISK_SCAN: &str = include_str!("disk_scan.ps1");
-
 /// Where a run is told about a program starting, as opposed to UAC still being
 /// on screen with nothing running yet.
 pub enum Phase {
     Waiting,
     Started,
 }
-
 /// The temporary files of one run, in a folder of its own that is removed
 /// with them when this is dropped.
 pub struct Workspace {
@@ -39,7 +25,6 @@ pub struct Workspace {
     pub log: PathBuf,
     pub stop: PathBuf,
 }
-
 impl Workspace {
     /// The folder is named at random and made here, never reused: nothing can
     /// be waiting in its place (such as a link planted to steer where the
@@ -57,7 +42,6 @@ impl Workspace {
         })
     }
 }
-
 impl Drop for Workspace {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.log);
@@ -65,10 +49,7 @@ impl Drop for Workspace {
         let _ = std::fs::remove_dir(&self.dir);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Running
-
+// --------------------------------------------------------------------------- Running
 /// Runs the steps in order without elevation, reporting what they printed.
 pub async fn run_plain(
     steps: &[Step],
@@ -90,7 +71,6 @@ pub async fn run_plain(
     }
     Ok(0)
 }
-
 /// Runs the steps behind a single UAC prompt, then reports everything they
 /// printed. Used for the short actions, where live output buys nothing.
 pub async fn run_batch_elevated(
@@ -104,7 +84,6 @@ pub async fn run_batch_elevated(
     }
     Ok(code)
 }
-
 /// Runs one program behind a UAC prompt, streaming its output as it appears.
 pub async fn run_stream_elevated(
     step: &Step,
@@ -114,7 +93,6 @@ pub async fn run_stream_elevated(
 ) -> Result<i32, String> {
     stream(step, workspace, true, on_phase, on_line).await
 }
-
 pub async fn run_disk_scan(
     workspace: &Workspace,
     on_phase: &mut (dyn FnMut(Phase) + Send),
@@ -129,7 +107,6 @@ pub async fn run_disk_scan(
     )
     .await
 }
-
 /// The same watch loop with or without the UAC prompt. Only the tests run it
 /// unelevated, which is how the redirect and the tailing are exercised without
 /// asking for rights or touching the system.
@@ -143,7 +120,6 @@ async fn stream(
     let script = stream_script(step, &workspace.log, &workspace.stop);
     watch(script, workspace, with_uac, on_phase, on_line).await
 }
-
 async fn watch(
     script: String,
     workspace: &Workspace,
@@ -154,7 +130,6 @@ async fn watch(
     let mut tail = Tail::new(&workspace.log);
     on_phase(Phase::Waiting);
     let mut started = false;
-
     let mut launched: BoxFuture = if with_uac {
         Box::pin(elevate(script))
     } else {
@@ -171,7 +146,6 @@ async fn watch(
             }
         }
     };
-
     // Whatever the tool wrote just before exiting.
     for _ in 0..FINAL_DRAINS {
         tail.drain(on_line).await;
@@ -180,9 +154,7 @@ async fn watch(
     tail.finish(on_line);
     Ok(code)
 }
-
 type BoxFuture = std::pin::Pin<Box<dyn Future<Output = Result<i32, String>> + Send>>;
-
 fn powershell_args(script: &str) -> Vec<String> {
     [
         "-NoProfile",
@@ -195,11 +167,9 @@ fn powershell_args(script: &str) -> Vec<String> {
     .chain([encode_command(script)])
     .collect()
 }
-
 async fn elevate(script: String) -> Result<i32, String> {
     run_elevated(&crate::apps::process::powershell().to_string_lossy(), &powershell_args(&script), true).await
 }
-
 async fn run_hidden(script: String) -> Result<i32, String> {
     let status = hidden(crate::apps::process::powershell())
         .args(powershell_args(&script))
@@ -210,17 +180,13 @@ async fn run_hidden(script: String) -> Result<i32, String> {
         .map_err(err)?;
     Ok(status.code().unwrap_or(-1))
 }
-
-// ---------------------------------------------------------------------------
-// Reading the log as it grows
-
+// --------------------------------------------------------------------------- Reading the log as it grows
 struct Tail {
     path: PathBuf,
     file: Option<tokio::fs::File>,
     splitter: LineSplitter,
     buf: [u8; 8192],
 }
-
 impl Tail {
     fn new(path: &Path) -> Self {
         Tail {
@@ -230,13 +196,11 @@ impl Tail {
             buf: [0; 8192],
         }
     }
-
     /// Emits everything written since the last call. Returns true once the log
     /// exists, which is the first moment the program is known to be running.
     async fn drain(&mut self, on_line: &mut (dyn FnMut(Line) + Send)) -> bool {
         if self.file.is_none() {
-            // Missing until UAC is answered; briefly unreadable if another
-            // handle is in the way. Both are worth retrying, never fatal.
+            // Missing until UAC is answered; briefly unreadable if another handle is in the way. Both are worth retrying, never fatal.
             self.file = tokio::fs::File::open(&self.path).await.ok();
         }
         let Some(file) = self.file.as_mut() else {
@@ -254,14 +218,12 @@ impl Tail {
         }
         true
     }
-
     fn finish(&mut self, on_line: &mut (dyn FnMut(Line) + Send)) {
         if let Some(line) = self.splitter.finish() {
             on_line(line);
         }
     }
 }
-
 fn emit_all(bytes: &[u8], on_line: &mut (dyn FnMut(Line) + Send)) {
     let mut splitter = LineSplitter::default();
     for line in splitter.feed(bytes) {
@@ -271,10 +233,7 @@ fn emit_all(bytes: &[u8], on_line: &mut (dyn FnMut(Line) + Send)) {
         on_line(line);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Script generation
-
+// --------------------------------------------------------------------------- Script generation
 /// The `cmd.exe` argument tail that runs one step and appends its output to
 /// `log`. `/d` skips AutoRun scripts; `/s` makes cmd strip only the outer pair
 /// of quotes and take the rest verbatim, which is the one quoting form that
@@ -287,7 +246,6 @@ fn cmd_tail(exe: &Path, args: &str, log: &Path) -> String {
     }
     format!("/d /s /c \"{command} >> \"{}\" 2>&1\"", log.display())
 }
-
 fn start_process(tail: &str, extra: &str) -> String {
     format!(
         "$p = Start-Process -FilePath {} -ArgumentList {} -NoNewWindow -PassThru{extra}\n",
@@ -295,7 +253,6 @@ fn start_process(tail: &str, extra: &str) -> String {
         ps_quote(tail)
     )
 }
-
 /// The start of every script: runs nothing unless the run's folder is still
 /// the plain, empty folder `Workspace::new` made (a link swapped in for it
 /// would steer the elevated writes elsewhere).
@@ -310,7 +267,6 @@ fn script_start(log: &Path) -> String {
         ps_quote(&log.to_string_lossy()),
     )
 }
-
 /// Every step in order; the first hard failure ends the script with its code.
 fn batch_script(steps: &[Step], log: &Path) -> String {
     let mut script = script_start(log);
@@ -326,14 +282,12 @@ fn batch_script(steps: &[Step], log: &Path) -> String {
     script.push_str("exit 0\n");
     script
 }
-
 /// One program, watched so it can be stopped: this process cannot kill an
 /// elevated child itself, so it drops a sentinel file and the elevated script
 /// does the killing. Cancelling that way needs no second UAC prompt.
 fn stream_script(step: &Step, log: &Path, stop: &Path) -> String {
     watched_script(&system32(step.exe), step.args, log, stop)
 }
-
 fn disk_script(log: &Path, stop: &Path) -> String {
     watched_script(
         &crate::apps::process::powershell(),
@@ -342,15 +296,13 @@ fn disk_script(log: &Path, stop: &Path) -> String {
         stop,
     )
 }
-
 fn watched_script(exe: &Path, args: &str, log: &Path, stop: &Path) -> String {
     let mut script = script_start(log);
     script.push_str(&start_process(
         &cmd_tail(exe, args, log),
         "",
     ));
-    // Windows PowerShell 5.1 otherwise releases the process handle while
-    // polling HasExited, leaving ExitCode null (and `exit $null` reports 0).
+    // Windows PowerShell 5.1 otherwise releases the process handle while polling HasExited, leaving ExitCode null (and `exit $null` reports 0).
     script.push_str("$null = $p.Handle\n");
     script.push_str(&format!(
         "while (-not $p.HasExited) {{\n  \
@@ -363,17 +315,14 @@ fn watched_script(exe: &Path, args: &str, log: &Path, stop: &Path) -> String {
     script.push_str("$p.WaitForExit()\nexit $p.ExitCode\n");
     script
 }
-
 /// A PowerShell single-quoted string literal.
 fn ps_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::maintenance::tasks;
-
     #[test]
     fn the_cmd_tail_quotes_the_program_and_the_log_but_not_the_arguments() {
         let tail = cmd_tail(
@@ -386,13 +335,11 @@ mod tests {
             r#"/d /s /c ""C:\Windows\System32\sfc.exe" /scannow >> "C:\Temp\out.log" 2>&1""#
         );
     }
-
     #[test]
     fn a_step_without_arguments_has_no_stray_space() {
         let tail = cmd_tail(Path::new(r"C:\x\a.exe"), "", Path::new(r"C:\t.log"));
         assert_eq!(tail, r#"/d /s /c ""C:\x\a.exe" >> "C:\t.log" 2>&1""#);
     }
-
     #[test]
     fn the_batch_script_keeps_the_steps_in_order_and_stops_at_the_first_failure() {
         let (_, action) = tasks::find("net-reset").unwrap();
@@ -400,7 +347,6 @@ mod tests {
             panic!("net-reset is a batch")
         };
         let script = batch_script(steps, Path::new(r"C:\Temp\out.log"));
-
         let winsock = script.find("winsock reset").expect("winsock step");
         let ip = script.find("int ip reset").expect("ip step");
         let ipv6 = script.find("int ipv6 reset").expect("ipv6 step");
@@ -414,7 +360,6 @@ mod tests {
         );
         assert!(script.ends_with("exit 0\n"));
     }
-
     #[test]
     fn the_stream_script_can_be_stopped_and_reports_the_real_exit_code() {
         let (_, action) = tasks::find("sfc").unwrap();
@@ -426,7 +371,6 @@ mod tests {
             Path::new(r"C:\Temp\out.log"),
             Path::new(r"C:\Temp\out.stop"),
         );
-
         assert!(script.contains(r"'C:\Temp\out.stop'"));
         assert!(script.contains("Test-Path"));
         assert!(script.contains("taskkill.exe"));
@@ -434,7 +378,6 @@ mod tests {
         assert!(script.contains("exit $p.ExitCode"));
         assert!(!script.contains("-Wait"), "it must poll, not block");
     }
-
     /// The whole point of the fixed table: nothing else can reach the shell.
     #[test]
     fn scripts_only_ever_name_programs_from_the_table() {
@@ -455,7 +398,6 @@ mod tests {
                 crate::apps::process::powershell().to_string_lossy().to_ascii_lowercase(),
             ])
             .collect();
-
         for card in tasks::CARDS {
             for action in card.actions {
                 let script = match &action.run {
@@ -483,12 +425,10 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn quotes_are_escaped() {
         assert_eq!(ps_quote(r"C:\Users\it's\t.log"), r"'C:\Users\it''s\t.log'");
     }
-
     /// Execute the real worker and redirect with a stubbed Storage provider:
     /// these tests never scan a volume or ask for elevation.
     #[tokio::test]
@@ -528,7 +468,6 @@ mod tests {
             assert!(lines.join("\n").contains(expected_text), "{lines:?}");
         }
     }
-
     #[test]
     fn disk_scan_requests_only_the_online_check() {
         assert!(DISK_SCAN.contains("Repair-Volume -DriveLetter $drive -Scan -ErrorAction Stop"));
@@ -537,7 +476,6 @@ mod tests {
             assert!(!DISK_SCAN.contains(forbidden), "unexpected request: {forbidden}");
         }
     }
-
     /// The end-to-end proof that the redirect works. `sfc` talks UTF-16LE and
     /// is one of the real streaming tools, and asking it to run without rights
     /// changes nothing, so this exercises the real script, the real `cmd`
@@ -561,7 +499,6 @@ mod tests {
         )
         .await
         .expect("the script runs");
-
         assert!(phases >= 2, "it reports waiting and then started");
         // Asserted on shape, not on words: the message is localized.
         let raw = std::fs::read(&workspace.log).expect("the log was written");
@@ -583,7 +520,6 @@ mod tests {
             "got: {text:?}"
         );
     }
-
     /// Cancellation goes through the sentinel file, because this process is not
     /// allowed to kill an elevated child.
     #[tokio::test]
@@ -600,7 +536,6 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             let _ = std::fs::write(&stop, b"");
         });
-
         let started = std::time::Instant::now();
         stream(&step, &workspace, false, &mut |_| {}, &mut |_| {})
             .await
@@ -611,7 +546,6 @@ mod tests {
             started.elapsed()
         );
     }
-
     #[test]
     fn a_workspace_cleans_up_after_itself() {
         let workspace = Workspace::new("test").unwrap();
@@ -621,7 +555,6 @@ mod tests {
         drop(workspace);
         assert!(!log.exists() && !stop.exists() && !dir.exists());
     }
-
     #[test]
     fn every_run_gets_a_new_folder_of_its_own() {
         let first = Workspace::new("test").unwrap();
@@ -630,7 +563,6 @@ mod tests {
         assert_eq!(first.log.parent(), Some(first.dir.as_path()));
         assert_eq!(first.stop.parent(), Some(first.dir.as_path()));
     }
-
     /// A log already there, or a folder that is gone (or was swapped for a
     /// link), stops the script before it runs anything.
     #[tokio::test]

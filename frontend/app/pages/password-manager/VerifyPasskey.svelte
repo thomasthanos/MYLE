@@ -1,7 +1,5 @@
 <script lang="ts">
-  // A site asks to confirm it is the user before a passkey is used, and this
-  // PC has no Windows Hello: the master password stands in. The app waits for
-  // the answer (two minutes at most) and brought this page forward for it.
+  // A site asks to confirm it is the user before a passkey is used, and this PC has no Windows Hello: the master password stands in. The app waits for the answer (two minutes at most) and brought this page forward for it.
   import { onMount } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { fade, scale } from "svelte/transition";

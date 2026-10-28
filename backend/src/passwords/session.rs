@@ -1,11 +1,8 @@
-//! Whether Windows is locked (Win+L, the lock screen after sleep), so the
-//! vault can lock with it.
-
+// ! Whether Windows is locked (Win+L, the lock screen after sleep), so the ! vault can lock with it.
 use windows_sys::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSFreeMemory, WTSINFOEXW,
     WTSQuerySessionInformationW, WTSSessionInfoEx,
 };
-
 pub fn windows_is_locked() -> bool {
     let mut buffer = std::ptr::null_mut();
     let mut size = 0u32;

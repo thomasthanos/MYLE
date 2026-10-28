@@ -1,22 +1,9 @@
-//! Build output, dependencies and caches told apart from sources by the files
-//! around a folder, for names that can be either.
-//!
-//! `target` is Rust's build output next to a `Cargo.toml` and Maven's next to
-//! a `pom.xml`, but a deployment target or a game's "target" sprites
-//! elsewhere; `bin` and `obj` are .NET output next to a `.csproj`, but
-//! scripts or 3D models elsewhere; `build` holds electron-builder's installer
-//! script and icons in an Electron project. So these names are never left out
-//! by name alone: a marker decides (`folder`), and without one a `.gitignore`
-//! or git itself (`Rules::ambiguous_output`). A folder git tracks files in is
-//! always backed up, whatever it is called.
-
+// ! Build output, dependencies and caches told apart from sources by the files ! around a folder, for names that can be either. ! ! `target` is Rust's build output next to a `Cargo.toml` and Maven's next to ! a `pom.xml`, but a deployment target or a game's "target" sprites ! elsewhere; `bin` and `obj` are .NET output next to a `.csproj`, but ! scripts or 3D models elsewhere; `build` holds electron-builder's installer ! script and icons in an Electron project. So these names are never left out ! by name alone: a marker decides (`folder`), and without one a `.gitignore` ! or git itself (`Rules::ambiguous_output`). A folder git tracks files in is ! always backed up, whatever it is called.
 use super::rules::{Listing, Rules, parent_of};
-
 /// The reason shown for a folder a `.gitignore` names (no marker found).
 pub(crate) const IGNORED_OUTPUT: &str = "build output (ignored by .gitignore)";
 /// The reason shown for a folder git tracks nothing in (no marker found).
 pub(crate) const UNTRACKED_OUTPUT: &str = "build output (git tracks nothing in it)";
-
 /// Names that are build output, dependencies or caches in some projects and
 /// sources in others: left out when a `.gitignore` ignores them.
 pub(crate) const AMBIGUOUS: &[&str] = &[
@@ -45,13 +32,11 @@ pub(crate) const AMBIGUOUS: &[&str] = &[
     "venv",
     "vendor",
 ];
-
 /// The commonest of them: also left out in a git work tree that tracks
 /// nothing inside them (they were never committed: generated).
 pub(crate) const UNTRACKED_MEANS_OUTPUT: &[&str] = &[
     "build", "out", "target", "bin", "obj", "debug", "release", "gen",
 ];
-
 const DOTNET_PROJECTS: &[&str] = &[".csproj", ".fsproj", ".vbproj"];
 const VISUAL_STUDIO: &[&str] = &[".sln", ".slnx", ".vcxproj", ".vcproj"];
 const GRADLE: &[&str] = &[
@@ -84,7 +69,6 @@ const TAURI_CONFIG: &[&str] = &[
     "tauri.toml",
 ];
 const C_SOURCES: &[&str] = &["c", "cc", "cpp", "cxx", "asm", "s"];
-
 /// Why the folder `rel` (its lower-case `name`) is build output,
 /// dependencies or a cache, if the files around it say so.
 pub(crate) fn folder(
@@ -185,7 +169,6 @@ pub(crate) fn folder(
         _ => None,
     }
 }
-
 /// A solution's `packages` folder: `repositories.config`, or folders named
 /// like `Newtonsoft.Json.13.0.3`.
 fn nuget_packages(rel: &str, listing: &dyn Listing) -> bool {
@@ -199,7 +182,6 @@ fn nuget_packages(rel: &str, listing: &dyn Listing) -> bool {
                 .any(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
         })
 }
-
 /// Why the file `rel` (its lower-case `name`) is build output, if the files
 /// next to it say so. `.obj` is a compiler's object file next to C/C++
 /// sources or a Visual Studio project, and a 3D model elsewhere.
@@ -214,7 +196,6 @@ pub(crate) fn file(rel: &str, name: &str, listing: &dyn Listing) -> Option<&'sta
             .any(|ext| parent.has_file(&format!("{stem}.{ext}")));
     compiled.then_some("C/C++ object file")
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,14 +203,12 @@ mod tests {
     use crate::project_backups::walk::walk;
     use std::fs;
     use std::path::{Path, PathBuf};
-
     fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-detect-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     /// Writes the files of a project (a path ending with `/` is an empty folder).
     fn project(name: &str, paths: &[&str]) -> PathBuf {
         let root = temp(name);
@@ -244,12 +223,10 @@ mod tests {
         }
         root
     }
-
     struct Outcome {
         files: Vec<String>,
         excluded: Vec<(String, String)>,
     }
-
     impl Outcome {
         fn left_out(&self, rel: &str) -> &str {
             self.excluded
@@ -260,7 +237,6 @@ mod tests {
                     panic!("{rel} should be left out; left out: {:?}", self.excluded)
                 })
         }
-
         fn backed_up(&self, rel: &str) {
             assert!(
                 self.files.iter().any(|file| file == rel),
@@ -270,7 +246,6 @@ mod tests {
             );
         }
     }
-
     fn backup_of(root: &Path) -> Outcome {
         let rules = Rules::compile(
             &RuleInput {
@@ -292,7 +267,6 @@ mod tests {
                 .collect(),
         }
     }
-
     #[test]
     fn rust_workspaces_and_tauri() {
         let out = backup_of(&project(
@@ -307,8 +281,7 @@ mod tests {
                 "crates/core/Cargo.toml",
                 "crates/core/src/lib.rs",
                 "crates/core/target/debug/libcore.rlib",
-                // Tauri: target, generated schemas; the mobile projects stay,
-                // their Gradle output does not.
+                // Tauri: target, generated schemas; the mobile projects stay, their Gradle output does not.
                 "app/src-tauri/Cargo.toml",
                 "app/src-tauri/tauri.conf.json",
                 "app/src-tauri/target/release/app.exe",
@@ -352,7 +325,6 @@ mod tests {
             out.backed_up(kept);
         }
     }
-
     #[test]
     fn javascript_typescript_and_electron() {
         let mut paths = vec![
@@ -413,7 +385,6 @@ mod tests {
         ] {
             out.backed_up(kept);
         }
-
         // electron-builder named in package.json only.
         let out = backup_of(&project(
             "electron-json",
@@ -431,7 +402,6 @@ mod tests {
             "electron-builder output"
         );
     }
-
     #[test]
     fn python() {
         let out = backup_of(&project(
@@ -489,7 +459,6 @@ mod tests {
         out.backed_up("deploy/env/production.yaml");
         out.backed_up("src/pkg/__init__.py");
     }
-
     #[test]
     fn dotnet_and_visual_studio_cpp() {
         let out = backup_of(&project(
@@ -535,7 +504,6 @@ mod tests {
             out.backed_up(kept);
         }
     }
-
     #[test]
     fn java_kotlin_go_and_cmake() {
         let out = backup_of(&project(
@@ -583,7 +551,6 @@ mod tests {
         out.backed_up("cpp/main.cpp");
         out.backed_up("settings.gradle.kts");
     }
-
     #[test]
     fn flutter_xcode_unity_and_godot() {
         let out = backup_of(&project(
@@ -647,7 +614,6 @@ mod tests {
             out.backed_up(kept);
         }
     }
-
     #[test]
     fn system_files_logs_editors_and_agents() {
         let out = backup_of(&project(
@@ -686,7 +652,6 @@ mod tests {
         out.backed_up(".vscode/settings.json");
         out.backed_up("README.md");
     }
-
     #[test]
     fn git_decides_names_without_markers_and_tracked_folders_stay() {
         let root = project(
@@ -728,7 +693,6 @@ mod tests {
         ] {
             out.backed_up(kept);
         }
-
         // No git: a .gitignore that names the folder decides.
         let root = project("gitignore-only", &["web/out/x.js", "web/vendor/lib.js"]);
         fs::write(root.join("web").join(".gitignore"), "out/\n").unwrap();

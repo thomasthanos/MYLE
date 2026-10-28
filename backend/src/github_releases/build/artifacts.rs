@@ -1,14 +1,7 @@
-//! The files a build made that are worth shipping: installers, archives,
-//! packages, update manifests and signatures, written since the build
-//! started. Inside a Rust `target` folder only `bundle` output and the
-//! programs right in the profile folder count; unpacked app folders,
-//! dependencies and intermediate files never do.
-
+// ! The files a build made that are worth shipping: installers, archives, ! packages, update manifests and signatures, written since the build ! started. Inside a Rust `target` folder only `bundle` output and the ! programs right in the profile folder count; unpacked app folders, ! dependencies and intermediate files never do.
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use serde::Serialize;
-
 const EXTENSIONS: &[&str] = &[
     "exe",
     "msi",
@@ -64,7 +57,6 @@ const SKIP: &[&str] = &[
 ];
 const MAX_DEPTH: usize = 8;
 const MAX_FILES: usize = 200;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Artifact {
@@ -78,7 +70,6 @@ pub struct Artifact {
     /// `installer`, `archive`, `package`, `update`, `signature`, `program`.
     pub kind: &'static str,
 }
-
 fn kind_of(name: &str) -> Option<&'static str> {
     let lower = name.to_lowercase();
     if (lower.starts_with("latest")
@@ -101,7 +92,6 @@ fn kind_of(name: &str) -> Option<&'static str> {
         _ => "archive",
     })
 }
-
 /// Inside a `target` folder: `target/<profile>/<file>` or anything under a
 /// `bundle` folder.
 fn allowed_in_target(rel_parts: &[String]) -> bool {
@@ -117,7 +107,6 @@ fn allowed_in_target(rel_parts: &[String]) -> bool {
         || (after.len() == 3 && after[1].eq_ignore_ascii_case("release"))
         || after.iter().any(|p| p.eq_ignore_ascii_case("bundle"))
 }
-
 /// Files in `dir` written at or after `since` (a little slack for clocks).
 pub(crate) fn find(dir: &Path, since: SystemTime) -> Vec<Artifact> {
     let since = since.checked_sub(Duration::from_secs(2)).unwrap_or(since);
@@ -139,8 +128,7 @@ pub(crate) fn find(dir: &Path, since: SystemTime) -> Vec<Artifact> {
                     rel.components()
                         .any(|c| c.as_os_str().eq_ignore_ascii_case("target"))
                 });
-                // `build` is skipped only inside `target` (build scripts):
-                // elsewhere it can be where a tool puts what it made.
+                // `build` is skipped only inside `target` (build scripts): elsewhere it can be where a tool puts what it made.
                 let skip = SKIP.contains(&lower.as_str()) && (lower != "build" || in_target);
                 if depth < MAX_DEPTH
                     && !skip
@@ -187,7 +175,6 @@ pub(crate) fn find(dir: &Path, since: SystemTime) -> Vec<Artifact> {
     }
     sorted(found)
 }
-
 fn sorted(mut found: Vec<Artifact>) -> Vec<Artifact> {
     let rank = |a: &Artifact| match a.kind {
         "installer" => 0,
@@ -204,7 +191,6 @@ fn sorted(mut found: Vec<Artifact>) -> Vec<Artifact> {
     });
     found
 }
-
 /// Which artifacts to tick by themselves: installers, packages, update
 /// files and signatures; a bare program only when nothing else was made.
 pub(crate) fn preselect(artifacts: &[Artifact]) -> Vec<String> {
@@ -219,7 +205,6 @@ pub(crate) fn preselect(artifacts: &[Artifact]) -> Vec<String> {
     };
     chosen.into_iter().map(|a| a.path.clone()).collect()
 }
-
 /// The SHA-256 of a file, in hex.
 pub(crate) fn sha256(path: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
@@ -240,11 +225,9 @@ pub(crate) fn sha256(path: &Path) -> Result<String, String> {
         .map(|b| format!("{b:02x}"))
         .collect())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn only_fresh_shippable_files_are_found() {
         let dir = std::env::temp_dir().join(format!("myle-gr-artifacts-{}", std::process::id()));

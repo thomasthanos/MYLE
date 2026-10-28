@@ -1,6 +1,4 @@
-// Typed bridge to the Project Backups commands in backend/src/project_backups/.
-// Projects are addressed by id and backups by the id from their list; every
-// path is resolved and checked by the backend.
+// Typed bridge to the Project Backups commands in backend/src/project_backups/. Projects are addressed by id and backups by the id from their list; every path is resolved and checked by the backend.
 import { Channel, invoke } from "@tauri-apps/api/core";
 export type BackupProvider = "googleDrive" | "dropbox";
 export interface LastBackup {
@@ -267,8 +265,7 @@ export interface ChangedFile {
   status: "added" | "modified" | "deleted";
   size: number | null;
 }
-/** `unreachable`: the backups folder can't be reached now (the cloud app is
- *  not running), so nothing is known; `error`: the check failed (`message`). */
+/* `unreachable`: the backups folder can't be reached now (the cloud app is not running), so nothing is known; `error`: the check failed (`message`). */
 export type ChangeState = "upToDate" | "changed" | "noBackup" | "missing" | "unreachable" | "error";
 export interface ProjectChanges {
   projectId: string;
@@ -315,8 +312,7 @@ export const projectBackupsApi = {
   preview: (request: PreviewRequest) => invoke<Preview>("project_backups_preview", { request }),
   cancelPreview: () => invoke<void>("project_backups_cancel_preview"),
   changes: (projectIds: string[], fresh: boolean) => invoke<ProjectChanges[]>("project_backups_changes", { projectIds, fresh }),
-  /** Starts the app's background detection, or watches the folders again
-   *  after the project list changed. Its answers come as `CHANGES_EVENT`. */
+  /* Starts the app's background detection, or watches the folders again after the project list changed. Its answers come as `CHANGES_EVENT`. */
   watch: () => invoke<void>("project_backups_watch"),
   /** The latest answer of the background detection for every project. */
   latestChanges: () => invoke<ProjectChanges[]>("project_backups_latest_changes"),

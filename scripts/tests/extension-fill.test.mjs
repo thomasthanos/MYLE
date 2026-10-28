@@ -1,12 +1,9 @@
-// How the page script (content.js) finds fields, fills them and offers its
-// menu: its functions, each run on its own with what it needs stubbed.
+// How the page script (content.js) finds fields, fills them and offers its menu: its functions, each run on its own with what it needs stubbed.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-
 const source = (await readFile(new URL("../../extension/content.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-
 /** One function of content.js, by name, with `context` as its world. */
 function pick(name, context = {}) {
   let start = source.indexOf(`  function ${name}(`);
@@ -15,7 +12,6 @@ function pick(name, context = {}) {
   const end = source.indexOf("\n  }\n", start);
   return vm.runInNewContext(`(${source.slice(start, end + 4).trim()})`, context);
 }
-
 /** A constant of content.js, by name (a regular expression, say). */
 function constant(name) {
   const start = source.indexOf(`  const ${name} = `);
@@ -23,7 +19,6 @@ function constant(name) {
   const end = source.indexOf(";\n", start);
   return vm.runInNewContext(source.slice(start + `  const ${name} = `.length, end));
 }
-
 test("a fill types the way a person does: key, beforeinput, the browser's setter, input, key, change", () => {
   const seen = [];
   class Event {
@@ -65,7 +60,6 @@ test("a fill types the way a person does: key, beforeinput, the browser's setter
   assert.equal(seen[0].key, "Unidentified");
   assert.ok(input.focused, "the field keeps the focus (no blur)");
 });
-
 test("the site's search box is never taken for a user name", () => {
   const getAttr = (el, name) => el.attrs?.[name] ?? null;
   const isSearch = pick("isSearch", { getAttr });
@@ -77,7 +71,6 @@ test("the site's search box is never taken for a user name", () => {
   assert.ok(!isSearch(field({ name: "username" })));
   assert.ok(!isSearch(field({ type: "email", placeholder: "Email" })));
 });
-
 test("2FA setup words are whole words: not inside a blob, nor a one-time purchase", () => {
   const words = constant("SETUP_WORDS");
   assert.ok(words.test("Scan this QR code with your authenticator app"));
@@ -87,7 +80,6 @@ test("2FA setup words are whole words: not inside a blob, nor a one-time purchas
   assert.ok(!words.test("sha256-3f2fa81c0d9e5b7a"));
   assert.ok(!words.test("A one-time purchase, no subscription"));
 });
-
 test("a code about to change is waited for, and asked for once more", async () => {
   const asked = [];
   const waits = [];
@@ -110,7 +102,6 @@ test("a code about to change is waited for, and asked for once more", async () =
   assert.equal((await freshCode("a")).code, "000001");
   assert.deepEqual(asked, ["totp"], "a fresh code is used as it is");
 });
-
 test("a menu with only a note shows once per field, unless asked from the badge", () => {
   const rendered = [];
   let hidden = 0;
@@ -131,7 +122,6 @@ test("a menu with only a note shows once per field, unless asked from the badge"
   offer(field, [login], false);
   assert.equal(rendered.length, 3, "a menu with logins always shows");
 });
-
 test("the menu explains what stands in the way, also on a 2FA field", () => {
   const made = [];
   const problemItems = pick("problemItems", {
@@ -149,7 +139,6 @@ test("the menu explains what stands in the way, also on a 2FA field", () => {
   assert.deepEqual(made[3], ["note", "Reload"]);
   assert.deepEqual([...problemItems({ ok: false, error: "somethingNew" }, {})], []);
 });
-
 test("the badge sits at the field's right end, or just left of the page's own icon there", () => {
   let padding = "10px";
   const badgeSpot = pick("badgeSpot", {
@@ -167,7 +156,6 @@ test("the badge sits at the field's right end, or just left of the page's own ic
   const tiny = { getBoundingClientRect: () => ({ left: 0, right: 40, top: 0, bottom: 40, width: 40, height: 40 }) };
   assert.equal(badgeSpot(tiny), null, "no room in a code box");
 });
-
 test("no save offer while the sign-in form is still shown (the password was refused)", async () => {
   const sent = [];
   const offerSave = pick("offerSave", {

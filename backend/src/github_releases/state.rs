@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-
 /// What runs on a repository: one at a time per repository, so a build and
 /// a commit never step on each other.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,7 +10,6 @@ pub(crate) enum Job {
     Release,
     Scan,
 }
-
 impl Job {
     fn busy_text(self) -> &'static str {
         match self {
@@ -22,25 +20,20 @@ impl Job {
         }
     }
 }
-
 type Active = HashMap<String, (Arc<AtomicBool>, Job)>;
-
 #[derive(Clone, Default)]
 pub struct GithubReleasesState {
     active: Arc<Mutex<Active>>,
 }
-
 pub(crate) struct Running {
     state: GithubReleasesState,
     key: String,
     pub cancel: Arc<AtomicBool>,
 }
-
 impl GithubReleasesState {
     fn lock(&self) -> MutexGuard<'_, Active> {
         self.active.lock().unwrap_or_else(|p| p.into_inner())
     }
-
     /// Starts `job` on the repository `key` (a scan: any key).
     pub(crate) fn begin(&self, key: &str, job: Job) -> Result<Running, String> {
         let mut active = self.lock();
@@ -55,12 +48,10 @@ impl GithubReleasesState {
             cancel,
         })
     }
-
     /// What runs on `key`, if anything.
     pub(crate) fn job(&self, key: &str) -> Option<Job> {
         self.lock().get(key).map(|(_, job)| *job)
     }
-
     pub(crate) fn cancel(&self, key: &str) -> bool {
         match self.lock().get(key) {
             Some((cancel, _)) => {
@@ -70,13 +61,11 @@ impl GithubReleasesState {
             None => false,
         }
     }
-
     pub(crate) fn cancel_all(&self) {
         for (cancel, _) in self.lock().values() {
             cancel.store(true, Ordering::Relaxed);
         }
     }
-
     pub(crate) fn with_idle<T>(&self, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         let active = self.lock();
         if !active.is_empty() { return Err("Wait for the running GitHub project operation to finish, then sync again.".into()); }
@@ -85,24 +74,20 @@ impl GithubReleasesState {
         result
     }
 }
-
 impl Running {
     #[cfg(test)]
     pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }
 }
-
 impl Drop for Running {
     fn drop(&mut self) {
         self.state.lock().remove(&self.key);
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn path_sync_waits_for_active_work_without_cancelling_it() {
         let state = GithubReleasesState::default();
@@ -114,7 +99,6 @@ mod tests {
         drop(running);
         assert_eq!(state.with_idle(|| Ok(7)).unwrap(), 7);
     }
-
     #[test]
     fn one_job_per_repository() {
         let state = GithubReleasesState::default();

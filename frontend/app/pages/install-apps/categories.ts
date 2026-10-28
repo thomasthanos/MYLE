@@ -1,5 +1,4 @@
 // Automatic categories from keywords in package IDs.
-
 export const CATEGORIES = [
   "Browsers",
   "Communication",
@@ -11,11 +10,8 @@ export const CATEGORIES = [
   "Utilities",
   "Others",
 ] as const;
-
 export type Category = (typeof CATEGORIES)[number];
-
-// A keyword matches an ID token that starts with it ("git" matches "github").
-// Checked in this order, so put the more specific categories first.
+// A keyword matches an ID token that starts with it ("git" matches "github"). Checked in this order, so put the more specific categories first.
 const KEYWORDS: [Category, string[]][] = [
   ["Browsers", ["chrome", "firefox", "brave", "opera", "vivaldi", "zen", "librewolf", "torbrowser", "waterfox", "chromium", "edge", "browser"]],
   ["Communication", ["discord", "telegram", "zoom", "teams", "slack", "signal", "viber", "teamspeak", "thunderbird", "whatsapp", "skype", "element", "mumble"]],
@@ -26,7 +22,6 @@ const KEYWORDS: [Category, string[]][] = [
   ["Hardware", ["cpu", "gpu", "hwmonitor", "hwinfo", "afterburner", "crystaldisk", "fancontrol", "openrgb", "displaydriveruninstaller", "nvidia", "amd", "intel", "logitech", "corsair", "razer"]],
   ["Utilities", ["7zip", "winrar", "everything", "powertoys", "sharex", "rufus", "qbittorrent", "dropbox", "googledrive", "anydesk", "teamviewer", "sumatrapdf", "acrobat", "freedownloadmanager", "revouninstaller", "bleachbit", "ditto", "onedrive", "flameshot"]],
 ];
-
 export function categorize(id: string): Category {
   const tokens = id.toLowerCase().split(/[.\-_ ]+/).filter(Boolean);
   for (const [category, keywords] of KEYWORDS) {
@@ -34,7 +29,6 @@ export function categorize(id: string): Category {
   }
   return "Others";
 }
-
 export function isCategory(value: unknown): value is Category {
   return typeof value === "string" && (CATEGORIES as readonly string[]).includes(value);
 }

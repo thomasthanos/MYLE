@@ -15,8 +15,7 @@
   let autoRequested = false;
 
   function afterFocus(focused: boolean) {
-    // The setup's checked taskbar option is the explicit request. Wait until
-    // MYLE is in front; regular launches and passive updates never auto-prompt.
+    // The setup's checked taskbar option is the explicit request. Wait until MYLE is in front; regular launches and passive updates never auto-prompt.
     if (focused && offer?.pending && offer.supported && offer.requestAfterSetup && !autoRequested) {
       autoRequested = true;
       void pin();

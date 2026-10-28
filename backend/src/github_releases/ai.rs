@@ -1,17 +1,9 @@
-//! One client for every AI provider: they all speak the OpenAI chat
-//! completions API, so a provider is only a base URL, a default model and
-//! how its key is checked. Keys are the user's own (`secrets`); a provider
-//! that is out of free requests (HTTP 429) or fails points the page at the
-//! next one in the user's order.
-
+// ! One client for every AI provider: they all speak the OpenAI chat ! completions API, so a provider is only a base URL, a default model and ! how its key is checked. Keys are the user's own (`secrets`); a provider ! that is out of free requests (HTTP 429) or fails points the page at the ! next one in the user's order.
 use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-
 use super::Problem;
 use super::store::AiSettings;
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
@@ -21,7 +13,6 @@ pub enum ProviderId {
     DeepSeek,
     Ollama,
 }
-
 impl ProviderId {
     pub(crate) const ALL: [ProviderId; 5] = [
         ProviderId::Groq,
@@ -30,7 +21,6 @@ impl ProviderId {
         ProviderId::DeepSeek,
         ProviderId::Ollama,
     ];
-
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             ProviderId::Groq => "groq",
@@ -40,7 +30,6 @@ impl ProviderId {
             ProviderId::Ollama => "ollama",
         }
     }
-
     pub(crate) fn def(self) -> &'static ProviderDef {
         PROVIDERS
             .iter()
@@ -48,7 +37,6 @@ impl ProviderId {
             .unwrap_or(&PROVIDERS[0])
     }
 }
-
 /// What the page shows about a provider and how it is reached.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,7 +53,6 @@ pub struct ProviderDef {
     /// What happens to what is sent.
     pub privacy: &'static str,
 }
-
 pub(crate) const PROVIDERS: &[ProviderDef] = &[
     ProviderDef {
         id: ProviderId::Groq,
@@ -118,14 +105,12 @@ pub(crate) const PROVIDERS: &[ProviderDef] = &[
         privacy: "Nothing leaves this PC.",
     },
 ];
-
 /// One chat request, ready to send.
 #[derive(Clone, Debug)]
 pub(crate) struct ChatRequest {
     pub url: String,
     pub body: Value,
 }
-
 pub(crate) fn base_url(settings: &AiSettings, provider: ProviderId) -> String {
     match (provider, settings.ollama_url.as_deref()) {
         (ProviderId::Ollama, Some(url)) if !url.trim().is_empty() => {
@@ -139,7 +124,6 @@ pub(crate) fn base_url(settings: &AiSettings, provider: ProviderId) -> String {
         _ => provider.def().base_url.to_string(),
     }
 }
-
 pub(crate) fn model(settings: &AiSettings, provider: ProviderId) -> String {
     settings
         .models
@@ -148,7 +132,6 @@ pub(crate) fn model(settings: &AiSettings, provider: ProviderId) -> String {
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| provider.def().default_model.to_string())
 }
-
 pub(crate) fn build_request(
     base: &str,
     provider: ProviderId,
@@ -181,7 +164,6 @@ pub(crate) fn build_request(
         body,
     }
 }
-
 /// A failed AI request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AiError {
@@ -191,7 +173,6 @@ pub(crate) struct AiError {
     pub message: String,
     pub retry_after: Option<u64>,
 }
-
 fn error_message(body: &str) -> String {
     let json: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     let error = json.get("error").unwrap_or(&json);
@@ -204,7 +185,6 @@ fn error_message(body: &str) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| body.chars().take(300).collect())
 }
-
 /// Drops a reasoning model's `<think>…</think>` and a Markdown fence around
 /// the whole answer.
 pub(crate) fn clean_answer(text: &str) -> String {
@@ -229,7 +209,6 @@ pub(crate) fn clean_answer(text: &str) -> String {
         .unwrap_or(trimmed);
     unfenced.trim().to_string()
 }
-
 pub(crate) fn parse_response(
     provider: ProviderId,
     status: u16,
@@ -302,7 +281,6 @@ pub(crate) fn parse_response(
         )),
     }
 }
-
 fn http() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("MYLE-GitHub-Releases")
@@ -311,7 +289,6 @@ fn http() -> Result<reqwest::Client, String> {
         .build()
         .map_err(|error| error.to_string())
 }
-
 pub(crate) async fn send(
     client: &reqwest::Client,
     provider: ProviderId,
@@ -346,7 +323,6 @@ pub(crate) async fn send(
     let body = response.text().await.unwrap_or_default();
     parse_response(provider, status, retry_after.as_deref(), &body)
 }
-
 /// Whether `provider` can be used: it has a key (Ollama: it is switched on).
 pub(crate) fn ready(settings: &AiSettings, provider: ProviderId) -> bool {
     match provider {
@@ -354,7 +330,6 @@ pub(crate) fn ready(settings: &AiSettings, provider: ProviderId) -> bool {
         _ => super::secrets::ai_key(provider).is_some(),
     }
 }
-
 /// The providers that can be used, in the user's order.
 pub(crate) fn ready_order(
     settings: &AiSettings,
@@ -367,13 +342,11 @@ pub(crate) fn ready_order(
         .filter(|p| is_ready(*p))
         .collect()
 }
-
 /// The provider after `provider` in `order`.
 pub(crate) fn next_after(order: &[ProviderId], provider: ProviderId) -> Option<ProviderId> {
     let index = order.iter().position(|p| *p == provider)?;
     order.get(index + 1).copied()
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Answer {
@@ -381,7 +354,6 @@ pub struct Answer {
     pub provider: ProviderId,
     pub model: String,
 }
-
 /// Asks `provider` (the first ready one when `None`). A failure carries the
 /// next ready provider in `data.next`, for the page to offer.
 pub(crate) async fn complete(
@@ -445,7 +417,6 @@ pub(crate) async fn complete(
         }
     }
 }
-
 /// Checks a key by listing the models it may use.
 pub(crate) async fn check_key(
     settings: &AiSettings,
@@ -481,7 +452,6 @@ pub(crate) async fn check_key(
         )),
     }
 }
-
 /// The models Ollama has (for the settings' model list).
 pub(crate) async fn ollama_models(settings: &AiSettings) -> Result<Vec<String>, String> {
     let url = format!("{}/models", base_url(settings, ProviderId::Ollama));
@@ -500,13 +470,10 @@ pub(crate) async fn ollama_models(settings: &AiSettings) -> Result<Vec<String>, 
         })
         .unwrap_or_default())
 }
-
 // ─── Prompts ───────────────────────────────────────────────────────────────
-
 /// Most of a diff a request carries (Groq's free tier allows ~8,000 tokens a
 /// minute, so the whole prompt stays well under it).
 pub(crate) const MAX_DIFF_CHARS: usize = 14_000;
-
 /// `diff` cut to `max` characters, each file keeping its share so one huge
 /// file doesn't push the others out.
 pub(crate) fn trim_diff(diff: &str, max: usize) -> String {
@@ -537,9 +504,7 @@ pub(crate) fn trim_diff(diff: &str, max: usize) -> String {
     }
     out
 }
-
 pub(crate) const COMMIT_SYSTEM: &str = "You write git commit messages. Reply with the message only: a subject line of at most 72 characters in the imperative mood, then, only if it helps, a blank line and a few short bullet points. Follow the style of the project's recent commit subjects when they are given. No Markdown headings, no code fences, no quotes around the message.";
-
 pub(crate) fn commit_prompt(stat: &str, diff: &str, recent: &[String]) -> String {
     let mut prompt = String::new();
     if !recent.is_empty() {
@@ -555,9 +520,7 @@ pub(crate) fn commit_prompt(stat: &str, diff: &str, recent: &[String]) -> String
     prompt.push_str(&trim_diff(diff, MAX_DIFF_CHARS));
     prompt
 }
-
 pub(crate) const NOTES_SYSTEM: &str = "You write release notes for a GitHub release, for the people who use the app. Reply in exactly this form:\nTITLE: <a short title for the release, without the version number>\n---\n<the notes in Markdown: short sections such as ### New, ### Improved, ### Fixed, with one bullet per user-visible change, plain words, no commit hashes>\nLeave out sections that would be empty and changes users can't notice (refactors, CI, tests, version bumps).";
-
 pub(crate) fn notes_prompt(
     project: &str,
     version: &str,
@@ -583,11 +546,8 @@ pub(crate) fn notes_prompt(
     }
     prompt
 }
-
 pub(crate) const POLISH_SYSTEM: &str = "You tidy up release notes written by a developer: fix spelling and grammar, group the points under short Markdown sections (### New, ### Improved, ### Fixed) where that fits, and keep every fact. Reply in exactly this form:\nTITLE: <a short title without the version number>\n---\n<the notes in Markdown>";
-
 pub(crate) const COMBINE_SYSTEM: &str = "You merge the notes of several GitHub releases into the notes of one release that replaces them. Keep every user-visible change once (drop duplicates and changes later reverted), group them under short Markdown sections (### New, ### Improved, ### Fixed). Reply in exactly this form:\nTITLE: <a short title without the version number>\n---\n<the notes in Markdown>";
-
 /// Splits `TITLE: …\n---\n<notes>`; an answer without the form is all notes.
 pub(crate) fn split_title(answer: &str) -> (Option<String>, String) {
     let text = answer.trim();
@@ -607,13 +567,11 @@ pub(crate) fn split_title(answer: &str) -> (Option<String>, String) {
         notes.trim().to_string(),
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-
     #[test]
     fn requests_are_built_alike_for_every_provider() {
         let settings = AiSettings::default();
@@ -652,7 +610,6 @@ mod tests {
         assert_eq!(model(&custom, ProviderId::Ollama), "qwen3");
         assert_eq!(model(&custom, ProviderId::Gemini), "gemini-flash-latest");
     }
-
     #[test]
     fn answers_and_failures_are_read() {
         let ok = r#"{"choices":[{"message":{"content":"<think>hmm</think>\n```text\nFix the login button\n```"},"finish_reason":"stop"}]}"#;
@@ -728,7 +685,6 @@ mod tests {
                 .contains("ran out of room")
         );
     }
-
     #[test]
     fn the_next_provider_follows_the_users_order() {
         let settings = AiSettings {
@@ -743,7 +699,6 @@ mod tests {
         );
         assert_eq!(next_after(&order, ProviderId::Groq), None);
     }
-
     /// A one-shot HTTP server: answers `response` and hands back the request.
     fn mock(
         status: &'static str,
@@ -789,7 +744,6 @@ mod tests {
         });
         (url, handle)
     }
-
     #[test]
     fn a_mock_server_sees_the_key_once_and_a_429_is_reported() {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -826,7 +780,6 @@ mod tests {
                 .contains("authorization: bearer gsk_test_key_123")
         );
         assert!(seen.contains("\"model\":\"openai/gpt-oss-120b\""));
-
         let (url, server) = mock(
             "200 OK",
             "",
@@ -845,7 +798,6 @@ mod tests {
                 .contains("authorization")
         );
     }
-
     #[test]
     fn diffs_are_trimmed_fairly_and_titles_split() {
         let big = format!(

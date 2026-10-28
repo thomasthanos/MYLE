@@ -18,9 +18,7 @@
   );
   /** The backend lists at most this many of a game's save folders. */
   const PATHS_LISTED = 8;
-  /** The folder a game's save folders are all in: "…/DeathStrandingDC/1122762396"
-   *  for its eight autosave folders, rather than the first one and "+7",
-   *  which read as seven changes. Nothing when they share only the drive. */
+  /* The folder a game's save folders are all in: "…/DeathStrandingDC/1122762396" for its eight autosave folders, rather than the first one and "+7", which read as seven changes. Nothing when they share only the drive. */
   function commonFolder(paths: string[]): string | null {
     const split = paths.map((path) => path.split(/[\\/]/));
     const first = split[0] ?? [];
@@ -36,8 +34,7 @@
   const folderCount = $derived(
     game.paths.length > 1 ? `${game.paths.length >= PATHS_LISTED ? `${PATHS_LISTED}+` : game.paths.length} folders` : null,
   );
-  /** Two letters and a colour of its own for each game, so the list is not
-   *  one icon repeated: "AC" for Assassin's Creed. */
+  /* Two letters and a colour of its own for each game, so the list is not one icon repeated: "AC" for Assassin's Creed. */
   const monogram = $derived.by(() => {
     const words = game.title.match(/[\p{L}\p{N}]+/gu) ?? ["?"];
     const letters = (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
@@ -148,8 +145,7 @@
   </div>
 </article>
 <style>
-  /* Identity takes what is left; the stats keep the same widths on every
-     row, so the columns line up down the list. */
+  /* Identity takes what is left; the stats keep the same widths on every row, so the columns line up down the list. */
   .card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "check identity stats actions"; align-items: center; gap: 6px 14px; min-width: 0; padding: 7px 12px; transition: border-color var(--dur-fast), background var(--dur-fast); }
   .card:hover { border-color: rgb(255 255 255 / 0.11); }
   .card.selected { border-color: rgb(var(--accent-rgb) / 0.34); background: linear-gradient(180deg, rgb(var(--accent-rgb) / 0.085), rgb(var(--accent-rgb) / 0.025)); }

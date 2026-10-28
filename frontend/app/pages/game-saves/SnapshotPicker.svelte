@@ -126,8 +126,7 @@
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
-  /* The game list scrolls, not the glass element: an overflow on it clips
-     the glass rim (see BiosRestartDialog). */
+  /* The game list scrolls, not the glass element: an overflow on it clips the glass rim (see BiosRestartDialog). */
   .dialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 15px; width: min(680px, 100%); max-height: calc(100vh - 48px); padding: 20px; border-radius: var(--radius-xl); }
 
   header { display: flex; align-items: flex-start; gap: 10px; }

@@ -29,11 +29,9 @@
   /** Emptied since the last scan: off until the next one measures it again. */
   const done = $derived(cleanerState.isCleaned(category.id));
   const outcome = $derived(cleanerState.outcome[category.id]);
-  /** Cleaned, but not everything could go: files in use, or system files
-   *  without administrator approval. */
+  /* Cleaned, but not everything could go: files in use, or system files without administrator approval. */
   const partly = $derived(done && (measured?.bytes ?? 0) > 0);
-  /** The bytes the run could not remove; an administrator pass already replaced
-   *  its part of `skippedBytes` and zeroed `adminSkippedBytes`. */
+  /* The bytes the run could not remove; an administrator pass already replaced its part of `skippedBytes` and zeroed `adminSkippedBytes`. */
   const remaining = $derived(done ? Math.max(outcome?.skippedBytes ?? 0, partly ? (measured?.bytes ?? 0) : 0) : 0);
   const adminBytes = $derived(Math.min(remaining, outcome?.adminSkippedBytes ?? 0));
   const inUse = $derived(Math.max(0, remaining - adminBytes));

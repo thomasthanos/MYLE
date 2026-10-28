@@ -5,9 +5,7 @@ import { createRequire } from "node:module";
 import vm from "node:vm";
 import { compileModule } from "svelte/compiler";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
-
-// Exercise the component's real lifecycle and callbacks, without invoking an
-// OS pin dialog or needing a DOM for its presentation-only markup.
+// Exercise the component's real lifecycle and callbacks, without invoking an OS pin dialog or needing a DOM for its presentation-only markup.
 const component = readFileSync(new URL("../../frontend/lib/components/TaskbarPin.svelte", import.meta.url), "utf8");
 const source = component.match(/<script lang="ts">([\s\S]*?)<\/script>/)[1].replace(/^\s*import[^;]*;\r?\n/gm, "");
 const transpile = (text, module = ModuleKind.ESNext) => transpileModule(text, { compilerOptions: { target: ScriptTarget.ESNext, module } }).outputText;
@@ -22,7 +20,6 @@ globalThis.pinView = {
 const code = transpile(compileModule(transpile(source) + exposeState, { filename: "taskbar-choice.svelte.js", generate: "client" }).js.code, ModuleKind.CommonJS);
 const require = createRequire(import.meta.url);
 const tick = () => new Promise(setImmediate);
-
 async function harness({ pending = true, supported = true, requestAfterSetup = false, focused = true, pinned = true, pinResults, pinError } = {}) {
   let mount, onFocus;
   const calls = [], notices = [];
@@ -48,14 +45,12 @@ async function harness({ pending = true, supported = true, requestAfterSetup = f
   await tick();
   return { pin: context.pinView, calls, notices, focus: (value) => onFocus({ payload: value }), unmount };
 }
-
 test("regular launches and updates never request a pin automatically", async () => {
   const h = await harness();
   h.focus(true); await tick();
   assert.deepEqual(h.calls, ["taskbar_pin_offer"]);
   assert.equal(h.pin.offer.pending, true);
 });
-
 test("a checked setup taskbar choice requests Windows confirmation once after focus", async () => {
   const h = await harness({ requestAfterSetup: true, focused: false });
   assert.deepEqual(h.calls, ["taskbar_pin_offer"]);
@@ -64,25 +59,21 @@ test("a checked setup taskbar choice requests Windows confirmation once after fo
   assert.equal(h.pin.offer, null);
   assert.equal(h.notices[0].kind, "success");
 });
-
 test("a setup launch that is already focused also opens the confirmation", async () => {
   const h = await harness({ requestAfterSetup: true });
   assert.deepEqual(h.calls, ["taskbar_pin_offer", "taskbar_pin"]);
 });
-
 test("an opted-out or already handled request never pins", async () => {
   const h = await harness({ pending: false, requestAfterSetup: true });
   h.focus(true); await tick();
   assert.deepEqual(h.calls, ["taskbar_pin_offer"]);
 });
-
 test("unsupported Windows keeps the manual instructions without invoking the API", async () => {
   const h = await harness({ supported: false, requestAfterSetup: true });
   h.focus(true); await tick();
   assert.deepEqual(h.calls, ["taskbar_pin_offer"]);
   assert.equal(h.pin.offer.supported, false);
 });
-
 test("a refused pin is not reported as success and can be retried explicitly", async () => {
   const h = await harness({ requestAfterSetup: true, pinned: false });
   assert.equal(h.pin.offer?.pending, true);
@@ -92,7 +83,6 @@ test("a refused pin is not reported as success and can be retried explicitly", a
   await h.pin.pin();
   assert.equal(h.calls.filter((call) => call === "taskbar_pin").length, 2);
 });
-
 test("Windows denying confirmation keeps the choice pending and shows the manual route", async () => {
   const h = await harness({ pinResults: [{ status: "notAllowed", reason: "unknown" }] });
   await h.pin.pin();
@@ -101,7 +91,6 @@ test("Windows denying confirmation keeps the choice pending and shows the manual
   assert.equal(h.notices.some((notice) => notice.kind === "success"), false);
   assert.equal(h.calls.includes("taskbar_pin_dismiss"), false);
 });
-
 test("a blocked setup request waits for an explicit retry after Windows settings change", async () => {
   const h = await harness({ requestAfterSetup: true, pinResults: [{ status: "notAllowed", reason: "unknown" }, { status: "pinned" }] });
   h.focus(false); h.focus(true); await tick();
@@ -112,7 +101,6 @@ test("a blocked setup request waits for an explicit retry after Windows settings
   assert.equal(h.pin.offer, null);
   assert.equal(h.notices.at(-1).kind, "success");
 });
-
 test("disabled pin consent notifications expose the settings action without recording a pin", async () => {
   const h = await harness({ pinResults: [{ status: "notAllowed", reason: "pinConsentNotificationsDisabled" }] });
   await h.pin.pin();
@@ -122,14 +110,12 @@ test("disabled pin consent notifications expose the settings action without reco
   assert.equal(h.pin.offer?.pending, true);
   assert.equal(h.notices.some((notice) => notice.kind === "success"), false);
 });
-
 test("an unidentified Windows denial does not claim notifications are disabled", async () => {
   const h = await harness({ pinResults: [{ status: "notAllowed", reason: "unknown" }] });
   await h.pin.pin();
   assert.equal(h.pin.manual, true);
   assert.equal(h.pin.notificationsDisabled, false);
 });
-
 test("a retry that reaches Windows confirmation removes the old notification warning", async () => {
   const h = await harness({ pinResults: [{ status: "notAllowed", reason: "pinConsentNotificationsDisabled" }, { status: "notPinned" }] });
   await h.pin.pin();
@@ -140,7 +126,6 @@ test("a retry that reaches Windows confirmation removes the old notification war
   assert.equal(h.pin.offer?.pending, true);
   assert.equal(h.notices.at(-1).kind, "info");
 });
-
 test("an unexpected pin error keeps the suggestion available without reporting success", async () => {
   const h = await harness({ pinError: "The MYLE window is not open." });
   await h.pin.pin();
@@ -148,7 +133,6 @@ test("an unexpected pin error keeps the suggestion available without reporting s
   assert.equal(h.notices.at(-1).kind, "error");
   assert.equal(h.notices.some((notice) => notice.kind === "success"), false);
 });
-
 test("dismissing records the decision and closes the suggestion", async () => {
   const h = await harness();
   await h.pin.dismiss();

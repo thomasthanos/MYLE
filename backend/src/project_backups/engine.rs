@@ -1,34 +1,27 @@
-//! One project's backup from start to finish, the list of its backups, and
-//! the preview of what a backup would hold.
-
+// ! One project's backup from start to finish, the list of its backups, and ! the preview of what a backup would hold.
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-
 use serde::Serialize;
 use serde_json::json;
-
 use super::archive::{self, MIN_ZIP_SIZE, ZipJob};
 use super::naming;
 use super::rules::{BACKUP_INFO_FILE, RuleInput, Rules};
 use super::store::{Project, inside, valid_file_name};
 use super::walk;
 use super::{Failure, Sink, Stage};
-
 /// `__partial__` files younger than this may belong to a backup running in
 /// backup_projects right now.
 const STALE_PARTIAL: Duration = Duration::from_secs(60 * 60);
 /// Missing files named in an error message.
 const NAMED_MISSING: usize = 8;
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkippedItem {
     pub path: String,
     pub reason: String,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupOutcome {
@@ -53,7 +46,6 @@ pub struct BackupOutcome {
     /// Files an increment records as deleted.
     pub deleted_count: usize,
 }
-
 pub(crate) struct BackupRequest<'a> {
     pub project: &'a Project,
     pub rules: RuleInput,
@@ -62,7 +54,6 @@ pub(crate) struct BackupRequest<'a> {
     pub app_version: &'a str,
     pub delays: &'a [u64],
 }
-
 /// `<backup root>\<AppName>`, refusing names that would leave the root.
 pub(crate) fn app_dir(backup_root: &Path, app_name: &str) -> Result<PathBuf, Failure> {
     let dir = backup_root.join(app_name);
@@ -73,7 +64,6 @@ pub(crate) fn app_dir(backup_root: &Path, app_name: &str) -> Result<PathBuf, Fai
     }
     Ok(dir)
 }
-
 pub(crate) fn backup_project(
     request: &BackupRequest,
     sink: &dyn Sink,
@@ -92,14 +82,12 @@ pub(crate) fn backup_project(
     if let Some(staging) = request.staging {
         archive::clean_staging(staging);
     }
-
     let now = SystemTime::now();
     let local = naming::local(now);
     let version = naming::next_version(&app_dir, &project.app_name);
     let name = naming::backup_name(&project.app_name, local.day, version);
     let month_folder = naming::month_folder(local.year, local.month);
     let final_path = app_dir.join(&month_folder).join(format!("{name}.zip"));
-
     sink.stage(Stage::Scanning);
     let rules = Rules::compile(&request.rules, Some(&source)).map_err(Failure::Message)?;
     let mut skip_dirs = vec![request.backup_root.to_path_buf()];
@@ -154,7 +142,6 @@ pub(crate) fn backup_project(
     let info =
         serde_json::to_vec_pretty(&info).map_err(|error| Failure::Message(error.to_string()))?;
     let buffers = vec![(BACKUP_INFO_FILE.to_string(), info)];
-
     let mut completeness = |written: &archive::Written| -> Result<(), Failure> {
         sink.stage(Stage::CheckingCompleteness);
         let archived: HashSet<String> = written.manifest.keys().cloned().collect();
@@ -207,7 +194,6 @@ pub(crate) fn backup_project(
         deleted_count: 0,
     })
 }
-
 /// `{ reason: count }` of what a backup left out, for its info file.
 fn excluded_by_rule(found: &walk::Walk) -> serde_json::Map<String, serde_json::Value> {
     let mut counts = serde_json::Map::new();
@@ -219,9 +205,7 @@ fn excluded_by_rule(found: &walk::Walk) -> serde_json::Map<String, serde_json::V
     }
     counts
 }
-
 // ─── Listing ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupEntry {
@@ -241,12 +225,10 @@ pub struct BackupEntry {
     /// Too small to be a zip: a copy that never finished.
     pub broken: bool,
 }
-
 /// Every backup of `app_name`, newest first.
 pub(crate) fn list_backups(app_dir: &Path, app_name: &str) -> Vec<BackupEntry> {
     list_backups_checked(app_dir, app_name).unwrap_or_default()
 }
-
 /// A status check must distinguish an empty history from a listing it could
 /// not finish. In particular, a cloud folder's failed month listing must not
 /// silently hide its newest backup.
@@ -315,7 +297,6 @@ pub(crate) fn list_backups_checked(app_dir: &Path, app_name: &str) -> Result<Vec
     entries.sort_by(|a, b| b.version.cmp(&a.version).then(b.modified.cmp(&a.modified)));
     Ok(entries)
 }
-
 /// The path of the backup `id` of `app_name`, refusing anything else.
 pub(crate) fn resolve_backup(app_dir: &Path, app_name: &str, id: &str) -> Result<PathBuf, String> {
     let invalid = || format!("\"{id}\" is not a backup of this project.");
@@ -333,7 +314,6 @@ pub(crate) fn resolve_backup(app_dir: &Path, app_name: &str, id: &str) -> Result
     }
     Ok(path)
 }
-
 /// Which of two backups is the older one, by version and then date.
 pub(crate) fn older_first<'a>(
     a: &'a BackupEntry,
@@ -345,9 +325,7 @@ pub(crate) fn older_first<'a>(
         (b, a)
     }
 }
-
 // ─── Preview ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExcludedItem {
@@ -357,7 +335,6 @@ pub struct ExcludedItem {
     /// `pattern`, `detected`, `gitignore` or `internal`.
     pub kind: &'static str,
 }
-
 /// How many items one reason left out.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -367,7 +344,6 @@ pub struct RuleCount {
     pub folders: usize,
     pub files: usize,
 }
-
 /// One line of the "what will be backed up" tree, in display order.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -387,7 +363,6 @@ pub struct PreviewNode {
     /// Files of this folder not listed (the tree has a size limit).
     pub hidden_files: u64,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preview {
@@ -402,12 +377,10 @@ pub struct Preview {
     /// Files directly in the project folder not listed in the tree.
     pub tree_hidden_files: u64,
 }
-
 const PREVIEW_LIMIT: usize = 1000;
 /// Lines of the preview tree at most (folders and what is left out come
 /// first; files fill the rest).
 const TREE_LIMIT: usize = 4000;
-
 #[derive(Default)]
 struct TreeDir {
     size: u64,
@@ -418,7 +391,6 @@ struct TreeDir {
     /// (name, is_dir, why) left out directly inside.
     excluded: Vec<(String, bool, super::rules::Exclusion)>,
 }
-
 impl TreeDir {
     fn dir_mut(&mut self, parts: &[&str]) -> &mut TreeDir {
         let mut dir = self;
@@ -428,7 +400,6 @@ impl TreeDir {
         dir
     }
 }
-
 fn build_tree(found: &walk::Walk) -> (Vec<PreviewNode>, u64) {
     let mut root = TreeDir::default();
     for file in &found.files {
@@ -455,19 +426,16 @@ fn build_tree(found: &walk::Walk) -> (Vec<PreviewNode>, u64) {
             .excluded
             .push(((*name).to_string(), item.is_dir, item.why.clone()));
     }
-    // Folders and what is left out always fit (they are few); files fill
-    // what is left of the limit, shallow ones first.
+    // Folders and what is left out always fit (they are few); files fill what is left of the limit, shallow ones first.
     let structural = count_structural(&root);
     let mut budget = TREE_LIMIT.saturating_sub(structural);
     let mut out = Vec::new();
     let hidden = flatten(&root, "", 0, &mut budget, &mut out);
     (out, hidden)
 }
-
 fn count_structural(dir: &TreeDir) -> usize {
     dir.dirs.len() + dir.excluded.len() + dir.dirs.values().map(count_structural).sum::<usize>()
 }
-
 /// Adds the lines of `dir`'s content; returns how many of its own files
 /// did not fit.
 fn flatten(
@@ -563,7 +531,6 @@ fn flatten(
     }
     hidden
 }
-
 pub(crate) fn preview(
     source: &Path,
     input: &RuleInput,
@@ -641,20 +608,17 @@ pub(crate) fn preview(
         env_files,
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::project_backups::archive::tests::{Quiet, temp};
     use crate::project_backups::rules::DEFAULT_PATTERNS;
     use std::io::Read;
-
     fn put(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-
     fn input() -> RuleInput {
         RuleInput {
             patterns: DEFAULT_PATTERNS.iter().map(|p| p.to_string()).collect(),
@@ -662,14 +626,12 @@ mod tests {
             ..RuleInput::default()
         }
     }
-
     fn zip_names(path: &Path) -> Vec<String> {
         let mut archive = zip::ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
         (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect()
     }
-
     #[test]
     fn a_backup_lands_where_backup_projects_puts_it_and_numbering_continues() {
         let root = temp("engine");
@@ -682,8 +644,7 @@ mod tests {
         put(&source, "build/installer.nsh", "!define X");
         put(&source, "dist/app.exe", "exe");
         let backup_root = root.join("My Drive").join("Projects Backup");
-        // backup_projects made V7 last month (Greek month folder) and a
-        // folder backup V3 earlier.
+        // backup_projects made V7 last month (Greek month folder) and a folder backup V3 earlier.
         let app_dir = backup_root.join("steam_idler");
         put(&app_dir, "2025-12 Δεκέμβριος/steam_idler_D30_V7.zip", "PK");
         fs::create_dir_all(app_dir.join("2025-11 Νοέμβριος").join("steam_idler_D2_V3")).unwrap();
@@ -727,7 +688,6 @@ mod tests {
             ]
         );
         assert_eq!(outcome.file_count, 4);
-
         let mut archive = zip::ZipArchive::new(fs::File::open(&zip).unwrap()).unwrap();
         let mut text = String::new();
         archive
@@ -743,7 +703,6 @@ mod tests {
         assert_eq!(info["monthFolder"], outcome.month_folder);
         assert!(info["createdAt"].as_str().unwrap().ends_with('Z'));
         assert!(info["skipped"].as_array().unwrap().is_empty());
-
         // The list shows both apps' backups, newest first; the next one is V9.
         let list = list_backups(&app_dir, "steam_idler");
         let versions: Vec<u32> = list.iter().map(|entry| entry.version).collect();
@@ -764,7 +723,6 @@ mod tests {
         assert_eq!(fs::read_dir(&staging).unwrap().count(), 0);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_missing_project_folder_is_reported_as_such() {
         let root = temp("missing");
@@ -789,7 +747,6 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn backups_inside_the_project_are_not_backed_up_again() {
         let root = temp("nested");
@@ -819,7 +776,6 @@ mod tests {
         assert_eq!(names, [".backup-info.json", "a.txt"]);
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn the_preview_lists_what_is_left_out() {
         let root = temp("preview");
@@ -854,11 +810,9 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
-
     /// A zip made by backup_projects 2.0.6 (`createBackupZip`) from the
     /// project written below.
     const BACKUP_PROJECTS_ZIP: &[u8] = include_bytes!("testdata/backup_projects_2.0.6.zip");
-
     fn demo_project(root: &Path) {
         put(
             root,
@@ -876,7 +830,6 @@ mod tests {
         .unwrap();
         fs::create_dir_all(root.join("assets").join("empty")).unwrap();
     }
-
     #[test]
     fn backups_made_by_backup_projects_are_read_compared_and_continued() {
         use crate::project_backups::compare::{self, Side};
@@ -888,7 +841,6 @@ mod tests {
         fs::create_dir_all(&month).unwrap();
         let old_zip = month.join("demo_D5_V12.zip");
         fs::write(&old_zip, BACKUP_PROJECTS_ZIP).unwrap();
-
         // The zip reads back whole and holds the files and the info file.
         let check = archive::verify_zip(&old_zip, None, &Quiet).unwrap();
         assert_eq!(check.files, 6);
@@ -907,7 +859,6 @@ mod tests {
                 std::time::UNIX_EPOCH + Duration::from_millis(1_791_194_400_000 + 3 * 3_600_000),
             ))
         );
-
         // Same content as the project folder.
         let rules = Rules::compile(&input(), Some(&source)).unwrap();
         let same = compare::compare(
@@ -921,7 +872,6 @@ mod tests {
         .unwrap();
         assert!(same.changes.is_empty(), "{:?}", same.changes);
         assert_eq!(same.unchanged, 5);
-
         // MYLE's next backup is V13 in the same place, and matches it.
         let project = Project {
             id: "1".into(),
@@ -951,7 +901,6 @@ mod tests {
         )
         .unwrap();
         assert!(diff.changes.is_empty(), "{:?}", diff.changes);
-
         // A change in the project shows up against both.
         fs::write(
             source.join("src").join("main.js"),

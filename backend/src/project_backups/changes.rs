@@ -1,24 +1,4 @@
-//! Is a project's folder still what its newest backup holds?
-//!
-//! The folder is walked with the project's rules (what a backup would take)
-//! and paired with the newest backup's files. A file is new or gone by its
-//! name; changed when its size differs or, with the same size, when its
-//! CRC-32 differs. The CRC is read whenever the file may have changed: its
-//! date is not the one the backup recorded, or it was written after the
-//! backup started. A file that can't be read is counted apart, never as
-//! changed nor as the same. A false "No changes" is the one answer that must
-//! never be given, so anything unsure is read. A CRC read earlier is used
-//! again only while the file keeps the size and date it had then (see
-//! `crc_remembered`), as git's index does.
-//!
-//! Detection runs in the background for the whole app, page open or not: a
-//! watcher on the project folders checks a project once it has been quiet for
-//! a few seconds (a folder written to all the time: every minute and a half,
-//! as a check walks the whole folder), and every project is checked every
-//! few minutes (a missed
-//! event, a folder on a network or removable drive, which is never watched).
-//! The latest answers are kept here for the page and sent to it.
-
+// ! Is a project's folder still what its newest backup holds? ! ! The folder is walked with the project's rules (what a backup would take) ! and paired with the newest backup's files. A file is new or gone by its ! name; changed when its size differs or, with the same size, when its ! CRC-32 differs. The CRC is read whenever the file may have changed: its ! date is not the one the backup recorded, or it was written after the ! backup started. A file that can't be read is counted apart, never as ! changed nor as the same. A false "No changes" is the one answer that must ! never be given, so anything unsure is read. A CRC read earlier is used ! again only while the file keeps the size and date it had then (see ! `crc_remembered`), as git's index does. ! ! Detection runs in the background for the whole app, page open or not: a ! watcher on the project folders checks a project once it has been quiet for ! a few seconds (a folder written to all the time: every minute and a half, ! as a check walks the whole folder), and every project is checked every ! few minutes (a missed ! event, a folder on a network or removable drive, which is never watched). ! The latest answers are kept here for the page and sent to it.
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -27,15 +7,12 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
 use serde::Serialize;
 use zip::ZipArchive;
-
 use super::compare::{self, FileInfo, Recorded, Side};
 use super::rules::{BACKUP_INFO_FILE, Early, Rules, TreeListing, parent_of};
 use super::store::{LastBackup, Project, Settings};
 use super::{archive, engine, incremental, store, walk};
-
 /// At most this many files are listed per project (the counts are whole).
 const LIST_LIMIT: usize = 300;
 /// A file written this long before a backup started may still be newer than
@@ -43,7 +20,6 @@ const LIST_LIMIT: usize = 300;
 const MARGIN: Duration = Duration::from_secs(2);
 /// When the backup does not say when it started: this long before its date.
 const NO_START_MARGIN: Duration = Duration::from_secs(60 * 60);
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeState {
@@ -57,7 +33,6 @@ pub enum ChangeState {
     /// The check failed; `message` says why.
     Error,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedFile {
@@ -66,7 +41,6 @@ pub struct ChangedFile {
     pub status: &'static str,
     pub size: Option<u64>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectChanges {
@@ -87,7 +61,6 @@ pub struct ProjectChanges {
     /// Why the check failed, or what can't be reached.
     pub message: Option<String>,
 }
-
 impl ProjectChanges {
     fn new(project_id: &str, state: ChangeState) -> ProjectChanges {
         ProjectChanges {
@@ -104,18 +77,14 @@ impl ProjectChanges {
         }
     }
 }
-
 struct Cached {
     fingerprint: u64,
     result: ProjectChanges,
 }
-
 /// The last answer of each project, by the walk that gave it.
 static CACHE: LazyLock<Mutex<HashMap<String, Cached>>> = LazyLock::new(Default::default);
-
 /// A backup's files by normalized name, shared between checks.
 type Files = Arc<BTreeMap<String, FileInfo>>;
-
 /// The newest backup's files, read once per backup: a cloud zip is read
 /// again only when it is replaced.
 struct Listing {
@@ -126,20 +95,15 @@ struct Listing {
     /// When the backup started, as its `.backup-info.json` says.
     started: Option<SystemTime>,
 }
-
 static LISTINGS: LazyLock<Mutex<HashMap<String, Listing>>> = LazyLock::new(Default::default);
-
 /// The latest answer of each project, for the page.
 static RESULTS: LazyLock<Mutex<HashMap<String, ProjectChanges>>> = LazyLock::new(Default::default);
-
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
-
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
 /// CRCs read before, by file, while the file keeps its size and date. A
 /// project being edited is checked every few seconds: without these, every
 /// file whose date differs from the backup's was read again each time.
@@ -148,7 +112,6 @@ static CRCS: LazyLock<Mutex<HashMap<PathBuf, KnownCrc>>> = LazyLock::new(Default
 type KnownCrc = (u64, SystemTime, u32);
 /// At most this many are kept (about 100 bytes each); then they start over.
 const CRCS_KEPT: usize = 200_000;
-
 /// The CRC of a file of this size and date: remembered from an earlier read
 /// when neither changed since. A read is remembered only when the file kept
 /// its size and date through it, and its date is well before the read: a
@@ -174,7 +137,6 @@ fn crc_remembered(path: &Path, size: u64, modified: Option<SystemTime>) -> Optio
     }
     Some(crc)
 }
-
 pub(crate) fn crc_of(path: &Path) -> Option<u32> {
     let mut file = File::open(path).ok()?;
     let mut hasher = crc32fast::Hasher::new();
@@ -188,7 +150,6 @@ pub(crate) fn crc_of(path: &Path) -> Option<u32> {
     }
     Some(hasher.finalize())
 }
-
 /// The CRC of a file of the backup: stored in a zip, read for a folder one.
 fn backup_crc(side: &Side, info: &FileInfo) -> Option<u32> {
     match side {
@@ -200,7 +161,6 @@ fn backup_crc(side: &Side, info: &FileInfo) -> Option<u32> {
         }
     }
 }
-
 /// Folders a walk of the project never enters: the backups themselves (a
 /// project folder may hold the cloud folder) and MYLE's staging folder.
 pub(crate) fn skip_dirs(settings: &Settings) -> Vec<PathBuf> {
@@ -209,7 +169,6 @@ pub(crate) fn skip_dirs(settings: &Settings) -> Vec<PathBuf> {
     skip.extend(archive::staging_dir());
     skip
 }
-
 /// Checks one project (its answer is kept for the page). `fresh`: compare
 /// again even when the folder looks as it did at the last check.
 pub(crate) fn check(settings: &Settings, project: &Project, fresh: bool) -> ProjectChanges {
@@ -217,7 +176,6 @@ pub(crate) fn check(settings: &Settings, project: &Project, fresh: bool) -> Proj
     remember(std::slice::from_ref(&result));
     result
 }
-
 pub(crate) fn check_with(
     settings: &Settings,
     project: &Project,
@@ -234,14 +192,12 @@ pub(crate) fn check_with(
     }
     result
 }
-
 /// Where a project's backups are: `Ok(None)` when none can exist yet.
 pub(crate) fn backups_folder(settings: &Settings, project: &Project) -> Result<Option<PathBuf>, ChangeState> {
     let Some(root) = settings.backup_root() else {
         return Ok(None);
     };
-    // The cloud folder itself missing is the cloud app not running (or a
-    // drive not there): what the backups hold is unknown, not empty.
+    // The cloud folder itself missing is the cloud app not running (or a drive not there): what the backups hold is unknown, not empty.
     if !root.parent().is_some_and(Path::is_dir) {
         return Err(ChangeState::Unreachable);
     }
@@ -254,7 +210,6 @@ pub(crate) fn backups_folder(settings: &Settings, project: &Project) -> Result<O
         Err(_) => Err(ChangeState::Unreachable),
     }
 }
-
 fn latest_full(dir: &Path, app_name: &str) -> Result<Option<(engine::BackupEntry, PathBuf)>, String> {
     let Some(entry) = engine::list_backups_checked(dir, app_name)?.into_iter().next() else {
         return Ok(None);
@@ -265,7 +220,6 @@ fn latest_full(dir: &Path, app_name: &str) -> Result<Option<(engine::BackupEntry
     let path = engine::resolve_backup(dir, app_name, &entry.id)?;
     Ok(Some((entry, path)))
 }
-
 /// Rebuild the local history projection from the surviving backup metadata.
 /// The mirror imported on a clean install holds configuration only. Never
 /// derive this record from today's source or turn discovery into a backup
@@ -307,7 +261,6 @@ pub(crate) fn recover_history(settings: &mut Settings) {
         }
     }
 }
-
 fn examine(
     settings: &Settings,
     project: &Project,
@@ -332,14 +285,12 @@ fn examine(
     let rules = Rules::compile(&settings.rule_input(Some(project)), Some(&source))?;
     let found = walk::walk(&source, &rules, skip_dirs, &|| false)?;
     let latest = dir.as_ref().map(|dir| latest_full(dir, &project.app_name)).transpose()?.flatten();
-    // The newest increment on that backup, if any: the project as last
-    // backed up is what it records.
+    // The newest increment on that backup, if any: the project as last backed up is what it records.
     let increment = latest
         .as_ref()
         .zip(dir.as_ref())
         .map(|((entry, _), dir)| incremental::checked_chain(dir, entry))
         .transpose()?.and_then(|mut chain| chain.pop());
-
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for file in &found.files {
         file.rel.hash(&mut hasher);
@@ -362,7 +313,6 @@ fn examine(
             return Ok(());
         }
     }
-
     let Some((entry, path)) = latest else {
         result.state = ChangeState::NoBackup;
         result.added = found.files.len();
@@ -396,7 +346,6 @@ fn examine(
     store_cache(&project.id, fingerprint, result);
     Ok(())
 }
-
 /// The newest backup's files and start, from the cache while it is the same
 /// backup (same name, size and date).
 fn listing(
@@ -426,13 +375,11 @@ fn listing(
     );
     Ok((files, started))
 }
-
 /// `.backup-info.json` at the top of a backup, or inside its one folder.
 fn is_info_name(name: &str) -> bool {
     let key = compare::normalize_name(name);
     key == BACKUP_INFO_FILE || key.split_once('/').is_some_and(|(_, rest)| rest == BACKUP_INFO_FILE)
 }
-
 /// When the backup started: the `timestamp` its `.backup-info.json` holds
 /// (MYLE and backup_projects both write the start, in Unix milliseconds).
 fn backup_started(side: &Side) -> Option<SystemTime> {
@@ -452,7 +399,6 @@ fn backup_started(side: &Side) -> Option<SystemTime> {
     let ms = stamp.as_u64().or_else(|| stamp.as_f64().filter(|ms| *ms >= 0.0).map(|ms| ms as u64))?;
     (ms > 0).then(|| UNIX_EPOCH + Duration::from_millis(ms))
 }
-
 /// Whether a same-size file's content has to be read: its date is not the
 /// one the backup recorded, or it was written after the backup started.
 pub(crate) fn may_differ(info: &FileInfo, modified: Option<SystemTime>, reference: Option<SystemTime>) -> bool {
@@ -474,7 +420,6 @@ pub(crate) fn may_differ(info: &FileInfo, modified: Option<SystemTime>, referenc
         None => true,
     }
 }
-
 /// Pairs the backup's files with the folder's and counts the differences.
 fn compare_files(
     old: &BTreeMap<String, FileInfo>,
@@ -493,8 +438,7 @@ fn compare_files(
     }
     let names = |keys: Vec<&String>| keys.into_iter().map(|k| (k.clone(), ())).collect::<BTreeMap<_, _>>();
     let pairs = compare::match_files(&names(old.keys().collect()), &names(new.keys().collect()));
-    // What the folders hold on both sides tells build output from sources, as
-    // for a comparison: a backup's file the rules now leave out is not "gone".
+    // What the folders hold on both sides tells build output from sources, as for a comparison: a backup's file the rules now leave out is not "gone".
     let listing = TreeListing::from_paths(pairs.keys().map(String::as_str));
     let mut files = Vec::new();
     for (display, pair) in &pairs {
@@ -542,11 +486,9 @@ fn compare_files(
         ChangeState::Changed
     };
 }
-
 fn store_cache(project_id: &str, fingerprint: u64, result: &ProjectChanges) {
     lock(&CACHE).insert(project_id.to_string(), Cached { fingerprint, result: result.clone() });
 }
-
 /// Keeps the answers for the page: an answer never replaces a later one.
 fn remember(results: &[ProjectChanges]) {
     let mut kept = lock(&RESULTS);
@@ -556,15 +498,12 @@ fn remember(results: &[ProjectChanges]) {
         }
     }
 }
-
 /// The latest answer of every project still in the list.
 pub(crate) fn latest(settings: &Settings) -> Vec<ProjectChanges> {
     let kept = lock(&RESULTS);
     settings.projects.iter().filter_map(|project| kept.get(&project.id).cloned()).collect()
 }
-
 // ─── Detecting in the background ────────────────────────────────────────────
-
 /// Event name: the answers of a background check (`ProjectChanges[]`).
 pub const RESULTS_EVENT: &str = "project-backups-changes";
 /// Every project is checked this often, events or not.
@@ -578,7 +517,6 @@ const AT_MOST: Duration = Duration::from_secs(90);
 /// While a backup runs, checks wait (they would read what it writes).
 const BUSY_WAIT: Duration = Duration::from_secs(2);
 const STARTUP_DELAY: Duration = Duration::from_secs(5);
-
 enum Signal {
     Paths(Vec<PathBuf>),
     /// The watcher lost events (its buffer overflowed): every project.
@@ -588,9 +526,7 @@ enum Signal {
     /// The project list changed: watch again and check everything.
     Rewatch,
 }
-
 static DETECTOR: LazyLock<Mutex<Option<Sender<Signal>>>> = LazyLock::new(Default::default);
-
 /// Starts detecting changes, once for the app; later calls watch the
 /// folders again (the project list changed) and check every project.
 pub(crate) fn start(app: tauri::AppHandle) -> Result<(), String> {
@@ -609,21 +545,18 @@ pub(crate) fn start(app: tauri::AppHandle) -> Result<(), String> {
     *detector = Some(sender);
     Ok(())
 }
-
 /// Checks these projects again soon: right after a backup of them.
 pub(crate) fn recheck(project_ids: Vec<String>) {
     if let Some(sender) = lock(&DETECTOR).as_ref() {
         let _ = sender.send(Signal::Check(project_ids));
     }
 }
-
 /// A watched project folder and its exclusions (the patterns only: cheap).
 struct Root {
     id: String,
     path: PathBuf,
     rules: Rules,
 }
-
 fn watch_roots(settings: &Settings) -> Vec<Root> {
     settings
         .projects
@@ -637,12 +570,10 @@ fn watch_roots(settings: &Settings) -> Vec<Root> {
         .filter(|root| root.path.is_dir())
         .collect()
 }
-
 /// Every project whose folder holds `path` (projects may be nested).
 fn owners<'a>(path: &Path, roots: &'a [Root]) -> Vec<&'a Root> {
     roots.iter().filter(|root| path.starts_with(&root.path)).collect()
 }
-
 /// Whether a write at `rel` (inside a project) may change its backup: not
 /// when a folder above it is left out by the exclusions (`node_modules`,
 /// `.git`), unless a keep pattern holds it. Anything undecided counts.
@@ -659,7 +590,6 @@ fn relevant(rel: &str, rules: &Rules) -> bool {
     }
     !excluded
 }
-
 /// Projects waiting to be checked after writes in their folders.
 #[derive(Default)]
 struct Debouncer {
@@ -668,7 +598,6 @@ struct Debouncer {
     last: Option<Instant>,
     now: bool,
 }
-
 impl Debouncer {
     /// A relevant write in `id`'s folder at `at`.
     fn touch(&mut self, at: Instant, id: &str) {
@@ -678,7 +607,6 @@ impl Debouncer {
         self.first.get_or_insert(at);
         self.last = Some(at);
     }
-
     /// Checked as soon as possible.
     fn soon(&mut self, at: Instant, ids: Vec<String>) {
         for id in ids {
@@ -686,7 +614,6 @@ impl Debouncer {
         }
         self.now = true;
     }
-
     fn due_at(&self) -> Option<Instant> {
         if self.pending.is_empty() {
             return None;
@@ -698,18 +625,15 @@ impl Debouncer {
         let last = self.last.unwrap_or(first);
         Some((last + QUIET_FOR).min(first + AT_MOST))
     }
-
     fn due(&self, now: Instant) -> bool {
         self.due_at().is_some_and(|at| now >= at)
     }
-
     fn take(&mut self) -> Vec<String> {
         let pending = std::mem::take(&mut self.pending);
         *self = Debouncer::default();
         pending
     }
 }
-
 /// Folders on removable or network drives are not watched (a watch keeps
 /// the drive in use, so it could not be ejected): the periodic check covers them.
 #[cfg(windows)]
@@ -729,12 +653,10 @@ fn watchable(path: &Path) -> bool {
     let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
     !matches!(kind, DRIVE_REMOVABLE | DRIVE_REMOTE)
 }
-
 #[cfg(not(windows))]
 fn watchable(_path: &Path) -> bool {
     true
 }
-
 fn watcher_for(roots: &[Root], sender: Sender<Signal>) -> Option<notify::RecommendedWatcher> {
     use notify::{RecursiveMode, Watcher};
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -749,7 +671,6 @@ fn watcher_for(roots: &[Root], sender: Sender<Signal>) -> Option<notify::Recomme
     }
     Some(watcher)
 }
-
 fn detect(app: tauri::AppHandle, sender: Sender<Signal>, receiver: Receiver<Signal>) {
     use tauri::Manager;
     let busy = || app.state::<super::state::ProjectBackupsState>().is_running();
@@ -790,8 +711,7 @@ fn detect(app: tauri::AppHandle, sender: Sender<Signal>, receiver: Receiver<Sign
                     }
                 }
             }
-            // Every project, soon; however often the watcher fails, at
-            // most one check of them all per `AT_MOST`.
+            // Every project, soon; however often the watcher fails, at most one check of them all per `AT_MOST`.
             Ok(Signal::Lost) => check_all_at = check_all_at.min(Instant::now() + AT_MOST),
             Ok(Signal::Check(ids)) => debouncer.soon(Instant::now(), ids),
             Ok(Signal::Rewatch) => {
@@ -818,7 +738,6 @@ fn detect(app: tauri::AppHandle, sender: Sender<Signal>, receiver: Receiver<Sign
         check_and_tell(&app, ids);
     }
 }
-
 /// Checks `ids` (every project: `None`) and sends the answers to the page.
 fn check_and_tell(app: &tauri::AppHandle, ids: Option<Vec<String>>) {
     use tauri::Emitter;
@@ -840,14 +759,12 @@ fn check_and_tell(app: &tauri::AppHandle, ids: Option<Vec<String>>) {
         let _ = app.emit(RESULTS_EVENT, &results);
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::project_backups::archive::tests::{Quiet, temp};
     use crate::project_backups::compare::tests::make_zip;
     use crate::project_backups::engine::{BackupRequest, backup_project};
-
     #[test]
     #[ignore = "reads this PC's projects and their backups; changes nothing"]
     fn this_pc_s_projects_check_time() {
@@ -875,12 +792,10 @@ mod tests {
         }
     }
     use std::fs;
-
     struct Scene {
         root: PathBuf,
         settings: Settings,
     }
-
     impl Scene {
         fn new(name: &str) -> Scene {
             let root = temp(&format!("changes-{name}"));
@@ -901,18 +816,15 @@ mod tests {
             };
             Scene { root, settings }
         }
-
         fn source(&self) -> PathBuf {
             self.root.join("source")
         }
-
         fn write(&self, rel: &str, body: &[u8]) -> PathBuf {
             let path = self.source().join(rel);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(&path, body).unwrap();
             path
         }
-
         fn backup(&self) -> PathBuf {
             let project = &self.settings.projects[0];
             let backup_root = self.settings.backup_root().unwrap();
@@ -926,24 +838,20 @@ mod tests {
             };
             PathBuf::from(backup_project(&request, &Quiet).unwrap().zip_path)
         }
-
         fn check(&self) -> ProjectChanges {
             let project = &self.settings.projects[0];
             // Every check compares again: these tests change files in place.
             check_with(&self.settings, project, &skip_dirs(&self.settings), true)
         }
     }
-
     impl Drop for Scene {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
-
     fn set_modified(path: &Path, at: SystemTime) {
         File::options().write(true).open(path).unwrap().set_modified(at).unwrap();
     }
-
     #[test]
     fn a_crc_is_used_again_only_while_the_file_keeps_its_size_and_date() {
         let dir = temp("crc-remembered");
@@ -965,7 +873,6 @@ mod tests {
         assert_ne!(lock(&CRCS)[&path].1, now);
         let _ = std::fs::remove_dir_all(dir);
     }
-
     #[test]
     fn an_edit_made_while_the_backup_was_copied_is_a_change() {
         let scene = Scene::new("during");
@@ -981,7 +888,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Changed, "{result:?}");
         assert_eq!((result.added, result.modified, result.deleted), (0, 1, 0));
     }
-
     #[test]
     fn an_older_file_put_back_with_its_old_date_is_a_change() {
         let scene = Scene::new("older");
@@ -993,7 +899,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Changed, "{result:?}");
         assert_eq!(result.modified, 1);
     }
-
     #[test]
     fn a_folder_as_it_was_backed_up_has_no_changes() {
         let scene = Scene::new("same");
@@ -1004,7 +909,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::UpToDate, "{result:?}");
         assert_eq!(result.unreadable, 0);
     }
-
     #[test]
     fn a_cloud_folder_out_of_reach_is_not_a_project_without_backups() {
         let mut scene = Scene::new("offline");
@@ -1014,7 +918,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Unreachable, "{result:?}");
         assert_eq!(result.added, 0, "nothing is counted as changed");
     }
-
     #[test]
     fn backups_kept_inside_the_project_folder_are_not_its_files() {
         let mut scene = Scene::new("inside");
@@ -1027,7 +930,6 @@ mod tests {
         let result = scene.check();
         assert_eq!(result.state, ChangeState::UpToDate, "{result:?}");
     }
-
     fn zip_backup(scene: &Scene, entries: &[(&str, &[u8])]) -> PathBuf {
         let month = scene.settings.backup_root().unwrap().join("App").join("2026-10 Οκτώβριος");
         fs::create_dir_all(&month).unwrap();
@@ -1035,7 +937,6 @@ mod tests {
         make_zip(&zip, entries);
         zip
     }
-
     #[test]
     fn the_info_file_inside_a_wrapped_zip_is_not_a_deleted_file() {
         let scene = Scene::new("wrapped");
@@ -1044,7 +945,6 @@ mod tests {
         let result = scene.check();
         assert_eq!(result.state, ChangeState::UpToDate, "{result:?}");
     }
-
     #[test]
     fn a_file_the_rules_now_leave_out_is_not_a_deleted_file() {
         let scene = Scene::new("rules");
@@ -1058,7 +958,6 @@ mod tests {
         let comparison = compare::compare(&Side::Zip(zip), &Side::Folder(scene.source()), &rules, None, &|| false, &|_, _| {}).unwrap();
         assert_eq!(comparison.added + comparison.modified + comparison.deleted, 0);
     }
-
     #[test]
     fn a_backup_that_is_not_a_zip_is_an_error_not_silence() {
         let scene = Scene::new("broken");
@@ -1070,7 +969,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Error, "{result:?}");
         assert!(result.message.is_some());
     }
-
     #[test]
     fn an_incomplete_only_backup_is_unknown_not_an_authoritative_empty_history() {
         let scene = Scene::new("incomplete-only");
@@ -1082,7 +980,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Error, "a discovered but incomplete archive is not proof that this project was never backed up: {result:?}");
         assert_eq!(result.added + result.modified + result.deleted, 0);
     }
-
     #[test]
     fn an_incomplete_newest_backup_must_not_silently_certify_an_older_baseline() {
         let scene = Scene::new("incomplete-newest");
@@ -1094,7 +991,6 @@ mod tests {
         assert_eq!(result.state, ChangeState::Error, "the newest archive cannot be checked; an older matching archive cannot establish No changes: {result:?}");
         assert_eq!(result.added + result.modified + result.deleted, 0);
     }
-
     #[test]
     fn the_newest_backup_is_read_once_until_it_is_replaced() {
         let scene = Scene::new("listing");
@@ -1109,7 +1005,6 @@ mod tests {
         assert!(lock(&LISTINGS).get(&id).and_then(|listing| listing.started).is_some(), "the start is read from the info file");
         drop(zip);
     }
-
     #[cfg(windows)]
     #[test]
     fn a_file_open_without_sharing_is_unreadable_not_modified() {
@@ -1123,7 +1018,6 @@ mod tests {
         assert_eq!(result.modified, 0, "{result:?}");
         assert_eq!(result.unreadable, 1);
     }
-
     #[test]
     fn writes_in_left_out_folders_say_nothing() {
         let rules = Rules::compile(
@@ -1143,7 +1037,6 @@ mod tests {
         assert!(!relevant(".venv/lib/x.py", &rules));
         assert!(relevant("node_modules/kept/a.js", &rules), "a keep pattern wins");
     }
-
     #[test]
     fn a_write_in_nested_projects_is_told_to_both() {
         let roots = vec![
@@ -1154,7 +1047,6 @@ mod tests {
         let ids: Vec<&str> = owners(Path::new("/code/app/src/x.rs"), &roots).iter().map(|root| root.id.as_str()).collect();
         assert_eq!(ids, ["a", "b"]);
     }
-
     #[test]
     fn checks_wait_for_quiet_but_never_longer_than_the_limit() {
         let start = Instant::now();
@@ -1174,7 +1066,6 @@ mod tests {
         debouncer.soon(start, vec!["b".into()]);
         assert!(debouncer.due(start));
     }
-
     #[test]
     fn a_later_answer_is_never_replaced_by_an_earlier_one() {
         let mut newer = ProjectChanges::new("remember-test", ChangeState::UpToDate);

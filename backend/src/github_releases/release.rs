@@ -1,26 +1,10 @@
-//! Releasing a project, in an order that never leaves GitHub half done:
-//!
-//! 1. checks (branch, not behind GitHub, the tag is free, a clean folder or
-//!    the changes go along, a token, a release workflow in Actions mode);
-//! 2. the version in every version file;
-//! 3. the build (local mode), then the files to upload;
-//! 4. a commit of the version files (and the chosen changes);
-//! 5. the push; 6. the tag on that exact commit, pushed;
-//! 7. local mode: a draft release, its files uploaded, then published.
-//!    Actions mode: the workflow the tag started is watched to its end.
-//!
-//! A failure before the push puts every file and the branch back as they
-//! were. After the push nothing is ever rewritten: the outcome says what is
-//! left (upload the rest, publish the draft) so it can be finished.
-
+// ! Releasing a project, in an order that never leaves GitHub half done: ! ! 1. checks (branch, not behind GitHub, the tag is free, a clean folder or ! the changes go along, a token, a release workflow in Actions mode); ! 2. the version in every version file; ! 3. the build (local mode), then the files to upload; ! 4. a commit of the version files (and the chosen changes); ! 5. the push; 6. the tag on that exact commit, pushed; ! 7. local mode: a draft release, its files uploaded, then published. ! Actions mode: the workflow the tag started is watched to its end. ! ! A failure before the push puts every file and the branch back as they ! were. After the push nothing is ever rewritten: the outcome says what is ! left (upload the rest, publish the draft) so it can be finished.
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
-
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-
 use super::build::artifacts::{self, Artifact};
 use super::build::runner::{self, BuildEvent, BuildOutcome};
 use super::entry::Entry;
@@ -29,7 +13,6 @@ use super::github::{self, NewRelease, Release, Run};
 use super::project::{self, Workflow};
 use super::versions::{self, Edit};
 use super::{CANCELLED, Problem, ops, secrets, store};
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
@@ -38,7 +21,6 @@ pub enum Mode {
     /// Push the tag; the repository's workflow builds and releases.
     Actions,
 }
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseRequest {
@@ -75,13 +57,11 @@ pub struct ReleaseRequest {
     #[serde(default)]
     pub target: Option<String>,
 }
-
 /// Branches that must never be deleted after a release merge.
 pub(crate) fn is_protected_branch(name: &str) -> bool {
     let lower = name.trim().to_ascii_lowercase();
     matches!(lower.as_str(), "main" | "master" | "old")
 }
-
 /// A branch name safe to hand to git: no option, no range, no oddities.
 pub(crate) fn valid_branch(name: &str) -> bool {
     !name.is_empty()
@@ -93,7 +73,6 @@ pub(crate) fn valid_branch(name: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
 }
-
 /// The tag message's line for the workflows, from the chosen target.
 pub(crate) fn target_line(target: Option<&str>) -> Option<&'static str> {
     match target {
@@ -102,7 +81,6 @@ pub(crate) fn target_line(target: Option<&str>) -> Option<&'static str> {
         _ => None,
     }
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StepState {
@@ -111,7 +89,6 @@ pub enum StepState {
     Failed,
     Skipped,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum ReleaseEvent {
@@ -144,7 +121,6 @@ pub enum ReleaseEvent {
         jobs: Vec<FailedJob>,
     },
 }
-
 /// What is left to finish a release whose files or publishing failed.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -172,7 +148,6 @@ pub struct Resume {
     #[serde(default)]
     pub notes_in_file: bool,
 }
-
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseOutcome {
@@ -190,9 +165,7 @@ pub struct ReleaseOutcome {
     pub build: Option<BuildOutcome>,
     pub artifacts: Vec<Artifact>,
 }
-
 // ─── Checks ────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CheckState {
@@ -200,7 +173,6 @@ pub enum CheckState {
     Warn,
     Fail,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Check {
@@ -210,7 +182,6 @@ pub struct Check {
     /// What the page can do about it: `pull`, `connect`, `commit`, `build`.
     pub fix: Option<&'static str>,
 }
-
 fn check(
     id: &'static str,
     state: CheckState,
@@ -224,7 +195,6 @@ fn check(
         fix,
     }
 }
-
 /// Everything a release needs, gathered once.
 pub(crate) struct Context {
     pub entry: Entry,
@@ -233,12 +203,10 @@ pub(crate) struct Context {
     pub versions: versions::Versions,
     pub workflows: Vec<Workflow>,
 }
-
 /// When each repository was last fetched for the checks.
 static CHECK_FETCHES: std::sync::Mutex<Vec<(PathBuf, Instant)>> = std::sync::Mutex::new(Vec::new());
 /// The checks follow the form as it is typed; they fetch at most this often.
 const CHECK_FETCH_EVERY: Duration = Duration::from_secs(90);
-
 /// Whether the checks should fetch `root` now (and notes that they do).
 fn check_fetch_due(root: &Path, now: Instant) -> bool {
     let mut fetches = CHECK_FETCHES.lock().unwrap_or_else(|e| e.into_inner());
@@ -249,14 +217,12 @@ fn check_fetch_due(root: &Path, now: Instant) -> bool {
     fetches.push((root.to_path_buf(), now));
     true
 }
-
 /// The context for the live checks: fetched now and then, not on every
 /// keystroke (a fetch takes seconds, and the checks ran again on each).
 pub(crate) async fn context_for_checks(entry: Entry) -> Result<Context, String> {
     let fetch = check_fetch_due(&entry.root, Instant::now());
     context(entry, fetch).await
 }
-
 pub(crate) async fn context(entry: Entry, fetch: bool) -> Result<Context, String> {
     git::require_git()?;
     if fetch {
@@ -282,7 +248,6 @@ pub(crate) async fn context(entry: Entry, fetch: bool) -> Result<Context, String
         workflows,
     })
 }
-
 /// Changes inside the project that are not version files.
 fn own_changes(context: &Context) -> Vec<&git::FileChange> {
     let version_paths: Vec<String> = context
@@ -299,7 +264,6 @@ fn own_changes(context: &Context) -> Vec<&git::FileChange> {
         .filter(|c| !version_paths.contains(&c.path))
         .collect()
 }
-
 pub(crate) async fn preflight(
     context: &Context,
     version: &str,
@@ -478,8 +442,7 @@ pub(crate) async fn preflight(
             if let Some(remote) = &context.remote
                 && let (Some(owner), Some(repo)) = (&remote.owner, &remote.repo)
             {
-                // A tag only on GitHub (a failed release, another PC) would
-                // stop the tag push after the release commit is pushed.
+                // A tag only on GitHub (a failed release, another PC) would stop the tag push after the release commit is pushed.
                 if !local_tag && let Ok(true) = github::tag_exists(&token, owner, repo, &tag).await {
                     checks.push(check(
                         "tag",
@@ -553,8 +516,7 @@ pub(crate) async fn preflight(
                     Some("build"),
                 ));
             }
-            // The tag starts the repository's own release workflow anyway,
-            // which publishes the same release from GitHub.
+            // The tag starts the repository's own release workflow anyway, which publishes the same release from GitHub.
             if let Some(workflow) = project::workflow_for_tag(&context.workflows, &tag) {
                 checks.push(check(
                     "workflow",
@@ -570,28 +532,22 @@ pub(crate) async fn preflight(
     }
     checks
 }
-
 // ─── Running ───────────────────────────────────────────────────────────────
-
 pub(crate) struct Session<'a> {
     on_event: &'a (dyn Fn(ReleaseEvent) + Send + Sync),
     cancel: Arc<AtomicBool>,
 }
-
 impl Session<'_> {
     fn step(&self, id: &'static str, state: StepState, message: Option<String>) {
         (self.on_event)(ReleaseEvent::Step { id, state, message });
     }
-
     fn log(&self, text: impl Into<String>) {
         (self.on_event)(ReleaseEvent::Log { text: text.into() });
     }
-
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }
 }
-
 fn problem_of(error: String) -> Problem {
     serde_json::from_str::<serde_json::Value>(&error)
         .ok()
@@ -614,7 +570,6 @@ fn problem_of(error: String) -> Problem {
             )
         })
 }
-
 /// A file to upload: inside the project's repository, and there.
 fn check_asset(entry: &Entry, path: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(path);
@@ -627,7 +582,6 @@ fn check_asset(entry: &Entry, path: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-
 pub(crate) async fn run(
     request: ReleaseRequest,
     entry: Entry,
@@ -654,10 +608,7 @@ pub(crate) async fn run(
         tag: tag.clone(),
         ..ReleaseOutcome::default()
     };
-
-    // 0. The chosen branch, merged into the default branch first. Until the
-    // release commit is on GitHub, any failure puts the branch back where it
-    // was (`reset --keep`, which never touches uncommitted work).
+    // 0. The chosen branch, merged into the default branch first. Until the release commit is on GitHub, any failure puts the branch back where it was (`reset --keep`, which never touches uncommitted work).
     let merging = request.merge_branch.clone().filter(|b| !b.is_empty());
     let mut before_merge = None;
     if let Some(branch) = merging.as_deref() {
@@ -674,8 +625,7 @@ pub(crate) async fn run(
     if let (Some(head), false) = (before_merge.as_deref(), pushed.load(Ordering::Relaxed)) {
         outcome.rolled_back |= undo_merge(&run, &entry, head).await;
     }
-    // The merged branch goes only once the release is out: never while its
-    // workflow may still fail, and never with commits that are not merged.
+    // The merged branch goes only once the release is out: never while its workflow may still fail, and never with commits that are not merged.
     if outcome.ok
         && request.delete_merged_branch
         && let Some(branch) = merging.as_deref()
@@ -684,7 +634,6 @@ pub(crate) async fn run(
     }
     outcome
 }
-
 /// The release after the merge: checks, version files, build, commit, push,
 /// tag, release. `pushed` says when the release commit reached GitHub.
 #[allow(clippy::too_many_arguments)]
@@ -705,7 +654,6 @@ async fn release_merged(
     };
     let cancel = run.cancel.clone();
     let (request, entry, version, tag) = (request.clone(), entry.clone(), version.to_string(), tag.to_string());
-
     // 1. Checks.
     run.step("check", StepState::Running, None);
     let context = match context(entry.clone(), true).await {
@@ -744,7 +692,6 @@ async fn release_merged(
         outcome.problem = Some(Problem::new("AUTH", "Connect your GitHub account first."));
         return outcome;
     };
-
     // 2. Version files (and the notes file).
     run.step("version", StepState::Running, None);
     let mut edits: Vec<Edit> = {
@@ -815,7 +762,6 @@ async fn release_merged(
         versions::undo(edits);
         run.log("The version files were put back as they were.");
     };
-
     // 3. Build and files.
     let mut assets: Vec<PathBuf> = Vec::new();
     if request.mode == Mode::Local {
@@ -907,7 +853,6 @@ async fn release_merged(
         ));
         return outcome;
     }
-
     // 4. Commit.
     run.step("commit", StepState::Running, None);
     let mut paths: Vec<String> = edits
@@ -1006,7 +951,6 @@ async fn release_merged(
         },
         Some(commit[..commit.len().min(7)].to_string()),
     );
-
     // 5. Push.
     run.step("push", StepState::Running, None);
     let on_line = |text: &str, replace: bool| {
@@ -1058,7 +1002,6 @@ async fn release_merged(
     }
     run.step("push", StepState::Done, None);
     release_pushed.store(true, Ordering::Relaxed);
-
     // 6. Tag.
     finish_from_tag(
         &run,
@@ -1075,14 +1018,12 @@ async fn release_merged(
     )
     .await
 }
-
 fn default_commit_message(entry: &Entry, version: &str) -> String {
     match &entry.sub {
         Some(_) if entry.monorepo => format!("{} {version}", entry.name),
         _ => format!("Release {version}"),
     }
 }
-
 #[allow(clippy::too_many_arguments)]
 async fn finish_from_tag(
     run: &Session<'_>,
@@ -1177,8 +1118,7 @@ async fn finish_from_tag(
             });
         }
     };
-    // Runs this commit already has (an earlier attempt of this version on the
-    // same commit): never taken for the ones this tag push starts.
+    // Runs this commit already has (an earlier attempt of this version on the same commit): never taken for the ones this tag push starts.
     let earlier: Vec<u64> = if request.mode == Mode::Actions {
         github::runs_for_commit(token, owner, repo, commit)
             .await
@@ -1215,7 +1155,6 @@ async fn finish_from_tag(
         return outcome;
     }
     run.step("tag", StepState::Done, Some(tag.to_string()));
-
     match request.mode {
         Mode::Local => {
             run.step("release", StepState::Running, None);
@@ -1275,8 +1214,7 @@ async fn finish_from_tag(
                         return outcome;
                     }
                     run.step("workflow", StepState::Done, None);
-                    // The workflow made the release; give it the notes when
-                    // they were not handed over in a file.
+                    // The workflow made the release; give it the notes when they were not handed over in a file.
                     if let Ok(Some(release)) = github::release_by_tag(token, owner, repo, tag).await
                     {
                         let release = if !notes_in_file && !request.notes.trim().is_empty() {
@@ -1309,9 +1247,7 @@ async fn finish_from_tag(
                         },
                         Some(problem.message.clone()),
                     );
-                    // Stopped or lost from sight: the release is not known to
-                    // be out, so it is never reported as published. The tag
-                    // is pushed, so "Follow the run" can pick it up again.
+                    // Stopped or lost from sight: the release is not known to be out, so it is never reported as published. The tag is pushed, so "Follow the run" can pick it up again.
                     outcome.ok = false;
                     outcome.cancelled = stopped;
                     outcome.problem = Some(problem);
@@ -1321,7 +1257,6 @@ async fn finish_from_tag(
         }
     }
 }
-
 /// Uploads the pending files of a draft (or any) release, then publishes it.
 async fn finish_release(
     run: &Session<'_>,
@@ -1466,14 +1401,12 @@ async fn finish_release(
     outcome.ok = true;
     outcome
 }
-
 fn error_is_final(error: &str) -> bool {
     error == CANCELLED
         || ["\"AUTH\"", "\"FORBIDDEN\"", "\"NOT_FOUND\""]
             .iter()
             .any(|code| error.contains(code))
 }
-
 /// The run to follow among those a push of `commit` started: a push of
 /// `tag`, and of the release `workflow` when it is known. A tag can start
 /// several workflows (MYLE's starts Release and MYLE Passwords, which ends
@@ -1484,8 +1417,7 @@ pub(crate) fn pick_run(
     workflow: Option<&Workflow>,
     earlier: &[u64],
 ) -> Option<Run> {
-    // `earlier`: runs this commit had before the tag was pushed (an earlier
-    // attempt of the same version), never the ones this push started.
+    // `earlier`: runs this commit had before the tag was pushed (an earlier attempt of the same version), never the ones this push started.
     let mut candidates = runs
         .into_iter()
         .filter(|r| r.event == "push" && !earlier.contains(&r.id))
@@ -1501,7 +1433,6 @@ pub(crate) fn pick_run(
         }),
     }
 }
-
 /// The repository's workflows a push of `tag` starts, the release one first.
 async fn tag_workflows(entry: &Entry, tag: &str) -> Vec<Workflow> {
     let root = entry.root.clone();
@@ -1510,7 +1441,6 @@ async fn tag_workflows(entry: &Entry, tag: &str) -> Vec<Workflow> {
     };
     project::workflows_for_tag(&workflows, tag).into_iter().cloned().collect()
 }
-
 /// Merges `origin/<branch>` into the checked-out branch, which must be the
 /// repository's default branch (main). A conflict is undone (`merge --abort`)
 /// and reported with the files in conflict. Answers the commit the branch was
@@ -1525,8 +1455,7 @@ async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<
         return Err(fail(format!("{branch:?} is not a branch name.")));
     }
     let remote = ops::require_remote(&entry.root).await.map_err(fail)?;
-    // Into the default branch only: merging a feature into whatever happens
-    // to be checked out is never what "merge before release" means.
+    // Into the default branch only: merging a feature into whatever happens to be checked out is never what "merge before release" means.
     let current = git::read(&entry.root, &["rev-parse", "--abbrev-ref", "HEAD"]).await.unwrap_or_default();
     let current = current.trim();
     let default = default_branch(&entry.root, &remote.name).await;
@@ -1585,7 +1514,6 @@ async fn merge_branch(run: &Session<'_>, entry: &Entry, branch: &str) -> Result<
         )
     }))
 }
-
 /// The remote's default branch (`main` mostly): what `<remote>/HEAD` names,
 /// else `main` or `master` when the repository has it.
 async fn default_branch(root: &Path, remote: &str) -> Option<String> {
@@ -1602,7 +1530,6 @@ async fn default_branch(root: &Path, remote: &str) -> Option<String> {
     }
     None
 }
-
 /// Takes back a merge the release made, when the release did not reach
 /// GitHub: the branch goes back to `before`. `--keep` keeps uncommitted work
 /// and refuses rather than overwrite it. Answers whether the branch is back.
@@ -1632,7 +1559,6 @@ async fn undo_merge(run: &Session<'_>, entry: &Entry, before: &str) -> bool {
         }
     }
 }
-
 /// Deletes a merged feature branch after a release that is out: on GitHub,
 /// then here with `branch -d`, which refuses a branch with commits that were
 /// never merged (they would be lost).
@@ -1668,7 +1594,6 @@ async fn delete_merged_branch(run: &Session<'_>, entry: &Entry, branch: &str) {
     }
     let _ = ops::fetch(&entry.root, true, run.cancel.clone()).await;
 }
-
 /// What went wrong in a failed run: per failed job, the failed step, the
 /// error annotations and the part of the job's log that shows the error.
 async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Job]) -> Vec<FailedJob> {
@@ -1706,7 +1631,6 @@ async fn failure_report(token: &str, owner: &str, repo: &str, jobs: &[github::Jo
     }
     out
 }
-
 /// The part of a job log that shows why it failed: from the start of the
 /// step that failed (or 60 lines before) to the last error, without GitHub's
 /// timestamps and group markers, and without the clean-up that follows.
@@ -1729,7 +1653,6 @@ pub(crate) fn log_excerpt(log: &str) -> String {
         .collect();
     kept[kept.len().saturating_sub(120)..].join("\n")
 }
-
 /// A log line without GitHub's leading timestamp.
 fn without_stamp(line: &str) -> &str {
     match line.split_once(' ') {
@@ -1737,7 +1660,6 @@ fn without_stamp(line: &str) -> &str {
         _ => line,
     }
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedJob {
@@ -1747,25 +1669,21 @@ pub struct FailedJob {
     log_tail: String,
     url: Option<String>,
 }
-
 /// How many GitHub requests in a row may fail before watching gives up and
 /// says why (a revoked token, the rate limit, no network).
 const WATCH_FAILURES: u32 = 8;
 /// How long a release's workflows are followed at most.
 const WATCH_LIMIT: Duration = Duration::from_secs(6 * 60 * 60);
-
 /// Keeps count of GitHub requests that failed in a row, waiting longer after
 /// each (and as long as GitHub asks for a rate limit).
 struct Backoff {
     failures: u32,
     started: Instant,
 }
-
 impl Backoff {
     fn new() -> Self {
         Self { failures: 0, started: Instant::now() }
     }
-
     /// The value, or (after a pause) `None` to try again; the error itself
     /// once too many requests failed in a row.
     async fn check<T>(&mut self, run: &Session<'_>, result: Result<T, String>) -> Result<Option<T>, String> {
@@ -1786,12 +1704,10 @@ impl Backoff {
             }
         }
     }
-
     fn out_of_time(&self) -> bool {
         self.started.elapsed() > WATCH_LIMIT
     }
 }
-
 fn stopped() -> String {
     Problem::new(
         "CANCELLED",
@@ -1799,7 +1715,6 @@ fn stopped() -> String {
     )
     .into()
 }
-
 /// Follows the workflow runs a push of `commit` (and `tag`) started, to their
 /// end: the release workflow first (`workflows[0]`), then every other the tag
 /// started, so a release is never called done while one of them still runs.
@@ -1838,11 +1753,9 @@ async fn watch(
     }
     Ok(main)
 }
-
 fn succeeded(run: &Run) -> bool {
     matches!(run.conclusion.as_deref(), Some("success" | "skipped" | "neutral"))
 }
-
 /// Waits for the run of `workflow` that the push started (3 minutes for the
 /// release workflow, `main`; less for the others, which start with it).
 #[allow(clippy::too_many_arguments)]
@@ -1878,7 +1791,6 @@ async fn discover(
         sleep_unless_cancelled(&run.cancel, Duration::from_secs(5)).await;
     }
 }
-
 /// Follows one run to its end, telling the page each job and step, and what
 /// failed as soon as a job fails.
 async fn follow(
@@ -1916,8 +1828,7 @@ async fn follow(
         });
         if current.status.as_deref() == Some("completed") {
             if !succeeded(&current) {
-                // The jobs once more, so the report is complete; an empty
-                // report is never sent over one already shown.
+                // The jobs once more, so the report is complete; an empty report is never sent over one already shown.
                 let fresh = github::run_jobs(token, owner, repo, current.id).await.unwrap_or_default();
                 let failed = failure_report(token, owner, repo, &fresh).await;
                 if !failed.is_empty() {
@@ -1938,7 +1849,6 @@ async fn follow(
         }
     }
 }
-
 async fn sleep_unless_cancelled(cancel: &AtomicBool, total: Duration) {
     let step = Duration::from_millis(250);
     let mut waited = Duration::ZERO;
@@ -1947,7 +1857,6 @@ async fn sleep_unless_cancelled(cancel: &AtomicBool, total: Duration) {
         waited += step;
     }
 }
-
 /// Finishes a release from what `resume` says is left.
 pub(crate) async fn resume(
     entry: Entry,
@@ -1983,7 +1892,6 @@ pub(crate) async fn resume(
     }
     finish_release(&run, &token, &owner, &repo, resume, outcome).await
 }
-
 /// The release a resume finishes: the one that was asked for (an older page
 /// sends no mode: a local release then, as before).
 pub(crate) fn resume_request(entry: &Entry, resume: &Resume, tag: &str) -> ReleaseRequest {
@@ -2007,7 +1915,6 @@ pub(crate) fn resume_request(entry: &Entry, resume: &Resume, tag: &str) -> Relea
         target: resume.target.clone(),
     }
 }
-
 /// Watches the newest workflow run of `commit` on its own (the page asks
 /// again after it was closed).
 pub(crate) async fn watch_commit(
@@ -2037,7 +1944,6 @@ pub(crate) async fn watch_commit(
     )
     .await
 }
-
 pub(crate) fn stats_of(command: &str, outcome: &BuildOutcome) -> store::BuildStats {
     store::BuildStats {
         command: command.to_string(),
@@ -2046,12 +1952,10 @@ pub(crate) fn stats_of(command: &str, outcome: &BuildOutcome) -> store::BuildSta
         at: super::unix_millis(),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::github_releases::store::EntryConfig;
-
     fn entry(sub: Option<&str>, monorepo: bool) -> Entry {
         Entry {
             id: "r".into(),
@@ -2065,7 +1969,6 @@ mod tests {
             config: EntryConfig::default(),
         }
     }
-
     fn change(path: &str) -> git::FileChange {
         git::FileChange {
             path: path.into(),
@@ -2074,7 +1977,6 @@ mod tests {
             staged: git::Staged::None,
         }
     }
-
     #[test]
     fn commit_messages_and_the_projects_own_changes() {
         assert_eq!(
@@ -2085,7 +1987,6 @@ mod tests {
             default_commit_message(&entry(Some("backup_projects"), true), "2.0.7"),
             "backup_projects 2.0.7"
         );
-
         let context = Context {
             entry: entry(Some("backup_projects"), true),
             remote: None,
@@ -2114,7 +2015,6 @@ mod tests {
             .collect();
         assert_eq!(own, ["backup_projects/src/a.ts"]);
     }
-
     fn run_of(id: u64, name: &str, path: Option<&str>, branch: &str) -> Run {
         serde_json::from_value(serde_json::json!({
             "id": id,
@@ -2127,7 +2027,6 @@ mod tests {
         }))
         .unwrap()
     }
-
     #[test]
     fn branch_names_targets_and_log_tails() {
         assert!(valid_branch("feature/x-1.2"));
@@ -2147,11 +2046,9 @@ mod tests {
         let log = "2026-10-10T09:00:00.1234567Z one\n2026-10-10T09:00:01.1234567Z two\nthree";
         assert_eq!(log_excerpt(log), "one\ntwo\nthree");
     }
-
     #[test]
     fn the_release_workflows_run_is_followed_not_another_on_the_same_tag() {
-        // MYLE's tag starts MYLE Passwords (done in seconds) and Release; the
-        // API lists the newest first.
+        // MYLE's tag starts MYLE Passwords (done in seconds) and Release; the API lists the newest first.
         let runs = || {
             vec![
                 run_of(3, "CI", Some(".github/workflows/ci.yml"), "main"),
@@ -2206,7 +2103,6 @@ mod tests {
             Some(6)
         );
     }
-
     #[test]
     fn the_live_checks_fetch_now_and_then() {
         let root = std::env::temp_dir().join("myle-gr-check-fetch");
@@ -2220,7 +2116,6 @@ mod tests {
             now + CHECK_FETCH_EVERY + Duration::from_secs(1)
         ));
     }
-
     #[test]
     fn the_failure_excerpt_shows_the_failing_step_up_to_its_error() {
         let log = [
@@ -2242,20 +2137,17 @@ mod tests {
         assert!(!excerpt.contains("Post job cleanup"));
         assert!(!excerpt.contains("added 300 packages"));
     }
-
     #[test]
     fn a_log_without_an_error_marker_ends_before_the_clean_up() {
         let log = "step output\nlast line\nPost job cleanup.\nCleaning up orphan processes";
         assert_eq!(log_excerpt(log), "step output\nlast line");
     }
-
     #[test]
     fn a_run_from_an_earlier_attempt_on_the_same_commit_is_never_followed() {
         let run = |id: u64| run_of(id, "Release", Some(".github/workflows/release.yml"), "v9.17.1");
         assert_eq!(pick_run(vec![run(1)], Some("v9.17.1"), None, &[1]).map(|r| r.id), None);
         assert_eq!(pick_run(vec![run(2), run(1)], Some("v9.17.1"), None, &[1]).map(|r| r.id), Some(2));
     }
-
     #[test]
     fn this_repositorys_tag_is_followed_through_release_yml_first() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -2265,7 +2157,6 @@ mod tests {
         assert!(started.contains(&"mobile.yml"), "the phone builds are followed too");
         assert_eq!(project::workflow_for_tag(&workflows, "v9.17.1").map(|w| w.file.as_str()), Some("release.yml"));
     }
-
     #[test]
     fn a_resume_is_the_release_that_was_asked_for() {
         let entry = entry(None, false);

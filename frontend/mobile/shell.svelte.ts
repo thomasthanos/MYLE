@@ -3,5 +3,4 @@ class Shell {
   /** The Settings sheet (security, sync and the account, about). */
   settingsOpen = $state(false);
 }
-
 export const shell = new Shell();

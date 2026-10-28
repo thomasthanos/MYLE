@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SpotifyHubAction {
@@ -7,7 +6,6 @@ pub enum SpotifyHubAction {
     RestoreSpotify,
     PurgeAll,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SpotifyHubStage {
@@ -20,7 +18,6 @@ pub enum SpotifyHubStage {
     Cleaning,
     Finalizing,
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(
     tag = "event",
@@ -43,7 +40,6 @@ pub enum SpotifyHubEvent {
         replace: bool,
     },
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SpotifyHubResult {
@@ -52,7 +48,6 @@ pub enum SpotifyHubResult {
     Partial,
     NeedsAdmin,
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotifyHubOutcome {
@@ -61,7 +56,6 @@ pub struct SpotifyHubOutcome {
     pub action: SpotifyHubAction,
     pub note: Option<String>,
 }
-
 impl SpotifyHubOutcome {
     pub fn new(
         result: SpotifyHubResult,
@@ -77,14 +71,12 @@ impl SpotifyHubOutcome {
         }
     }
 }
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallationState {
     pub installed: bool,
     pub version: Option<String>,
 }
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpicetifyState {
@@ -93,21 +85,18 @@ pub struct SpicetifyState {
     pub healthy: bool,
     pub applied: bool,
 }
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceState {
     pub installed: bool,
     pub version: Option<String>,
 }
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotifyHubReleases {
     pub cli: String,
     pub marketplace: String,
 }
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Prerequisites {
@@ -115,7 +104,6 @@ pub struct Prerequisites {
     pub supported: bool,
     pub message: Option<String>,
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveJob {
@@ -124,7 +112,6 @@ pub struct ActiveJob {
     pub stage: SpotifyHubStage,
     pub progress: Option<f64>,
 }
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotifyHubSnapshot {
@@ -136,7 +123,6 @@ pub struct SpotifyHubSnapshot {
     pub last_outcome: Option<SpotifyHubOutcome>,
     pub active_job: Option<ActiveJob>,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PurgePreview {

@@ -1,25 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-
 use tauri::{AppHandle, Manager};
-
 use super::models::{GAME_SAVES_SETTINGS_VERSION, GameSavesSettings, RootSource};
 use super::{atomic, detection};
-
 const SETTINGS_FILE: &str = "settings.json";
 pub(crate) fn config_root(app: &AppHandle) -> Result<PathBuf, String> {
     let _ = app;
     crate::storage::roaming_dir().map(|path| path.join("game-saves"))
 }
-
 pub(crate) fn engine_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_root(app)?.join("ludusavi"))
 }
-
 pub(crate) fn safety_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_root(app)?.join("safety"))
 }
-
 pub(crate) fn headless_config_root() -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("MYLE_GAME_SAVES_CONFIG")
         && !path.trim().is_empty()
@@ -28,69 +22,56 @@ pub(crate) fn headless_config_root() -> Result<PathBuf, String> {
     }
     crate::storage::roaming_dir().map(|path| path.join("game-saves"))
 }
-
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_root(app)?.join(SETTINGS_FILE))
 }
-
 pub(crate) fn load(app: &AppHandle) -> Result<GameSavesSettings, String> {
     load_from_path(&settings_path(app)?)
 }
-
 pub(crate) fn load_from_root(root: &Path) -> Result<GameSavesSettings, String> {
     load_from_path(&root.join(SETTINGS_FILE))
 }
-
 fn load_from_path(path: &Path) -> Result<GameSavesSettings, String> {
     let mut settings = match fs::read_to_string(path) {
-        // A byte-order mark, as Notepad and PowerShell 5 save UTF-8, is not
-        // a reason to lose every setting.
+        // A byte-order mark, as Notepad and PowerShell 5 save UTF-8, is not a reason to lose every setting.
         Ok(text) => serde_json::from_str::<GameSavesSettings>(text.strip_prefix('\u{feff}').unwrap_or(&text))
             .map_err(|e| format!("Game Saves settings are invalid: {e}"))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => GameSavesSettings::default(),
         Err(e) => return Err(e.to_string()),
     };
-
     if settings.version > GAME_SAVES_SETTINGS_VERSION {
         return Err(format!(
             "Game Saves settings version {} is newer than this app supports ({}).",
             settings.version, GAME_SAVES_SETTINGS_VERSION
         ));
     }
-    // Version 0 was used by early development builds with the same serialized
-    // fields. Normalization below performs its only required migration.
+    // Version 0 was used by early development builds with the same serialized fields. Normalization below performs its only required migration.
     settings.version = GAME_SAVES_SETTINGS_VERSION;
     normalize(&mut settings);
     Ok(settings)
 }
-
 pub(crate) fn initialize(app: &AppHandle) -> Result<GameSavesSettings, String> {
     let mut settings = load(app)?;
     let mut changed = recover_backup_folder(app, &mut settings, None)?;
-
     if settings.backup_folder.is_none() {
         settings.backup_folder = Some(
             default_backup_folder(app)?.to_string_lossy().into_owned(),
         );
         changed = true;
     }
-
     if settings.roots.is_empty() {
         settings.roots = detection::detect_roots();
         changed = !settings.roots.is_empty() || changed;
     }
-
     if changed {
         save(app, &settings)?;
     }
     Ok(settings)
 }
-
 fn default_backup_folder(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app.path().document_dir().unwrap_or(crate::storage::roaming_dir()?);
     Ok(base.join("Make Your Life Easier").join("Game Saves Backups"))
 }
-
 /// Reconnect a clean install to history in the app's known cloud subfolders.
 /// This only reads mappings and snapshot metadata; the engine subsequently
 /// reads the complete inventory and compares the actual save contents.
@@ -108,8 +89,7 @@ pub(crate) fn recover_backup_folder(
     let Some(folder) = recovered_backup_folder(value, &default, &candidates, preferred) else {
         return Ok(false);
     };
-    // A synced path can name another PC's protected folder. It remains a
-    // hint until it passes the same validation as a local picker choice.
+    // A synced path can name another PC's protected folder. It remains a hint until it passes the same validation as a local picker choice.
     if validate_backup_folder(app, &folder, value).is_err() {
         return Ok(false);
     }
@@ -117,14 +97,12 @@ pub(crate) fn recover_backup_folder(
     value.backup_folder = Some(folder.to_string_lossy().into_owned());
     Ok(true)
 }
-
 fn may_recover_backup_folder(value: &GameSavesSettings, default: &Path) -> bool {
     value.backup_folder_chosen != Some(true)
         && value.backup_folder.as_deref().is_none_or(|current| {
             same_location(Path::new(current), default) || value.backup_folder_chosen == Some(false)
         })
 }
-
 fn recovered_backup_folder(
     value: &GameSavesSettings,
     default: &Path,
@@ -146,8 +124,7 @@ fn recovered_backup_folder(
                 .then(|| preferred.to_path_buf());
         }
     }
-    // Ordinary startup keeps its earlier discovery, even if that cloud drive
-    // is temporarily offline. Only a verified account hint can supersede it.
+    // Ordinary startup keeps its earlier discovery, even if that cloud drive is temporarily offline. Only a verified account hint can supersede it.
     if current_has_history || current.is_some_and(|current| !same_location(current, default)) {
         return None;
     }
@@ -161,12 +138,10 @@ fn recovered_backup_folder(
     }
     (found.len() == 1).then(|| found.remove(0))
 }
-
 pub(crate) fn same_location(a: &Path, b: &Path) -> bool {
     let normal = |path: &Path| path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
     normal(a) == normal(b)
 }
-
 /// MYLE writes full zip snapshots. Require their Ludusavi mapping and a
 /// mapped snapshot on disk: an empty folder or an orphan zip is no history.
 /// Only direct game folders are inspected, never a recursive cloud search.
@@ -204,27 +179,21 @@ fn has_backup_history(folder: &Path) -> bool {
         false
     })
 }
-
 pub(crate) fn save(app: &AppHandle, settings: &GameSavesSettings) -> Result<(), String> {
     save_to_path(&settings_path(app)?, settings)
 }
-
 pub(crate) fn save_to_root(root: &Path, settings: &GameSavesSettings) -> Result<(), String> {
     save_to_path(&root.join(SETTINGS_FILE), settings)
 }
-
 fn save_to_path(path: &Path, settings: &GameSavesSettings) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
     atomic::write(path, &json)
 }
-
 fn normalize(settings: &mut GameSavesSettings) {
     settings.auto_backup_excluded_game_ids.sort();
     settings.auto_backup_excluded_game_ids.dedup();
-
     settings.roots.retain(|root| !root.path.trim().is_empty());
-    // Older builds stored a drive-root library as `D:`, which means "the
-    // current folder on D:" rather than the drive itself.
+    // Older builds stored a drive-root library as `D:`, which means "the current folder on D:" rather than the drive itself.
     for root in &mut settings.roots {
         if root.path.len() == 2 && root.path.ends_with(':') {
             root.path.push('\\');
@@ -232,11 +201,9 @@ fn normalize(settings: &mut GameSavesSettings) {
     }
     settings.roots.sort_by(|a, b| a.id.cmp(&b.id));
     settings.roots.dedup_by(|a, b| a.id == b.id);
-
     if !valid_schedule_time(&settings.schedule_time) {
         settings.schedule_time = "03:00".into();
     }
-
     settings
         .custom_games
         .retain(|game| !game.name.trim().is_empty() && !game.paths.is_empty());
@@ -254,7 +221,6 @@ fn normalize(settings: &mut GameSavesSettings) {
     }
     settings.custom_games.sort_by(|a, b| a.id.cmp(&b.id));
     settings.custom_games.dedup_by(|a, b| a.id == b.id);
-
     settings.path_mappings.retain(|mapping| {
         !mapping.game_id.trim().is_empty()
             && !mapping.source.trim().is_empty()
@@ -271,7 +237,6 @@ fn normalize(settings: &mut GameSavesSettings) {
         .path_mappings
         .dedup_by(|a, b| a.game_id == b.game_id && a.source.eq_ignore_ascii_case(&b.source));
 }
-
 pub(crate) fn valid_schedule_time(value: &str) -> bool {
     let Some((hour, minute)) = value.split_once(':') else {
         return false;
@@ -281,7 +246,6 @@ pub(crate) fn valid_schedule_time(value: &str) -> bool {
         && hour.parse::<u8>().is_ok_and(|hour| hour < 24)
         && minute.parse::<u8>().is_ok_and(|minute| minute < 60)
 }
-
 pub(crate) fn validate_backup_folder(
     app: &AppHandle,
     candidate: &Path,
@@ -291,9 +255,7 @@ pub(crate) fn validate_backup_folder(
     if candidate.parent().is_none() {
         return Err("Choose a folder, not the root of a drive.".into());
     }
-
     validate_backup_folder_for_root(&candidate, &config_root(app)?, settings)?;
-
     if let Ok(executable) = std::env::current_exe()
         && let Some(install) = executable.parent()
     {
@@ -305,7 +267,6 @@ pub(crate) fn validate_backup_folder(
     }
     Ok(())
 }
-
 pub(crate) fn validate_backup_folder_for_root(
     candidate: &Path,
     config_root: &Path,
@@ -315,18 +276,15 @@ pub(crate) fn validate_backup_folder_for_root(
     if is_drive_root(&candidate) {
         return Err("Choose a folder, not the root of a drive.".into());
     }
-
     let config = resolved_normalized(config_root)?;
     if overlaps(&candidate, &config) {
         return Err("The backup folder cannot contain the application's settings.".into());
     }
-
     if let Ok(windir) = std::env::var("WINDIR")
         && overlaps(&candidate, &resolved_normalized(Path::new(&windir))?)
     {
         return Err("The backup folder cannot be inside the Windows folder.".into());
     }
-
     for variable in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
         if let Some(program_files) = std::env::var_os(variable)
             && overlaps(&candidate, &resolved_normalized(Path::new(&program_files))?)
@@ -334,10 +292,7 @@ pub(crate) fn validate_backup_folder_for_root(
             return Err("The backup folder cannot be inside Program Files.".into());
         }
     }
-
-    // A game folder on a drive that is not connected right now (an external
-    // Steam library) cannot be resolved. It also cannot overlap a folder that
-    // does resolve, so it is skipped instead of blocking every backup.
+    // A game folder on a drive that is not connected right now (an external Steam library) cannot be resolved. It also cannot overlap a folder that does resolve, so it is skipped instead of blocking every backup.
     for root in &settings.roots {
         let Ok(root_path) = resolved_normalized(Path::new(&root.path)) else {
             continue;
@@ -364,7 +319,6 @@ pub(crate) fn validate_backup_folder_for_root(
     }
     Ok(())
 }
-
 pub(crate) fn validate_restore_target(
     app: &AppHandle,
     candidate: &Path,
@@ -413,7 +367,6 @@ pub(crate) fn validate_restore_target(
     }
     Ok(())
 }
-
 pub(crate) fn absolute_normalized(path: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -424,7 +377,6 @@ pub(crate) fn absolute_normalized(path: &Path) -> Result<PathBuf, String> {
     };
     Ok(absolute.components().collect())
 }
-
 /// Whether the drive `path` is on is there right now. A cloud drive (Google
 /// Drive's G:) or a USB disk is there only while its app runs or it is
 /// plugged in.
@@ -434,7 +386,6 @@ pub(crate) fn drive_connected(path: &Path) -> bool {
         .and_then(|absolute| absolute.ancestors().last().map(Path::to_path_buf))
         .is_some_and(|root| root.exists())
 }
-
 /// Why a folder on a drive that is not there cannot be used.
 pub(crate) fn drive_missing(path: &Path) -> String {
     format!(
@@ -442,7 +393,6 @@ pub(crate) fn drive_missing(path: &Path) -> String {
         path.display()
     )
 }
-
 /// Resolve reparse points/junctions in the existing portion of a path before
 /// comparing protected locations. This prevents a visually harmless folder
 /// from redirecting backups or restores into the app, Windows, or save data.
@@ -473,7 +423,6 @@ fn resolved_normalized(path: &Path) -> Result<PathBuf, String> {
     }
     Ok(resolved.components().collect())
 }
-
 pub(crate) fn overlaps(a: &Path, b: &Path) -> bool {
     let a = a
         .to_string_lossy()
@@ -489,7 +438,6 @@ pub(crate) fn overlaps(a: &Path, b: &Path) -> bool {
         || b.strip_prefix(&a)
             .is_some_and(|rest| rest.starts_with(['\\', '/']))
 }
-
 pub(crate) fn paths_equal(a: &Path, b: &Path) -> bool {
     let Ok(a) = resolved_normalized(a) else {
         return false;
@@ -501,7 +449,6 @@ pub(crate) fn paths_equal(a: &Path, b: &Path) -> bool {
         .trim_end_matches(['\\', '/'])
         .eq_ignore_ascii_case(b.to_string_lossy().trim_end_matches(['\\', '/']))
 }
-
 fn reject_overlap(candidate: &Path, protected: &Path, message: &str) -> Result<(), String> {
     let protected = resolved_normalized(protected)?;
     if overlaps(candidate, &protected) {
@@ -510,14 +457,12 @@ fn reject_overlap(candidate: &Path, protected: &Path, message: &str) -> Result<(
         Ok(())
     }
 }
-
 fn is_drive_root(path: &Path) -> bool {
     path.parent().is_none()
         || path
             .parent()
             .is_some_and(|parent| parent.as_os_str().is_empty())
 }
-
 pub(crate) fn merge_detected_roots(settings: &mut GameSavesSettings) {
     let manual: Vec<_> = settings
         .roots
@@ -533,17 +478,14 @@ pub(crate) fn merge_detected_roots(settings: &mut GameSavesSettings) {
     }
     normalize(settings);
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn recovery_fixture() -> PathBuf {
         let root = std::env::temp_dir().join(format!("myle-game-saves-recovery-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         root
     }
-
     fn write_history(root: &Path) {
         use std::io::Write;
         let game = root.join("Game");
@@ -555,15 +497,13 @@ mod tests {
         zip.finish().unwrap();
         fs::write(game.join("mapping.yaml"), "---\nname: Game\ndrives:\n  drive-C: 'C:'\nbackups:\n  - name: backup-20260927T193842Z.zip\n    when: '2026-09-27T19:38:42Z'\n    files:\n      C:/Saves/save.dat:\n        hash: aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d\n        size: 5\n    registry:\n      hash: ~\n    children: []\n").unwrap();
     }
-
     #[test]
     fn reinstall_recovers_cloud_history_after_the_default_settings_were_already_created() {
         let root = recovery_fixture();
         let default = root.join("Documents/Make Your Life Easier/Game Saves Backups");
         let cloud = root.join("Google Drive/Make Your Life Easier/Game Saves Backups");
         write_history(&cloud);
-        // Exactly the state left by the first launch after reinstall: there
-        // is a new settings file, no cache, and an empty/nonexistent default.
+        // Exactly the state left by the first launch after reinstall: there is a new settings file, no cache, and an empty/nonexistent default.
         let config = root.join("config");
         save_to_root(&config, &GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() }).unwrap();
         let settings = load_from_root(&config).unwrap();
@@ -573,7 +513,6 @@ mod tests {
         assert!(!default.exists(), "discovery must not create an empty backup folder");
         fs::remove_dir_all(root).unwrap();
     }
-
     #[test]
     fn reinstall_recovery_preserves_local_choices_and_refuses_ambiguous_or_missing_history() {
         let root = recovery_fixture();
@@ -596,7 +535,6 @@ mod tests {
         assert_eq!(recovered_backup_folder(&value, &default, &[cloud_a], None), None, "healthy existing history wins");
         fs::remove_dir_all(root).unwrap();
     }
-
     #[test]
     fn reinstall_account_hint_overrides_persisted_auto_discovery_without_overwriting_legacy_choices() {
         let root = recovery_fixture();
@@ -606,8 +544,7 @@ mod tests {
         write_history(&discovered);
         write_history(&account);
         let mut value = GameSavesSettings { backup_folder: Some(default.to_string_lossy().into_owned()), ..Default::default() };
-        // Startup initialized before sign-in, saved its automatic discovery,
-        // and the next process loads it before importing the account hint.
+        // Startup initialized before sign-in, saved its automatic discovery, and the next process loads it before importing the account hint.
         let folder = recovered_backup_folder(&value, &default, std::slice::from_ref(&discovered), None).unwrap();
         value.backup_folder = Some(folder.to_string_lossy().into_owned());
         value.backup_folder_chosen = Some(false);
@@ -622,7 +559,6 @@ mod tests {
         }
         fs::remove_dir_all(root).unwrap();
     }
-
     #[test]
     fn reinstall_recovery_ignores_unmapped_archives_and_missing_or_unsafe_snapshot_names() {
         let root = recovery_fixture();
@@ -640,7 +576,6 @@ mod tests {
         assert_eq!(recovered_backup_folder(&settings, &default, &[cloud], None), None);
         fs::remove_dir_all(root).unwrap();
     }
-
     #[test]
     fn settings_saved_with_a_byte_order_mark_still_load() {
         let path = std::env::temp_dir().join(format!("myle-game-saves-bom-{}.json", uuid::Uuid::new_v4()));
@@ -654,7 +589,6 @@ mod tests {
         let _ = fs::remove_file(&path);
         assert_eq!(loaded.unwrap().backup_folder.as_deref(), Some(r"G:\My Drive\Backups"));
     }
-
     #[test]
     fn a_folder_on_a_drive_that_is_not_there_says_so() {
         // Google Drive's G: while Google Drive is not running.
@@ -667,7 +601,6 @@ mod tests {
         assert!(error.contains("not connected") && error.contains("Google Drive"), "{error}");
         assert!(drive_connected(&std::env::temp_dir().join("not-made-yet")));
     }
-
     #[test]
     fn overlap_is_case_insensitive_and_segment_aware() {
         assert!(overlaps(
@@ -683,7 +616,6 @@ mod tests {
             Path::new(r"C:\Games-old")
         ));
     }
-
     #[test]
     fn schedule_time_requires_twenty_four_hour_hh_mm() {
         assert!(valid_schedule_time("00:00"));
@@ -692,7 +624,6 @@ mod tests {
         assert!(!valid_schedule_time("24:00"));
         assert!(!valid_schedule_time("12:60"));
     }
-
     #[test]
     fn legacy_settings_are_migrated_to_the_current_version() {
         let root = std::env::temp_dir().join(format!(
@@ -703,13 +634,11 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let path = root.join("settings.json");
         fs::write(&path, r#"{"version":0,"schedule":"off"}"#).unwrap();
-
         let value = load_from_path(&path).unwrap();
         assert_eq!(value.version, GAME_SAVES_SETTINGS_VERSION);
         assert_eq!(value.schedule_time, "03:00");
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn settings_from_a_newer_app_are_not_silently_downgraded() {
         let root = std::env::temp_dir().join(format!(
@@ -720,12 +649,10 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let path = root.join("settings.json");
         fs::write(&path, r#"{"version":999}"#).unwrap();
-
         let error = load_from_path(&path).unwrap_err();
         assert!(error.contains("newer than this app supports"));
         let _ = fs::remove_dir_all(root);
     }
-
     #[test]
     fn a_disconnected_game_drive_does_not_block_the_backup_folder() {
         use super::super::models::{GameRoot, RootStore};
@@ -752,7 +679,6 @@ mod tests {
         );
         assert_eq!(result, Ok(()));
     }
-
     #[test]
     fn drive_root_libraries_from_older_builds_are_repaired() {
         use super::super::models::{GameRoot, RootStore};
@@ -768,7 +694,6 @@ mod tests {
         normalize(&mut settings);
         assert_eq!(settings.roots[0].path, r"D:\");
     }
-
     #[test]
     fn validation_resolves_the_existing_parent_of_a_new_folder() {
         let path = std::env::temp_dir()

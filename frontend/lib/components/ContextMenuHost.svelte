@@ -56,8 +56,7 @@
     // An async clipboard read must not overwrite typing that happened meanwhile.
     if (field.value !== current.value) throw new Error("The field changed. Open the menu and try again.");
     restoreSelection(current);
-    // Chromium's edit command preserves native undo and emits the normal input
-    // event, so Svelte bindings and the app's validation stay in sync.
+    // Chromium's edit command preserves native undo and emits the normal input event, so Svelte bindings and the app's validation stay in sync.
     if (!document.execCommand("insertText", false, text)) {
       field.setRangeText(text, current.start ?? field.value.length, current.end ?? field.value.length, "end");
       field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
