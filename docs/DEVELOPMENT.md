@@ -5,15 +5,15 @@ For what the app does, see the <a href="../README.md"><kbd>README</kbd></a>.
 
 **Contents**
 
-- [1. Get started](#1-get-started) · [commands](#commands) · [CI](#ci) · [where builds land](#where-builds-land)
-- [2. Repository map](#2-repository-map) · [not in git](#not-in-git) · [versions](#versions-that-must-agree)
-- [3. Frontend](#3-frontend) · [add a page](#add-a-page) · [conventions](#frontend-conventions)
-- [4. Backend](#4-backend) · [start-up](#start-up-and-the-hand-over) · [shared modules](#shared-backend-modules)
-- [5. The pages](#5-the-pages) — [Install Apps](#install-apps) · [Creative Suite](#creative-suite) · [Spotify Hub](#spotify-hub) · [Game Saves](#game-saves) · [Project Backups](#project-backups) · [GitHub Releases](#github-releases) · [Windows Optimization](#windows-optimization) · [System Cleaner](#system-cleaner) · [System Maintenance](#system-maintenance) · [Disk Analyzer](#disk-analyzer) · [Auto Clicker](#auto-clicker--macros) · [Password Manager](#password-manager) · [MYLE Passwords](#myle-passwords-android-and-iphone) · [Settings](#settings)
-- [6. Owner-only pages](#6-owner-only-pages)
-- [7. Where things live on disk](#7-where-things-live-on-disk)
-- [8. Updates and releases](#8-updates-and-releases) · [the site](#the-cloudflare-pages-site)
-- [9. Setup and uninstall](#9-setup-and-uninstall)
+- <a href="#1-get-started"><kbd>1 · Get started</kbd></a> <a href="#commands"><kbd>commands</kbd></a> <a href="#ci"><kbd>CI</kbd></a> <a href="#where-builds-land"><kbd>where builds land</kbd></a>
+- <a href="#2-repository-map"><kbd>2 · Repository map</kbd></a> <a href="#not-in-git"><kbd>not in git</kbd></a> <a href="#versions-that-must-agree"><kbd>versions</kbd></a>
+- <a href="#3-frontend"><kbd>3 · Frontend</kbd></a> <a href="#add-a-page"><kbd>add a page</kbd></a> <a href="#frontend-conventions"><kbd>conventions</kbd></a>
+- <a href="#4-backend"><kbd>4 · Backend</kbd></a> <a href="#start-up-and-the-hand-over"><kbd>start-up</kbd></a> <a href="#shared-backend-modules"><kbd>shared modules</kbd></a>
+- <a href="#5-the-pages"><kbd>5 · The pages</kbd></a> <a href="#install-apps"><kbd>Install Apps</kbd></a> <a href="#creative-suite"><kbd>Creative Suite</kbd></a> <a href="#spotify-hub"><kbd>Spotify Hub</kbd></a> <a href="#game-saves"><kbd>Game Saves</kbd></a> <a href="#project-backups"><kbd>Project Backups</kbd></a> <a href="#github-releases"><kbd>GitHub Releases</kbd></a> <a href="#windows-optimization"><kbd>Windows Optimization</kbd></a> <a href="#system-cleaner"><kbd>System Cleaner</kbd></a> <a href="#system-maintenance"><kbd>System Maintenance</kbd></a> <a href="#disk-analyzer"><kbd>Disk Analyzer</kbd></a> <a href="#auto-clicker--macros"><kbd>Auto Clicker</kbd></a> <a href="#password-manager"><kbd>Password Manager</kbd></a> <a href="#myle-passwords-android-and-iphone"><kbd>MYLE Passwords</kbd></a> <a href="#settings"><kbd>Settings</kbd></a>
+- <a href="#6-owner-only-pages"><kbd>6 · Owner-only pages</kbd></a>
+- <a href="#7-where-things-live-on-disk"><kbd>7 · Where things live on disk</kbd></a>
+- <a href="#8-updates-and-releases"><kbd>8 · Updates and releases</kbd></a> <a href="#the-cloudflare-pages-site"><kbd>the site</kbd></a>
+- <a href="#9-setup-and-uninstall"><kbd>9 · Setup and uninstall</kbd></a>
 - [10. Tests](#10-tests)
 - [11. Conventions](#11-conventions)
 
