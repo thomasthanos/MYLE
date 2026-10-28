@@ -33,7 +33,7 @@
   import { toast } from "../../../lib/toast.svelte";
   import { formatSize } from "./api";
   import { cleanerState } from "./state.svelte";
-  import { ACTION_LABELS, MODULES, health, type HealthAction } from "./health.svelte";
+  import { ACTION_LABELS, MODULES, health, healthApi, type HealthAction } from "./health.svelte";
   import { CLEANUP_MODULES, cleanupPlan, compatibleActions, filterFindings, selectResults, type ListFilter } from "./health-model";
 
   let category = $state("cleanup");
@@ -121,13 +121,17 @@
     }
   }
 
+  function isFileSystemPath(path: string | null): boolean {
+    if (!path) return false;
+    return /^[a-zA-Z]:[\\/]|^\\\\|^\//.test(path);
+  }
+
   async function openInExplorer(path: string | null) {
     if (!path) return;
     try {
-      const { revealItemInDir, openPath } = await import("@tauri-apps/plugin-opener");
-      await revealItemInDir(path).catch(() => openPath(path));
-    } catch {
-      toast.error("Could not open in File Explorer");
+      await healthApi.reveal(path);
+    } catch (e) {
+      toast.error(typeof e === "string" ? e : "Could not open in File Explorer");
     }
   }
 
@@ -164,7 +168,13 @@
         <span>{health.operation.current || "Finishing changes…"}<b>{health.operation.done}/{health.operation.total}</b></span>
         <ProgressBar value={health.operation.total ? health.operation.done / health.operation.total : 0} label="Software Health changes" />
       {:else}
-        <span>{health.running.size ? `Scanning ${[...health.running].map(moduleTitle).join(", ")}` : "Preparing scan…"}<b>{health.done}/{health.total}</b></span>
+        <span>
+          <span class="work-label">
+            <LoaderCircle size={14} class="spin" />
+            <span>{health.running.size ? `Scanning ${[...health.running].map(moduleTitle).join(", ")}…` : "Preparing scan…"}</span>
+          </span>
+          <b>{health.done}/{health.total}</b>
+        </span>
         <ProgressBar value={health.fraction} label="Software Health scan" />
       {/if}
     </div>
@@ -353,10 +363,12 @@
                                 <span class="btn-text">Copy</span>
                               {/if}
                             </button>
-                            <button type="button" class="mini-btn" title="Open in File Explorer" onclick={() => openInExplorer(f.path)}>
-                              <ExternalLink size={13} />
-                              <span class="btn-text">Open</span>
-                            </button>
+                            {#if isFileSystemPath(f.path)}
+                              <button type="button" class="mini-btn" title="Open in File Explorer" onclick={() => openInExplorer(f.path)}>
+                                <ExternalLink size={13} />
+                                <span class="btn-text">Open</span>
+                              </button>
+                            {/if}
                           </div>
                         </div>
                       {/if}
@@ -430,6 +442,7 @@
   .work { display: grid; gap: 8px; padding: 14px 18px; }
   .work span { display: flex; gap: 16px; font-size: var(--fluid-sm); }
   .work b { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .work-label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-1); }
   .outcome { color: var(--ok); padding: 0 4px; font-size: var(--fluid-sm); }
   .history { padding: 18px; }
   .history-row { justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--divider); }

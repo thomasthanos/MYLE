@@ -67,6 +67,7 @@ export const healthApi = {
   },
   restoreList: () => invoke<RestoreEntry[]>("cleaner_health_restore_list"),
   undo: (id: string) => invoke<void>("cleaner_health_restore", { id }),
+  reveal: (path: string) => invoke<void>("cleaner_health_reveal", { path }),
 };
 export class HealthState {
   reports = $state<Record<string, ModuleReport>>({});

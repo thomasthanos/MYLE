@@ -837,6 +837,49 @@ pub async fn cleaner_health_restore(id: String) -> Result<(), String> {
     let rest: Vec<RestoreEntry> = list.into_iter().filter(|e| e.id != id).collect();
     write_journal(&rest)
 }
+/// Opens a file or folder in Windows File Explorer.
+#[tauri::command(async)]
+pub fn cleaner_health_reveal(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err(format!("The path does not exist on disk: {path}"));
+    }
+    if target.is_file() {
+        if tauri_plugin_opener::reveal_item_in_dir(&target).is_ok() {
+            return Ok(());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new(crate::apps::process::explorer())
+                .raw_arg(format!("/select,\"{path}\""))
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("Explorer did not start: {e}"))
+        }
+        #[cfg(not(windows))]
+        {
+            tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
+        }
+    } else {
+        if tauri_plugin_opener::open_path(&path, None::<&str>).is_ok() {
+            return Ok(());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new(crate::apps::process::explorer())
+                .raw_arg(format!("\"{path}\""))
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("Explorer did not start: {e}"))
+        }
+        #[cfg(not(windows))]
+        {
+            tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
+        }
+    }
+}
 // ─── Changes ───────────────────────────────────────────────────────────────
 fn writable(hive: &str, path: &str) -> Result<winreg::RegKey, String> {
     sys::root(hive)

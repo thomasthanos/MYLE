@@ -469,6 +469,7 @@ pub fn run() {
             cleaner::health::cleaner_health_apply_batch,
             cleaner::health::cleaner_health_restore_list,
             cleaner::health::cleaner_health_restore,
+            cleaner::health::cleaner_health_reveal,
             disk_analyzer::disk_analyzer_drives,
             disk_analyzer::disk_analyzer_pick_folder,
             disk_analyzer::disk_analyzer_scan,

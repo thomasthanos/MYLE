@@ -603,7 +603,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     let mut running = live.paths;
     running.extend(startup_and_path());
     tick(0.4);
-    let mut out = Vec::new();
+
     let roots: Vec<(PathBuf, bool)> = [
         "APPDATA",
         "LOCALAPPDATA",
@@ -614,119 +614,157 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     .iter()
     .filter_map(|v| sys::env_dir(v).map(|dir| (dir, USER_DATA_ROOTS.contains(v))))
     .collect();
-    let mut seen = HashSet::new();
-    let roots_total = roots.len().max(1) as f32;
-    for (index, (root, user_data)) in roots.into_iter().enumerate() {
-        tick(0.4 + 0.5 * index as f32 / roots_total);
-        let Ok(entries) = std::fs::read_dir(&root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if !kind.is_dir() {
-                continue;
-            }
-            let path = entry.path();
-            if !seen.insert(path.to_string_lossy().to_lowercase()) {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let folder = sys::norm(&name);
-            if folder.len() < 2
-                || sys::protected_name(&name)
-                || sys::system_path(&path.to_string_lossy())
-            {
-                continue;
-            }
-            // Proof of uninstallation: a registered installation whose uninstaller is gone. In AppData and ProgramData, where the record usually goes with the uninstall, a folder nothing on this PC claims is shown too, for review only (stricter below).
-            let owner = orphan_folder_owner(&path, &list);
-            if owner.is_none() && !(user_data && unclaimed_candidate(&name)) {
-                continue;
-            }
-            let (depth, mut budget) = if owner.is_some() { (2, 1500) } else { (32, 50_000) };
-            let mut found = Contents::default();
-            let kept = contents_kept(&path, depth, &mut budget, &mut found);
-            let programs = found.programs;
-            // Saves in it, or where games keep saves (Ludusavi's manifest).
-            let saves = found.saves || save_roots.contains(&folder);
-            if kept
-                || active
-                    .iter()
-                    .flat_map(registered_paths)
-                    .any(|installed| related_folder(&path, &installed))
-                // Programs or saves keep a folder an uninstaller left behind; one nothing claims, only while its programs run, start or have a shortcut, and its games are on the PC.
-                || (owner.is_some() && (!programs.is_empty() || saves))
-                || (!programs.is_empty() && in_use(&path, &running))
-                || (saves && saves_in_use(&path, &tokens))
-            {
-                continue;
-            }
-            // Common shared folders no single app owns.
-            const SHARED: &[&str] = &[
-                "temp", "cache", "packages", "programs", "common", "data", "logs", "crashpad",
-                "cef", "local", "roaming",
-            ];
-            if SHARED.contains(&folder.as_str()) {
-                continue;
-            }
-            // Still installed? Then it is not a leftover.
-            if claimed(&name, &tokens, owner.is_none()) {
-                continue;
-            }
-            // A vendor folder with sub-apps is ambiguous; needs a clear match.
-            let idle = sys::newest_change(&path).map(sys::days_since).unwrap_or(0);
-            if idle < IDLE_DAYS {
-                continue;
-            }
-            // An empty folder left behind is a leftover too (the folder was read above: one that can't be is never offered).
-            let size = sys::dir_size(&path, 20_000);
-            let (files, names) = sys::folder_contents(&path, 20_000, 3);
-            let empty = files == 0;
-            // Made by an installer running as administrator (ProgramData, Program Files): this user may only read it.
-            let deletable = sys::can_delete(&path);
-            let mut f = finding("leftovers", name.clone());
-            f.path = Some(path.to_string_lossy().into_owned());
-            f.size = Some(size);
-            let mut holds = contents_line(files, &names, idle);
-            if !programs.is_empty() {
-                let more = if programs.len() > 3 { ", …" } else { "" };
-                holds.push_str(&format!(
-                    " Its programs ({}{more}) don't run, start with Windows, have a shortcut or sit on the PATH.",
-                    programs[..programs.len().min(3)].join(", ")
-                ));
-            }
-            if let Some(owner) = owner {
-                f.detail = format!(
-                    "The registered uninstaller for {} is missing. No app executable was found in its old installation folder. {holds}",
-                    owner.name
-                );
-                f.review_reason = Some("A missing uninstaller does not prove all remaining data is unwanted. Review the folder before moving it to the Recycle Bin.".into());
-            } else {
-                f.detail = format!(
-                    "Nothing on this PC uses this name: no installed program, running or recently run app, service, Store app, shortcut, command-line tool or game. {holds}"
-                );
-                f.confidence = Some(unclaimed_confidence(idle, empty));
-                // Nothing to lose in an empty folder: selected for cleanup. Anything inside is for the user to look at first.
-                if empty && deletable {
-                    f.recommended = true;
-                } else if saves {
-                    f.review_reason = Some("Games keep their saves here: check none of them is a game you still play before moving it to the Recycle Bin.".into());
-                } else if !programs.is_empty() {
-                    f.review_reason = Some("It has programs of its own: check it is not a portable app you still start by hand before moving it to the Recycle Bin.".into());
-                } else {
-                    f.review_reason = Some("Found by its name only: a program's data folder can be named differently from the program. Check what is inside before moving it to the Recycle Bin.".into());
-                }
-            }
-            if !deletable {
-                f.flags.push("Needs administrator".into());
-                f.detail.push_str(" Only an administrator can move it: run MYLE as administrator for this one.");
-            }
-            f.actions = vec!["recycle"];
-            out.push((f, Target::Paths(vec![path])));
+
+    let mut tasks = Vec::new();
+    let mut total_folders = 0;
+    for (root, user_data) in roots {
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            let dirs: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .collect();
+            total_folders += dirs.len();
+            tasks.push((root, user_data, dirs));
         }
     }
+
+    let progress_counter = std::sync::atomic::AtomicUsize::new(0);
+    let total_tasks = total_folders.max(1);
+
+    let per_thread_findings = std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for (_root, user_data, dirs) in tasks {
+            let tokens = &tokens;
+            let running = &running;
+            let list = &list;
+            let active = &active;
+            let save_roots = &save_roots;
+            let progress_counter = &progress_counter;
+            let handle = s.spawn(move || {
+                let mut findings = Vec::new();
+                for entry in dirs {
+                    let done = progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if done % 3 == 0 || done == total_tasks {
+                        tick(0.4 + 0.55 * (done as f32 / total_tasks as f32));
+                    }
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let folder = sys::norm(&name);
+                    if folder.len() < 2
+                        || sys::protected_name(&name)
+                        || sys::system_path(&path.to_string_lossy())
+                    {
+                        continue;
+                    }
+                    // Fast reject: Common shared folders no single app owns.
+                    const SHARED: &[&str] = &[
+                        "temp", "cache", "packages", "programs", "common", "data", "logs", "crashpad",
+                        "cef", "local", "roaming",
+                    ];
+                    if SHARED.contains(&folder.as_str()) {
+                        continue;
+                    }
+                    // Proof of uninstallation: a registered installation whose uninstaller is gone. In AppData and ProgramData, where the record usually goes with the uninstall, a folder nothing on this PC claims is shown too, for review only (stricter below).
+                    let owner = orphan_folder_owner(&path, list);
+                    if owner.is_none() && !(user_data && unclaimed_candidate(&name)) {
+                        continue;
+                    }
+                    // Fast reject: Still installed? Then it is not a leftover.
+                    if claimed(&name, tokens, owner.is_none()) {
+                        continue;
+                    }
+                    // Fast reject: Matches an active installed app location.
+                    if active
+                        .iter()
+                        .flat_map(registered_paths)
+                        .any(|installed| related_folder(&path, &installed))
+                    {
+                        continue;
+                    }
+                    // Fast reject: A folder that was active recently (< 7 days) is still in use.
+                    let idle = sys::newest_change(&path).map(sys::days_since).unwrap_or(0);
+                    if idle < IDLE_DAYS {
+                        continue;
+                    }
+                    // Deep inspection only on qualified candidates.
+                    let (depth, mut budget) = if owner.is_some() { (2, 1500) } else { (6, 5000) };
+                    let mut found = Contents::default();
+                    let kept = contents_kept(&path, depth, &mut budget, &mut found);
+                    let programs = found.programs;
+                    // Saves in it, or where games keep saves (Ludusavi's manifest).
+                    let saves = found.saves || save_roots.contains(&folder);
+                    if kept
+                        || (owner.is_some() && (!programs.is_empty() || saves))
+                        || (!programs.is_empty() && in_use(&path, running))
+                        || (saves && saves_in_use(&path, tokens))
+                    {
+                        continue;
+                    }
+                    // Single-pass stats gathering (size, file count, sample names).
+                    let (size, files, names) = sys::folder_stats(&path, 20_000, 3);
+                    let empty = files == 0;
+                    // User data directories in AppData are always deletable by the current user.
+                    let deletable = user_data || sys::can_delete(&path);
+                    let mut f = finding("leftovers", name.clone());
+                    f.path = Some(path.to_string_lossy().into_owned());
+                    f.size = Some(size);
+                    let mut holds = contents_line(files, &names, idle);
+                    if !programs.is_empty() {
+                        let more = if programs.len() > 3 { ", …" } else { "" };
+                        holds.push_str(&format!(
+                            " Its programs ({}{more}) don't run, start with Windows, have a shortcut or sit on the PATH.",
+                            programs[..programs.len().min(3)].join(", ")
+                        ));
+                    }
+                    if let Some(owner) = owner {
+                        f.detail = format!(
+                            "The registered uninstaller for {} is missing. No app executable was found in its old installation folder. {holds}",
+                            owner.name
+                        );
+                        f.review_reason = Some("A missing uninstaller does not prove all remaining data is unwanted. Review the folder before moving it to the Recycle Bin.".into());
+                    } else {
+                        f.detail = format!(
+                            "Nothing on this PC uses this name: no installed program, running or recently run app, service, Store app, shortcut, command-line tool or game. {holds}"
+                        );
+                        f.confidence = Some(unclaimed_confidence(idle, empty));
+                        if empty && deletable {
+                            f.recommended = true;
+                        } else if saves {
+                            f.review_reason = Some("Games keep their saves here: check none of them is a game you still play before moving it to the Recycle Bin.".into());
+                        } else if !programs.is_empty() {
+                            f.review_reason = Some("It has programs of its own: check it is not a portable app you still start by hand before moving it to the Recycle Bin.".into());
+                        } else {
+                            f.review_reason = Some("Found by its name only: a program's data folder can be named differently from the program. Check what is inside before moving it to the Recycle Bin.".into());
+                        }
+                    }
+                    if !deletable {
+                        f.flags.push("Needs administrator".into());
+                        f.detail.push_str(" Only an administrator can move it: run MYLE as administrator for this one.");
+                    }
+                    f.actions = vec!["recycle"];
+                    findings.push((f, Target::Paths(vec![path])));
+                }
+                findings
+            });
+            handles.push(handle);
+        }
+        handles.into_iter().map(|h| h.join().unwrap_or_default()).collect::<Vec<_>>()
+    });
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for thread_findings in per_thread_findings {
+        for (f, target) in thread_findings {
+            if let Some(ref path_str) = f.path {
+                if seen.insert(path_str.to_lowercase()) {
+                    out.push((f, target));
+                }
+            } else {
+                out.push((f, target));
+            }
+        }
+    }
+    tick(0.95);
     // Orphaned Uninstall keys: no uninstaller and no install folder.
     for (hive, key_name, app) in uninstall_keys() {
         if sys::protected_name(&app.name) || sys::protected_name(&app.publisher) {

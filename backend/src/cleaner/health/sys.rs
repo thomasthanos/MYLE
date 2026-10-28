@@ -326,7 +326,14 @@ pub fn dir_size(path: &Path, limit: usize) -> u64 {
 /// What a folder holds, for a person deciding about it: how many files (up
 /// to `limit` entries looked at; links not followed) and the names of the
 /// first few, shallowest first.
+#[allow(dead_code)]
 pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<String>) {
+    let (_, files, sample) = folder_stats(path, limit, names);
+    (files, sample)
+}
+/// Returns (total_bytes, file_count, sample_names) in a single directory pass.
+pub fn folder_stats(path: &Path, limit: usize, names: usize) -> (u64, usize, Vec<String>) {
+    let mut total = 0;
     let mut files = 0;
     let mut seen = 0;
     let mut found = Vec::new();
@@ -338,7 +345,7 @@ pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<S
         for entry in entries.flatten() {
             seen += 1;
             if seen > limit {
-                return (files, found);
+                return (total, files, found);
             }
             let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
@@ -350,13 +357,14 @@ pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<S
                 queue.push_back(entry.path());
             } else {
                 files += 1;
+                total += meta.len();
                 if found.len() < names {
                     found.push(entry.file_name().to_string_lossy().into_owned());
                 }
             }
         }
     }
-    (files, found)
+    (total, files, found)
 }
 /// A folder of a known Windows location (`{6D809377-…}` for Program Files)
 /// as UserAssist writes it, resolved to its path.
