@@ -106,10 +106,7 @@
 .input:focus { border-color: rgb(var(--accent-rgb) / 0.8); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12); }
 
 @media (prefers-reduced-motion: reduce) {
-  :where(button, [role="button"], .btn, .chip, .icon-btn):active {
-    scale: 1 !important;
-    translate: none !important;
-  }
+  :where(button, [role="button"], .btn, .chip, .icon-btn):active { scale: 1 !important; translate: none !important; }
 }
 
 /* Floating menus (popovers). Solid fill: no blur stacked on blur. */

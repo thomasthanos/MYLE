@@ -179,15 +179,7 @@
     </div>
     <label class="search-bar" aria-label="Search settings">
       <Search size={13} />
-      <input
-        id="settings-search"
-        type="search"
-        placeholder="Search settings… (Ctrl+F)"
-        autocomplete="off"
-        spellcheck="false"
-        bind:value={query}
-        onkeydown={(e) => e.key === "Escape" && query && ((query = ""), e.stopPropagation())}
-      />
+      <input id="settings-search" type="search" placeholder="Search settings… (Ctrl+F)" autocomplete="off" spellcheck="false" bind:value={query} onkeydown={(e) => e.key === "Escape" && query && ((query = ""), e.stopPropagation())} />
       {#if query}
         <button class="clear" aria-label="Clear search" onclick={() => (query = "")}>
           <X size={12} />
@@ -246,13 +238,7 @@
               <strong>Start with Windows</strong>
               <small>{startup.canChange ? "Opens MYLE when you sign in to Windows." : "Available in installed app."}</small>
             </span>
-            <input
-              type="checkbox"
-              class="switch"
-              checked={startup.enabled}
-              disabled={!startup.canChange || startupBusy}
-              onchange={(e) => void setStartup("enabled", e.currentTarget.checked)}
-            />
+            <input type="checkbox" class="switch" checked={startup.enabled} disabled={!startup.canChange || startupBusy} onchange={(e) => void setStartup("enabled", e.currentTarget.checked)} />
           </label>
           <label class="row" hidden={!showing.startMinimized}>
             <span class="row-icon"><Minimize2 size={13} /></span>
@@ -264,13 +250,7 @@
                   : "Turn on “Start with Windows” first."}
               </small>
             </span>
-            <input
-              type="checkbox"
-              class="switch"
-              checked={startup.minimized}
-              disabled={!startup.enabled || startupBusy}
-              onchange={(e) => void setStartup("minimized", e.currentTarget.checked)}
-            />
+            <input type="checkbox" class="switch" checked={startup.minimized} disabled={!startup.enabled || startupBusy} onchange={(e) => void setStartup("minimized", e.currentTarget.checked)} />
           </label>
           <label class="row" hidden={!showing.tray}>
             <span class="row-icon"><PanelBottomClose size={13} /></span>
@@ -282,12 +262,7 @@
                   : "Closing window quits MYLE completely."}
               </small>
             </span>
-            <input
-              type="checkbox"
-              class="switch"
-              checked={keepInTray}
-              onchange={(e) => void setKeepInTray(e.currentTarget.checked)}
-            />
+            <input type="checkbox" class="switch" checked={keepInTray} onchange={(e) => void setKeepInTray(e.currentTarget.checked)} />
           </label>
         </div>
       </section>
@@ -338,13 +313,7 @@
             </span>
           </div>
           <div class="themes" role="radiogroup" aria-label="Theme">
-            <button
-              class="theme"
-              role="radio"
-              aria-checked={!settings.dark}
-              class:chosen={!settings.dark}
-              onclick={() => settings.setDark(false)}
-            >
+            <button class="theme" role="radio" aria-checked={!settings.dark} class:chosen={!settings.dark} onclick={() => settings.setDark(false)}>
               <div class="mockup default" aria-hidden="true">
                 <div class="mock-chrome">
                   <span class="dot red"></span>
@@ -374,13 +343,7 @@
                 <span class="tick" aria-hidden="true"><CircleCheck size={14} /></span>
               </div>
             </button>
-            <button
-              class="theme"
-              role="radio"
-              aria-checked={settings.dark}
-              class:chosen={settings.dark}
-              onclick={() => settings.setDark(true)}
-            >
+            <button class="theme" role="radio" aria-checked={settings.dark} class:chosen={settings.dark} onclick={() => settings.setDark(true)}>
               <div class="mockup navy" aria-hidden="true">
                 <div class="mock-chrome">
                   <span class="dot red"></span>
@@ -656,291 +619,97 @@
   .empty strong { color: var(--text-1); font-size: 13px; }
   .empty .btn { margin-top: 8px; height: 26px; font-size: 11px; }
 
-  /* ============================================================== */
-  /* --- 3-TIER ZERO-SCROLL RESPONSIVE ARCHITECTURE ---             */
-  /* ============================================================== */
 
   /* TIER 1: Ultra-Wide / 1440p / 4K Displays (large canvas, generous scale) */
   @media (min-width: 1550px) and (min-height: 850px), (min-width: 2200px) {
-    .frame {
-      max-width: 1680px;
-    }
-    :global(.scroller:has(.frame)) {
-      padding: 26px 36px !important;
-    }
-    .settings-header {
-      margin-bottom: 22px;
-    }
-    .page-title {
-      font-size: 28px;
-    }
-    .page-subtitle {
-      font-size: 14px;
-    }
-    .search-bar {
-      width: 320px;
-      height: 36px;
-      border-radius: 11px;
-      padding: 0 12px;
-    }
-    .search-bar input {
-      font-size: 13px;
-    }
-    .content {
-      gap: 24px;
-    }
-    .col {
-      gap: 18px;
-    }
-    .group {
-      gap: 7px;
-    }
-    .group-head h2 {
-      font-size: 12.5px;
-      letter-spacing: 0.08em;
-    }
-    .group-head p {
-      display: block;
-      font-size: 12px;
-      color: var(--text-3);
-      margin: 0;
-    }
-    .panel {
-      padding: 16px 18px;
-      gap: 12px;
-      border-radius: 14px;
-    }
-    .panel.rows {
-      padding: 5px;
-    }
-    .row {
-      padding: 9px 12px;
-      gap: 12px;
-      border-radius: 9px;
-    }
-    .row-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-    }
-    strong {
-      font-size: 13.5px;
-    }
-    small {
-      font-size: 12px;
-      line-height: 1.35;
-    }
-    :global(.switch) {
-      width: 44px !important;
-      height: 24px !important;
-    }
-    :global(.switch::before) {
-      width: 18px !important;
-      height: 18px !important;
-      top: 3px !important;
-      left: 3px !important;
-    }
-    :global(.switch:checked::before) {
-      transform: translateX(20px) !important;
-    }
-    .themes {
-      gap: 14px;
-    }
-    .theme {
-      padding: 11px;
-      border-radius: 12px;
-    }
-    .mockup {
-      height: 72px;
-      border-radius: 8px;
-    }
-    .mock-chrome {
-      height: 15px;
-      padding: 0 7px;
-      gap: 4px;
-    }
-    .mock-chrome .dot {
-      width: 4.5px;
-      height: 4.5px;
-    }
-    .mock-title {
-      width: 24px;
-      height: 3px;
-    }
-    .mock-sidebar {
-      padding: 6px;
-      gap: 4px;
-    }
-    .mock-nav {
-      height: 4.5px;
-    }
-    .mock-canvas {
-      padding: 6px 8px;
-    }
-    .mock-line.title {
-      height: 3.5px;
-    }
-    .mock-line.desc {
-      height: 2px;
-    }
-    .mock-action-pill {
-      width: 26px;
-      height: 7px;
-    }
-    .theme-footer {
-      margin-top: 8px;
-      padding: 0 4px;
-    }
-    .theme-text b {
-      font-size: 13.5px;
-    }
-    .theme-text small {
-      font-size: 11.5px;
-    }
-    .more-summary {
-      padding: 9px 14px;
-      font-size: 12.5px;
-    }
-    .more-label {
-      gap: 8px;
-      font-size: 12.5px;
-    }
-    .version-pill {
-      font-size: 11px;
-      padding: 2px 9px;
-    }
-    .about-row {
-      gap: 14px;
-    }
-    .brand {
-      font-size: 15px;
-    }
+    .frame { max-width: 1680px; }
+    :global(.scroller:has(.frame)) { padding: 26px 36px !important; }
+    .settings-header { margin-bottom: 22px; }
+    .page-title { font-size: 28px; }
+    .page-subtitle { font-size: 14px; }
+    .search-bar { width: 320px; height: 36px; border-radius: 11px; padding: 0 12px; }
+    .search-bar input { font-size: 13px; }
+    .content { gap: 24px; }
+    .col { gap: 18px; }
+    .group { gap: 7px; }
+    .group-head h2 { font-size: 12.5px; letter-spacing: 0.08em; }
+    .group-head p { display: block; font-size: 12px; color: var(--text-3); margin: 0; }
+    .panel { padding: 16px 18px; gap: 12px; border-radius: 14px; }
+    .panel.rows { padding: 5px; }
+    .row { padding: 9px 12px; gap: 12px; border-radius: 9px; }
+    .row-icon { width: 32px; height: 32px; border-radius: 8px; }
+    strong { font-size: 13.5px; }
+    small { font-size: 12px; line-height: 1.35; }
+    :global(.switch) { width: 44px !important; height: 24px !important; }
+    :global(.switch::before) { width: 18px !important; height: 18px !important; top: 3px !important; left: 3px !important; }
+    :global(.switch:checked::before) { transform: translateX(20px) !important; }
+    .themes { gap: 14px; }
+    .theme { padding: 11px; border-radius: 12px; }
+    .mockup { height: 72px; border-radius: 8px; }
+    .mock-chrome { height: 15px; padding: 0 7px; gap: 4px; }
+    .mock-chrome .dot { width: 4.5px; height: 4.5px; }
+    .mock-title { width: 24px; height: 3px; }
+    .mock-sidebar { padding: 6px; gap: 4px; }
+    .mock-nav { height: 4.5px; }
+    .mock-canvas { padding: 6px 8px; }
+    .mock-line.title { height: 3.5px; }
+    .mock-line.desc { height: 2px; }
+    .mock-action-pill { width: 26px; height: 7px; }
+    .theme-footer { margin-top: 8px; padding: 0 4px; }
+    .theme-text b { font-size: 13.5px; }
+    .theme-text small { font-size: 11.5px; }
+    .more-summary { padding: 9px 14px; font-size: 12.5px; }
+    .more-label { gap: 8px; font-size: 12.5px; }
+    .version-pill { font-size: 11px; padding: 2px 9px; }
+    .about-row { gap: 14px; }
+    .brand { font-size: 15px; }
     .links .btn,
-    .extension-row .btn {
-      height: 29px;
-      padding: 0 11px;
-      font-size: 12px;
-    }
+    .extension-row .btn { height: 29px; padding: 0 11px; font-size: 12px; }
   }
 
   /* TIER 2: Standard Desktop 1080p (901px to 1549px, standard vertical room) */
   @media (min-width: 901px) and (max-width: 1549px) {
-    .frame {
-      max-width: 1180px;
-    }
-    .content {
-      gap: 14px;
-    }
-    .col {
-      gap: 11px;
-    }
+    .frame { max-width: 1180px; }
+    .content { gap: 14px; }
+    .col { gap: 11px; }
   }
 
   /* TIER 3: Compact 720p Window / Laptops / Low-Height (max-height: 750px), (max-width: 900px) */
   @media (max-height: 750px), (max-width: 900px) {
-    .frame {
-      max-width: 100%;
-    }
-    :global(.scroller:has(.frame)) {
-      padding: 12px 18px !important;
-    }
-    .settings-header {
-      margin-bottom: 8px;
-    }
-    .page-title {
-      font-size: 20px;
-    }
-    .page-subtitle {
-      font-size: 11px;
-    }
-    .search-bar {
-      width: 210px;
-      height: 27px;
-      font-size: 11px;
-    }
-    .content {
-      gap: 10px;
-    }
-    .col {
-      gap: 8px;
-    }
-    .group {
-      gap: 3px;
-    }
-    .group-head h2 {
-      font-size: 10px;
-    }
-    .group-head p {
-      display: none;
-    }
-    .panel {
-      padding: 8px 10px;
-      gap: 6px;
-    }
-    .panel.rows {
-      padding: 2px;
-    }
-    .row {
-      padding: 5px 7px;
-      gap: 8px;
-    }
-    .row-icon {
-      width: 22px;
-      height: 22px;
-    }
-    strong {
-      font-size: 11.5px;
-    }
-    small {
-      font-size: 10px;
-    }
-    :global(.switch) {
-      width: 32px !important;
-      height: 17px !important;
-    }
-    :global(.switch::before) {
-      width: 13px !important;
-      height: 13px !important;
-      top: 2px !important;
-      left: 2px !important;
-    }
-    :global(.switch:checked::before) {
-      transform: translateX(15px) !important;
-    }
-    .mockup {
-      height: 42px;
-    }
+    .frame { max-width: 100%; }
+    :global(.scroller:has(.frame)) { padding: 12px 18px !important; }
+    .settings-header { margin-bottom: 8px; }
+    .page-title { font-size: 20px; }
+    .page-subtitle { font-size: 11px; }
+    .search-bar { width: 210px; height: 27px; font-size: 11px; }
+    .content { gap: 10px; }
+    .col { gap: 8px; }
+    .group { gap: 3px; }
+    .group-head h2 { font-size: 10px; }
+    .group-head p { display: none; }
+    .panel { padding: 8px 10px; gap: 6px; }
+    .panel.rows { padding: 2px; }
+    .row { padding: 5px 7px; gap: 8px; }
+    .row-icon { width: 22px; height: 22px; }
+    strong { font-size: 11.5px; }
+    small { font-size: 10px; }
+    :global(.switch) { width: 32px !important; height: 17px !important; }
+    :global(.switch::before) { width: 13px !important; height: 13px !important; top: 2px !important; left: 2px !important; }
+    :global(.switch:checked::before) { transform: translateX(15px) !important; }
+    .mockup { height: 42px; }
     .links .btn,
-    .extension-row .btn {
-      height: 24px;
-      font-size: 10.5px;
-    }
+    .extension-row .btn { height: 24px; font-size: 10.5px; }
   }
 
   /* Single Column Layout for narrow/split screens */
   @media (max-width: 760px) {
-    .settings-header {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .search-bar {
-      width: 100%;
-      height: 32px;
-    }
-    .content {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 12px;
-    }
-    .col {
-      gap: 10px;
-    }
+    .settings-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 12px; }
+    .search-bar { width: 100%; height: 32px; }
+    .content { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .col { gap: 10px; }
   }
 
   @media (max-width: 560px) {
-    .themes {
-      grid-template-columns: 1fr;
-    }
+    .themes { grid-template-columns: 1fr; }
   }
 </style>

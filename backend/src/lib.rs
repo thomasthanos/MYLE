@@ -27,38 +27,30 @@ mod webview_policy;
 mod whats_new;
 mod window_sizing;
 mod windows_optimization;
-
 /// Handles a browser starting this program as the password extension's
 /// native messaging host. `None` means this is not such a start.
 pub fn run_passwords_native_host() -> Option<i32> {
     passwords::browser::run_native_host()
 }
-
 /// Handles the privileged Auto-Logon helper before Tauri and the
 /// single-instance plugin start. `None` means this is a normal app launch.
 pub fn run_windows_auto_logon_helper() -> Option<i32> {
     windows_optimization::run_auto_logon_helper_from_args()
 }
-
 /// Handles the debloater's administrator helper before Tauri starts.
 pub fn run_debloat_helper() -> Option<i32> {
     debloat::run_elevated_helper_from_args()
 }
-
 /// Handles the Disk Analyzer's fast-scan helper before Tauri starts.
 pub fn run_disk_analyzer_helper() -> Option<i32> {
     disk_analyzer::run_elevated_helper_from_args()
 }
-
 use std::sync::atomic::{AtomicBool, Ordering};
-
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-
 /// The splash alone: the main window follows once the splash is on screen
 /// (`splash_shown`), so the two web views don't compete for the first paint.
 fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     use tauri::window::Color;
-
     let data_dir = storage::webview_dir().map_err(std::io::Error::other)?;
     let splash = WebviewWindowBuilder::new(
         app,
@@ -79,11 +71,9 @@ fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     .build()?;
     webview_policy::harden(&splash)
 }
-
 /// The main window, hidden until the hand-over. Once only.
 fn create_main(app: &AppHandle) -> tauri::Result<()> {
     use tauri::window::Color;
-
     if app.get_webview_window("main").is_some() {
         return Ok(());
     }
@@ -104,49 +94,41 @@ fn create_main(app: &AppHandle) -> tauri::Result<()> {
     webview_policy::harden(&main)?;
     Ok(())
 }
-
 /// The start hands over from the splash to the main window once both are
 /// ready: the splash's update check is done, and the main page has drawn.
 static SPLASH_DONE: AtomicBool = AtomicBool::new(false);
 static MAIN_READY: AtomicBool = AtomicBool::new(false);
 static HANDED_OVER: AtomicBool = AtomicBool::new(false);
-
 fn hand_over(app: &AppHandle) -> tauri::Result<()> {
     if SPLASH_DONE.load(Ordering::SeqCst) && MAIN_READY.load(Ordering::SeqCst) && !HANDED_OVER.swap(true, Ordering::SeqCst) {
         show_main(app)?;
     }
     Ok(())
 }
-
 /// Called by the splash once it is on screen: now the main window loads.
 /// Async: a window created from a sync command deadlocks on Windows.
 #[tauri::command]
 async fn splash_shown(app: AppHandle) -> Result<(), String> {
     create_main(&app).map_err(|e| e.to_string())
 }
-
 /// Called by the splash once the update check is done.
 #[tauri::command]
 async fn finish_startup(app: AppHandle) -> Result<(), String> {
     SPLASH_DONE.store(true, Ordering::SeqCst);
     hand_over(&app).map_err(|e| e.to_string())
 }
-
 /// Called by the main page once it has drawn.
 #[tauri::command]
 async fn main_ready(app: AppHandle) -> Result<(), String> {
     MAIN_READY.store(true, Ordering::SeqCst);
     hand_over(&app).map_err(|e| e.to_string())
 }
-
-/// The page to open on start: the Password Manager when the browser
-/// extension started the app (`--open-passwords`), Game Saves from a
-/// scheduled backup's notice.
+/// The page to open on start: the Password Manager when the browser extension
+/// started the app (`--open-passwords`), Game Saves from a scheduled backup's notice.
 #[tauri::command]
 fn start_page() -> Option<&'static str> {
     page_asked(&std::env::args().collect::<Vec<_>>())
 }
-
 fn page_asked(args: &[String]) -> Option<&'static str> {
     if args.iter().any(|a| a == passwords::browser::OPEN_FLAG) {
         Some("password-manager")
@@ -156,11 +138,9 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
         None
     }
 }
-
-/// Refuses the owner-only pages' commands (GitHub Releases, Project
-/// Backups) unless the signed-in account is the owner's, by the verdict the
-/// backend got from Supabase (`account::owner`). One check for every command,
-/// so a command added to those pages later is covered too.
+/// Refuses the owner-only pages' commands (GitHub Releases, Project Backups) unless the signed-in account is the owner's,
+/// by the verdict the backend got from Supabase (`account::owner`). One check for every command, so a command added to
+/// those pages later is covered too.
 fn owner_gate(
     handler: impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static,
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -177,18 +157,15 @@ fn owner_gate(
         handler(invoke)
     }
 }
-
 /// Everything the app is built from, for its normal run and for a notice.
 fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
 }
-
 /// What the notice page shows.
 #[tauri::command]
 fn notice_data(notice: tauri::State<'_, game_saves::notice::Notice>) -> game_saves::notice::Notice {
     notice.inner().clone()
 }
-
 /// The notice closes: by itself, by its ×, or clicked to open Game Saves.
 #[tauri::command]
 fn notice_done(app: AppHandle, open: bool) {
@@ -197,7 +174,6 @@ fn notice_done(app: AppHandle, open: bool) {
     }
     app.exit(0);
 }
-
 /// `Some(exit code)` when this run is a scheduled backup's notice: only its
 /// window, which is gone after a few seconds.
 pub fn run_game_saves_notice() -> Option<i32> {
@@ -218,16 +194,14 @@ pub fn run_game_saves_notice() -> Option<i32> {
         Err(_) => 1,
     })
 }
-
 fn show_main(app: &AppHandle) -> tauri::Result<()> {
     let Some(main) = app.get_webview_window("main") else {
         return Ok(());
     };
     if !main.is_visible()? {
         window_sizing::fit_to_screen(&main)?;
-        // Launched by the Startup shortcut: stay out of the way, unless the
-        // user chose to have it open at sign-in. With the tray icon, out of
-        // the way means there; otherwise minimized in the taskbar.
+        // Launched by the Startup shortcut: stay out of the way, unless the user chose to have it open at sign-in.
+        // With the tray icon, out of the way means there; otherwise minimized in the taskbar.
         let quietly = startup::launched_at_sign_in() && startup::start_minimized();
         if quietly && tray::keep_running() {
             let _ = tray::ensure(app);
@@ -249,7 +223,6 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
     let _ = app.emit("myle-shown", ());
     Ok(())
 }
-
 pub fn run() {
     // SAFETY: a valid string, copied by Windows. The process and installed
     // shortcuts share the same identity for taskbar grouping and pinning.
@@ -337,14 +310,11 @@ pub fn run() {
                 if let Ok(dir) = storage::roaming_dir() {
                     std::thread::spawn(move || cleanup.init(dir.join("pending-cleanup.json")));
                 }
-                // The installer of the last update, if any. This runs before
-                // the splash can start a new download into the same folder.
-                // An installer still exiting after relaunching us stays
-                // locked and goes on a later start.
+                // The installer of the last update, if any. This runs before the splash can start a new download into
+                // the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
                 let _ = std::fs::remove_dir_all(updater::update_dir());
                 updater::sweep_leftovers_later();
-                // If the splash never gets to call finish_startup (a failed
-                // update check, a broken page), show the window anyway.
+                // If the splash never gets to call finish_startup (a failed update check, a broken page), show the window anyway.
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     loop {
@@ -650,7 +620,6 @@ pub fn run() {
         ]))
         .build(context())
         .expect("error while building the application");
-
     app.run(move |_app, event| {
         // Downloaded packages are removed once the app is closed.
         if matches!(event, tauri::RunEvent::Exit) {
