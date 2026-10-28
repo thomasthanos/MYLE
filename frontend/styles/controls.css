@@ -9,12 +9,12 @@
 
 :where(button, [role="button"], .btn, .chip, .icon-btn):where(:not(:disabled):not([aria-disabled="true"])):active { scale: 0.985; translate: 0 1px; transition-duration: 50ms; }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 13px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--btn-fill); box-shadow: var(--btn-sheen); font-size: 13px; font-weight: 600; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), filter var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 13px; border: 1px solid var(--btn-border); border-radius: 9px; background: var(--control-face), var(--btn-fill); box-shadow: var(--btn-sheen); font-size: 13px; font-weight: 600; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), filter var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
 
-.btn:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--btn-fill-hover); box-shadow: var(--btn-sheen-hover); }
+.btn:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--btn-fill-hover); box-shadow: var(--btn-sheen-hover); }
 
 /* Held down: pressed into the surface. */
-.btn:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.985; translate: 0 1px; background: var(--btn-fill-press); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2); transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms, 50ms, 50ms; }
+.btn:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.985; translate: 0 1px; background: var(--control-face-press), var(--btn-fill-press); box-shadow: var(--btn-sheen-press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms, 50ms, 50ms; }
 
 .btn:disabled,
 .btn[aria-disabled="true"],
@@ -23,47 +23,49 @@
 .chip:disabled,
 .chip[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 
-.btn.primary { border-color: transparent; background: var(--btn-primary); color: var(--btn-primary-text); box-shadow: var(--btn-sheen); }
+.btn.primary { border-color: var(--btn-border); background: var(--control-face), var(--btn-primary); color: var(--btn-primary-text); box-shadow: var(--btn-sheen); }
 
-.btn.primary:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--btn-primary-hover); box-shadow: var(--btn-sheen-hover); }
+.btn.primary:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--btn-primary-hover); box-shadow: var(--btn-sheen-hover); }
 
-.btn.primary:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--btn-primary-press); box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.25); }
+.btn.primary:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), var(--btn-primary-press); box-shadow: var(--btn-sheen-press); }
 
-:root.dark .btn.primary:not(.danger) { border-color: transparent; background: var(--btn-primary); color: var(--btn-primary-text); box-shadow: var(--btn-sheen); }
+:root.dark .btn.primary:not(.danger) { border-color: var(--btn-border); background: var(--control-face), var(--btn-primary); color: var(--btn-primary-text); box-shadow: var(--btn-sheen); }
 
-:root.dark .btn.primary:not(.danger):hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--btn-primary-hover); box-shadow: var(--btn-sheen-hover); filter: none; }
+:root.dark .btn.primary:not(.danger):hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--btn-primary-hover); box-shadow: var(--btn-sheen-hover); filter: none; }
 
-:root.dark .btn.primary:not(.danger):active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--btn-primary-press); box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.25); filter: none; }
+:root.dark .btn.primary:not(.danger):active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), var(--btn-primary-press); box-shadow: var(--btn-sheen-press); filter: none; }
 
-.btn.danger { border-color: transparent; background: rgb(229 72 77 / 0.9); color: #fff; box-shadow: var(--btn-sheen); }
+.btn.danger { border-color: rgb(255 255 255 / 0.16); background: var(--control-face), rgb(229 72 77 / 0.9); color: #fff; box-shadow: var(--btn-sheen); }
 
-.btn.danger:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: #cd3d43; }
+.btn.danger:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), #cd3d43; }
 
-.btn.danger:active:where(:not(:disabled):not([aria-disabled="true"])) { background: #b93339; box-shadow: none; }
+.btn.danger:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), #b93339; box-shadow: var(--btn-sheen-press); }
 
 .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; }
 
-.btn.ghost:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--hover); box-shadow: none; }
+.btn.ghost:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--hover); border-color: var(--glass-border); box-shadow: var(--btn-sheen); }
 
-.btn.ghost:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--press); box-shadow: none; }
+.btn.ghost:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), var(--press); box-shadow: var(--btn-sheen-press); }
 
 .btn.small { height: 26px; padding: 0 10px; border-radius: 7px; font-size: 12px; }
 
-.icon-btn { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; color: var(--text-2); transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
+.icon-btn { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; color: var(--text-2); transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
 
-.icon-btn:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--hover); color: var(--text-1); }
+.icon-btn:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--hover); color: var(--text-1); box-shadow: var(--btn-sheen-hover); }
 
-.icon-btn:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.96; background: var(--press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms; }
+.icon-btn:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.96; background: var(--control-face-press), var(--press); box-shadow: var(--btn-sheen-press); transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-fast), 50ms, 50ms; }
 
-.icon-btn.active { background: var(--selected); color: var(--text-1); }
+.icon-btn.active { background: var(--control-face), var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+.icon-btn.active:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), var(--selected); box-shadow: var(--btn-sheen-press); }
 
-.chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--btn-border); border-radius: var(--chip-radius); background: var(--chip-fill); box-shadow: var(--btn-sheen); color: var(--text-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--btn-border); border-radius: var(--chip-radius); background: var(--control-face), var(--chip-fill); box-shadow: var(--btn-sheen); color: var(--text-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out), translate 140ms var(--ease-out); }
 
-.chip:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--chip-fill-hover); color: var(--text-1); box-shadow: var(--btn-sheen-hover); }
+.chip:hover:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face), var(--chip-fill-hover); color: var(--text-1); box-shadow: var(--btn-sheen-hover); }
 
-.chip:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.985; background: var(--chip-fill-press); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2); transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-fast), 50ms, 50ms; }
+.chip:active:where(:not(:disabled):not([aria-disabled="true"])) { scale: 0.985; background: var(--control-face-press), var(--chip-fill-press); box-shadow: var(--btn-sheen-press); transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-fast), 50ms, 50ms; }
 
-.chip.active { border-color: rgb(var(--accent-rgb) / 0.4); background: var(--selected); color: var(--text-1); }
+.chip.active { border-color: rgb(var(--accent-rgb) / 0.4); background: var(--control-face), var(--selected); color: var(--text-1); }
+.chip.active:active:where(:not(:disabled):not([aria-disabled="true"])) { background: var(--control-face-press), var(--selected); box-shadow: var(--btn-sheen-press); }
 
 .chip .count { color: var(--text-3); font-variant-numeric: tabular-nums; }
 

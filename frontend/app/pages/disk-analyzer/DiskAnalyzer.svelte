@@ -467,20 +467,27 @@
   .picker-option { display: flex; align-items: center; gap: 9px; margin-right: 5px; }
   .option-label { font-size: 12px; color: var(--text-3); }
   .mode { display: inline-flex; padding: 3px; border: 1px solid var(--panel-rim); border-radius: 10px; background: var(--input-fill); gap: 2px; }
-  .mode button { height: 29px; padding: 0 11px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--text-3); font-size: 12px; font-weight: 600; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
-  .mode button:hover:not(:disabled) { color: var(--text-1); background: var(--hover); }
-  .mode button.active { background: var(--btn-fill); border-color: var(--btn-border); color: rgb(var(--accent-soft-rgb)); }
-  .folder-pick-btn, .scan-action-btn { display: inline-flex; align-items: center; justify-content: center; height: 37px; padding: 0 14px; gap: 7px; border-radius: 9px; font-size: 13px; font-weight: 700; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast); }
-  .folder-pick-btn { background: transparent; color: var(--text-2); border: 1px solid var(--glass-border); box-shadow: none; }
-  .folder-pick-btn:hover:not(:disabled) { background: var(--hover); color: var(--text-1); border-color: var(--btn-border); }
-  .scan-action-btn.primary { background: var(--btn-primary); border: 1px solid rgb(var(--accent-rgb) / 0.55); color: var(--btn-primary-text); box-shadow: 0 2px 6px rgb(0 0 0 / 0.15); }
-  .scan-action-btn.primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
-  .scan-action-btn.danger { background: var(--danger); color: #fff; }
+  .mode button { height: 29px; padding: 0 11px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--text-3); font-size: 12px; font-weight: 600; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+  .mode button:hover:not(:disabled) { color: var(--text-1); background: var(--control-face), var(--hover); box-shadow: var(--btn-sheen); }
+  .mode button.active { background: var(--control-face), var(--btn-fill); border-color: var(--btn-border); color: rgb(var(--accent-soft-rgb)); box-shadow: var(--btn-sheen); }
+  .mode button.active:hover:not(:disabled) { background: var(--control-face), var(--btn-fill-hover); box-shadow: var(--btn-sheen-hover); }
+  .mode button:active:not(:disabled), .mode button.active:active:not(:disabled) { background: var(--control-face-press), var(--btn-fill-press); box-shadow: var(--btn-sheen-press); }
+  .folder-pick-btn, .scan-action-btn { display: inline-flex; align-items: center; justify-content: center; height: 37px; padding: 0 14px; gap: 7px; border-radius: 9px; font-size: 13px; font-weight: 700; white-space: nowrap; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  .folder-pick-btn { background: var(--control-face), var(--btn-fill); color: var(--text-2); border: 1px solid var(--glass-border); box-shadow: var(--btn-sheen); }
+  .folder-pick-btn:hover:not(:disabled) { background: var(--control-face), var(--btn-fill-hover); color: var(--text-1); border-color: var(--btn-border); box-shadow: var(--btn-sheen-hover); }
+  .folder-pick-btn:active:not(:disabled) { background: var(--control-face-press), var(--btn-fill-press); box-shadow: var(--btn-sheen-press); }
+  .scan-action-btn.primary { background: var(--control-face), var(--btn-primary); border: 1px solid rgb(var(--accent-rgb) / 0.55); color: var(--btn-primary-text); box-shadow: var(--btn-sheen); }
+  .scan-action-btn.primary:hover:not(:disabled) { background: var(--control-face), var(--btn-primary-hover); box-shadow: var(--btn-sheen-hover); }
+  .scan-action-btn.primary:active:not(:disabled) { background: var(--control-face-press), var(--btn-primary-press); box-shadow: var(--btn-sheen-press); }
+  .scan-action-btn.danger { background: var(--control-face), var(--danger); color: #fff; }
+  .scan-action-btn.danger:active:not(:disabled) { background: var(--control-face-press), var(--danger); box-shadow: var(--btn-sheen-press); }
   .scan-action-btn:disabled, .folder-pick-btn:disabled, .mode button:disabled { opacity: 0.5; cursor: default; }
   .drive-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; padding: 16px 18px 18px; }
-  .drive-card { position: relative; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 15px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--surface-fill); color: var(--text-1); text-align: left; cursor: pointer; box-shadow: none; transition: border-color var(--dur-fast), background var(--dur-fast); }
-  .drive-card:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.55); background: var(--hover); }
-  .drive-card.selected { border-color: rgb(var(--accent-rgb) / 0.85); background: var(--selected); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.12); }
+  .drive-card { position: relative; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 15px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--surface-fill); color: var(--text-1); text-align: left; cursor: pointer; box-shadow: var(--surface-depth); transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast); }
+  .drive-card:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.55); background: var(--control-face), var(--surface-fill); box-shadow: var(--btn-sheen-hover); }
+  .drive-card.selected { border-color: rgb(var(--accent-rgb) / 0.85); background: var(--control-face), var(--selected); box-shadow: var(--btn-sheen); }
+  .drive-card.selected:hover:not(:disabled) { background: var(--control-face), var(--selected); box-shadow: var(--btn-sheen-hover); }
+  .drive-card:active:not(:disabled), .drive-card.selected:active:not(:disabled) { background-image: var(--control-face-press); box-shadow: var(--btn-sheen-press); }
   .drive-card:focus-visible, .mode button:focus-visible, .folder-pick-btn:focus-visible, .scan-action-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .drive-card:disabled:not(.selected) { opacity: 0.5; cursor: default; }
   .card-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -678,10 +685,11 @@
     color: var(--text-1);
   }
   .layout-toggle-btn.active {
-    background: var(--selected);
+    background: var(--control-face), var(--selected);
     color: var(--text-1);
     box-shadow: var(--btn-sheen);
   }
+  .layout-toggle-btn:active:not(:disabled) { background-image: var(--control-face-press); box-shadow: var(--btn-sheen-press); }
 
   .split { display: grid; gap: var(--fluid-gap-3); flex: 1; min-height: 420px; }
   .split.mode-split { grid-template-columns: minmax(320px, 1fr) minmax(400px, 1.4fr); }
@@ -692,8 +700,9 @@
   .tabs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 8px 10px 6px; border-bottom: 1px solid var(--glass-border); }
   .tabs { display: flex; gap: 4px; }
   .tabs button { display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 8px; color: var(--text-2); font-size: 12.5px; }
-  .tabs button:hover { background: var(--hover); color: var(--text-1); }
-  .tabs button.active { background: var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button:hover { background: var(--control-face), var(--hover); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button.active { background: var(--control-face), var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button:active { background-image: var(--control-face-press); box-shadow: var(--btn-sheen-press); }
   .tabs button :global(svg) { color: rgb(var(--accent-soft-rgb)); }
   .recycle { margin-left: auto; }
   .panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }

@@ -144,10 +144,11 @@
 
 <style>
   .tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; margin: 0 0 20px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
-  .tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
-  .tabs button:hover { background: var(--hover); color: var(--text-1); }
+  .tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+  .tabs button:hover { background: var(--control-face), var(--hover); color: var(--text-1); box-shadow: var(--btn-sheen); }
   .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .tabs button.active { background: var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button.active { background: var(--control-face), var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .tabs button:active { background-image: var(--control-face-press); box-shadow: var(--btn-sheen-press); }
   .tabs button :global(svg) { flex: none; color: var(--tool-color); }
   .tool-panel { flex: 0 0 auto; min-width: 0; }
   .disk-panel:not([hidden]) { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; }

@@ -220,12 +220,14 @@
   .group { display: grid; gap: 2px; }
   .section .group { gap: clamp(0px, calc(1cqh - 5px), 5px); }
   .collapsed .section .group { gap: clamp(0px, calc(1cqh - 5px), 2px); }
-  .item { position: relative; display: flex; align-items: center; width: 100%; height: clamp(26px, 5cqh, 40px); border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out); }
-  .item:hover { background: var(--hover); color: var(--text-1); }
-  .item:active { scale: 0.96; background: var(--press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms; }
+  .item { position: relative; display: flex; align-items: center; width: 100%; height: clamp(26px, 5cqh, 40px); border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast), scale 140ms var(--ease-out); }
+  .item:hover { background: var(--control-face), var(--hover); color: var(--text-1); box-shadow: var(--btn-sheen); }
+  .item:active { scale: 0.96; background: var(--control-face-press), var(--press); box-shadow: var(--btn-sheen-press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms, 50ms; }
   /* Inside the rounded item, so the ring is never cut by the panel's edge. */
   .item:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.75); outline-offset: -2px; }
-  .item.active { background: var(--selected); color: var(--text-1); font-weight: 600; box-shadow: var(--btn-sheen); }
+  .item.active { background: var(--control-face), var(--selected); color: var(--text-1); font-weight: 600; box-shadow: var(--btn-sheen); }
+  .item.active:hover { box-shadow: var(--btn-sheen-hover); }
+  .item.active:active { background: var(--control-face-press), var(--selected); box-shadow: var(--btn-sheen-press); }
   /* Glowing accent pill on the active item. */
   .item.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 3px 3px 0; background: var(--accent); }
   /* The icon column is exactly as wide as the collapsed item, so icons never move. */
