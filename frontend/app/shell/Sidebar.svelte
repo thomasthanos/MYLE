@@ -164,7 +164,7 @@
     {#each topSections as section (section.group)}
       <div class="section" class:owner-section={section.group === "owner"}>
         <h2 class="section-heading" id="sidebar-section-{section.group}">
-          {#if section.group === "owner"}<ShieldCheck size={11} strokeWidth={2} />{/if}
+          {#if section.group === "owner"}<ShieldCheck size={14} strokeWidth={2} />{/if}
           {GROUP_LABELS[section.group]}
         </h2>
         <div class="group" role="group" aria-labelledby="sidebar-section-{section.group}">
@@ -205,19 +205,22 @@
 {/if}
 
 <style>
-  .sidebar { --owner-rgb: 203 210 221; grid-area: side; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; min-height: 0; padding: 9px; border-radius: var(--shell-panel-radius); background: var(--sidebar-fill); }
+  .sidebar { container: navigation / size; grid-area: side; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-width: 0; min-height: 0; padding: 12px 9px; border-radius: var(--shell-panel-radius); background: var(--sidebar-fill); }
   /* On a short window the page list scrolls; Settings and the toggle stay. */
   .top { min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px; mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
   .top.more-above { --fade-top: 22px; }
   .top.more-below { --fade-bottom: 22px; }
-  .section + .section { margin-top: 14px; }
-  .section-heading { display: flex; align-items: center; gap: 6px; min-height: 16px; margin: 0 0 6px; padding: 0 12px; color: var(--text-3); font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; }
-  .owner-section .section-heading { color: rgb(var(--owner-rgb) / 0.74); }
+  /* The actual sidebar height sets the rhythm, including window scaling. */
+  .section + .section { margin-top: clamp(8px, calc(7.5cqh - 33px), 30px); }
+  .section-heading { display: flex; align-items: center; gap: 8px; min-height: 22px; margin: 0 0 clamp(3px, calc(2.5cqh - 12px), 10px); padding: 0 12px; color: var(--text-1); font-size: clamp(13px, 1.6cqh, 15px); font-weight: 700; line-height: 1.35; white-space: nowrap; }
+  .section-heading::after { content: ""; flex: 1; min-width: 16px; height: 1px; background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.35), transparent); }
   .section-heading :global(svg) { flex: none; }
   .collapsed .section-heading { display: none; }
   .collapsed .section + .section { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(255 255 255 / 0.08); }
   .group { display: grid; gap: 2px; }
-  .item { position: relative; display: flex; align-items: center; width: 100%; height: 40px; border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out); }
+  .section .group { gap: clamp(0px, calc(1cqh - 5px), 5px); }
+  .collapsed .section .group { gap: clamp(0px, calc(1cqh - 5px), 2px); }
+  .item { position: relative; display: flex; align-items: center; width: 100%; height: clamp(26px, 5cqh, 40px); border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out); }
   .item:hover { background: var(--hover); color: var(--text-1); }
   .item:active { scale: 0.96; background: var(--press); transition-duration: var(--dur-fast), var(--dur-fast), 50ms; }
   /* Inside the rounded item, so the ring is never cut by the panel's edge. */
@@ -227,11 +230,11 @@
   .item.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 3px 3px 0; background: var(--accent); }
   /* The icon column is exactly as wide as the collapsed item, so icons never move. */
   .icon { position: relative; flex: none; display: grid; place-items: center; width: 48px; }
-  .glyph { display: grid; place-items: center; width: 32px; height: 32px; color: var(--icon-neutral); }
+  .glyph { display: grid; place-items: center; width: 32px; height: clamp(26px, 5cqh, 32px); color: var(--icon-neutral); }
   /* Count on the right while expanded; on the icon's corner while collapsed. */
   .badge { flex: none; min-width: 19px; margin: 0 10px 0 auto; padding: 1px 6px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; box-shadow: 0 0 10px var(--accent-glow); transition: opacity var(--dur-med) var(--ease-out); }
   /* The count sits on the icon's upper-right corner. */
-  .dot { position: absolute; top: -2px; left: 30px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg-1), 0 0 8px var(--accent-glow); opacity: 0; transform: scale(0.6); transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
+  .dot { position: absolute; top: 0; left: 30px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--accent-grad); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg-1), 0 0 8px var(--accent-glow); opacity: 0; transform: scale(0.6); transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
   .collapsed .badge { opacity: 0; }
   .collapsed .dot { opacity: 1; transform: scale(1); }
   .label { white-space: nowrap; font-weight: 500; transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
@@ -247,6 +250,11 @@
   .tooltip p { margin: 7px 0 0; color: var(--text-2); line-height: 1.5; text-wrap: pretty; }
   .tooltip .tip-owner { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding: 9px 0 0; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: 11px; }
   .tip-owner :global(svg) { flex: none; }
+  @container navigation (max-height: 480px) {
+    .section + .section { margin-top: 4px; }
+    .section-heading { min-height: 18px; margin-bottom: 2px; }
+    .bottom .divider { margin-block: 2px; }
+  }
   @keyframes tip-in { from { opacity: 0; transform: translateX(-4px); } }
   @media (prefers-reduced-motion: reduce) { .tooltip { animation: none; } }
 </style>

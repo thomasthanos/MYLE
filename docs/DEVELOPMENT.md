@@ -1,7 +1,7 @@
 # MYLE · development guide
 
 Everything about building, the structure, each page, the updater and the setup.
-For what the app does, see the [README](../README.md).
+For what the app does, see the <a href="../README.md"><kbd>README</kbd></a>.
 
 **Contents**
 
@@ -195,7 +195,7 @@ Svelte 5 (runes: `$state`, `$derived`, `$props`), TypeScript, Vite 8. No SvelteK
 
 3. Give it an icon in `lib/icons/` and list it in the sidebar (nothing else to touch: `lib/sidebar.ts` derives groups, order and shortcuts from the registry).
 
-Icons come from [Lucide](https://lucide.dev/icons): `import Star from "@lucide/svelte/icons/star"`.
+Icons come from <a href="https://lucide.dev/icons"><kbd>Lucide</kbd></a>: `import Star from "@lucide/svelte/icons/star"`.
 
 ### Frontend conventions
 
@@ -468,7 +468,7 @@ An end-to-end encrypted vault (`backend/src/passwords/`, page in `frontend/app/p
 
 ### MYLE Passwords (Android and iPhone)
 
-The Password Manager on phones: see, copy and edit the logins, with their 2FA codes, in sync with MYLE on the PC. It does not fill other apps. It is distributed outside the stores: an APK for Android, and an IPA that [SideStore](https://sidestore.io) installs with the user's own (free) Apple ID.
+The Password Manager on phones: see, copy and edit the logins, with their 2FA codes, in sync with MYLE on the PC. It does not fill other apps. It is distributed outside the stores: an APK for Android, and an IPA that <a href="https://sidestore.io"><kbd>SideStore</kbd></a> installs with the user's own (free) Apple ID.
 
 - **Code.** `backend/vault` (`myle-vault`) is the vault itself, used by both apps: encryption, entries, 2FA codes, passkeys, imports, website icons, the sync and the account's Supabase sign-in (`account.rs`, `Cloud`). It knows nothing of Tauri or Windows; TLS is native-tls on Windows and rustls on phones (Mozilla's root certificates on Android, `http.rs`). `backend/mobile` answers the page with the same command names as the Windows app (`passwords_*`, `account_*`), so `frontend/app/pages/password-manager/` serves both; `frontend/lib/platform.ts` (`MOBILE`, from `vite build --mode mobile`) leaves out what only Windows does (browser filling, Windows programs, import and export, passkey prompts) and words things for a phone. `frontend/mobile/` is the phone's shell: the bar, the welcome screen, the account sheet, the camera's QR frame, the back button.
 - **Account.** Sign-in shows Discord's or Google's page inside the app (`backend/mobile/plugin`, `tauri-plugin-myle-mobile`): iOS's sign-in sheet (`ASWebAuthenticationSession`, sharing Safari's sign-ins), and on Android a Custom Tab over the app (Google refuses sign-in inside an app's own webview). Both come back to `uk.thomast.myle.passwords://auth-callback` (a Redirect URL of the Supabase project, Authentication → URL Configuration): iOS hands the address straight back; on Android it arrives as a link, and a return to the app without it means the tab was closed (the sign-in is cancelled). The PKCE verifier waits in `sign-in.json` for 10 minutes, so a return that starts the app again still finishes. The session is kept in `account.json` in the app's own folder, which no other app can read.
