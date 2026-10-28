@@ -220,7 +220,18 @@ fn orphan_folder_owner<'a>(path: &Path, list: &'a [Installed]) -> Option<&'a Ins
         orphan_folder_evidence(registered_location, uninstaller, icon)
     })
 }
-fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
+/// What in a folder may keep it: whether that is so is for the caller.
+#[derive(Debug, Default)]
+struct Contents {
+    /// Programs, installers and shortcuts (their file names).
+    programs: Vec<String>,
+    /// Save games, mods or profiles.
+    saves: bool,
+}
+/// Whether a folder must stay whatever else is known: it is too big or deep
+/// to read through, or part of it can't be read. What else it holds goes in
+/// `found`.
+fn contents_kept(path: &Path, depth: usize, budget: &mut usize, found: &mut Contents) -> bool {
     // An unreadable/truncated tree cannot be verified as abandoned.
     let Ok(entries) = std::fs::read_dir(path) else {
         return true;
@@ -239,30 +250,50 @@ fn has_program_files(path: &Path, depth: usize, budget: &mut usize) -> bool {
         if kind.is_symlink() {
             return true;
         }
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        // Programs and installers, shortcuts, and save games (FromSoftware's .sl2, Bethesda's .ess and .fos among them).
-        if kind.is_file()
-            && ["exe", "msi", "lnk", "sav", "save", "sl2", "ess", "fos"].contains(
-                &entry
-                    .path()
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .as_str(),
-            )
-        {
-            return true;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let extension = entry.path().extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if kind.is_file() {
+            // Save games (FromSoftware's .sl2, Bethesda's .ess and .fos among them).
+            if ["sav", "save", "sl2", "ess", "fos"].contains(&extension.as_str()) {
+                found.saves = true;
+            } else if ["exe", "msi", "lnk"].contains(&extension.as_str()) {
+                found.programs.push(name);
+            }
+            continue;
         }
-        if kind.is_dir()
-            && (["saves", "savegames", "savedgames", "mods", "profiles"].contains(&name.as_str())
-                || depth == 0
-                || has_program_files(&entry.path(), depth - 1, budget))
-        {
-            return true;
+        if kind.is_dir() {
+            if ["saves", "savegames", "savedgames", "mods", "profiles"].contains(&name.to_lowercase().as_str()) {
+                found.saves = true;
+            }
+            if depth == 0 || contents_kept(&entry.path(), depth - 1, budget, found) {
+                return true;
+            }
         }
     }
     false
+}
+/// Whether a program in `folder` runs, is a service, has a shortcut, starts
+/// with Windows or is on the PATH (`live`: those paths and command lines,
+/// lowercase). Then the folder is an app's, whatever its name.
+fn in_use(folder: &Path, live: &[String]) -> bool {
+    let inside = format!("{}\\", folder.to_string_lossy().to_lowercase().trim_end_matches('\\'));
+    live.iter().any(|path| path.contains(&inside))
+}
+/// What starts with Windows (the Run keys) and the folders on the PATH,
+/// lowercase, for `in_use`.
+fn startup_and_path() -> Vec<String> {
+    let mut out: Vec<String> = ["HKCU", "HKLM"]
+        .into_iter()
+        .filter_map(|hive| sys::open(hive, RUN))
+        .flat_map(|key| {
+            let names: Vec<String> = key.enum_values().flatten().map(|(name, _)| name).collect();
+            names.into_iter().filter_map(move |name| key.get_value::<String, _>(name).ok())
+        })
+        .map(|command| sys::expand(&command).to_lowercase())
+        .collect();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    out.extend(std::env::split_paths(&path).map(|dir| format!("{}\\", dir.to_string_lossy().to_lowercase().trim_end_matches('\\'))));
+    out
 }
 /// Normalised vendor and product words of everything installed, for matching
 /// a folder's name against software that is really there.
@@ -291,24 +322,48 @@ fn installed_tokens(list: &[Installed]) -> HashSet<String> {
     }
     set
 }
-/// Folder names of running programs, services and AppX packages: whatever
-/// runs or is installed outside the Uninstall list still counts as present.
-fn live_tokens() -> Result<HashSet<String>, String> {
-    let script = "$ErrorActionPreference = 'Stop'; $p = Get-Process | Where-Object Path | ForEach-Object { Split-Path (Split-Path $_.Path) -Leaf; Split-Path $_.Path -Leaf }; $s = Get-CimInstance Win32_Service | ForEach-Object { $_.PathName }; $a = Get-AppxPackage | ForEach-Object { $_.Name }; $w = New-Object -ComObject WScript.Shell; $l = @([Environment]::GetFolderPath('StartMenu'),[Environment]::GetFolderPath('CommonStartMenu'),[Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('CommonDesktopDirectory')) | Where-Object { $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName; $w.CreateShortcut($_.FullName).TargetPath } }; @($p) + @($s) + @($a) + @($l) | ConvertTo-Json -Compress";
-    let mut set = HashSet::new();
+/// Running programs, services, AppX packages and shortcuts: whatever runs or
+/// is installed outside the Uninstall list still counts as present.
+struct Live {
+    /// Their folder and file names.
+    tokens: HashSet<String>,
+    /// Their programs' paths and command lines, lowercase, for `in_use`.
+    paths: Vec<String>,
+}
+fn live() -> Result<Live, String> {
+    let script = "$ErrorActionPreference = 'Stop'; $r = @(Get-Process | Where-Object Path | ForEach-Object Path); $p = $r | ForEach-Object { Split-Path (Split-Path $_) -Leaf; Split-Path $_ -Leaf }; $s = @(Get-CimInstance Win32_Service | ForEach-Object { $_.PathName }); $a = Get-AppxPackage | ForEach-Object { $_.Name }; $w = New-Object -ComObject WScript.Shell; $n = @(); $t = @(); @([Environment]::GetFolderPath('StartMenu'),[Environment]::GetFolderPath('CommonStartMenu'),[Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('CommonDesktopDirectory')) | Where-Object { $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $n += $_.BaseName; $t += $w.CreateShortcut($_.FullName).TargetPath } }; @{ names = @($p) + $s + @($a) + $n + $t; paths = $r + $s + $t } | ConvertTo-Json -Compress";
     let text = sys::powershell(script).map_err(|e| format!("Installed apps and shortcuts could not be checked. Leftover folders were not classified: {e}"))?;
-    {
-        for item in sys::json_list(&text) {
-            let Some(text) = item.as_str() else { continue };
-            for part in text.split(['\\', '"', '.']) {
-                let w = sys::norm(part);
-                if w.len() >= 4 && w != "exe" && w != "program" && w != "programfiles" {
-                    set.insert(w);
-                }
+    let value: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or_default();
+    let strings = |key: &str| -> Vec<String> {
+        sys::json_list(&value.get(key).map(serde_json::Value::to_string).unwrap_or_default())
+            .into_iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .filter(|text| !text.is_empty())
+            .collect()
+    };
+    let mut tokens = HashSet::new();
+    for text in strings("names") {
+        for part in text.split(['\\', '"', '.']) {
+            let w = sys::norm(part);
+            if w.len() >= 4 && w != "exe" && w != "program" && w != "programfiles" {
+                tokens.insert(w);
             }
         }
     }
-    Ok(set)
+    let paths: Vec<String> = strings("paths").into_iter().map(|path| path.to_lowercase()).collect();
+    // Short names too ("uv.exe"), which claim a folder of exactly their name.
+    tokens.extend(paths.iter().filter_map(|path| program_name(Path::new(path.trim_matches('"')))));
+    Ok(Live { tokens, paths })
+}
+/// A program's or script's name ("pnpm" for pnpm.cmd, "uv" for uv.exe). One
+/// of two or three letters claims only a folder of exactly that name.
+fn program_name(program: &Path) -> Option<String> {
+    let extension = program.extension()?.to_string_lossy().to_lowercase();
+    if !["exe", "cmd", "bat", "ps1"].contains(&extension.as_str()) {
+        return None;
+    }
+    let stem = sys::norm(&program.file_stem()?.to_string_lossy());
+    (stem.len() >= 2).then_some(stem)
 }
 // ─── 1. Uninstallation leftovers ─────────────────────────────────────────────
 /// Where uninstallers leave settings and profiles behind, and where a folder
@@ -316,8 +371,9 @@ fn live_tokens() -> Result<HashSet<String>, String> {
 /// registered installations.
 const USER_DATA_ROOTS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "ProgramData"];
 /// A leftover folder must have been left alone this long: anything touched
-/// lately is still in use.
-const IDLE_DAYS: u64 = 30;
+/// in the last week is still in use. An app uninstalled days ago has its
+/// leftovers found already.
+const IDLE_DAYS: u64 = 7;
 /// Windows' own folders in AppData and ProgramData, the same on every PC:
 /// never shown as unclaimed. Apps' folders are told apart by what is on the
 /// PC instead (installed list, processes, services, Store apps, shortcuts,
@@ -342,8 +398,9 @@ const GENERIC_WORDS: &[&str] = &[
 ];
 /// Whether something on this PC goes by the folder's name: a name of four
 /// letters or more inside it (or it inside one), or a whole word of it ("npm"
-/// in "npm-cache"). For a folder no registered installation owns, common
-/// words alone don't count.
+/// in "npm-cache"). A folder of two or three letters ("uv") only by exactly
+/// its name. For a folder no registered installation owns, common words alone
+/// don't count.
 fn claimed(name: &str, tokens: &HashSet<String>, unclaimed: bool) -> bool {
     let folder = sys::norm(name);
     let words: Vec<String> = name
@@ -355,18 +412,21 @@ fn claimed(name: &str, tokens: &HashSet<String>, unclaimed: bool) -> bool {
         .iter()
         .filter(|token| !unclaimed || !GENERIC_WORDS.contains(&token.as_str()))
         .any(|token| {
-            if token.len() >= 4 {
+            if folder.len() < 4 {
+                *token == folder
+            } else if token.len() >= 4 {
                 folder.contains(token.as_str()) || token.contains(&folder)
             } else {
                 words.iter().any(|word| word == token)
             }
         })
 }
-/// Folder names on the PATH, where command-line tools live (npm, pnpm,
-/// Python, Git…): a tool installed without an Uninstall entry still counts.
+/// Folder names on the PATH, where command-line tools live (npm, Python,
+/// Git…), and the names of the tools there ("pnpm", "uv"): a tool installed
+/// without an Uninstall entry still counts.
 fn path_tokens() -> HashSet<String> {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
+    let mut tokens: HashSet<String> = std::env::split_paths(&path)
         .flat_map(|dir| {
             dir.components()
                 .rev()
@@ -375,7 +435,20 @@ fn path_tokens() -> HashSet<String> {
                 .collect::<Vec<_>>()
         })
         .filter(|word| word.len() >= 3 && !GENERIC_WORDS.contains(&word.as_str()))
-        .collect()
+        .collect();
+    // Windows' own folders have tools of their own ("sc", "control"), which name no app.
+    for dir in std::env::split_paths(&path).filter(|dir| !sys::system_path(&dir.to_string_lossy())) {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            tokens.extend(
+                entries
+                    .flatten()
+                    .take(5000)
+                    .filter_map(|entry| program_name(&entry.path()))
+                    .filter(|name| !GENERIC_WORDS.contains(&name.as_str())),
+            );
+        }
+    }
+    tokens
 }
 /// Programs Windows saw run (the shell's MuiCache, the Compatibility
 /// Assistant, UserAssist) that are still on disk: a portable app with no
@@ -436,12 +509,13 @@ fn ran_tokens(programs: &[PathBuf]) -> HashSet<String> {
                 set.insert(word);
             }
         }
+        set.extend(program_name(program).filter(|name| !GENERIC_WORDS.contains(&name.as_str())));
     }
     set
 }
 /// The folder names in AppData, LocalAppData and ProgramData where games keep
-/// saves and settings, from Ludusavi's manifest (the one Game Saves uses). A
-/// game's folder is never a leftover, even when the game itself is gone.
+/// saves and settings, from Ludusavi's manifest (the one Game Saves uses).
+/// Such a folder stays while a game in it is on the PC (`saves_in_use`).
 fn save_roots_in(manifest: &str) -> HashSet<String> {
     let mut roots = HashSet::new();
     for marker in ["<winAppData>/", "<winLocalAppData>/", "<winProgramData>/"] {
@@ -461,6 +535,26 @@ fn game_save_roots() -> HashSet<String> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|text| save_roots_in(&text))
         .unwrap_or_default()
+}
+/// Whether a folder games keep saves in holds a game that is on the PC: a
+/// folder in it, two levels down at most, goes by the name of something here
+/// ("Godot\app_userdata\<game>"). One that can't be read is kept.
+fn saves_in_use(path: &Path, tokens: &HashSet<String>) -> bool {
+    let mut stack = vec![(path.to_path_buf(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return true;
+        };
+        for entry in entries.flatten().filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir())) {
+            if claimed(&entry.file_name().to_string_lossy(), tokens, true) {
+                return true;
+            }
+            if depth < 1 {
+                stack.push((entry.path(), depth + 1));
+            }
+        }
+    }
+    false
 }
 /// How sure the scan is that a folder nothing claims is a leftover: more
 /// the longer nothing changed in it, most when it is empty.
@@ -487,7 +581,7 @@ fn unclaimed_candidate(name: &str) -> bool {
     let id_like = name.starts_with('{')
         || (name.len() >= 16 && name.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
     let letters = name.chars().filter(|c| c.is_alphabetic()).count();
-    !id_like && letters >= 3 && !WINDOWS_OWN.contains(&folder.as_str())
+    !id_like && letters >= 2 && !WINDOWS_OWN.contains(&folder.as_str())
 }
 fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     let list = installed_list();
@@ -504,7 +598,10 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
     tokens.extend(ran_tokens(&ran_programs()));
     let save_roots = game_save_roots();
     tick(0.1);
-    tokens.extend(live_tokens()?);
+    let live = live()?;
+    tokens.extend(live.tokens);
+    let mut running = live.paths;
+    running.extend(startup_and_path());
     tick(0.4);
     let mut out = Vec::new();
     let roots: Vec<(PathBuf, bool)> = [
@@ -537,7 +634,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             let folder = sys::norm(&name);
-            if folder.len() < 4
+            if folder.len() < 2
                 || sys::protected_name(&name)
                 || sys::system_path(&path.to_string_lossy())
             {
@@ -548,14 +645,21 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             if owner.is_none() && !(user_data && unclaimed_candidate(&name)) {
                 continue;
             }
-            let (depth, mut budget) = if owner.is_some() { (2, 1500) } else { (3, 3000) };
-            if active
-                .iter()
-                .flat_map(registered_paths)
-                .any(|installed| related_folder(&path, &installed))
-                || has_program_files(&path, depth, &mut budget)
-                // A game's saves or settings (Ludusavi's manifest).
-                || save_roots.contains(&folder)
+            let (depth, mut budget) = if owner.is_some() { (2, 1500) } else { (32, 50_000) };
+            let mut found = Contents::default();
+            let kept = contents_kept(&path, depth, &mut budget, &mut found);
+            let programs = found.programs;
+            // Saves in it, or where games keep saves (Ludusavi's manifest).
+            let saves = found.saves || save_roots.contains(&folder);
+            if kept
+                || active
+                    .iter()
+                    .flat_map(registered_paths)
+                    .any(|installed| related_folder(&path, &installed))
+                // Programs or saves keep a folder an uninstaller left behind; one nothing claims, only while its programs run, start or have a shortcut, and its games are on the PC.
+                || (owner.is_some() && (!programs.is_empty() || saves))
+                || (!programs.is_empty() && in_use(&path, &running))
+                || (saves && saves_in_use(&path, &tokens))
             {
                 continue;
             }
@@ -585,7 +689,14 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             let mut f = finding("leftovers", name.clone());
             f.path = Some(path.to_string_lossy().into_owned());
             f.size = Some(size);
-            let holds = contents_line(files, &names, idle);
+            let mut holds = contents_line(files, &names, idle);
+            if !programs.is_empty() {
+                let more = if programs.len() > 3 { ", …" } else { "" };
+                holds.push_str(&format!(
+                    " Its programs ({}{more}) don't run, start with Windows, have a shortcut or sit on the PATH.",
+                    programs[..programs.len().min(3)].join(", ")
+                ));
+            }
             if let Some(owner) = owner {
                 f.detail = format!(
                     "The registered uninstaller for {} is missing. No app executable was found in its old installation folder. {holds}",
@@ -600,6 +711,10 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
                 // Nothing to lose in an empty folder: selected for cleanup. Anything inside is for the user to look at first.
                 if empty && deletable {
                     f.recommended = true;
+                } else if saves {
+                    f.review_reason = Some("Games keep their saves here: check none of them is a game you still play before moving it to the Recycle Bin.".into());
+                } else if !programs.is_empty() {
+                    f.review_reason = Some("It has programs of its own: check it is not a portable app you still start by hand before moving it to the Recycle Bin.".into());
                 } else {
                     f.review_reason = Some("Found by its name only: a program's data folder can be named differently from the program. Check what is inside before moving it to the Recycle Bin.".into());
                 }
@@ -1733,18 +1848,37 @@ mod tests {
         let (location, uninstaller, icon) = installation_status(&app);
         assert!(!broken_candidate(location, uninstaller, icon));
         std::fs::write(dir.join("ModOrganizer.exe"), b"fixture").unwrap();
-        assert!(has_program_files(&dir, 2, &mut 1500));
+        let mut found = Contents::default();
+        assert!(!contents_kept(&dir, 2, &mut 1500, &mut found));
+        assert_eq!(found.programs, ["ModOrganizer.exe"]);
         std::fs::remove_file(dir.join("ModOrganizer.exe")).unwrap();
         std::fs::remove_file(dir.join("App icon.ico")).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }
     #[test]
-    fn deeply_nested_portable_apps_are_not_classified_as_abandoned() {
+    fn programs_deep_inside_are_found_and_keep_the_folder_while_in_use() {
         let dir = std::env::temp_dir().join(format!("myle-health-deep-{}", uuid::Uuid::new_v4()));
         let nested = dir.join(r"a\b\c");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("LOOT.exe"), b"fixture").unwrap();
-        assert!(has_program_files(&dir, 2, &mut 1500));
+        // Deeper than it may look: kept, unread.
+        assert!(contents_kept(&dir, 2, &mut 1500, &mut Contents::default()));
+        let mut found = Contents::default();
+        assert!(!contents_kept(&dir, 32, &mut 50_000, &mut found));
+        assert_eq!(found.programs, ["LOOT.exe"]);
+        assert!(!found.saves);
+        // Running, a service, a shortcut's target, a Run entry or the PATH keeps it; nothing else does.
+        let loot = nested.join("LOOT.exe").to_string_lossy().to_lowercase();
+        assert!(in_use(&dir, &[format!("\"{loot}\" --minimized")]));
+        assert!(in_use(&dir, &[format!("{}\\", nested.to_string_lossy().to_lowercase())]));
+        assert!(!in_use(&dir, &[]));
+        assert!(!in_use(&dir, &[format!("{}-other\\x.exe", dir.to_string_lossy().to_lowercase())]), "a folder next to it is another");
+        // Save games are noted: they keep the folder while their game is on the PC.
+        std::fs::write(nested.join("slot1.sav"), b"fixture").unwrap();
+        let mut found = Contents::default();
+        assert!(!contents_kept(&dir, 32, &mut 50_000, &mut found));
+        assert!(found.saves);
+        std::fs::remove_file(nested.join("slot1.sav")).unwrap();
         std::fs::remove_file(nested.join("LOOT.exe")).unwrap();
         for path in [&nested, &dir.join(r"a\b"), &dir.join("a"), &dir] {
             std::fs::remove_dir(path).unwrap();
@@ -1788,7 +1922,7 @@ mod tests {
             assert!(!unclaimed_candidate(name), "{name} must stay out");
         }
         // Apps' folders are judged by what is on the PC, not by a list.
-        for name in ["OldPhotoEditor", "Some Tool", "ow-electron", "NuGet", "KojimaProductions", "npm-cache"] {
+        for name in ["OldPhotoEditor", "Some Tool", "ow-electron", "NuGet", "KojimaProductions", "npm-cache", "uv"] {
             assert!(unclaimed_candidate(name), "{name} is judged by the PC");
         }
     }
@@ -1804,12 +1938,30 @@ mod tests {
         assert!(!claimed("Iris Installer", &tokens, true));
         // A registered installation's folder: any name counts.
         assert!(claimed("Iris Installer", &tokens, false));
+        // Two or three letters: exactly a program's name, never part of one.
+        let tools: HashSet<String> = ["uv", "python", "gh"].map(String::from).into();
+        assert!(claimed("uv", &tools, true));
+        assert!(!claimed("go", &tools, true));
+        assert!(!claimed("py", &tools, true), "not inside a longer name");
+        assert_eq!(program_name(Path::new(r"C:\Users\A\.local\bin\uv.exe")).as_deref(), Some("uv"));
+        assert_eq!(program_name(Path::new(r"C:\Users\A\AppData\Roaming\npm\pnpm.ps1")).as_deref(), Some("pnpm"));
+        assert_eq!(program_name(Path::new(r"C:\Tools\uv.json")), None);
+        assert_eq!(program_name(Path::new(r"C:\Tools\x.exe")), None, "one letter names nothing");
     }
     #[test]
     fn game_save_folders_come_from_the_manifest_without_placeholders() {
         let manifest = "Death Stranding:\n  files:\n    <winLocalAppData>/KojimaProductions/DeathStranding/*:\n      tags: [save]\n    \"<winAppData>/Rockstar Games/GTA V\": {}\n    <winAppData>/<game>/saves: {}\n    <winProgramData>/*/x: {}\n    <home>/Documents/My Games: {}\n";
         let roots = save_roots_in(manifest);
         assert_eq!(roots, ["kojimaproductions", "rockstargames"].map(String::from).into());
+    }
+    #[test]
+    fn a_save_folder_stays_while_a_game_in_it_is_on_the_pc() {
+        let dir = std::env::temp_dir().join(format!("myle-health-saves-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(r"app_userdata\Haystack Incremental")).unwrap();
+        let installed: HashSet<String> = ["haystackincremental", "steam"].map(String::from).into();
+        assert!(saves_in_use(&dir, &installed), "the game is installed");
+        assert!(!saves_in_use(&dir, &["steam".to_string()].into()), "the game is gone");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn programs_that_ran_claim_their_names_but_setups_do_not() {
@@ -1827,10 +1979,10 @@ mod tests {
     }
     #[test]
     fn confidence_grows_with_time_and_emptiness_and_the_contents_are_described() {
-        assert_eq!(unclaimed_confidence(30, false), 30);
-        assert_eq!(unclaimed_confidence(95, false), 70);
+        assert_eq!(unclaimed_confidence(IDLE_DAYS, false), 30);
+        assert_eq!(unclaimed_confidence(IDLE_DAYS + 65, false), 70);
         assert_eq!(unclaimed_confidence(400, true), 95);
-        assert!(unclaimed_confidence(30, true) > unclaimed_confidence(30, false));
+        assert!(unclaimed_confidence(IDLE_DAYS, true) > unclaimed_confidence(IDLE_DAYS, false));
         assert_eq!(contents_line(0, &[], 40), "It is empty. Nothing in it changed for 40 days.");
         assert_eq!(contents_line(1, &["a.ini".into()], 40), "It holds one file, a.ini. Nothing in it changed for 40 days.");
         assert_eq!(
