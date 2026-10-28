@@ -349,6 +349,69 @@ pub fn dir_size(path: &Path, limit: usize) -> u64 {
     total
 }
 
+/// What a folder holds, for a person deciding about it: how many files (up
+/// to `limit` entries looked at; links not followed) and the names of the
+/// first few, shallowest first.
+pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<String>) {
+    let mut files = 0;
+    let mut seen = 0;
+    let mut found = Vec::new();
+    let mut queue = std::collections::VecDeque::from([path.to_path_buf()]);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > limit {
+                return (files, found);
+            }
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                queue.push_back(entry.path());
+            } else {
+                files += 1;
+                if found.len() < names {
+                    found.push(entry.file_name().to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    (files, found)
+}
+
+/// A folder of a known Windows location (`{6D809377-…}` for Program Files)
+/// as UserAssist writes it, resolved to its path.
+pub fn known_folder(id: &str) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+    let hex: String = id.trim_matches(['{', '}']).chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 {
+        return None;
+    }
+    let guid = windows_sys::core::GUID::from_u128(u128::from_str_radix(&hex, 16).ok()?);
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
+    let result = unsafe { SHGetKnownFolderPath(&guid, 0, std::ptr::null_mut(), &mut raw) };
+    if raw.is_null() {
+        return None;
+    }
+    let path = (result >= 0).then(|| {
+        // SAFETY: a successful call returns a NUL-terminated string.
+        let length = (0..).take_while(|&i| unsafe { *raw.add(i) } != 0).count();
+        PathBuf::from(std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(raw, length) }))
+    });
+    // SAFETY: allocated by SHGetKnownFolderPath.
+    unsafe { CoTaskMemFree(raw as *const _) };
+    path
+}
+
 /// The newest modification inside a folder, two levels deep.
 pub fn newest_change(path: &Path) -> Option<SystemTime> {
     let mut newest = std::fs::metadata(path).ok()?.modified().ok();
@@ -379,6 +442,49 @@ pub fn days_since(time: SystemTime) -> u64 {
         / 86_400
 }
 
+/// Whether this user may remove the folder itself (opened for DELETE, as
+/// moving it to the Recycle Bin needs). A folder an installer made as
+/// administrator usually lets other users only read it.
+pub fn can_delete(path: &Path) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    let mut wide = path.as_os_str().encode_wide_compat();
+    wide.push(0);
+    // SAFETY: NUL-terminated path; the handle is only opened and closed.
+    unsafe {
+        let handle = CreateFileW(
+            wide.as_ptr(),
+            DELETE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        );
+        if handle == INVALID_HANDLE_VALUE {
+            return false;
+        }
+        CloseHandle(handle);
+    }
+    true
+}
+
+/// What a failed move to the Recycle Bin means (SHFileOperation's codes).
+fn recycle_error(code: i32) -> String {
+    match code {
+        // DE_ACCESSDENIEDSRC, ERROR_ACCESS_DENIED
+        0x78 | 5 => "Only an administrator can move it: run MYLE as administrator for this one.".into(),
+        // ERROR_SHARING_VIOLATION: open in another program
+        0x20 => "It is open in another program. Close it and try again.".into(),
+        // DE_INVALIDFILES, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+        0x7C | 2 | 3 => "It is no longer there, or its path is too long for the Recycle Bin. Scan again.".into(),
+        _ => format!("Some files are in use or could not be moved to the Recycle Bin (code {code})."),
+    }
+}
+
 /// Moves files or folders to the Recycle Bin (no prompt, no progress).
 pub fn recycle(paths: &[PathBuf]) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::{
@@ -406,9 +512,7 @@ pub fn recycle(paths: &[PathBuf]) -> Result<(), String> {
     };
     let code = unsafe { SHFileOperationW(&mut op) };
     if code != 0 || op.fAnyOperationsAborted != 0 {
-        return Err(format!(
-            "Some files are in use or could not be moved to the Recycle Bin (code {code})."
-        ));
+        return Err(recycle_error(code));
     }
     Ok(())
 }

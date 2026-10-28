@@ -17,6 +17,16 @@ pub use headless::run_headless_auto_backup;
 pub(crate) use state::GameSavesReservation;
 pub use state::GameSavesState;
 
+/// Ludusavi's manifest (where thousands of games keep their saves), as Game
+/// Saves reads it: its updated copy, else the one shipped with MYLE.
+pub(crate) fn manifest_path() -> Option<std::path::PathBuf> {
+    settings::headless_config_root()
+        .ok()
+        .map(|root| root.join("ludusavi").join("manifest.yaml"))
+        .filter(|path| path.is_file())
+        .or_else(|| engine::resolve_manifest(None))
+}
+
 /// The save folders the last scan found on this PC, with each game's title,
 /// for the Disk Analyzer's warnings. Empty before the first scan.
 pub(crate) fn known_save_folders() -> Vec<(std::path::PathBuf, String)> {

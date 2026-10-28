@@ -326,7 +326,7 @@ fn resolve_executable(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
         })
 }
 
-fn resolve_manifest(resource_dir: Option<&Path>) -> Option<PathBuf> {
+pub(super) fn resolve_manifest(resource_dir: Option<&Path>) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(resource) = resource_dir {
         candidates.push(resource.join("ludusavi").join("manifest.yaml"));

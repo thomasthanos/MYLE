@@ -350,23 +350,11 @@ const USER_DATA_ROOTS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "ProgramData"];
 /// lately is still in use.
 const IDLE_DAYS: u64 = 30;
 
-/// Data folders of tools and games that are often missing from the installed
-/// list (portable apps, package managers, launchers' games), and Windows'
-/// own folders in AppData and ProgramData: never shown as unclaimed. An app
-/// that is installed (Overwolf, Clip Studio…) protects its folders by name.
-const UNCLAIMED_KEEP: &[&str] = &[
-    // Portable mod tools whose settings are their load orders and profiles
-    // (the scan's past false finds).
-    "loot", "modorganizer", "avaloniaui", "vortex", "nexusmods",
-    // Package managers and developer tools.
-    "nuget", "npm", "npmcache", "pnpm", "yarn", "pip", "pipx", "pypa", "python", "node", "nodegyp",
-    "electron", "electronbuilder", "gradle", "jetbrains", "github", "gitcredentialmanager", "docker",
-    "vscode", "code", "cursor", "claude", "anthropic", "openai", "ollama",
-    // Game studios and launchers (saves without a save-file extension).
-    "kojimaproductions", "fromsoftware", "rockstargames", "cdprojektred", "ubisoft", "epicgames",
-    "unrealengine", "unity", "steam", "riotgames", "battlenet", "blizzard", "ea", "electronicarts",
-    "bethesda", "savedgames", "mygames", "godot",
-    // Windows' own folders in AppData and ProgramData.
+/// Windows' own folders in AppData and ProgramData, the same on every PC:
+/// never shown as unclaimed. Apps' folders are told apart by what is on the
+/// PC instead (installed list, processes, services, Store apps, shortcuts,
+/// the PATH, and the games Ludusavi's manifest knows).
+const WINDOWS_OWN: &[&str] = &[
     "packagecache", "virtualstore", "d3dscache", "connecteddevicesplatform", "crashdumps",
     "peerdistrepub", "placeholdertilelogofolder", "publishers", "comms", "history", "tempstate",
     "elevateddiagnostics", "packagemanagement", "usoshared", "usoprivate", "softwaredistribution",
@@ -381,27 +369,169 @@ const GENERIC_WORDS: &[&str] = &[
     "data", "system", "launcher", "helper", "host", "tools", "common", "shared", "runtime", "plugin",
     "plugins", "program", "files", "user", "users", "store", "online", "desktop", "mobile", "studio",
     "games", "game", "portable", "network", "report", "reporter", "epic", "core", "free", "light",
+    // Folders on the PATH, and where programs are often run from, that say
+    // nothing about a program.
+    "bin", "cmd", "sbin", "lib", "libexec", "scripts", "usr", "system32", "wbem", "windowsapps",
+    "downloads", "documents", "temp", "appdata", "roaming", "programfiles", "programfilesx86", "users",
 ];
 
-/// Whether something on this PC goes by the folder's name. For a folder no
-/// registered installation owns, common words alone don't count.
-fn claimed(folder: &str, tokens: &HashSet<String>, unclaimed: bool) -> bool {
+/// Whether something on this PC goes by the folder's name: a name of four
+/// letters or more inside it (or it inside one), or a whole word of it ("npm"
+/// in "npm-cache"). For a folder no registered installation owns, common
+/// words alone don't count.
+fn claimed(name: &str, tokens: &HashSet<String>, unclaimed: bool) -> bool {
+    let folder = sys::norm(name);
+    let words: Vec<String> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .map(sys::norm)
+        .filter(|word| word.len() >= 3)
+        .collect();
     tokens
         .iter()
         .filter(|token| !unclaimed || !GENERIC_WORDS.contains(&token.as_str()))
-        .any(|token| folder.contains(token.as_str()) || token.contains(folder))
+        .any(|token| {
+            if token.len() >= 4 {
+                folder.contains(token.as_str()) || token.contains(&folder)
+            } else {
+                words.iter().any(|word| word == token)
+            }
+        })
 }
 
-/// Whether a folder nothing claims may be shown for review: a readable
-/// name (not an id) that no tool or game above, nor Windows, is known by.
+/// Folder names on the PATH, where command-line tools live (npm, pnpm,
+/// Python, Git…): a tool installed without an Uninstall entry still counts.
+fn path_tokens() -> HashSet<String> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .flat_map(|dir| {
+            dir.components()
+                .rev()
+                .take(2)
+                .map(|part| sys::norm(&part.as_os_str().to_string_lossy()))
+                .collect::<Vec<_>>()
+        })
+        .filter(|word| word.len() >= 3 && !GENERIC_WORDS.contains(&word.as_str()))
+        .collect()
+}
+
+/// Programs Windows saw run (the shell's MuiCache, the Compatibility
+/// Assistant, UserAssist) that are still on disk: a portable app with no
+/// Uninstall entry still counts while its program is there, wherever it is.
+fn ran_programs() -> Vec<PathBuf> {
+    let mut names: Vec<String> = Vec::new();
+    let values = |hive: &str, path: &str| -> Vec<String> {
+        sys::open(hive, path)
+            .map(|key| key.enum_values().flatten().map(|(name, _)| name).collect())
+            .unwrap_or_default()
+    };
+    // "C:\…\app.exe.FriendlyAppName", "C:\…\app.exe.ApplicationCompany"
+    names.extend(values("HKCU", r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"));
+    names.extend(values("HKCU", r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"));
+    // ROT13 names; a known folder's id stands for its path ("{6D809377-…}\App\app.exe").
+    const USER_ASSIST: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist";
+    if let Some(root) = sys::open("HKCU", USER_ASSIST) {
+        for id in sys::subkeys(&root) {
+            names.extend(values("HKCU", &format!(r"{USER_ASSIST}\{id}\Count")).iter().map(|name| rot13(name)));
+        }
+    }
+    let mut seen = HashSet::new();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let end = name.to_ascii_lowercase().find(".exe")? + 4;
+            let text = &name[..end];
+            let path = match text.strip_prefix('{').and_then(|rest| rest.split_once('}')) {
+                Some((id, rest)) => sys::known_folder(id)?.join(rest.trim_start_matches('\\')),
+                None => PathBuf::from(text),
+            };
+            (path.is_absolute() && seen.insert(text.to_lowercase()) && path.is_file()).then_some(path)
+        })
+        .collect()
+}
+
+fn rot13(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            'a'..='z' => (((c as u8 - b'a') + 13) % 26 + b'a') as char,
+            'A'..='Z' => (((c as u8 - b'A') + 13) % 26 + b'A') as char,
+            _ => c,
+        })
+        .collect()
+}
+
+/// Names a program that ran goes by: its file and its two folders. Setups
+/// are left out: the installer of an app that is gone, still in Downloads,
+/// doesn't make its leftovers in use.
+fn ran_tokens(programs: &[PathBuf]) -> HashSet<String> {
+    let mut set = HashSet::new();
+    for program in programs.iter().filter(|program| !sys::system_path(&program.to_string_lossy())) {
+        let stem = program.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+        if ["setup", "install", "redist"].iter().any(|word| stem.to_lowercase().contains(word)) {
+            continue;
+        }
+        let folders = program.parent().into_iter().flat_map(|dir| dir.components().rev().take(2));
+        for word in std::iter::once(sys::norm(&stem)).chain(folders.map(|part| sys::norm(&part.as_os_str().to_string_lossy()))) {
+            if word.len() >= 3 && !GENERIC_WORDS.contains(&word.as_str()) {
+                set.insert(word);
+            }
+        }
+    }
+    set
+}
+
+/// The folder names in AppData, LocalAppData and ProgramData where games keep
+/// saves and settings, from Ludusavi's manifest (the one Game Saves uses). A
+/// game's folder is never a leftover, even when the game itself is gone.
+fn save_roots_in(manifest: &str) -> HashSet<String> {
+    let mut roots = HashSet::new();
+    for marker in ["<winAppData>/", "<winLocalAppData>/", "<winProgramData>/"] {
+        for (at, _) in manifest.match_indices(marker) {
+            let rest = &manifest[at + marker.len()..];
+            let name = &rest[..rest.find(['/', '"', '\'', '\n', '\r']).unwrap_or(rest.len())];
+            // "<game>/…" and "*/…" stand for any folder: they name none.
+            if !name.is_empty() && !name.contains(['<', '*', '?', '[']) {
+                roots.insert(sys::norm(name));
+            }
+        }
+    }
+    roots
+}
+
+fn game_save_roots() -> HashSet<String> {
+    crate::game_saves::manifest_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|text| save_roots_in(&text))
+        .unwrap_or_default()
+}
+
+/// How sure the scan is that a folder nothing claims is a leftover: more
+/// the longer nothing changed in it, most when it is empty.
+fn unclaimed_confidence(idle_days: u64, empty: bool) -> u8 {
+    let age = (idle_days.saturating_sub(IDLE_DAYS) / 15).min(4) as u8 * 10;
+    (30 + age + if empty { 25 } else { 0 }).min(95)
+}
+
+/// What a leftover holds and since when, for the person deciding about it.
+fn contents_line(files: usize, names: &[String], idle_days: u64) -> String {
+    let since = format!("Nothing in it changed for {idle_days} days.");
+    match files {
+        0 => format!("It is empty. {since}"),
+        1 => format!("It holds one file, {}. {since}", names.join("")),
+        _ => {
+            let more = if files > names.len() { ", …" } else { "" };
+            format!("It holds {files} files, such as {}{more}. {since}", names.join(", "))
+        }
+    }
+}
+
+/// Whether a folder nothing claims may be shown for review: a readable name
+/// (not an id), and not one of Windows' own folders.
 fn unclaimed_candidate(name: &str) -> bool {
     let folder = sys::norm(name);
     let id_like = name.starts_with('{')
         || (name.len() >= 16 && name.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
     let letters = name.chars().filter(|c| c.is_alphabetic()).count();
-    !id_like
-        && letters >= 3
-        && !UNCLAIMED_KEEP.iter().any(|keep| folder == *keep || (keep.len() >= 4 && folder.starts_with(keep)))
+    !id_like && letters >= 3 && !WINDOWS_OWN.contains(&folder.as_str())
 }
 
 fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
@@ -415,6 +545,9 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
         .cloned()
         .collect();
     let mut tokens = installed_tokens(&active);
+    tokens.extend(path_tokens());
+    tokens.extend(ran_tokens(&ran_programs()));
+    let save_roots = game_save_roots();
     tick(0.1);
     tokens.extend(live_tokens()?);
     tick(0.4);
@@ -471,13 +604,8 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
                 .flat_map(registered_paths)
                 .any(|installed| related_folder(&path, &installed))
                 || has_program_files(&path, depth, &mut budget)
-                || [
-                    "kojimaproductions",
-                    "fromsoftware",
-                    "rockstargames",
-                    "cdprojektred",
-                ]
-                .contains(&folder.as_str())
+                // A game's saves or settings (Ludusavi's manifest).
+                || save_roots.contains(&folder)
             {
                 continue;
             }
@@ -490,7 +618,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
                 continue;
             }
             // Still installed? Then it is not a leftover.
-            if claimed(&folder, &tokens, owner.is_none()) {
+            if claimed(&name, &tokens, owner.is_none()) {
                 continue;
             }
             // A vendor folder with sub-apps is ambiguous; needs a clear match.
@@ -501,29 +629,37 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
             // An empty folder left behind is a leftover too (the folder was
             // read above: one that can't be is never offered).
             let size = sys::dir_size(&path, 20_000);
-            let empty = if size == 0 { " It is empty." } else { "" };
+            let (files, names) = sys::folder_contents(&path, 20_000, 3);
+            let empty = files == 0;
+            // Made by an installer running as administrator (ProgramData,
+            // Program Files): this user may only read it.
+            let deletable = sys::can_delete(&path);
             let mut f = finding("leftovers", name.clone());
             f.path = Some(path.to_string_lossy().into_owned());
             f.size = Some(size);
+            let holds = contents_line(files, &names, idle);
             if let Some(owner) = owner {
                 f.detail = format!(
-                    "The registered uninstaller for {} is missing. No app executable was found in its old installation folder.{empty}",
+                    "The registered uninstaller for {} is missing. No app executable was found in its old installation folder. {holds}",
                     owner.name
                 );
                 f.review_reason = Some("A missing uninstaller does not prove all remaining data is unwanted. Review the folder before moving it to the Recycle Bin.".into());
             } else {
                 f.detail = format!(
-                    "No installed program, running app, service, Store app or shortcut goes by this name, it holds no programs or saves, and nothing in it changed for {idle} days.{empty}"
+                    "Nothing on this PC uses this name: no installed program, running or recently run app, service, Store app, shortcut, command-line tool or game. {holds}"
                 );
-                f.confidence = Some(30);
-                f.review_reason = Some("Found by its name only: a program's data folder can be named differently from the program. Check what is inside before moving it to the Recycle Bin.".into());
+                f.confidence = Some(unclaimed_confidence(idle, empty));
+                // Nothing to lose in an empty folder: selected for cleanup.
+                // Anything inside is for the user to look at first.
+                if empty && deletable {
+                    f.recommended = true;
+                } else {
+                    f.review_reason = Some("Found by its name only: a program's data folder can be named differently from the program. Check what is inside before moving it to the Recycle Bin.".into());
+                }
             }
-            if root
-                .to_string_lossy()
-                .to_lowercase()
-                .contains("program files")
-            {
+            if !deletable {
                 f.flags.push("Needs administrator".into());
+                f.detail.push_str(" Only an administrator can move it: run MYLE as administrator for this one.");
             }
             f.actions = vec!["recycle"];
             out.push((f, Target::Paths(vec![path])));
@@ -1754,33 +1890,93 @@ mod tests {
     }
 
     #[test]
-    fn unclaimed_folders_leave_out_ids_tools_games_and_windows_own_folders() {
-        // The scan's past false finds, package managers, game studios and
-        // Windows' folders are never shown as unclaimed.
-        for name in [
-            "LOOT", "ModOrganizer", "ModOrganizer2", "NuGet", "AvaloniaUI", "KojimaProductions", "npm-cache",
-            "Package Cache", "VirtualStore", "D3DSCache", "Steam", "SteamVR", "EA", "Unity", "UnityHub",
-            "pnpm-state",
-        ] {
+    fn only_windows_own_folders_and_ids_are_left_out_by_name() {
+        for name in ["Package Cache", "VirtualStore", "D3DSCache", "ConnectedDevicesPlatform"] {
             assert!(!unclaimed_candidate(name), "{name} must stay out");
         }
         // Ids say nothing a person could check.
         for name in ["{2F4B8A10-55C3-4D2B-9C0D-1A2B3C4D5E6F}", "a1b2c3d4e5f6a7b8c9d0", "_x1"] {
             assert!(!unclaimed_candidate(name), "{name} must stay out");
         }
-        // Apps' own folders may be reviewed: when the app is installed, the
-        // scan's name check (installed list, processes, shortcuts) keeps them.
-        for name in ["OldPhotoEditor", "Some Tool", "eaglecad", "ow-electron", "CELSYS_EN", "USVFS", "ludusavi"] {
-            assert!(unclaimed_candidate(name), "{name} may be reviewed");
+        // Apps' folders are judged by what is on the PC, not by a list.
+        for name in ["OldPhotoEditor", "Some Tool", "ow-electron", "NuGet", "KojimaProductions", "npm-cache"] {
+            assert!(unclaimed_candidate(name), "{name} is judged by the PC");
         }
+    }
+
+    #[test]
+    fn a_folder_is_claimed_by_a_name_on_the_pc_or_a_whole_word_of_it() {
+        let tokens: HashSet<String> = ["pnpm", "npm", "discord", "installer", "nodejs"].map(String::from).into();
+        // A tool on the PATH claims its folders: inside the name, or a word.
+        assert!(claimed("pnpm-state", &tokens, true));
+        assert!(claimed("npm-cache", &tokens, true));
+        assert!(claimed("BetterDiscord Installer", &tokens, true));
+        // Three letters only as a whole word, and common words not at all.
+        assert!(!claimed("snpmx", &tokens, true));
+        assert!(!claimed("Iris Installer", &tokens, true));
+        // A registered installation's folder: any name counts.
+        assert!(claimed("Iris Installer", &tokens, false));
+    }
+
+    #[test]
+    fn game_save_folders_come_from_the_manifest_without_placeholders() {
+        let manifest = "Death Stranding:\n  files:\n    <winLocalAppData>/KojimaProductions/DeathStranding/*:\n      tags: [save]\n    \"<winAppData>/Rockstar Games/GTA V\": {}\n    <winAppData>/<game>/saves: {}\n    <winProgramData>/*/x: {}\n    <home>/Documents/My Games: {}\n";
+        let roots = save_roots_in(manifest);
+        assert_eq!(roots, ["kojimaproductions", "rockstargames"].map(String::from).into());
+    }
+
+    #[test]
+    fn programs_that_ran_claim_their_names_but_setups_do_not() {
+        assert_eq!(rot13(r"P:\Gbbyf\YBBG.rkr"), r"C:\Tools\LOOT.exe");
+        let tokens = ran_tokens(&[
+            PathBuf::from(r"D:\Modding\MO2\ModOrganizer.exe"),
+            PathBuf::from(r"C:\Users\A\Downloads\WinhanceSetup.exe"),
+            PathBuf::from(r"C:\Users\A\Downloads\tool.exe"),
+        ]);
+        for name in ["modorganizer", "mo2", "modding", "tool"] {
+            assert!(tokens.contains(name), "{name}");
+        }
+        assert!(!tokens.iter().any(|token| token.contains("winhance")), "an installer left in Downloads claims nothing");
+        assert!(!tokens.contains("downloads"));
+    }
+
+    #[test]
+    fn confidence_grows_with_time_and_emptiness_and_the_contents_are_described() {
+        assert_eq!(unclaimed_confidence(30, false), 30);
+        assert_eq!(unclaimed_confidence(95, false), 70);
+        assert_eq!(unclaimed_confidence(400, true), 95);
+        assert!(unclaimed_confidence(30, true) > unclaimed_confidence(30, false));
+        assert_eq!(contents_line(0, &[], 40), "It is empty. Nothing in it changed for 40 days.");
+        assert_eq!(contents_line(1, &["a.ini".into()], 40), "It holds one file, a.ini. Nothing in it changed for 40 days.");
+        assert_eq!(
+            contents_line(12, &["a.ini".into(), "b.log".into(), "c.json".into()], 40),
+            "It holds 12 files, such as a.ini, b.log, c.json, …. Nothing in it changed for 40 days."
+        );
+        let dir = std::env::temp_dir().join(format!("myle-health-contents-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(r"deep\er")).unwrap();
+        std::fs::write(dir.join("top.ini"), b"x").unwrap();
+        std::fs::write(dir.join(r"deep\er\inner.dat"), b"x").unwrap();
+        assert_eq!(sys::folder_contents(&dir, 100, 1), (2, vec!["top.ini".to_string()]), "shallowest first");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_this_user_made_can_be_deleted() {
+        let dir = std::env::temp_dir().join(format!("myle-health-delete-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        assert!(sys::can_delete(&dir));
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(!sys::can_delete(&dir), "a folder that is gone can't be moved either");
     }
 
     #[test]
     #[ignore = "scans this PC's leftovers (PowerShell, AppData); changes nothing"]
     fn this_pc_s_leftovers() {
+        println!("{} programs that ran are still on disk", ran_programs().len());
         let found = leftovers(&|_| {}).unwrap();
         for (f, _) in &found {
-            println!("{} · {} · {:?} MB · conf {:?} · {}", f.title, f.path.as_deref().unwrap_or(""), f.size.map(|s| s / 1_048_576), f.confidence, f.detail);
+            let tag = if f.recommended { "Recommended" } else { "Needs review" };
+            println!("{} · {tag} · {} · {:?} KB · conf {:?} · {}", f.title, f.path.as_deref().unwrap_or(""), f.size.map(|s| s / 1024), f.confidence, f.detail);
         }
         println!("{} findings", found.len());
     }
