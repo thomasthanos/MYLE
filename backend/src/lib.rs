@@ -1,4 +1,5 @@
 mod account;
+mod autoclicker;
 mod apps;
 pub mod cleaner;
 mod cloud;
@@ -277,6 +278,7 @@ pub fn run() {
     let passwords_state = passwords::PasswordsState::default();
     let passwords_windows_state = passwords::WindowsFillState::default();
     let disk_analyzer_state = disk_analyzer::DiskAnalyzerState::default();
+    let autoclicker_state = autoclicker::AutoClickerState::default();
     let app = tauri::Builder::default()
         // Must be registered first. A second launch focuses the running app.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -314,6 +316,7 @@ pub fn run() {
         .manage(passwords_state.clone())
         .manage(passwords_windows_state.clone())
         .manage(disk_analyzer_state.clone())
+        .manage(autoclicker_state.clone())
         .manage(cloud::online_only::OnlineOnlyState::default())
         .setup({
             let cleanup = cleanup.clone();
@@ -398,6 +401,13 @@ pub fn run() {
             }
         })
         .invoke_handler(owner_gate(tauri::generate_handler![
+            autoclicker::autoclicker_start,
+            autoclicker::autoclicker_stop,
+            autoclicker::autoclicker_configure,
+            autoclicker::autoclicker_get_status,
+            autoclicker::autoclicker_pick_location,
+            autoclicker::autoclicker_save_profiles,
+            autoclicker::autoclicker_load_profiles,
             splash_shown,
             finish_startup,
             main_ready,
@@ -651,6 +661,7 @@ pub fn run() {
             spotify_hub_state.cancel_all();
             github_releases_state.cancel_all();
             disk_analyzer_state.cancel();
+            autoclicker_state.shutdown();
             jobs.cancel_all();
             cleanup.run();
         }

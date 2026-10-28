@@ -15,6 +15,7 @@ export const GROUP_LABELS: Record<NavGroup, string> = {
 export interface NavEntry {
   id: string;
   group: NavGroup;
+  numbered?: boolean;
 }
 export interface NavSection<T extends NavEntry> {
   group: NavGroup;
@@ -36,6 +37,7 @@ export function shortcutOf<T extends NavEntry>(pages: readonly T[], id: string):
   if (bottom) return id === "settings" ? SETTINGS_SHORTCUT : null;
   const index = sections(pages)
     .flatMap((section) => section.pages)
+    .filter((page) => page.numbered !== false)
     .findIndex((page) => page.id === id);
   return index >= 0 && index < 10 ? `Ctrl+${(index + 1) % 10}` : null;
 }
@@ -63,7 +65,7 @@ export function pageForShortcut<T extends NavEntry>(pages: readonly T[], event: 
   const digit = event.code?.match(/^Digit([0-9])$/)?.[1] ?? event.key;
   if (!/^[0-9]$/.test(digit)) return undefined;
   const index = digit === "0" ? 9 : Number(digit) - 1;
-  return sections(pages).flatMap((section) => section.pages)[index];
+  return sections(pages).flatMap((section) => section.pages).filter((page) => page.numbered !== false)[index];
 }
 /** Leave room for the floating panel's shadow while keeping its arrow on
  *  the button. The arrow stays clear of the rounded panel corners. */

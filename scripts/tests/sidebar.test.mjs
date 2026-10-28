@@ -5,7 +5,7 @@ import { isSidebarToggle, nextFocus, pageForShortcut, sections, shortcutOf, tool
 // The registry's order and groups (frontend/app/pages/registry.ts).
 const registry = readFileSync(new URL("../../frontend/app/pages/registry.ts", import.meta.url), "utf8");
 const all = [...registry.matchAll(/\{ id: "([a-z-]+)",\s+label: "[^"]+",\s+group: "([a-z]+)",([^\n]*)/g)].map(
-  ([, id, group, rest]) => ({ id, group, ownerOnly: rest.includes("ownerOnly: true"), lazy: false }),
+  ([, id, group, rest]) => ({ id, group, ownerOnly: rest.includes("ownerOnly: true"), numbered: !rest.includes("numbered: false"), lazy: false }),
 );
 for (const page of all) {
   const entry = registry.slice(registry.indexOf(`id: "${page.id}"`)).split(/\n {2}\{ id:|\n\] as const/)[0];
@@ -14,7 +14,7 @@ for (const page of all) {
 const everyone = all.filter((page) => !page.ownerOnly);
 const keys = (key, extra = {}) => ({ key, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, ...extra });
 test("the registry lists every page once, grouped", () => {
-  assert.equal(all.length, 12);
+  assert.equal(all.length, 13);
   assert.equal(new Set(all.map((page) => page.id)).size, all.length);
   assert.equal(all[0].id, "install-apps", "the page the app opens on comes first");
   assert.deepEqual(
@@ -22,6 +22,11 @@ test("the registry lists every page once, grouped", () => {
     ["apps", "data", "system", "owner"],
   );
   assert.deepEqual(all.filter((page) => page.group === "bottom").map((page) => page.id), ["settings"]);
+});
+test("Auto Clicker is available to everyone without changing existing numbered shortcuts", () => {
+  assert.ok(everyone.some(page => page.id === "auto-clicker"));
+  assert.equal(shortcutOf(everyone, "auto-clicker"), null);
+  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+0");
 });
 test("the owner-only pages are their own group, loaded only when opened", () => {
   const owner = all.filter((page) => page.ownerOnly);

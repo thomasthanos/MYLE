@@ -10,6 +10,7 @@ import IconWindowsOpt from "../../lib/icons/IconWindowsOpt.svelte";
 import IconSystemCleaner from "../../lib/icons/IconSystemCleaner.svelte";
 import IconDiskAnalyzer from "../../lib/icons/IconDiskAnalyzer.svelte";
 import IconSystemMaint from "../../lib/icons/IconSystemMaint.svelte";
+import IconAutoClicker from "../../lib/icons/IconAutoClicker.svelte";
 import IconPasswords from "../../lib/icons/IconPasswords.svelte";
 import IconSettings from "../../lib/icons/IconSettings.svelte";
 import type { NavGroup } from "../../lib/sidebar";
@@ -44,6 +45,8 @@ export interface PageDef {
   /** Only for the app's owner (see backend/src/account/owner.rs): hidden
    *  from everyone else, and the backend refuses its commands. */
   ownerOnly?: boolean;
+  /** Extra tools can opt out to preserve the established Ctrl+number mappings. */
+  numbered?: boolean;
 }
 // The sidebar shows them in this order, group by group: what you install,
 // what you keep, the PC itself, then the owner's tools. Install Apps comes
@@ -67,6 +70,9 @@ const defs = [
     description: "See what is filling your drives, and free up space." },
   { id: "system-maintenance",   label: "System Maintenance",    group: "system", icon: IconSystemMaint,    component: SystemMaintenance,
     description: "Repair connections, check system files, keep everything up to date." },
+  { id: "auto-clicker", label: "Auto Clicker & Macros", group: "system", icon: IconAutoClicker, numbered: false,
+    load: () => import("./auto-clicker/AutoClicker.svelte"),
+    description: "Repeat clicks or run a sequence of points, with F6 to start and stop." },
   { id: "project-backups",      label: "Project Backups",       group: "owner",  icon: IconProjectBackups, ownerOnly: true,
     load: () => import("./project-backups/ProjectBackups.svelte"),
     description: "Zip your projects into Google Drive or Dropbox, checked before they are kept." },
