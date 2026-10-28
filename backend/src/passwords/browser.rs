@@ -102,8 +102,18 @@ fn allow(bucket: &Mutex<VecDeque<Instant>>, per_minute: usize) -> bool {
 fn manifest_dir() -> Result<PathBuf, String> {
     Ok(crate::storage::local_dir()?.join("native-messaging"))
 }
+/// The program the browsers and `myle:` links start: the installed MYLE
+/// whenever there is one. A dev build must not take them over: started by a
+/// browser, it opens on a dev server that is not running ("can't reach this
+/// page"). Without an install, this program.
+fn browser_exe() -> Result<PathBuf, String> {
+    match crate::updater::installed_exe().or_else(crate::updater::installed_copy) {
+        Some(exe) => Ok(exe),
+        None => std::env::current_exe().map_err(|e| e.to_string()),
+    }
+}
 /// What the browsers are told about the host: a registry key per browser,
-/// pointing at a manifest that names this program.
+/// pointing at a manifest that names the program (`browser_exe`).
 struct Hosts {
     /// Put before every registry key: empty, except in tests.
     root: String,
@@ -115,7 +125,7 @@ impl Hosts {
         Ok(Self {
             root: String::new(),
             dir: manifest_dir()?,
-            exe: std::env::current_exe().map_err(|e| e.to_string())?,
+            exe: browser_exe()?,
         })
     }
     fn key(&self, browsers: &str) -> String {
@@ -592,10 +602,10 @@ fn open_link() -> bool {
         })
         .is_ok()
 }
-/// `myle:` links start this program on the Password Manager (for this user
-/// only). Whatever the link says after the scheme is not passed on.
+/// `myle:` links start MYLE (`browser_exe`) on the Password Manager (for
+/// this user only). Whatever the link says after the scheme is not passed on.
 pub fn register_protocol() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = browser_exe()?;
     let command = format!("\"{}\" {OPEN_FLAG}", exe.display());
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let (key, _) = hkcu.create_subkey(format!(r"Software\Classes\{PROTOCOL}")).map_err(|e| e.to_string())?;
@@ -2075,6 +2085,18 @@ mod tests {
         assert!(!dir.exists());
         assert!(moved.check().is_err());
         let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(&root);
+    }
+    #[test]
+    fn browsers_start_the_installed_myle_rather_than_a_dev_build() {
+        // Tests run from target\debug, as a dev build does.
+        let exe = browser_exe().unwrap();
+        match crate::updater::installed_copy() {
+            Some(installed) => {
+                assert_eq!(exe, installed);
+                assert!(installed.parent().unwrap().join("install.json").is_file());
+            }
+            None => assert_eq!(exe, std::env::current_exe().unwrap()),
+        }
     }
     #[test]
     fn the_host_names_the_browser_and_notes_whom_it_turned_away() {

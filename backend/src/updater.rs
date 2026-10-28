@@ -343,6 +343,22 @@ pub(crate) fn installed_exe() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     exe.parent()?.join("install.json").is_file().then_some(exe)
 }
+/// The installed MYLE, wherever this copy runs from: the program its setup
+/// listed in "Installed apps", while it and its file list are still there.
+pub(crate) fn installed_copy() -> Option<std::path::PathBuf> {
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+    let entry = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\MakeYourLifeEasier")
+        .ok()?;
+    let location: String = entry.get_value("InstallLocation").ok()?;
+    let name: String = entry.get_value("MainBinaryName").ok()?;
+    // A program in that folder, never a path out of it.
+    let plain = std::path::Path::new(&name).file_name() == Some(std::ffi::OsStr::new(&name));
+    let dir = std::path::PathBuf::from(location.trim().trim_matches('"'));
+    let exe = dir.join(&name);
+    (plain && name.to_ascii_lowercase().ends_with(".exe") && exe.is_file() && dir.join("install.json").is_file())
+        .then_some(exe)
+}
 /// Runs the setup silently in live mode and waits for it: it only swaps
 /// files, so a minute is far more than it needs.
 async fn live_install(setup: &std::path::Path) -> Result<LiveInstall, String> {
