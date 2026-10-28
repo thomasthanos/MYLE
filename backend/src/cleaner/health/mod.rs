@@ -254,6 +254,13 @@ fn prepare_finding(f: &mut Finding, target: &Target) {
     }
 }
 
+/// One finding per id (the first): the page keys its list by id, and a
+/// repeated one stops the list from showing at all.
+fn keep_first_of_each_id(items: &mut Vec<(Finding, Target)>) {
+    let mut ids = std::collections::HashSet::new();
+    items.retain(|(finding, _)| ids.insert(finding.id.clone()));
+}
+
 fn target_claims(target: &Target) -> Vec<String> {
     match target {
         Target::Paths(paths) => paths
@@ -294,6 +301,34 @@ pub struct BatchProgress {
 #[cfg(test)]
 mod identity_tests {
     use super::*;
+
+    #[test]
+    fn a_repeated_finding_is_listed_once() {
+        // Three processes of one program, as the hibernation scan once sent.
+        let process = |detail: &str| Finding {
+            id: String::new(),
+            module: "hibernation",
+            title: "claude".into(),
+            detail: detail.into(),
+            path: Some(r"C:\Program Files\Claude\claude.exe".into()),
+            size: None,
+            confidence: None,
+            enabled: None,
+            flags: vec![],
+            actions: vec![],
+            cleanup_action: None,
+            recommended: false,
+            review_reason: None,
+        };
+        let mut items: Vec<_> = ["first", "second", "third"].map(|detail| (process(detail), Target::Info)).into();
+        items.push((Finding { title: "other".into(), ..process("other") }, Target::Info));
+        for (finding, target) in &mut items {
+            prepare_finding(finding, target);
+        }
+        keep_first_of_each_id(&mut items);
+        let kept: Vec<_> = items.iter().map(|(f, _)| f.detail.as_str()).collect();
+        assert_eq!(kept, ["first", "other"]);
+    }
 
     #[test]
     fn target_identity_is_stable_and_windows_paths_ignore_case() {
@@ -573,6 +608,7 @@ pub async fn cleaner_health_scan(
                     for (finding, target) in &mut items {
                         prepare_finding(finding, target);
                     }
+                    keep_first_of_each_id(&mut items);
                     let findings: Vec<Finding> = items.iter().map(|(f, _)| f.clone()).collect();
                     {
                         let mut store = FOUND.lock().unwrap_or_else(|p| p.into_inner());
