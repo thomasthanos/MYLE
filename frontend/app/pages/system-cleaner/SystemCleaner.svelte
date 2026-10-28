@@ -6,15 +6,39 @@
   import RadarIcon from "@lucide/svelte/icons/radar";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
   import SoftwareHealth from "./SoftwareHealth.svelte";
+  import DiskAnalyzer from "../disk-analyzer/DiskAnalyzer.svelte";
   import { cleanerState } from "./state.svelte";
   import { health } from "./health.svelte";
 
-  let tab = $state<"cleanup" | "health">("cleanup");
+  const tools = [
+    { id: "cleanup", label: "Cleanup", icon: Sparkles, color: "#7dd3fc" },
+    { id: "health", label: "Software Health", icon: HeartPulse, color: "#c4b5fd" },
+    { id: "disk", label: "Disk Analyzer", icon: HardDrive, color: "#fbbf24" },
+  ] as const;
+  type Tool = (typeof tools)[number]["id"];
+  let tab = $state<Tool>("cleanup");
+  let diskOpened = $state(false);
+
+  function selectTab(id: Tool) {
+    tab = id;
+    if (id === "disk") diskOpened = true;
+  }
+
+  function onTabKey(event: KeyboardEvent, index: number) {
+    const next = event.key === "ArrowRight" ? (index + 1) % tools.length
+      : event.key === "ArrowLeft" ? (index - 1 + tools.length) % tools.length
+      : event.key === "Home" ? 0 : event.key === "End" ? tools.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    selectTab(tools[next].id);
+    document.getElementById(`${tools[next].id}-tab`)?.focus();
+  }
   const locked = $derived(cleanerState.busy || health.busy || health.scanning);
 
   onMount(() => void cleanerState.load());
@@ -43,14 +67,15 @@
   });
 </script>
 
-<PageHeader title="System Cleaner" subtitle="Clear temporary files, clean software leftovers and keep your apps in check." />
+<PageHeader title="System Cleaner" subtitle="Clear temporary files, clean software leftovers and see what is filling your drives." />
 
 <div class="tabs" role="tablist" aria-label="Cleaner tools">
-  <button id="cleanup-tab" role="tab" aria-selected={tab === "cleanup"} aria-controls="cleanup-panel" tabindex={tab === "cleanup" ? 0 : -1} class:active={tab === "cleanup"} onclick={() => tab = "cleanup"} onkeydown={(e) => { if (["ArrowRight", "ArrowLeft", "End"].includes(e.key)) { e.preventDefault(); tab = "health"; document.getElementById("health-tab")?.focus(); } }}><Sparkles size={17} /> Cleanup</button>
-  <button id="health-tab" role="tab" aria-selected={tab === "health"} aria-controls="health-panel" tabindex={tab === "health" ? 0 : -1} class:active={tab === "health"} onclick={() => tab = "health"} onkeydown={(e) => { if (["ArrowRight", "ArrowLeft", "Home"].includes(e.key)) { e.preventDefault(); tab = "cleanup"; document.getElementById("cleanup-tab")?.focus(); } }}><HeartPulse size={17} /> Software Health</button>
+  {#each tools as tool, index (tool.id)}
+    <button type="button" id="{tool.id}-tab" role="tab" aria-selected={tab === tool.id} aria-controls="{tool.id}-panel" tabindex={tab === tool.id ? 0 : -1} class:active={tab === tool.id} style:--tool-color={tool.color} onclick={() => selectTab(tool.id)} onkeydown={(event) => onTabKey(event, index)}><tool.icon size={17} /> {tool.label}</button>
+  {/each}
 </div>
 
-<div id="cleanup-panel" role="tabpanel" aria-labelledby="cleanup-tab" hidden={tab !== "cleanup"}>
+<div id="cleanup-panel" class="tool-panel" role="tabpanel" aria-labelledby="cleanup-tab" hidden={tab !== "cleanup"}>
 
 <section class="hero surface">
   <div class="stats">
@@ -112,14 +137,20 @@
 </div>
 
 </div>
-<div id="health-panel" role="tabpanel" aria-labelledby="health-tab" hidden={tab !== "health"}><SoftwareHealth /></div>
+<div id="health-panel" class="tool-panel" role="tabpanel" aria-labelledby="health-tab" hidden={tab !== "health"}><SoftwareHealth /></div>
+<div id="disk-panel" class="tool-panel disk-panel" role="tabpanel" aria-labelledby="disk-tab" hidden={tab !== "disk"}>
+  {#if diskOpened}<DiskAnalyzer active={tab === "disk"} />{/if}
+</div>
 
 <style>
-  .tabs { display: flex; gap: 6px; margin: 0 0 20px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
+  .tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; margin: 0 0 20px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
   .tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+  .tabs button:hover { background: var(--hover); color: var(--text-1); }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .tabs button.active { background: var(--selected); color: var(--text-1); box-shadow: var(--btn-sheen); }
-  .tabs button:first-child :global(svg) { color: #7dd3fc; }
-  .tabs button:last-child :global(svg) { color: #c4b5fd; }
+  .tabs button :global(svg) { flex: none; color: var(--tool-color); }
+  .tool-panel { flex: 0 0 auto; min-width: 0; }
+  .disk-panel:not([hidden]) { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; }
   .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-3) var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4); }
   .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 28px; }
   .stat { display: grid; gap: 3px; }

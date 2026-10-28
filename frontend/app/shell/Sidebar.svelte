@@ -39,7 +39,7 @@
   }
 
   $effect(() => {
-    if (!list) return;
+    if (!list || !topSections.length) return;
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     for (const child of list.children) observer.observe(child);
@@ -161,20 +161,17 @@
       measure();
     }}
   >
-    {#each topSections as section, index (section.group)}
-      {#if section.group === "owner"}
-        <div class="owner-head" aria-hidden="true">
-          <span class="rule"></span>
-          <span class="owner-label"><ShieldCheck size={11} strokeWidth={2.25} /> Owner</span>
-          <span class="rule"></span>
+    {#each topSections as section (section.group)}
+      <div class="section" class:owner-section={section.group === "owner"}>
+        <h2 class="section-heading" id="sidebar-section-{section.group}">
+          {#if section.group === "owner"}<ShieldCheck size={11} strokeWidth={2} />{/if}
+          {GROUP_LABELS[section.group]}
+        </h2>
+        <div class="group" role="group" aria-labelledby="sidebar-section-{section.group}">
+          {#each section.pages as page (page.id)}
+            {@render item(page, nav.current === page.id, () => nav.go(page.id), badges.of(page.id))}
+          {/each}
         </div>
-      {:else if index > 0}
-        <div class="divider" aria-hidden="true"></div>
-      {/if}
-      <div class="group" class:owner-group={section.group === "owner"} role="group" aria-label={GROUP_LABELS[section.group]}>
-        {#each section.pages as page (page.id)}
-          {@render item(page, nav.current === page.id, () => nav.go(page.id), badges.of(page.id))}
-        {/each}
       </div>
     {/each}
   </div>
@@ -213,6 +210,12 @@
   .top { min-height: 0; overflow-x: hidden; overflow-y: auto; --fade-top: 0px; --fade-bottom: 0px; mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
   .top.more-above { --fade-top: 22px; }
   .top.more-below { --fade-bottom: 22px; }
+  .section + .section { margin-top: 14px; }
+  .section-heading { display: flex; align-items: center; gap: 6px; min-height: 16px; margin: 0 0 6px; padding: 0 12px; color: var(--text-3); font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+  .owner-section .section-heading { color: rgb(var(--owner-rgb) / 0.74); }
+  .section-heading :global(svg) { flex: none; }
+  .collapsed .section-heading { display: none; }
+  .collapsed .section + .section { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgb(255 255 255 / 0.08); }
   .group { display: grid; gap: 2px; }
   .item { position: relative; display: flex; align-items: center; width: 100%; height: 40px; border-radius: var(--radius-md); color: var(--text-2); overflow: hidden; transition: background var(--dur-fast), color var(--dur-fast), scale 140ms var(--ease-out); }
   .item:hover { background: var(--hover); color: var(--text-1); }
@@ -235,12 +238,6 @@
   .item.active .label { font-weight: 600; }
   .collapsed .label { opacity: 0; transform: translateX(-6px); }
   .divider { height: 1px; margin: 6px 8px; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.08), transparent); }
-  /* "Owner" between two hairlines; only the hairline when collapsed. */
-  .owner-head { display: flex; align-items: center; gap: 6px; height: 13px; margin: 6px 8px; }
-  .owner-head .rule { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--owner-rgb) / 0.22)); }
-  .owner-head .rule:last-child { background: linear-gradient(90deg, rgb(var(--owner-rgb) / 0.22), transparent); }
-  .owner-label { display: inline-flex; align-items: center; gap: 4px; color: rgb(var(--owner-rgb) / 0.72); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; transition: opacity var(--dur-med) var(--ease-out); }
-  .collapsed .owner-label { display: none; }
   .tooltip { position: fixed; z-index: 50; width: 312px; max-width: calc(100vw - 24px); padding: 12px 14px 14px; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 14px; background: linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent), var(--tooltip-bg); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045), 0 4px 10px rgb(0 0 0 / 0.24), 0 10px 24px -10px rgb(0 0 0 / 0.6); font-size: 13px; pointer-events: none; animation: tip-in var(--dur-fast) var(--ease-out); }
   .tooltip::before { content: ""; position: absolute; left: -6px; top: var(--tip-arrow-y); width: 10px; height: 10px; transform: translateY(-50%) rotate(45deg); border-left: 1px solid rgb(255 255 255 / 0.1); border-bottom: 1px solid rgb(255 255 255 / 0.1); border-radius: 1px; background: linear-gradient(rgb(255 255 255 / 0.018), rgb(255 255 255 / 0.018)), var(--tooltip-bg); }
   .tip-head { display: flex; align-items: center; gap: 9px; }

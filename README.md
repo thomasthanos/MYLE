@@ -26,13 +26,39 @@
   <img src="docs/assets/features.svg" alt="Install Apps, Game Saves, Spotify Hub, Creative Suite, Windows Optimization, System Cleaner, System Maintenance, Sync &amp; Updates" width="100%" />
 </p>
 
+| Page | What it does |
+|---|---|
+| **Install Apps** | An app store on top of winget: install, update and keep track of your programs, with your own list and app packs |
+| **Creative Suite** | Your own creative packages (Adobe, Clip Studio Paint, Office…): download, unpack and run the setup in one click |
+| **Spotify Hub** | Customize Spotify with Spicetify and a theme, or put it back to stock; Purge removes the leftovers |
+| **Game Saves** | Finds your game saves and backs them up (three snapshots each), restores them with a safety copy, and can back up daily or weekly by itself |
+| **Project Backups** | Zips your project folders into Google Drive or Dropbox, checked twice before they are kept, with a diff between any two backups |
+| **GitHub Releases** | Commit, build and release your own projects to GitHub — version files, notes, tag, upload, or the tag's Actions workflow |
+| **Windows Optimization** | Bloat removal and tuning in profiles (Light, Recommended, Maximum), with a full undo and a restore point |
+| **System Cleaner** | Finds and removes the files Windows leaves behind, and reports honestly what is in use |
+| **System Maintenance** | Windows diagnostics and repairs, one at a time, with their output on screen |
+| **Disk Analyzer** | Shows what is filling a drive — as a treemap, a folder tree, the largest files and file types — and moves what you pick to the Recycle Bin. Also makes cloud files online-only |
+| **Auto Clicker & Macros** | Repeats clicks at an interval, or runs a sequence of recorded points, with F6 to start and stop |
+| **Password Manager** | An end-to-end encrypted vault for your logins and 2FA codes, with Windows Hello, passkeys and browser filling |
+| **Settings** | Your account and sync, the appearance, start-up and the tray, and updates |
+
+<p align="center">
+  <sub><b>MYLE Passwords</b> brings the Password Manager to Android and iPhone, in sync with your PC. <b>Browser filling</b> is the extension for Chrome, Edge, Brave, Vivaldi, Opera, Arc, Thorium and Firefox (Zen, LibreWolf, Waterfox, Floorp).</sub>
+</p>
+
 <h2 align="center">Install</h2>
 
 <p align="center">
   <img src="docs/assets/install-steps.svg" alt="Download, install for your account without admin rights, and it updates itself" width="100%" />
 </p>
 
-<p align="center"><sub>If the WebView2 Runtime is missing, the setup installs it from Microsoft. Your settings and data are kept across every update.</sub></p>
+<p align="center"><sub>Install for your own account — no administrator rights. If the WebView2 Runtime is missing, the setup installs it from Microsoft. Your settings and data are kept across every update.</sub></p>
+
+<p align="center">
+  <a href="https://downloads.thomast.uk/MYLE-Passwords.apk">MYLE Passwords for Android</a> ·
+  <a href="https://downloads.thomast.uk/sidestore.json">iPhone, through SideStore</a> ·
+  <a href="https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca">Browser filling for Chrome, Edge and Brave</a>
+</p>
 
 <h2 align="center">How it works</h2>
 
@@ -40,17 +66,31 @@
   <img src="docs/assets/how-it-works.svg" alt="Svelte frontend, Rust and Tauri backend, Windows tools, and updates verified with SHA-256" width="100%" />
 </p>
 
+- **One window, thirteen pages.** Svelte 5 in front, Rust and Tauri behind, on the WebView2 runtime Windows already has.
+- **Your data stays yours.** Everything that matters is written to your own profile: no account is needed, and the parts that can sync are end-to-end encrypted (the Password Manager's vault never leaves a PC unsealed).
+- **Nothing needs administrator rights until it truly does**, and then it is one prompt, through the same program.
+- **Updates are verified.** The app checks its feed, downloads the installer, and installs it only if its SHA-256 matches. If the update fails, it falls back to the setup's own window.
+
 <img src="docs/assets/divider.svg" alt="" width="100%" />
 
 ## For developers
 
 ```powershell
 npm install
-npm run dev      # the app with hot reload
+npm run dev      # the app, with hot reload
 npm run build    # installer → backend/target/release/bundle/setup/MYLE.exe
+npm run check    # svelte-check, TypeScript and the site check
+npm test         # Rust tests (workspace), then the script tests
+npm run lint     # cargo clippy -D warnings
 ```
 
-You'll need Node.js 20+, Rust (MSVC), and the Visual Studio Build Tools. The development guide covers the structure, pages, updater and setup.
+You'll need **Node.js 20+**, **Rust** (stable, MSVC) and the **Visual Studio 2022 Build Tools** with the C++ workload, on Windows 10 or 11.
+
+The flow of the app, the structure of the repository, every page's internals, the updater, the release workflow and the setup are all in the development guide:
+
+```text
+docs/DEVELOPMENT.md
+```
 
 <p><a href="docs/DEVELOPMENT.md"><img src="docs/assets/link-development.svg" alt="Read the development guide" width="90" /></a></p>
 

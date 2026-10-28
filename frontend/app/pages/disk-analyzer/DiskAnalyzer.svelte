@@ -19,7 +19,6 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Usb from "@lucide/svelte/icons/usb";
   import X from "@lucide/svelte/icons/x";
-  import PageHeader from "../../../lib/components/PageHeader.svelte";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { deletionShare, formatSize, sizeOf, type Drive } from "./api";
   import FileTypes from "./FileTypes.svelte";
@@ -28,6 +27,8 @@
   import { diskState as d, type View } from "./state.svelte";
   import Treemap from "./Treemap.svelte";
   import CloudStorage from "./cloud-storage/CloudStorage.svelte";
+
+  let { active = true }: { active?: boolean } = $props();
 
   onMount(() => void d.load());
 
@@ -68,7 +69,7 @@
 
   /** Backspace or Alt+← goes one folder up in the treemap, unless typing. */
   function onKeydown(e: KeyboardEvent) {
-    if (d.phase !== "ready" || e.defaultPrevented) return;
+    if (!active || d.phase !== "ready" || e.defaultPrevented) return;
     const typing = e.target instanceof HTMLElement && e.target.closest("input, textarea, [contenteditable='true']");
     if (typing || document.querySelector('[aria-modal="true"]:not(dialog), dialog[open]')) return;
     if (e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) {
@@ -83,8 +84,6 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} />
-
-<PageHeader title="Disk Analyzer" subtitle="See what is filling a drive or a folder, then move what you no longer need to the Recycle Bin." />
 
 <section class="scan-picker surface" class:compact={!drivesExpanded} aria-label="Scan target">
   <header class="picker-header">

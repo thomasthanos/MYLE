@@ -2,7 +2,7 @@
 export type NavGroup = "apps" | "data" | "system" | "owner" | "bottom";
 /** The groups of the upper list, in order. "bottom" (Settings) is pinned below. */
 export const TOP_GROUPS: readonly NavGroup[] = ["apps", "data", "system", "owner"];
-export const GROUP_LABELS: Record<NavGroup, string> = { apps: "Apps", data: "Your data", system: "System", owner: "Owner only", bottom: "App" };
+export const GROUP_LABELS: Record<NavGroup, string> = { apps: "Apps & Tools", data: "Your Data", system: "System", owner: "Owner Tools", bottom: "App" };
 export interface NavEntry { id: string; group: NavGroup; numbered?: boolean }
 export interface NavSection<T extends NavEntry> { group: NavGroup; pages: T[] }
 /* The upper list's groups, each with its pages in registry order; empty groups (the owner's, for everyone else) are left out. */
