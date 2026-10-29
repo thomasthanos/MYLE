@@ -13,23 +13,25 @@ const transpile = (text, module = ModuleKind.ESNext) => transpileModule(text, {
 const executable = transpile(compileModule(transpile(source) + "\nglobalThis.mobileAccount = account;", {
   filename: "mobile-account.svelte.js", generate: "client",
 }).js.code, ModuleKind.CommonJS);
-function harness({ accept = true, fail = false, signIn, cancelSignIn = async () => true } = {}) {
+function harness({ accept = true, fail = false, signIn, profile = async () => null, syncNow = async () => {}, cancelSignIn = async () => true } = {}) {
   const calls = [], questions = [], errors = [], timers = [];
+  const listeners = [];
   const context = vm.createContext({
     require: createRequire(import.meta.url), exports: {}, URLSearchParams, navigator: { userAgent: "Android" },
     isTauri: () => true, shell: { settingsOpen: true }, document: { visibilityState: "visible" },
     setTimeout: (run) => { timers.push(run); return timers.length; },
     invoke: (command) => { assert.equal(command, "account_cancel_sign_in"); return cancelSignIn(); },
+    listen: async (event, callback) => { listeners.push({ event, callback }); return () => {}; },
     confirm: async (options) => { questions.push(options); return accept; },
-    passwords: { lock: async () => calls.push("lock"), resetLocal: () => calls.push("reset"), syncNow: async () => {} },
-    accountApi: { signIn, cancelSignIn, signOut: async () => { calls.push("native"); if (fail) throw new Error("file cannot be removed"); } },
+    passwords: { lock: async () => calls.push("lock"), resetLocal: () => calls.push("reset"), syncNow },
+    accountApi: { signIn, profile, cancelSignIn, signOut: async () => { calls.push("native"); if (fail) throw new Error("file cannot be removed"); } },
     localStorage: { clear: () => calls.push("localStorage") }, sessionStorage: { clear: () => calls.push("sessionStorage") },
     toast: { info() {}, success() {}, error: (message) => errors.push(message) },
   });
   vm.runInContext(executable, context);
   const account = context.mobileAccount;
   account.profile = { id: "fixture", name: "Fixture", email: "fixture@example.com" };
-  return { account, calls, questions, errors, timers, shell: context.shell };
+  return { account, calls, questions, errors, timers, listeners, shell: context.shell };
 }
 test("confirmed sign out clears the phone and tells the shell to show welcome", async () => {
   const h = harness();
@@ -109,4 +111,77 @@ test("an old resume timer cannot cancel a new sign-in to the same provider", asy
   await Promise.all([first, second]);
   assert.equal(h.account.profile?.id, "current");
   assert.equal(cancellations, 1);
+});
+
+test("repeated initialization registers one account-return listener", async () => {
+  const h = harness();
+  await Promise.all([h.account.init(), h.account.init()]);
+  assert.equal(h.listeners.length, 1);
+  assert.equal(h.account.loaded, true);
+});
+
+test("the initial profile read cannot restore an account after sign-out", async () => {
+  let answer, started;
+  const reading = new Promise(resolve => { started = resolve; });
+  const h = harness({ profile: () => { started(); return new Promise(resolve => { answer = resolve; }); } });
+  const initializing = h.account.init();
+  await reading;
+  await h.account.signOut();
+  answer({ id: "signed-out", name: "Old fixture" });
+  await initializing;
+  assert.equal(h.account.profile, null);
+  assert.equal(h.account.loaded, true);
+});
+
+test("the initial profile read cannot replace a completed sign-in", async () => {
+  let answer, started;
+  const reading = new Promise(resolve => { started = resolve; });
+  const h = harness({
+    profile: () => { started(); return new Promise(resolve => { answer = resolve; }); },
+    signIn: async () => ({ id: "current", name: "Current fixture" }),
+  });
+  h.account.profile = null;
+  const initializing = h.account.init();
+  await reading;
+  await h.account.signIn("google");
+  answer(null);
+  await initializing;
+  assert.equal(h.account.profile?.id, "current");
+  assert.equal(h.account.loaded, true);
+});
+
+test("the initial profile read cannot replace an accepted browser-return event", async () => {
+  let answer, started, syncFinished;
+  const reading = new Promise(resolve => { started = resolve; });
+  const syncing = new Promise(resolve => { syncFinished = resolve; });
+  const current = { id: "returned", name: "Returned fixture" };
+  let reads = 0;
+  const h = harness({
+    profile: () => ++reads === 1 ? new Promise(resolve => { answer = resolve; started(); }) : Promise.resolve(current),
+    syncNow: async () => { syncFinished(); },
+  });
+  h.account.profile = null;
+  const initializing = h.account.init();
+  await reading;
+  h.listeners[0].callback({ payload: current });
+  await syncing;
+  answer(null);
+  await initializing;
+  assert.equal(h.account.profile?.id, "returned");
+});
+
+test("an old browser-return event cannot invalidate a newer explicit sign-in", async () => {
+  let answer, reads = 0;
+  const h = harness({
+    profile: async () => ++reads === 1 ? null : { id: "old", name: "Old fixture" },
+    signIn: () => new Promise(resolve => { answer = resolve; }),
+  });
+  h.account.profile = null;
+  await h.account.init();
+  const signingIn = h.account.signIn("google");
+  h.listeners[0].callback({ payload: { id: "old", name: "Old fixture" } });
+  answer({ id: "current", name: "Current fixture" });
+  await signingIn;
+  assert.equal(h.account.profile?.id, "current");
+  assert.equal(h.account.signingIn, null);
 });

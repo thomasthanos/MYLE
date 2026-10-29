@@ -112,23 +112,32 @@ pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
 fn is_skipped_dir(path: &Path, skip: &[PathBuf]) -> bool {
     skip.iter().any(|dir| same_path(dir, path))
 }
+fn check_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+    if cancelled() { Err(super::CANCELLED.into()) } else { Ok(()) }
+}
 /// The entries of a folder, sorted by name.
-fn read_sorted(dir: &Path) -> Result<Vec<fs::DirEntry>, String> {
-    let entries = fs::read_dir(dir)
+fn read_sorted(dir: &Path, cancelled: &dyn Fn() -> bool) -> Result<Vec<fs::DirEntry>, String> {
+    check_cancelled(cancelled)?;
+    let read = fs::read_dir(dir)
         .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
-    let mut entries: Vec<fs::DirEntry> = entries
-        .collect::<Result<_, _>>()
-        .map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?;
+    let mut entries = Vec::new();
+    for entry in read {
+        check_cancelled(cancelled)?;
+        entries.push(entry.map_err(|error| format!("Can't read the folder \"{}\": {error}", dir.display()))?);
+    }
+    check_cancelled(cancelled)?;
     entries.sort_by_key(|entry| entry.file_name());
+    check_cancelled(cancelled)?;
     Ok(entries)
 }
-fn names_of(entries: &[fs::DirEntry]) -> DirNames {
+fn names_of(entries: &[fs::DirEntry], cancelled: &dyn Fn() -> bool) -> Result<DirNames, String> {
     let mut names = DirNames::default();
     for entry in entries {
+        check_cancelled(cancelled)?;
         let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
         names.add(&entry.file_name().to_string_lossy(), is_dir);
     }
-    names
+    Ok(names)
 }
 /// Every file of `root` a backup holds, in a stable order.
 pub(crate) fn walk(
@@ -139,8 +148,8 @@ pub(crate) fn walk(
 ) -> Result<Walk, String> {
     let mut out = Walk::default();
     let listing = StackListing::default();
-    let entries = read_sorted(root)?;
-    listing.set("", names_of(&entries));
+    let entries = read_sorted(root, cancelled)?;
+    listing.set("", names_of(&entries, cancelled)?);
     walk_dir(
         &Walker {
             rules,
@@ -171,6 +180,7 @@ fn walk_dir(
     }
     let rules = walker.rules;
     for entry in entries {
+        check_cancelled(walker.cancelled)?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
         let child = join_rel(rel, &name);
@@ -189,10 +199,13 @@ fn walk_dir(
                     continue;
                 }
                 // Read before deciding: markers inside (CACHEDIR.TAG, pyvenv.cfg) tell output apart. A folder that can't be read only fails the backup when it is not left out anyway.
-                let inner = read_sorted(&path);
-                walker
-                    .listing
-                    .set(&child, inner.as_deref().map(names_of).unwrap_or_default());
+                let inner = read_sorted(&path, walker.cancelled);
+                let names = match &inner {
+                    Ok(entries) => names_of(entries, walker.cancelled)?,
+                    Err(error) if error == super::CANCELLED => return Err(error.clone()),
+                    Err(_) => DirNames::default(),
+                };
+                walker.listing.set(&child, names);
                 if matches!(early, Early::Undecided)
                     && let Some(why) = rules.detected_dir(&child, walker.listing)
                 {
@@ -274,24 +287,26 @@ pub(crate) fn audit(
     skip_dirs: &[PathBuf],
     archived: &HashSet<String>,
     since: SystemTime,
-) -> Vec<String> {
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<String>, String> {
     let mut missing = Vec::new();
     let since = since.checked_sub(Duration::from_secs(2)).unwrap_or(since);
     let listing = StackListing::default();
-    let Some(entries) = audit_entries(root) else {
-        return missing;
+    let Some(entries) = audit_entries(root, cancelled)? else {
+        return Ok(missing);
     };
-    listing.set("", audit_names(&entries));
+    listing.set("", audit_names(&entries, cancelled)?);
     let auditor = Auditor {
         rules,
         skip_dirs,
         archived,
         since,
         listing: &listing,
+        cancelled,
     };
-    audit_dir(&auditor, "", entries, &mut missing);
+    audit_dir(&auditor, "", entries, &mut missing)?;
     missing.sort();
-    missing
+    Ok(missing)
 }
 struct Auditor<'a> {
     rules: &'a Rules,
@@ -299,6 +314,7 @@ struct Auditor<'a> {
     archived: &'a HashSet<String>,
     since: SystemTime,
     listing: &'a StackListing,
+    cancelled: &'a dyn Fn() -> bool,
 }
 /// A folder's entries with their metadata, read without trusting entry types.
 struct AuditEntry {
@@ -307,40 +323,37 @@ struct AuditEntry {
     own: fs::Metadata,
     meta: fs::Metadata,
 }
-fn audit_entries(dir: &Path) -> Option<Vec<AuditEntry>> {
-    let entries = fs::read_dir(dir).ok()?;
-    Some(
-        entries
-            .flatten()
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let path = dir.join(&name);
-                // Gone meanwhile, or a broken link.
-                let own = fs::symlink_metadata(&path).ok()?;
-                let meta = fs::metadata(&path).ok()?;
-                Some(AuditEntry {
-                    name,
-                    path,
-                    own,
-                    meta,
-                })
-            })
-            .collect(),
-    )
+fn audit_entries(dir: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<Vec<AuditEntry>>, String> {
+    check_cancelled(cancelled)?;
+    let Ok(entries) = fs::read_dir(dir) else { return Ok(None) };
+    let mut found = Vec::new();
+    for entry in entries {
+        check_cancelled(cancelled)?;
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = dir.join(&name);
+        // Gone meanwhile, or a broken link.
+        let Ok(own) = fs::symlink_metadata(&path) else { continue };
+        let Ok(meta) = fs::metadata(&path) else { continue };
+        found.push(AuditEntry { name, path, own, meta });
+    }
+    Ok(Some(found))
 }
-fn audit_names(entries: &[AuditEntry]) -> DirNames {
+fn audit_names(entries: &[AuditEntry], cancelled: &dyn Fn() -> bool) -> Result<DirNames, String> {
     let mut names = DirNames::default();
     for entry in entries {
+        check_cancelled(cancelled)?;
         names.add(
             &entry.name,
             entry.meta.is_dir() && !entry.own.file_type().is_symlink(),
         );
     }
-    names
+    Ok(names)
 }
-fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &mut Vec<String>) {
+fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &mut Vec<String>) -> Result<(), String> {
     let rules = auditor.rules;
     for entry in entries {
+        check_cancelled(auditor.cancelled)?;
         let child = join_rel(rel, &entry.name);
         if entry.meta.is_dir() {
             if entry.own.file_type().is_symlink() || is_skipped_dir(&entry.path, auditor.skip_dirs)
@@ -351,16 +364,15 @@ fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &m
             if matches!(early, Early::Excluded(_)) {
                 continue;
             }
-            let Some(inner) = audit_entries(&entry.path) else {
+            let Some(inner) = audit_entries(&entry.path, auditor.cancelled)? else {
                 continue;
             };
-            auditor.listing.set(&child, audit_names(&inner));
+            auditor.listing.set(&child, audit_names(&inner, auditor.cancelled)?);
             let excluded = matches!(early, Early::Undecided)
                 && rules.detected_dir(&child, auditor.listing).is_some();
-            if !excluded {
-                audit_dir(auditor, &child, inner, missing);
-            }
+            let result = if excluded { Ok(()) } else { audit_dir(auditor, &child, inner, missing) };
             auditor.listing.forget(&child);
+            result?;
         } else if entry.meta.is_file() {
             if rules.excluded_file(&child, auditor.listing).is_some() {
                 continue;
@@ -374,6 +386,7 @@ fn audit_dir(auditor: &Auditor, rel: &str, entries: Vec<AuditEntry>, missing: &m
             }
         }
     }
+    Ok(())
 }
 #[cfg(test)]
 mod tests {
@@ -441,11 +454,11 @@ mod tests {
         let since = SystemTime::now() + Duration::from_secs(60);
         let mut archived: HashSet<String> = ["package.json".to_string()].into();
         assert_eq!(
-            audit(&root, &rules(), &[], &archived, since),
+            audit(&root, &rules(), &[], &archived, since, &|| false).unwrap(),
             ["src/main.ts"]
         );
         archived.insert("src/main.ts".into());
-        assert!(audit(&root, &rules(), &[], &archived, since).is_empty());
+        assert!(audit(&root, &rules(), &[], &archived, since, &|| false).unwrap().is_empty());
         // Files written while the backup ran are not counted as missing.
         assert!(
             audit(
@@ -453,8 +466,10 @@ mod tests {
                 &rules(),
                 &[],
                 &HashSet::new(),
-                SystemTime::now() - Duration::from_secs(60)
+                SystemTime::now() - Duration::from_secs(60),
+                &|| false,
             )
+            .unwrap()
             .is_empty()
         );
         let _ = fs::remove_dir_all(root);
@@ -464,6 +479,28 @@ mod tests {
         let root = temp("cancel");
         put(&root, "a.txt", "a");
         assert!(walk(&root, &rules(), &[], &|| true).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn a_cancelled_walk_does_not_open_the_source_folder() {
+        let root = temp("cancel-before-read");
+        fs::remove_dir(&root).unwrap();
+        let error = walk(&root, &rules(), &[], &|| true).unwrap_err();
+        assert_eq!(error, super::super::CANCELLED);
+    }
+    #[test]
+    fn cancellation_interrupts_a_flat_folder() {
+        use std::cell::Cell;
+        let root = temp("cancel-flat");
+        for n in 0..128 {
+            put(&root, &format!("file-{n:03}.txt"), "a");
+        }
+        let checks = Cell::new(0);
+        let result = walk(&root, &Rules::none(), &[], &|| {
+            checks.set(checks.get() + 1);
+            checks.get() >= 4
+        });
+        assert!(matches!(result, Err(error) if error == super::super::CANCELLED), "cancellation must be checked while enumerating a flat folder");
         let _ = fs::remove_dir_all(root);
     }
     /// Links to files are followed, links to folders (and junctions) and
@@ -519,8 +556,10 @@ mod tests {
                 &rules(),
                 &[],
                 &archived,
-                SystemTime::now() + Duration::from_secs(60)
+                SystemTime::now() + Duration::from_secs(60),
+                &|| false,
             )
+            .unwrap()
             .is_empty()
         );
         let _ = fs::remove_dir_all(root);

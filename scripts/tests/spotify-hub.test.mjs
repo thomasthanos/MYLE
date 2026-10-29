@@ -24,10 +24,10 @@ const snapshot = (overrides = {}) => ({
   activeJob: null, lastOutcome: null, ...overrides,
 });
 const latest = { cli: "2.45.3", marketplace: "1.0.11" };
-function harness(api = {}) {
+function harness(api = {}, { setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   let runs = 0, checks = 0, locked = false;
   const context = vm.createContext({
-    require, exports: {}, Date, setTimeout, clearTimeout, isTauri: () => true,
+    require, exports: {}, Date, setTimeout: setTimer, clearTimeout: clearTimer, isTauri: () => true,
     compareVersions,
     appsState: { busy: false }, confirm: async () => true, nav: {},
     toast: { error() {}, success() {}, info() {} },
@@ -83,6 +83,34 @@ test("a failed installation keeps its console and offers one repair action", asy
   await h.hub.repair();
   assert.equal(h.hub.consoles.installSpicetify.open, true);
   assert.equal(h.hub.installLabel(), "Repair");
+});
+test("completion releases a revisited job even when the final detection fails", async () => {
+  const timers = [];
+  const job = { jobId: "current", action: "installSpicetify", stage: "installing", progress: 0.5 };
+  let reads = 0, finishRun;
+  const h = harness({
+    getState: async () => {
+      reads++;
+      if (reads === 1) return snapshot();
+      if (reads === 2) return snapshot({ activeJob: job });
+      throw new Error("detection failed");
+    },
+    run: (_action, _token, onEvent) => {
+      onEvent({ event: "stage", data: { jobId: job.jobId, stage: job.stage } });
+      return new Promise((resolve) => { finishRun = resolve; });
+    },
+  }, { setTimer: (run) => { timers.push(run); return timers.length; }, clearTimer() {} });
+  await h.hub.load(false, { checkUpdates: false });
+  const repairing = h.hub.repair();
+  await h.hub.load(true, { checkUpdates: false });
+  // The adopted-job watcher defers to the locally owned command while it runs.
+  await timers.shift()();
+  finishRun({ result: "done", jobId: job.jobId, action: job.action, note: null });
+  await repairing;
+  assert.match(h.hub.error, /detection failed/);
+  assert.equal(h.hub.statuses.installSpicetify, "Completed");
+  assert.equal(h.hub.activeJob, null, "a completed job cannot survive through its cached snapshot");
+  assert.equal(h.hub.locked, false, "the next action remains available after a failed refresh");
 });
 test("failed release checks remain retryable without reinstalling", async () => {
   let failed = true;

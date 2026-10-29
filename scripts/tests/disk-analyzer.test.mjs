@@ -276,6 +276,39 @@ test.afterEach(() => {
   while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   if (confirmState.current) confirmState.answer(false);
 });
+test("overlapping page loads share drive discovery and a later load refreshes it", async () => {
+  backend();
+  const pending = deferred();
+  const read = diskApi.drives;
+  let requests = 0;
+  diskApi.drives = () => { requests++; return pending.promise; };
+  const first = state.load();
+  const second = state.load();
+  const whilePending = requests;
+  const drives = await read();
+  pending.resolve(drives);
+  await Promise.all([first, second]);
+  assert.equal(whilePending, 1, "remounts must share their native drive waiters");
+  assert.equal(state.target, "C:\\");
+  const refreshed = drives.map((drive) => ({ ...drive, free: 42 }));
+  diskApi.drives = async () => refreshed;
+  await state.load();
+  assert.equal(state.drives[0].free, 42, "settled discovery must not cache old free space");
+});
+test("drive discovery can be retried after a shared failure", async () => {
+  backend();
+  const pending = deferred();
+  const read = diskApi.drives;
+  diskApi.drives = () => pending.promise;
+  const first = state.load();
+  const second = state.load();
+  pending.reject(new Error("The old volume is disconnected."));
+  await Promise.all([first, second]);
+  diskApi.drives = read;
+  await state.load();
+  assert.equal(state.target, "C:\\");
+  assert.equal(state.drives.length, 2);
+});
 test("a scan shows its progress, then the results of the drive picked", async () => {
   backend();
   await state.load();
@@ -633,4 +666,185 @@ test("tabs load their lists when first opened and the view is kept", async () =>
   assert.equal(storage.get(KEY.view), JSON.stringify("types"));
   assert.ok(calls.some((c) => c.name === "topFiles" && c.args[1] === 1000 && c.args[3] === null));
   assert.ok(calls.some((c) => c.name === "extensions" && c.args[1] === 0));
+});
+
+test("an old scan finishing its result reads cannot clear the next scan's progress", async () => {
+  backend();
+  state.target = "D:\\";
+  const firstRead = deferred();
+  const nextScan = deferred();
+  const read = diskApi.children;
+  diskApi.children = (...args) => args[0] === done.scanId ? firstRead.promise.then(() => read(...args)) : read(...args);
+  let events;
+  let scans = 0;
+  diskApi.scan = async (_root, _fast, onEvent) => {
+    if (++scans === 1) { events = onEvent; return done; }
+    return nextScan.promise;
+  };
+  const previous = state.scan();
+  await settle();
+  assert.equal(state.phase, "ready");
+  const current = state.scan();
+  const progress = state.progress;
+  firstRead.resolve();
+  await previous;
+  const retained = state.progress;
+  events({ event: "progress", data: { files: 999, dirs: 99, bytes: 999, alloc: 999, current: "Old scan" } });
+  const lateEvent = state.progress;
+  nextScan.resolve(null);
+  await current;
+  assert.equal(retained, progress, "old finalization must leave the active scan's progress alone");
+  assert.equal(lateEvent, progress, "old channel events must not replace the active progress");
+});
+
+test("initial scan breadcrumbs cannot replace a newer zoom", async () => {
+  backend();
+  state.target = "D:\\";
+  diskApi.scan = async () => done;
+  const pending = deferred();
+  const read = diskApi.trail;
+  diskApi.trail = (...args) => args[1] === 0 ? pending.promise : read(...args);
+  const scanning = state.scan();
+  await settle();
+  await state.zoomTo(1);
+  pending.resolve(await read(done.scanId, 0));
+  await scanning;
+  assert.equal(state.current, 1);
+  assert.deepEqual(state.trail.map((crumb) => crumb.id), [0, 1]);
+});
+
+test("a tree reveal from an old scan cannot expand or focus the new scan", async () => {
+  await scanned();
+  const pending = deferred();
+  const read = diskApi.trail;
+  const oldTrail = await read(done.scanId, 4);
+  diskApi.trail = (...args) => args[0] === done.scanId && args[1] === 4 ? pending.promise : read(...args);
+  const revealing = state.showInTree(4);
+  diskApi.scan = async () => ({ ...done, scanId: 4 });
+  await state.scan();
+  calls.length = 0;
+  pending.resolve(oldTrail);
+  await revealing;
+  assert.equal(state.focused, null);
+  assert.equal(state.scrollTo, null);
+  assert.deepEqual([...state.expanded], [0]);
+  assert.equal(calls.length, 0, "an obsolete reveal must not issue reads against the new scan");
+});
+
+test("the latest tree reveal wins even if the previous trail arrives last", async () => {
+  await scanned();
+  const pending = deferred();
+  const read = diskApi.trail;
+  const oldTrail = await read(done.scanId, 4);
+  diskApi.trail = (...args) => args[1] === 4 ? pending.promise : read(...args);
+  const previous = state.showInTree(4);
+  await state.showInTree(2);
+  pending.resolve(oldTrail);
+  await previous;
+  assert.equal(state.focused, 2);
+  assert.deepEqual(state.scrollTo, { id: 2 });
+});
+
+for (const view of ["files", "types"]) {
+  test(`changing size mode refreshes an unfinished first ${view} read`, async () => {
+    await scanned();
+    const pending = deferred();
+    const queries = [];
+    const api = view === "files" ? "topFiles" : "extensions";
+    diskApi[api] = async (...args) => {
+      queries.push(args);
+      return args[2] === "alloc" ? pending.promise : [{ marker: "size result" }];
+    };
+    state.setView(view);
+    await state.setSizeMode("size");
+    pending.resolve([{ marker: "obsolete allocation result" }]);
+    await settle();
+    assert.equal(queries.length, 2, "a pending first read also needs a replacement in the new mode");
+    assert.deepEqual(view === "files" ? state.topFiles : state.extensions, [{ marker: "size result" }]);
+  });
+}
+
+test("a failed list request from a replaced scan stays silent", async () => {
+  await scanned();
+  const pending = deferred();
+  diskApi.topFiles = () => pending.promise;
+  const previous = state.loadTopFiles();
+  diskApi.scan = async () => ({ ...done, scanId: 4 });
+  await state.scan();
+  pending.reject(new Error("Old scan expired"));
+  await previous;
+  assert.equal(toast.visible.length, 0);
+});
+
+function filterClock() {
+  const pending = new Map();
+  const set = globalThis.setTimeout;
+  const clear = globalThis.clearTimeout;
+  let id = 0;
+  globalThis.setTimeout = (run) => { pending.set(++id, run); return id; };
+  globalThis.clearTimeout = (key) => pending.delete(key);
+  return { pending, restore() { globalThis.setTimeout = set; globalThis.clearTimeout = clear; } };
+}
+
+test("typing a filter coalesces native largest-file queries", async () => {
+  await scanned();
+  const clock = filterClock();
+  calls.length = 0;
+  try {
+    state.setFilter("s");
+    state.setFilter("sa");
+    state.setFilter("save");
+    assert.equal(calls.filter((call) => call.name === "topFiles").length, 0);
+    assert.equal(clock.pending.size, 1);
+    const [id, run] = clock.pending.entries().next().value;
+    clock.pending.delete(id);
+    run();
+    await Promise.resolve();
+    const queries = calls.filter((call) => call.name === "topFiles");
+    assert.equal(queries.length, 1);
+    assert.equal(queries[0].args[3], "save");
+  } finally { clock.restore(); }
+});
+
+test("starting a new scan cancels a queued filter query", async () => {
+  await scanned();
+  const clock = filterClock();
+  try {
+    state.setFilter("new filter");
+    assert.equal(clock.pending.size, 1);
+    await state.scan();
+    assert.equal(clock.pending.size, 0);
+  } finally { clock.restore(); }
+});
+test("an old folder's type response cannot populate the new folder while its map loads", async () => {
+  await scanned();
+  const oldTypes = deferred(), map = deferred();
+  const readMap = diskApi.treemap;
+  const old = [{ ext: "iso", other: false, size: 150, alloc: 300, count: 1, rank: 0 }];
+  diskApi.extensions = async (_scanId, id) => id === 0 ? oldTypes.promise : [];
+  state.view = "types";
+  const reading = state.loadExtensions();
+  diskApi.treemap = (...args) => args[1] === 1 ? map.promise : readMap(...args);
+  const navigating = state.zoomTo(1);
+  await settle();
+  assert.equal(state.current, 1);
+  oldTypes.resolve(old); await reading;
+  const shown = state.extensions;
+  map.resolve(await readMap(done.scanId, 1, 10, 1, "alloc"));
+  await navigating;
+  assert.equal(shown, null, "old directory totals must not appear under the new directory heading");
+});
+
+test("reveal waits for an already-loading parent then pages until its row is present", async () => {
+  await scanned();
+  const pending = deferred();
+  const read = diskApi.children;
+  const firstPage = Array.from({ length: 500 }, (_, index) => view(10 + index, `fixture-${index}.txt`, "file", 1, 1));
+  diskApi.children = async (...args) => args[1] !== 1 ? read(...args) : args[2] === 0 ? pending.promise : { items: [nodes[4]], total: 501, rest: null };
+  state.toggle(1, true);
+  const revealing = state.showInTree(4);
+  await settle();
+  pending.resolve({ items: firstPage, total: 501, rest: { count: 1, size: 800, alloc: 1600 } });
+  await revealing; await settle();
+  assert.ok(state.rows.some(row => row.type === "node" && row.node.id === 4), "the selected file must actually be listed before reveal completes");
 });

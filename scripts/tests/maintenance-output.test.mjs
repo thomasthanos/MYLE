@@ -19,22 +19,52 @@ const card = {
   id: "system-repair", title: "System File & Image Repair", admin: true, console: true,
   actions: [{ id: "dism", label: "Run DISM", confirm: null }],
 };
-function harness(events) {
+function harness(events, api = {}, confirm = async () => true) {
   const context = vm.createContext({
-    require, exports: {}, setTimeout, SvelteSet: Set, appendOutput,
+    require, exports: {}, setTimeout, SvelteSet: Set, appendOutput, confirm,
     readJson: (_key, fallback) => fallback,
     toast: { error() {}, info() {}, success() {} },
     requestAnimationFrame: () => 1,
     maintenanceApi: { run: async (_id, _elevated, send) => {
       for (const data of events) send({ event: "line", data });
       return { result: "done", note: null };
-    } },
+    }, ...api },
   });
   vm.runInContext(code, context);
   return context.state;
 }
 const line = (text, replace = false) => ({ text, replace });
 const bar = (percent) => `[==========================${percent}%===             ]`;
+test("an old stop confirmation cannot cancel a newer run of the same action", async () => {
+  const finishes = [];
+  const cancelled = [];
+  let answerStop;
+  const state = harness([], {
+    run: () => new Promise((resolve) => { finishes.push(resolve); }),
+    cancel: async (id) => { cancelled.push(id); },
+  }, () => new Promise((resolve) => { answerStop = resolve; }));
+  const action = { ...card.actions[0], cancelConfirm: "Stop this run?" };
+  const first = state.run(card, action);
+  const stoppingFirst = state.cancel(card, action);
+  finishes[0]({ result: "done", note: null });
+  await first;
+  const second = state.run(card, action);
+  answerStop(true);
+  await stoppingFirst;
+  try {
+    assert.deepEqual(cancelled, [], "confirmation belongs to the run that displayed it");
+    assert.equal(state.stopping, false);
+    assert.equal(state.running, action.id);
+    const stoppingSecond = state.cancel(card, action);
+    answerStop(true);
+    await stoppingSecond;
+    assert.deepEqual(cancelled, ["dism"], "a confirmation for the current run still stops it");
+    assert.equal(state.stopping, true);
+  } finally {
+    finishes[1]({ result: "done", note: null });
+    await second;
+  }
+});
 test("DISM newline progress stays on one row and keeps its final diagnosis", async () => {
   const state = harness([line("Deployment Image Servicing"), ...Array.from({ length: 261 }, () => line(bar(63.4))), line(bar(100)), line("The restore operation completed successfully.")]);
   await state.run(card, card.actions[0]);

@@ -1151,14 +1151,21 @@ impl Vault {
         };
         let mut changed = false;
         let mut rejected = 0;
+        // Match the old first-record lookup even if an imported file contains
+        // duplicate IDs, without scanning the whole vault for every item.
+        let mut indices = HashMap::with_capacity(file.records.len());
+        for (index, record) in file.records.iter().enumerate() {
+            indices.entry(record.id.clone()).or_insert(index);
+        }
         for item in remote {
             let theirs = open_remote(&unlocked.key, &item);
-            let Some(index) = file.records.iter().position(|r| r.id == item.id) else {
+            let Some(index) = indices.get(&item.id).copied() else {
                 // New from elsewhere.
                 match theirs {
                     Ok(entry) => {
                         changed = true;
                         apply(unlocked, &item.id, entry);
+                        indices.insert(item.id.clone(), file.records.len());
                         file.records.push(item.into_record());
                     }
                     Err(()) => rejected += 1,

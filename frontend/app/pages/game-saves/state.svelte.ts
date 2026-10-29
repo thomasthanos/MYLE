@@ -400,40 +400,53 @@ class GameSavesState {
     }
   }
   /** Full scan of every game in the database ("Scan again"). */
-  async scan(announce = true) {
+  async scan(announce = true): Promise<void> {
     if (this.locked || !this.page.engineAvailable) return;
     await this.#stopDiscovery();
     if (this.locked) return;
     this.beginOperation("scan", "scanning");
     this.error = null;
+    const revision = this.#settingsRevision;
     try {
       const result = await gameSavesApi.scan("full", this.onEvent);
-      this.#applyScan(result);
-      this.#reloadPage();
-      if (announce) toast.success(`Found ${result.stats.localGames} games on this PC.`);
+      if (revision === this.#settingsRevision) {
+        this.#applyScan(result);
+        this.#reloadPage();
+        if (announce) toast.success(`Found ${result.stats.localGames} games on this PC.`);
+      }
     } catch (error) {
-      this.fail("Scan failed", error);
+      if (revision === this.#settingsRevision) this.fail("Scan failed", error);
     } finally {
       this.operation = null;
     }
+    if (revision !== this.#settingsRevision) await this.scan(announce);
   }
   /** Re-checks only the games already found: a couple of seconds. */
-  async refresh(quiet = false) {
+  async refresh(quiet = false): Promise<void> {
     if (this.locked || this.discovering || !this.page.engineAvailable || !this.scanResult) return;
     this.#lastRefresh = Date.now();
     this.beginOperation("scan", "scanning");
     if (quiet && this.operation) this.operation.background = true;
+    const revision = this.#settingsRevision;
     let discoveryDue = false;
     try {
       const result = await gameSavesApi.scan("quick", this.onEvent);
-      this.#applyScan(result);
-      if (!quiet) this.#reloadPage();
-      discoveryDue = result.discoveryDue;
+      if (revision === this.#settingsRevision) {
+        this.#applyScan(result);
+        if (!quiet) this.#reloadPage();
+        discoveryDue = result.discoveryDue;
+      }
     } catch (error) {
-      if (!quiet) this.fail("Refresh failed", error);
-      else void this.#adoptScheduled();
+      if (revision === this.#settingsRevision) {
+        if (!quiet) this.fail("Refresh failed", error);
+        else void this.#adoptScheduled();
+      }
     } finally {
       this.operation = null;
+    }
+    if (revision !== this.#settingsRevision) {
+      await this.refresh(quiet);
+      return;
     }
     if (discoveryDue) void this.discover();
   }
@@ -442,20 +455,24 @@ class GameSavesState {
     if (this.#discovery) return this.#discovery;
     if (this.locked || this.customDialogOpen || this.restoreDialogOpen || !this.page.engineAvailable) return Promise.resolve();
     this.discovering = true;
+    const revision = this.#settingsRevision;
     this.#discovery = (async () => {
       try {
         const before = new Set((this.scanResult?.onThisPc ?? []).map((game) => game.id));
         const result = await gameSavesApi.scan("full", () => {});
-        this.#applyScan(result);
-        this.#reloadPage();
-        const found = result.onThisPc.filter((game) => !before.has(game.id)).length;
-        if (found) toast.info(`Found ${found} new ${found === 1 ? "game" : "games"} with saves.`);
+        if (revision === this.#settingsRevision) {
+          this.#applyScan(result);
+          this.#reloadPage();
+          const found = result.onThisPc.filter((game) => !before.has(game.id)).length;
+          if (found) toast.info(`Found ${found} new ${found === 1 ? "game" : "games"} with saves.`);
+        }
       } catch {
         // Cancelled for an action, or failed: the next refresh asks again.
       } finally {
         this.discovering = false;
         this.#discovery = null;
       }
+      if (revision !== this.#settingsRevision) await this.refresh();
     })();
     return this.#discovery;
   }

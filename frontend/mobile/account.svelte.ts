@@ -19,6 +19,7 @@ const CLOSED_AFTER_MS = 1500;
 const previewProfile: Profile = { id: "preview", name: "Thomas", email: "thomas@example.com", avatarUrl: null, provider: "discord" };
 class MobileAccount {
   #authEpoch = 0;
+  #initializing: Promise<void> | null = null;
   profile = $state<Profile | null>(null);
   loaded = $state(false);
   /** The provider whose browser sign-in is being waited for. */
@@ -26,7 +27,11 @@ class MobileAccount {
   signingOut = $state(false);
   /** Tells the shell to return to the welcome screen after local cleanup. */
   resetVersion = $state(0);
-  async init() {
+  init() {
+    return this.#initializing ??= this.#init();
+  }
+  async #init() {
+    const epoch = this.#authEpoch;
     if (preview) {
       this.profile = new URLSearchParams(location.search).has("signed-out") ? null : previewProfile;
       this.loaded = true;
@@ -34,7 +39,8 @@ class MobileAccount {
     }
     // The browser's return started the app again: the sign-in finished without anyone waiting for it.
     await listen<Profile>("account-signed-in", (event) => void this.#signedIn(event.payload, null)).catch(() => {});
-    this.profile = await accountApi.profile().catch(() => null);
+    const profile = await accountApi.profile().catch(() => null);
+    if (epoch === this.#authEpoch) this.profile = profile;
     this.loaded = true;
   }
   async signIn(provider: Provider) {
@@ -56,9 +62,13 @@ class MobileAccount {
   async #signedIn(profile: Profile, provider: Provider | null) {
     if (this.signingOut) return;
     if (provider === null && !preview) {
+      // A new explicit attempt owns its reply; an older unobserved return
+      // must not invalidate it while its browser is still open.
+      if (this.signingIn) return;
       const epoch = this.#authEpoch;
       const saved = await accountApi.profile().catch(() => null);
       if (epoch !== this.#authEpoch || this.signingOut || saved?.id !== profile.id) return;
+      this.#authEpoch++;
     }
     this.profile = profile;
     this.signingIn = null;

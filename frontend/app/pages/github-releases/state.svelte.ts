@@ -40,6 +40,8 @@ const TAB_KEY = "myle.githubReleases.tab";
 const tabs: Tab[] = ["changes", "build", "release", "history"];
 /** Lines a build log keeps on screen; the whole log is in its file. */
 export const LOG_LIMIT = 20_000;
+/** Matches the native outcome limit; the full build log remains on disk. */
+const DIAGNOSTIC_LIMIT = 1000;
 export const buildKindLabels: Record<BuildKind, string> = {
   tauri: "Tauri",
   electron: "Electron",
@@ -117,7 +119,7 @@ export class BuildSession {
         break;
       }
       case "diagnostic":
-        this.diagnostics = [...this.diagnostics, event.data.diagnostic];
+        this.diagnostics = [...this.diagnostics.slice(-(DIAGNOSTIC_LIMIT - 1)), event.data.diagnostic];
         break;
       case "stage":
         this.stage = event.data.text;
@@ -132,8 +134,10 @@ export class BuildSession {
   finish(outcome: BuildOutcome) {
     this.running = false;
     this.outcome = outcome;
-    // The full list (the live one can miss problems found at the end).
-    if (outcome.diagnostics.length >= this.diagnostics.length) this.diagnostics = outcome.diagnostics;
+    // Recover missed events from the outcome. Once the live window is full, it contains later problems than the native outcome's first 1000.
+    if (this.diagnostics.length < DIAGNOSTIC_LIMIT && outcome.diagnostics.length >= this.diagnostics.length) {
+      this.diagnostics = outcome.diagnostics.slice(-DIAGNOSTIC_LIMIT);
+    }
     if (outcome.ok) this.percent = 100;
   }
 }
@@ -282,6 +286,10 @@ class GithubReleasesState {
   releases = new SvelteMap<string, ReleaseSession>();
   #started = false;
   #projectsRevision = 0;
+  #readSequence = 0;
+  #statusReads = new Map<string, number>();
+  #refreshReads = new Map<string, number>();
+  #remoteReads = new Map<string, number>();
   get repos(): RepoBrief[] {
     return this.page?.repos ?? [];
   }
@@ -359,8 +367,7 @@ class GithubReleasesState {
     // The native import returns paths without probing folders or credentials. Keep this PC's live tool/account metadata until its ordinary refresh.
     this.page = this.page ? { ...this.page, repos: page.repos.map((repo) => ({ ...repo, exists: previous.get(repo.id)?.exists ?? false })) } : page;
     const retained = new Set(this.repos.map((repo) => repo.id));
-    for (const id of Object.keys(this.statuses)) if (!retained.has(id)) delete this.statuses[id];
-    for (const id of Object.keys(this.remotes)) if (!retained.has(id)) delete this.remotes[id];
+    for (const id of previous.keys()) if (!retained.has(id)) this.#forgetRepo(id);
     if (this.selectedId && !retained.has(this.selectedId.split("/")[0])) this.selectedId = null;
     if (this.#started) await each(this.repos, 4, (repo) => this.refresh(repo.id));
     this.updateBadge();
@@ -400,12 +407,17 @@ class GithubReleasesState {
     return null;
   }
   async refresh(repoId: string) {
+    if (!this.repos.some((repo) => repo.id === repoId)) return;
+    const sequence = ++this.#readSequence;
+    this.#statusReads.set(repoId, sequence);
+    this.#refreshReads.set(repoId, sequence);
     this.refreshing[repoId] = true;
     try {
-      this.statuses[repoId] = await api.status(repoId);
+      const status = await api.status(repoId);
+      if (this.#statusReads.get(repoId) === sequence) this.statuses[repoId] = status;
     } catch (error) {
       const repo = this.repos.find((r) => r.id === repoId);
-      if (repo) {
+      if (repo && this.#statusReads.get(repoId) === sequence) {
         this.statuses[repoId] = {
           repoId,
           path: repo.path,
@@ -420,7 +432,10 @@ class GithubReleasesState {
         };
       }
     } finally {
-      delete this.refreshing[repoId];
+      if (this.#refreshReads.get(repoId) === sequence) {
+        this.#refreshReads.delete(repoId);
+        delete this.refreshing[repoId];
+      }
       this.updateBadge();
     }
   }
@@ -431,30 +446,44 @@ class GithubReleasesState {
     if (withRemote) await this.loadRemote(repoId);
   }
   async loadRemote(repoId: string) {
+    if (!this.repos.some((repo) => repo.id === repoId)) return;
+    const sequence = ++this.#readSequence;
+    this.#remoteReads.set(repoId, sequence);
     try {
-      this.remotes[repoId] = await api.remote(repoId);
+      const remote = await api.remote(repoId);
+      if (this.#remoteReads.get(repoId) === sequence) this.remotes[repoId] = remote;
     } catch (error) {
-      this.remotes[repoId] = { releases: [], lastRelease: {}, run: null, problem: problemOf(error) };
+      if (this.#remoteReads.get(repoId) === sequence) this.remotes[repoId] = { releases: [], lastRelease: {}, run: null, problem: problemOf(error) };
     }
   }
   /** Brings what GitHub has (ahead/behind), without bothering the user. */
   async fetchQuietly(repoId: string) {
-    if (this.running(repoId)) return;
+    if (this.running(repoId) || !this.repos.some((repo) => repo.id === repoId)) return;
+    const sequence = ++this.#readSequence;
+    this.#statusReads.set(repoId, sequence);
     try {
-      this.statuses[repoId] = await api.fetch(repoId, true);
+      const status = await api.fetch(repoId, true);
+      if (this.#statusReads.get(repoId) !== sequence) return;
+      this.statuses[repoId] = status;
+      this.updateBadge();
     } catch {
       // Offline, or signed out: the local status stays.
     }
-    void this.loadRemote(repoId);
+    if (this.#statusReads.get(repoId) === sequence) void this.loadRemote(repoId);
   }
   async fetch(repoId: string) {
-    if (this.running(repoId)) return;
+    if (this.running(repoId) || !this.repos.some((repo) => repo.id === repoId)) return;
+    const sequence = ++this.#readSequence;
+    this.#statusReads.set(repoId, sequence);
     this.busy[repoId] = "fetch";
     try {
-      this.statuses[repoId] = await api.fetch(repoId, false);
+      const status = await api.fetch(repoId, false);
+      if (this.#statusReads.get(repoId) !== sequence) return;
+      this.statuses[repoId] = status;
+      this.updateBadge();
       await this.loadRemote(repoId);
     } catch (error) {
-      this.showProblem(problemOf(error));
+      if (this.#statusReads.get(repoId) === sequence) this.showProblem(problemOf(error));
     } finally {
       delete this.busy[repoId];
     }
@@ -509,13 +538,20 @@ class GithubReleasesState {
   async removeRepo(repoId: string) {
     this.page = await api.removeRepo(repoId);
     notifyChange("githubReleases.projects");
-    delete this.statuses[repoId];
-    delete this.remotes[repoId];
+    this.#forgetRepo(repoId);
     if (this.selected?.repo.id === repoId || this.selectedId?.split("/")[0] === repoId) {
       this.selectedId = null;
       this.showList = true;
     }
     this.updateBadge();
+  }
+  #forgetRepo(repoId: string) {
+    this.#statusReads.delete(repoId);
+    this.#refreshReads.delete(repoId);
+    this.#remoteReads.delete(repoId);
+    delete this.statuses[repoId];
+    delete this.remotes[repoId];
+    delete this.refreshing[repoId];
   }
   // ─── Git ───────────────────────────────────────────────────────────────
   #output(repoId: string, action: string): (event: GitEvent) => void {

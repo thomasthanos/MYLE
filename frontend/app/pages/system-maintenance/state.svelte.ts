@@ -59,6 +59,7 @@ class MaintenanceState {
   #pending: Record<string, PendingLine[]> = {};
   #frame = 0;
   #loaded = false;
+  #runId = 0;
   /** Locked because of a task we did not start, so nothing will report it done. */
   #adopted = false;
   readonly locked = $derived(this.running !== null);
@@ -146,6 +147,7 @@ class MaintenanceState {
       if (!ok || this.locked) return;
     }
     this.running = action.id;
+    this.#runId++;
     this.phase = "waiting";
     this.#setStatus(
       card,
@@ -184,6 +186,7 @@ class MaintenanceState {
   }
   async cancel(card: MaintenanceCard, action: MaintenanceAction) {
     if (!this.isRunning(action.id) || this.stopping) return;
+    const runId = this.#runId;
     if (action.cancelConfirm) {
       const ok = await confirm({
         title: `Stop ${card.title}?`,
@@ -192,8 +195,8 @@ class MaintenanceState {
         cancelLabel: "Keep going",
         danger: true,
       });
-      // It may well have finished while the dialog was open.
-      if (!ok || !this.isRunning(action.id)) return;
+      // The same action may have started again while the dialog was open.
+      if (!ok || !this.isRunning(action.id) || runId !== this.#runId) return;
     }
     this.stopping = true;
     this.#setStatus(card, action, "running", `Stopping ${this.#actionName(action)}…`);

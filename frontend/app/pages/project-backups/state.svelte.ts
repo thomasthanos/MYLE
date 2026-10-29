@@ -103,6 +103,10 @@ class ProjectBackupsState {
   /** The count the last toast was about (null: none shown yet). */
   #announced: number | null = null;
   private loaded = $state(false);
+  #pageSequence = 0;
+  #settingsRevision = 0;
+  #backupSequence = 0;
+  #backupReads = new Map<string, number>();
   /* The projects the answers are about: before the page state is read (at the app's start), every project an answer came for. */
   private get knownIds(): string[] {
     return this.loaded ? this.projects.map((p) => p.id) : Object.keys(this.changes);
@@ -333,8 +337,11 @@ class ProjectBackupsState {
     await this.refresh(true);
   }
   async refresh(first = false) {
+    const sequence = ++this.#pageSequence;
+    const revision = this.#settingsRevision;
     try {
       const page = await api.getState();
+      if (sequence !== this.#pageSequence || revision !== this.#settingsRevision) return;
       this.page = page;
       this.error = null;
       this.loaded = true;
@@ -344,20 +351,22 @@ class ProjectBackupsState {
       }
       if (this.expanded && !page.settings.projects.some((project) => project.id === this.expanded)) this.expanded = null;
     } catch (error) {
-      this.error = message(error);
+      if (sequence === this.#pageSequence && revision === this.#settingsRevision) this.error = message(error);
     } finally {
-      this.loading = false;
+      if (sequence === this.#pageSequence) this.loading = false;
     }
   }
   private async run<T>(busy: string, work: () => Promise<T>): Promise<T | undefined> {
     if (this.locked) return undefined;
     this.busy = busy;
+    this.#settingsRevision++;
     try {
       return await work();
     } catch (error) {
       toast.error(message(error));
       return undefined;
     } finally {
+      this.#settingsRevision++;
       this.busy = null;
     }
   }
@@ -432,6 +441,7 @@ class ProjectBackupsState {
       return;
     }
     this.cancelling = false;
+    this.#settingsRevision++;
     this.failures = [];
     this.operation = { startedAt: Date.now(), index: 0, total: projectIds.length, projectName: "", stage: "preparing", doneBytes: 0, totalBytes: 0, doneFiles: 0, totalFiles: 0, note: null };
     try {
@@ -471,6 +481,7 @@ class ProjectBackupsState {
     } catch (error) {
       toast.error(message(error));
     } finally {
+      this.#settingsRevision++;
       this.operation = null;
       this.cancelling = false;
       void this.refresh();
@@ -547,16 +558,24 @@ class ProjectBackupsState {
     await this.loadBackups(projectId);
   }
   async loadBackups(projectId: string) {
+    const sequence = ++this.#backupSequence;
+    this.#backupReads.set(projectId, sequence);
+    const provider = this.provider;
+    const folder = this.page.settings.cloudFolder;
+    const current = () => this.#backupReads.get(projectId) === sequence && this.provider === provider && this.page.settings.cloudFolder === folder;
     this.backupsLoading = projectId;
     try {
       const list = await api.list(projectId);
+      if (!current()) return;
       this.backups = { ...this.backups, [projectId]: list };
       delete this.backupErrors[projectId];
     } catch (error) {
+      if (!current()) return;
       this.backupErrors[projectId] = message(error);
       toast.error(message(error));
     } finally {
-      if (this.backupsLoading === projectId) this.backupsLoading = null;
+      if (this.#backupReads.get(projectId) === sequence) this.#backupReads.delete(projectId);
+      if (this.#backupSequence === sequence) this.backupsLoading = null;
     }
   }
   togglePick(id: string) {

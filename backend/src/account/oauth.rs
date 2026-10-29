@@ -26,16 +26,20 @@ impl Loopback {
     /// send a request, and one of those must not hold up the real redirect.
     pub async fn next_callback(&self) -> Callback {
         let (found, mut callbacks) = tokio::sync::mpsc::channel::<Callback>(1);
+        // Request tasks belong to this attempt. Dropping the callback future
+        // (cancel/timeout) or accepting its result also closes spare sockets.
+        let mut connections = tokio::task::JoinSet::new();
         loop {
             let accepted = tokio::select! {
                 Some(callback) = callbacks.recv() => return callback,
+                _ = connections.join_next(), if !connections.is_empty() => continue,
                 accepted = self.v4.accept() => accepted,
                 accepted = accept_optional(self.v6.as_ref()) => accepted,
             };
             let Ok((stream, _)) = accepted else {
                 continue;
             };
-            tokio::spawn(serve(stream, found.clone()));
+            connections.spawn(serve(stream, found.clone()));
         }
     }
 }
@@ -213,7 +217,7 @@ mod tests {
         let server = Loopback::bind(0).await.unwrap();
         let port = server.v4.local_addr().unwrap().port();
         // A speculative connection that never sends anything, opened first.
-        let _idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         tokio::spawn(async move {
             let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
             stream
@@ -228,6 +232,30 @@ mod tests {
                 .await
                 .expect("the idle connection must not delay the real one");
         assert_eq!(callback, Callback::Code("fast".into()));
+        let mut byte = [0];
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(2), idle.read(&mut byte))
+            .await.expect("finishing sign-in must close spare connections");
+        assert!(matches!(closed, Ok(0) | Err(_)));
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_sign_in_closes_its_accepted_browser_connections() {
+        let server = Loopback::bind(0).await.unwrap();
+        let port = server.v4.local_addr().unwrap().port();
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let waiting = tokio::spawn(async move { server.next_callback().await });
+        // A later, answered request proves the earlier connection was accepted.
+        let mut probe = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        probe.write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+        let mut reply = Vec::new();
+        tokio::time::timeout(std::time::Duration::from_secs(2), probe.read_to_end(&mut reply)).await.unwrap().unwrap();
+        assert!(reply.starts_with(b"HTTP/1.1 404"));
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
+        let mut byte = [0];
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(2), idle.read(&mut byte))
+            .await.expect("cancelling sign-in must drop its request handlers");
+        assert!(matches!(closed, Ok(0) | Err(_)));
     }
     #[tokio::test]
     async fn the_loopback_server_hands_over_the_code_and_answers_the_browser() {

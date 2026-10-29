@@ -129,6 +129,8 @@ class CleanerState {
       this.error = message(err);
       toast.error(`Scan failed: ${message(err)}`);
     }
+    // A failed category scan must still own its Downloads request until it finishes.
+    await downloadsPass;
     const adminError = await adminPass;
     if (wantsAdmin) this.#afterAdminScan(adminError);
     this.phase = "idle";

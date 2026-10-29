@@ -46,14 +46,14 @@
   // Runs after the new page is in the DOM: put it back where it was left.
   $effect(() => {
     const page = nav.current;
-    if (!scroller) return;
+    if (!scroller || !Page) return;
     restoring = true;
     scroller.scrollTop = nav.scrollOf(page);
     requestAnimationFrame(() => (restoring = false));
   });
 
   function onScroll() {
-    if (!restoring && scroller) nav.rememberScroll(nav.current, scroller.scrollTop);
+    if (!restoring && scroller && Page) nav.rememberScroll(nav.current, scroller.scrollTop);
   }
 </script>
 

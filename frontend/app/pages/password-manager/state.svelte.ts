@@ -110,6 +110,10 @@ class PasswordsState {
   #unlistenChanged: (() => void) | null = null;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
   #dataEpoch = 0;
+  /** Decrypted replies belong to the unlock that requested them. */
+  #vaultEpoch = 0;
+  #listSequence = 0;
+  #loading: { epoch: number; promise: Promise<void> } | null = null;
   readonly visible = $derived.by(() => {
     const words = searchWords(this.query);
     const byName = (a: Summary, b: Summary) =>
@@ -149,7 +153,24 @@ class PasswordsState {
   entry(id: string) {
     return this.entries.find((e) => e.id === id) ?? null;
   }
-  async load() {
+  async load(): Promise<void> {
+    const epoch = this.#dataEpoch;
+    if (this.#loading) {
+      const loading = this.#loading;
+      await loading.promise;
+      // A new account cannot reuse the status check that was invalidated by local reset.
+      if (epoch === this.#dataEpoch && loading.epoch !== epoch) await this.load();
+      return;
+    }
+    const promise = this.#load();
+    this.#loading = { epoch, promise };
+    try {
+      await promise;
+    } finally {
+      if (this.#loading?.promise === promise) this.#loading = null;
+    }
+  }
+  async #load() {
     const epoch = this.#dataEpoch;
     this.#unlisten ??= await api.onLocked(() => this.#onLocked(true)).catch(() => null);
     this.#unlistenSync ??= await api.onSynced((result) => {
@@ -313,13 +334,15 @@ class PasswordsState {
     }
   }
   async refresh() {
-    const epoch = this.#dataEpoch;
+    if (this.status !== "unlocked") return;
+    const epoch = this.#vaultEpoch;
+    const sequence = ++this.#listSequence;
     try {
       const entries = await api.list();
-      if (epoch !== this.#dataEpoch) return;
+      if (epoch !== this.#vaultEpoch || sequence !== this.#listSequence) return;
       this.entries = entries;
     } catch (error) {
-      if (epoch !== this.#dataEpoch) return;
+      if (epoch !== this.#vaultEpoch || sequence !== this.#listSequence) return;
       if (message(error).includes("locked")) this.#onLocked(false);
       else toast.error(message(error));
       return;
@@ -378,16 +401,17 @@ class PasswordsState {
   /** Runs `work` with the page marked busy; the error goes to `this.error`. */
   async #run<T>(work: () => Promise<T>): Promise<T | null> {
     const epoch = this.#dataEpoch;
+    const vaultEpoch = this.#vaultEpoch;
     this.busy = true;
     this.error = null;
     try {
       const result = await work();
-      return epoch === this.#dataEpoch ? result : null;
+      return epoch === this.#dataEpoch && vaultEpoch === this.#vaultEpoch ? result : null;
     } catch (error) {
-      if (epoch === this.#dataEpoch) this.error = message(error);
+      if (epoch === this.#dataEpoch && vaultEpoch === this.#vaultEpoch) this.error = message(error);
       return null;
     } finally {
-      if (epoch === this.#dataEpoch) this.busy = false;
+      if (epoch === this.#dataEpoch && vaultEpoch === this.#vaultEpoch) this.busy = false;
     }
   }
   /** Returns the recovery code to show once. */
@@ -447,6 +471,7 @@ class PasswordsState {
   /** After the phone removed its local files: forget all in-memory UI data. */
   resetLocal() {
     this.#dataEpoch++;
+    this.#vaultEpoch++;
     this.#iconEpoch++;
     this.#hideAll();
     clearTimeout(this.#copiedTimer);
@@ -475,6 +500,8 @@ class PasswordsState {
     this.sync = { kind: "signedOut" };
   }
   #onLocked(automatic: boolean) {
+    this.#vaultEpoch++;
+    this.busy = false;
     if (this.status !== "unlocked") return;
     this.status = "locked";
     this.entries = [];
@@ -508,9 +535,10 @@ class PasswordsState {
       this.hide(id);
       return;
     }
+    const epoch = this.#vaultEpoch;
     try {
       const password = await api.reveal(id);
-      if (this.status !== "unlocked") return;
+      if (epoch !== this.#vaultEpoch || this.status !== "unlocked") return;
       this.revealed = { ...this.revealed, [id]: password };
       // Hidden again after a while: a shown password is not left on screen. Its own timer, so one shown, hidden and shown again gets the full time.
       clearTimeout(this.#revealTimers.get(id));
@@ -519,7 +547,7 @@ class PasswordsState {
         setTimeout(() => this.hide(id), 30_000),
       );
     } catch (error) {
-      toast.error(message(error));
+      if (epoch === this.#vaultEpoch) toast.error(message(error));
     }
   }
   /** Marks a Copy button as done for a moment. */
@@ -555,10 +583,13 @@ class PasswordsState {
     }
   }
   async save(entry: EntryInput) {
+    const epoch = this.#vaultEpoch;
     try {
       const id = await api.save(entry);
+      if (epoch !== this.#vaultEpoch) return false;
       this.hide(id);
       await this.refresh();
+      if (epoch !== this.#vaultEpoch) return false;
       this.#syncSoon();
       this.panel = { kind: "view", id };
       toast.success(entry.id ? "Saved." : "Added to your vault.");

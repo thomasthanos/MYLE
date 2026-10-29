@@ -1317,26 +1317,11 @@ async fn finish_release(
                 let _ = github::delete_asset(token, owner, repo, stale.id).await;
                 release.assets.retain(|a| a.id != stale.id);
             }
-            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<(u64, u64)>();
-            let upload = github::upload_asset(
-                token,
-                &release.upload_url,
-                &path_buf,
-                &name,
-                run.cancel.clone(),
-                move |sent, total| {
-                    let _ = sender.send((sent, total));
-                },
-            );
-            tokio::pin!(upload);
-            let result = loop {
-                tokio::select! {
-                    result = &mut upload => break result,
-                    Some((sent, total)) = receiver.recv() => {
-                        (run.on_event)(ReleaseEvent::Upload { name: name.clone(), sent, total, index, count });
-                    }
-                }
-            };
+            let result = upload_with_progress(
+                &run.cancel,
+                |on_progress| github::upload_asset(token, &release.upload_url, &path_buf, &name, run.cancel.clone(), on_progress),
+                |sent, total| (run.on_event)(ReleaseEvent::Upload { name: name.clone(), sent, total, index, count }),
+            ).await;
             match result {
                 Ok(asset) => {
                     release.assets.push(asset);
@@ -1708,6 +1693,42 @@ impl Backoff {
         self.started.elapsed() > WATCH_LIMIT
     }
 }
+async fn upload_with_progress<T, U>(
+    cancel: &AtomicBool,
+    upload: impl FnOnce(Box<dyn Fn(u64, u64) + Send + Sync>) -> U,
+    mut on_progress: impl FnMut(u64, u64),
+) -> Result<T, String>
+where U: std::future::Future<Output = Result<T, String>>,
+{
+    // Progress is a current snapshot: a slow observer only needs its latest
+    // value. Keeping one tuple also bounds memory while the request runs.
+    let (sender, mut receiver) = tokio::sync::watch::channel(None);
+    let upload = upload(Box::new(move |sent, total| { sender.send_replace(Some((sent, total))); }));
+    tokio::pin!(upload);
+    let mut last = None;
+    loop {
+        if cancel.load(Ordering::Relaxed) { return Err(CANCELLED.into()); }
+        tokio::select! {
+            result = &mut upload => {
+                // Completion and the final body chunk can become ready in the
+                // same poll. Always deliver that last snapshot before returning.
+                let latest = *receiver.borrow_and_update();
+                if let Some((sent, total)) = latest.filter(|value| Some(*value) != last) {
+                    on_progress(sent, total);
+                }
+                return result;
+            },
+            Ok(()) = receiver.changed() => {
+                let latest = *receiver.borrow_and_update();
+                if let Some((sent, total)) = latest.filter(|value| Some(*value) != last) {
+                    last = Some((sent, total));
+                    on_progress(sent, total);
+                }
+            },
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+        }
+    }
+}
 fn stopped() -> String {
     Problem::new(
         "CANCELLED",
@@ -1955,6 +1976,25 @@ pub(crate) fn stats_of(command: &str, outcome: &BuildOutcome) -> store::BuildSta
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn upload_progress_coalesces_a_burst_and_delivers_the_final_value() {
+        let cancel = AtomicBool::new(false);
+        let mut observed = Vec::new();
+        upload_with_progress(&cancel, |report| async move {
+            for sent in 1..=100_000 { report(sent, 100_000); }
+            Ok(())
+        }, |sent, total| observed.push((sent, total))).await.unwrap();
+        assert_eq!(observed, [(100_000, 100_000)], "retain the current progress and flush it on completion");
+    }
+    #[tokio::test]
+    async fn a_stalled_upload_can_be_cancelled_without_another_body_chunk() {
+        let cancel = AtomicBool::new(false);
+        let result = tokio::time::timeout(Duration::from_secs(1), upload_with_progress(&cancel, |report| async move {
+            report(1, 2);
+            std::future::pending::<Result<(), String>>().await
+        }, |_, _| cancel.store(true, Ordering::Relaxed))).await;
+        assert_eq!(result.expect("cancellation must interrupt a stalled upload").unwrap_err(), CANCELLED);
+    }
     use crate::github_releases::store::EntryConfig;
     fn entry(sub: Option<&str>, monorepo: bool) -> Entry {
         Entry {

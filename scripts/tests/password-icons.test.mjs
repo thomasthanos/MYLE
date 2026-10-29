@@ -114,3 +114,110 @@ test("a sync started before local reset cannot restore the previous account stat
   assert.equal(h.state.status, "new");
   assert.equal(h.state.sync.kind, "signedOut");
 });
+
+test("a list reply received after locking never restores decrypted entries", async () => {
+  const h = harness(() => ({}));
+  let reply;
+  h.api.list = () => new Promise(resolve => { reply = resolve; });
+  const reading = h.state.refresh();
+  await h.state.lock();
+  reply([{ id: "old", urls: [] }]);
+  await reading;
+  assert.equal(h.state.status, "locked");
+  assert.equal(h.state.entries.length, 0);
+});
+
+test("a reveal from the previous unlock cannot display its password after reopening", async () => {
+  const h = harness(() => ({}));
+  let reply;
+  h.api.reveal = () => new Promise(resolve => { reply = resolve; });
+  const revealing = h.state.toggleReveal("fixture");
+  await h.state.lock();
+  h.state.status = "unlocked";
+  reply("fictional previous password");
+  await revealing;
+  assert.equal(Object.keys(h.state.revealed).length, 0);
+  assert.equal(h.timers.size, 0);
+});
+
+test("an older list reply cannot overwrite a later refresh", async () => {
+  const h = harness(() => ({}));
+  let reply;
+  h.api.list = () => new Promise(resolve => { reply = resolve; });
+  const older = h.state.refresh();
+  h.api.list = async () => [{ id: "current", urls: [] }];
+  await h.state.refresh();
+  reply([{ id: "old", urls: [] }]);
+  await older;
+  assert.equal(h.state.entries[0].id, "current");
+});
+
+test("a save received after locking leaves the panel closed and does not reload entries", async () => {
+  const h = harness(() => ({}));
+  let reply;
+  h.api.save = () => new Promise(resolve => { reply = resolve; });
+  h.api.list = async () => { throw new Error("must not reload the locked vault"); };
+  const saving = h.state.save({ id: "fixture" });
+  await h.state.lock();
+  reply("fixture");
+  await saving;
+  assert.equal(h.state.panel.kind, "none");
+  assert.equal(h.timers.size, 0);
+});
+
+function deferredLoad(h) {
+  const registrations = []; const calls = { locked: 0, synced: 0, icon: 0, changed: 0, status: 0 };
+  h.api.onLocked = () => { calls.locked++; return new Promise(resolve => { registrations.push(resolve); }); };
+  for (const [method, key] of [["onSynced", "synced"], ["onIcon", "icon"], ["onChanged", "changed"]]) {
+    h.api[method] = async () => { calls[key]++; return () => {}; };
+  }
+  h.api.helloStatus = async () => ({ available: false, enabled: false });
+  h.api.status = async () => { calls.status++; return { status: "locked", autoLockMinutes: 5, damaged: 0, websiteIcons: true }; };
+  h.api.sync = async () => ({ state: "nothing" });
+  return { calls, register: () => registrations.forEach(resolve => resolve(() => {})) };
+}
+
+test("overlapping page loads share native listener registration and vault reads", async () => {
+  const h = harness(() => ({})); const setup = deferredLoad(h);
+  const first = h.state.load(); const second = h.state.load();
+  setup.register(); await Promise.all([first, second]);
+  assert.deepEqual(setup.calls, { locked: 1, synced: 1, icon: 1, changed: 1, status: 1 });
+});
+
+test("a page opened after local reset rechecks its account once an earlier load finishes", async () => {
+  const h = harness(() => ({})); const setup = deferredLoad(h);
+  const first = h.state.load();
+  h.state.resetLocal();
+  const reopened = h.state.load();
+  setup.register(); await Promise.all([first, reopened]);
+  assert.equal(h.state.checkedAccount, true);
+  assert.equal(h.state.status, "locked");
+  assert.equal(setup.calls.locked, 1);
+  assert.equal(setup.calls.status, 1);
+});
+
+test("locking invalidates an unfinished unlock's busy state", async () => {
+  const h = harness(() => ({})); h.state.status = "locked";
+  let reply;
+  h.api.unlock = () => new Promise(resolve => { reply = resolve; });
+  const opening = h.state.unlock("fictional");
+  await h.state.lock();
+  const stillBusy = h.state.busy;
+  reply(); await opening;
+  assert.equal(stillBusy, false, "the invalidated unlock must not keep the new lock screen disabled");
+});
+
+test("an invalidated unlock's completion cannot clear a newer unlock's busy state", async () => {
+  const h = harness(() => ({})); h.state.status = "locked";
+  let oldReply, rejectCurrent;
+  h.api.unlock = () => new Promise(resolve => { oldReply = resolve; });
+  const previous = h.state.unlock("old fictional");
+  await h.state.lock();
+  h.api.unlock = () => new Promise((_resolve, reject) => { rejectCurrent = reject; });
+  const current = h.state.unlock("current fictional");
+  oldReply(); await previous;
+  const stillBusy = h.state.busy;
+  rejectCurrent(new Error("fixture unlock declined")); await current;
+  assert.equal(stillBusy, true, "the current unlock still owns the busy indicator");
+  assert.equal(h.state.busy, false);
+});

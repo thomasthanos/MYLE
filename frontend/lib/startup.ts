@@ -14,9 +14,23 @@ export function mainReady() {
 export function whenShown(): Promise<void> {
   if (!isTauri()) return Promise.resolve();
   shown ??= new Promise<void>((resolve) => {
-    void listen("myle-shown", () => resolve());
-    void getCurrentWindow().isVisible().then((visible) => visible && resolve(), () => {});
-    setTimeout(resolve, GIVE_UP_MS);
+    let settled = false;
+    let unlisten: (() => void) | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unlisten?.();
+      unlisten = undefined;
+      resolve();
+    };
+    const timer = setTimeout(finish, GIVE_UP_MS);
+    void listen("myle-shown", finish).then((stop) => {
+      // The window may have opened before registering its listener completed.
+      if (settled) stop();
+      else unlisten = stop;
+    }, () => {});
+    void getCurrentWindow().isVisible().then((visible) => visible && finish(), () => {});
   });
   return shown;
 }

@@ -1,4 +1,5 @@
 // ! Running git and reading what it says. ! ! git runs hidden, in English (`LC_ALL=C`, so its messages can be told ! apart), never asks on a terminal (`GIT_TERMINAL_PROMPT=0`) and never ! colors. The GitHub token, when one is needed for a push, goes in through ! the environment as an HTTP header for github.com only: never on the ! command line (visible in process lists) and never into `.git/config`.
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -8,8 +9,36 @@ use base64::Engine;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use super::{CANCELLED, Problem};
-use crate::apps::process::hidden;
+use crate::apps::process::{JobObject, hidden};
 use crate::console::LineSplitter;
+/// Network-command stdout is retained intact, or refused explicitly.
+const MAX_STREAM_STDOUT: usize = 16 * 1024 * 1024;
+/// Diagnostic history is a tail; live stderr is still delivered in full.
+const MAX_STREAM_STDERR: usize = 256 * 1024;
+const PIPE_LINGER: Duration = Duration::from_secs(3);
+#[derive(Default)]
+struct DiagnosticTail {
+    bytes: VecDeque<u8>,
+    omitted: bool,
+}
+impl DiagnosticTail {
+    fn append(&mut self, bytes: &[u8]) {
+        let excess = (self.bytes.len() + bytes.len()).saturating_sub(MAX_STREAM_STDERR);
+        self.omitted |= excess > 0;
+        if bytes.len() >= MAX_STREAM_STDERR {
+            self.bytes.clear();
+            self.bytes.extend(&bytes[bytes.len() - MAX_STREAM_STDERR..]);
+        } else {
+            self.bytes.drain(..excess);
+            self.bytes.extend(bytes);
+        }
+    }
+    fn text(self) -> String {
+        let bytes: Vec<u8> = self.bytes.into_iter().collect();
+        let text = String::from_utf8_lossy(&bytes);
+        if self.omitted { format!("[Earlier git output omitted]\n{text}") } else { text.into_owned() }
+    }
+}
 // ─── Finding the programs ──────────────────────────────────────────────────
 /// `name` (`git.exe`) on the PATH, or in one of `fallbacks` (full paths).
 pub(crate) fn find_program(name: &str, fallbacks: &[PathBuf]) -> Option<PathBuf> {
@@ -163,15 +192,17 @@ pub(crate) async fn run_with(
     let mut child = cmd
         .spawn()
         .map_err(|error| format!("Can't start git: {error}"))?;
-    if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+    let _job = JobObject::new().filter(|job| child.raw_handle().is_some_and(|handle| job.assign(handle as _)));
+    let stdin = child.stdin.take();
+    let write_input = async move {
         use tokio::io::AsyncWriteExt;
-        let bytes = bytes.to_vec();
-        tokio::spawn(async move {
-            let _ = stdin.write_all(&bytes).await;
+        if let (Some(bytes), Some(mut stdin)) = (input, stdin) {
+            let _ = stdin.write_all(bytes).await;
             let _ = stdin.shutdown().await;
-        });
-    }
-    match tokio::time::timeout(limit, child.wait_with_output()).await {
+        }
+    };
+    let output = async move { tokio::join!(write_input, child.wait_with_output()).1 };
+    match tokio::time::timeout(limit, output).await {
         Ok(Ok(output)) => Ok(Output {
             code: output.status.code().unwrap_or(-1),
             stdout: output.stdout,
@@ -212,59 +243,96 @@ pub(crate) async fn stream(
     args: &[&str],
     env: &GitEnv,
     cancel: Arc<AtomicBool>,
-    mut on_line: impl FnMut(&str, bool) + Send,
+    on_line: impl FnMut(&str, bool) + Send,
 ) -> Result<Output, String> {
     let git = require_git()?;
     let mut cmd = command(&git, repo, args, env);
     cmd.stdin(Stdio::null());
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .map_err(|error| format!("Can't start git: {error}"))?;
+    stream_child(child, cancel, on_line).await
+}
+async fn stream_child(
+    mut child: tokio::process::Child,
+    cancel: Arc<AtomicBool>,
+    mut on_line: impl FnMut(&str, bool) + Send,
+) -> Result<Output, String> {
+    let job = JobObject::new().filter(|job| child.raw_handle().is_some_and(|handle| job.assign(handle as _)));
     let mut stdout = child.stdout.take().ok_or("git has no output")?;
     let mut stderr = child.stderr.take().ok_or("git has no output")?;
-    let out_task = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes).await;
-        bytes
-    });
     let mut splitter = LineSplitter::default();
-    let mut err_text = String::new();
-    let mut buffer = vec![0u8; 8192];
+    let mut err_text = DiagnosticTail::default();
+    let mut out_bytes = Vec::new();
+    let mut out_buffer = vec![0u8; 8192];
+    let mut err_buffer = vec![0u8; 8192];
     let mut last_replace = false;
-    loop {
+    let mut out_open = true;
+    let mut err_open = true;
+    let mut status = None;
+    let mut exited = None;
+    enum Event {
+        Out(std::io::Result<usize>),
+        Err(std::io::Result<usize>),
+        Exit(std::io::Result<std::process::ExitStatus>),
+        Poll,
+    }
+    while out_open || err_open || status.is_none() {
         if cancel.load(Ordering::Relaxed) {
+            if let Some(job) = &job { job.kill(); }
             let _ = child.kill().await;
             return Err(CANCELLED.into());
         }
-        let read = tokio::time::timeout(Duration::from_millis(250), stderr.read(&mut buffer)).await;
-        match read {
-            Err(_) => continue,
-            Ok(Ok(0)) => break,
-            Ok(Ok(count)) => {
-                for line in splitter.feed(&buffer[..count]) {
+        if exited.is_some_and(|at: std::time::Instant| at.elapsed() >= PIPE_LINGER) {
+            // A helper inherited a pipe after git exited. Closing the job also
+            // stops that helper; no detached reader remains waiting for it.
+            if let Some(job) = &job { job.kill(); }
+            return Err("git exited but its output pipes stayed open.".into());
+        }
+        let event = tokio::select! {
+            read = stdout.read(&mut out_buffer), if out_open => Event::Out(read),
+            read = stderr.read(&mut err_buffer), if err_open => Event::Err(read),
+            result = child.wait(), if status.is_none() => Event::Exit(result),
+            _ = tokio::time::sleep(Duration::from_millis(250)) => Event::Poll,
+        };
+        match event {
+            Event::Out(Ok(0)) => out_open = false,
+            Event::Err(Ok(0)) => err_open = false,
+            Event::Out(Ok(count)) => {
+                if out_bytes.len() + count > MAX_STREAM_STDOUT {
+                    if let Some(job) = &job { job.kill(); }
+                    let _ = child.kill().await;
+                    return Err("git exceeded the 16 MiB output limit and was stopped; its stdout was not truncated.".into());
+                }
+                out_bytes.extend_from_slice(&out_buffer[..count]);
+            }
+            Event::Err(Ok(count)) => {
+                for line in splitter.feed(&err_buffer[..count]) {
                     on_line(&line.text, line.replace);
                     if !line.replace || !last_replace {
-                        err_text.push_str(&line.text);
-                        err_text.push('\n');
+                        err_text.append(line.text.as_bytes());
+                        err_text.append(b"\n");
                     }
                     last_replace = line.replace;
                 }
             }
-            Ok(Err(error)) => return Err(format!("git failed: {error}")),
+            Event::Exit(result) => {
+                status = Some(result.map_err(|error| format!("git failed: {error}"))?);
+                exited = Some(std::time::Instant::now());
+            }
+            Event::Out(Err(error)) | Event::Err(Err(error)) => return Err(format!("git failed: {error}")),
+            Event::Poll => {},
         }
     }
-    if let Some(line) = splitter.finish() {
+    for line in splitter.finish() {
         on_line(&line.text, line.replace);
-        err_text.push_str(&line.text);
+        err_text.append(line.text.as_bytes());
+        err_text.append(b"\n");
     }
-    let status = child
-        .wait()
-        .await
-        .map_err(|error| format!("git failed: {error}"))?;
     Ok(Output {
-        code: status.code().unwrap_or(-1),
-        stdout: out_task.await.unwrap_or_default(),
-        stderr: err_text,
+        code: status.and_then(|status| status.code()).unwrap_or(-1),
+        stdout: out_bytes,
+        stderr: err_text.text(),
     })
 }
 /// The line of git's output that tells what went wrong.
@@ -756,6 +824,183 @@ pub(crate) fn classify(action: &str, output: &str) -> Problem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const FIXTURE: &str = "github_releases::git::tests::stream_process_fixture";
+    fn fixture(mode: &str) -> tokio::process::Command {
+        let mut command = hidden(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", FIXTURE, "--nocapture"])
+            .env("MYLE_GIT_STREAM_FIXTURE", mode)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command
+    }
+    #[test]
+    fn stream_process_fixture() {
+        use std::io::Write;
+        let Ok(mode) = std::env::var("MYLE_GIT_STREAM_FIXTURE") else { return };
+        match mode.as_str() {
+            "short-stderr" => std::io::stderr().write_all(b"a\nb\n").unwrap(),
+            "closed-stderr" => {
+                use std::os::windows::io::AsRawHandle;
+                // SAFETY: this fixture exclusively owns its redirected stderr;
+                // closing it deliberately simulates a tool that closes one pipe.
+                unsafe {
+                    windows_sys::Win32::Foundation::CloseHandle(std::io::stderr().as_raw_handle() as _);
+                }
+                std::fs::write(std::env::var_os("MYLE_GIT_STREAM_MARKER").unwrap(), b"closed").unwrap();
+                std::thread::sleep(Duration::from_secs(30));
+            }
+            "stdout-limit" => {
+                let mut stdout = std::io::stdout().lock();
+                for _ in 0..(17 * 1024) {
+                    stdout.write_all(&[b'x'; 1024]).unwrap();
+                }
+            }
+            "stderr-tail" => {
+                let mut stderr = std::io::stderr().lock();
+                for _ in 0..20_000 {
+                    stderr.write_all(b"remote: diagnostic progress line\n").unwrap();
+                }
+                stderr.write_all(b"fatal: final failure detail\n").unwrap();
+            }
+            "stdout-data" => {
+                let mut stdout = std::io::stdout().lock();
+                stdout.write_all(b"PAYLOAD\n").unwrap();
+                let pattern: Vec<u8> = (0..=255).collect();
+                for _ in 0..8192 {
+                    stdout.write_all(&pattern).unwrap();
+                }
+                stdout.flush().unwrap();
+                std::process::exit(0);
+            }
+            "descendant" => {
+                let child = fixture("descendant-wait")
+                    .kill_on_drop(false)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap();
+                std::fs::write(std::env::var_os("MYLE_GIT_STREAM_MARKER").unwrap(), child.id().unwrap().to_string()).unwrap();
+                std::thread::sleep(Duration::from_secs(30));
+            }
+            "descendant-wait" => std::thread::sleep(Duration::from_secs(30)),
+            _ => panic!("unknown fixture"),
+        }
+    }
+    fn process_alive(pid: u32) -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        // SAFETY: this only queries the process created by the local fixture;
+        // the query handle is closed before returning.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() { return false; }
+            let mut code = 0;
+            let queried = GetExitCodeProcess(handle, &mut code);
+            CloseHandle(handle);
+            queried != 0 && code == 259
+        }
+    }
+    #[tokio::test]
+    async fn short_multiline_diagnostics_keep_their_boundaries() {
+        let child = fixture("short-stderr").spawn().unwrap();
+        let mut lines = Vec::new();
+        let output = stream_child(child, Arc::new(AtomicBool::new(false)), |text, _| lines.push(text.to_string())).await.unwrap();
+        assert!(output.ok());
+        assert_eq!(lines, ["a", "b"]);
+        assert_eq!(output.stderr, "a\nb\n");
+    }
+    #[tokio::test]
+    async fn git_input_and_output_are_driven_together() {
+        if git_exe().is_none() { return; }
+        let output = run_with(&std::env::temp_dir(), &["hash-object", "--stdin"], Some(b"hello\n"), &GitEnv::default(), Duration::from_secs(5)).await.unwrap();
+        assert!(output.ok(), "{}", output.stderr);
+        assert_eq!(output.text().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
+    }
+    #[tokio::test]
+    async fn cancelling_or_dropping_a_stream_stops_its_descendants() {
+        for drop_future in [false, true] {
+            let marker = std::env::temp_dir().join(format!("myle-git-descendant-{}", uuid::Uuid::new_v4()));
+            let child = fixture("descendant").env("MYLE_GIT_STREAM_MARKER", &marker).spawn().unwrap();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let mut stream = Box::pin(stream_child(child, cancel.clone(), |_, _| {}));
+            let appeared = async {
+                let started = std::time::Instant::now();
+                loop {
+                    if let Some(pid) = std::fs::read_to_string(&marker).ok().and_then(|text| text.parse::<u32>().ok()) { break pid; }
+                    assert!(started.elapsed() < Duration::from_secs(3), "fixture descendant did not start");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
+            let pid = tokio::select! {
+                pid = appeared => pid,
+                _ = &mut stream => panic!("fixture ended before its descendant started"),
+            };
+            if !drop_future {
+                cancel.store(true, Ordering::Relaxed);
+                assert_eq!(tokio::time::timeout(Duration::from_secs(3), &mut stream).await.unwrap().unwrap_err(), CANCELLED);
+            }
+            drop(stream);
+            let started = std::time::Instant::now();
+            while process_alive(pid) && started.elapsed() < Duration::from_secs(1) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let alive = process_alive(pid);
+            if alive { crate::apps::process::kill_tree(pid); }
+            let _ = std::fs::remove_file(marker);
+            assert!(!alive, "the streamed command's descendant survived (dropped: {drop_future})");
+        }
+    }
+    #[tokio::test]
+    async fn a_stream_can_be_cancelled_after_stderr_has_closed() {
+        let marker = std::env::temp_dir().join(format!("myle-git-stream-{}", uuid::Uuid::new_v4()));
+        let child = fixture("closed-stderr").env("MYLE_GIT_STREAM_MARKER", &marker).spawn().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancellation = tokio::spawn({
+            let cancel = cancel.clone();
+            let marker = marker.clone();
+            async move {
+                let started = std::time::Instant::now();
+                while !marker.exists() && started.elapsed() < Duration::from_secs(2) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                cancel.store(true, Ordering::Relaxed);
+            }
+        });
+        let result = tokio::time::timeout(Duration::from_secs(3), stream_child(child, cancel, |_, _| {})).await;
+        cancellation.await.unwrap();
+        let _ = std::fs::remove_file(marker);
+        assert_eq!(result.expect("cancellation must also interrupt the process wait").unwrap_err(), CANCELLED);
+    }
+    #[tokio::test]
+    async fn streamed_stderr_keeps_a_bounded_tail_and_the_final_failure() {
+        let child = fixture("stderr-tail").spawn().unwrap();
+        let mut lines = 0;
+        let output = tokio::time::timeout(Duration::from_secs(10), stream_child(child, Arc::default(), |_, _| lines += 1)).await.unwrap().unwrap();
+        assert!(lines >= 20_000, "all live diagnostics still reach the observer");
+        assert!(output.stderr.len() <= 256 * 1024 + 64, "retained diagnostic output must be bounded: {}", output.stderr.len());
+        assert!(output.stderr.contains("fatal: final failure detail"));
+    }
+    #[tokio::test]
+    async fn streamed_stdout_reports_an_explicit_limit_instead_of_truncating_data() {
+        let child = fixture("stdout-limit").spawn().unwrap();
+        let error = match tokio::time::timeout(Duration::from_secs(10), stream_child(child, Arc::default(), |_, _| {})).await.unwrap() {
+            Err(error) => error,
+            Ok(output) => panic!("stdout above the limit must fail (retained {} bytes)", output.stdout.len()),
+        };
+        assert!(error.contains("output limit"), "{error}");
+    }
+    #[tokio::test]
+    async fn streamed_stdout_preserves_binary_data_below_the_limit() {
+        let child = fixture("stdout-data").spawn().unwrap();
+        let output = tokio::time::timeout(Duration::from_secs(10), stream_child(child, Arc::default(), |_, _| {})).await.unwrap().unwrap();
+        let start = output.stdout.windows(8).position(|bytes| bytes == b"PAYLOAD\n").unwrap() + 8;
+        let expected: Vec<u8> = (0..=255).cycle().take(2 * 1024 * 1024).collect();
+        assert!(output.stdout[start..] == expected, "binary stdout changed (received {} bytes)", output.stdout.len() - start);
+    }
     #[test]
     fn porcelain_v2_status_with_renames_partial_staging_and_untracked() {
         let raw = concat!(

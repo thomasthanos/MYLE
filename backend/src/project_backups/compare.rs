@@ -467,7 +467,7 @@ const MAX_ROWS: usize = 20_000;
 fn with_reader<T>(
     side: &Side,
     stored: &str,
-    read: impl FnOnce(&mut dyn Read) -> Result<T, String>,
+    read: impl FnOnce(&mut dyn Read, u64) -> Result<T, String>,
 ) -> Result<T, String> {
     match side {
         Side::Zip(path) => {
@@ -477,18 +477,23 @@ fn with_reader<T>(
             let mut entry = archive
                 .by_name(stored)
                 .map_err(|error| format!("\"{stored}\": {error}"))?;
-            read(&mut entry)
+            let size = entry.size();
+            read(&mut entry, size)
         }
         Side::Folder(root) => {
             let path = folder_file(root, stored)?;
             let mut file =
                 File::open(&path).map_err(|error| format!("Can't read \"{stored}\": {error}"))?;
-            read(&mut file)
+            let size = file
+                .metadata()
+                .map_err(|error| format!("Can't read \"{stored}\": {error}"))?
+                .len();
+            read(&mut file, size)
         }
     }
 }
 fn read_stored(side: &Side, stored: &str, limit: u64) -> Result<Vec<u8>, String> {
-    with_reader(side, stored, |reader| {
+    with_reader(side, stored, |reader, _| {
         let mut bytes = Vec::new();
         reader
             .take(limit + 1)
@@ -500,33 +505,45 @@ fn read_stored(side: &Side, stored: &str, limit: u64) -> Result<Vec<u8>, String>
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
-/// Size and SHA-256 of the file `stored`, read to its end.
+/// Size and SHA-256 of the file `stored`, within the hash budget.
 fn side_info(side: &Side, stored: &str, size: Option<u64>) -> Result<SideInfo, String> {
-    use sha2::{Digest, Sha256};
     if size.is_some_and(|size| size > MAX_HASH_BYTES) {
         return Ok(SideInfo {
             size: size.unwrap_or(0),
             sha256: None,
         });
     }
-    with_reader(side, stored, |reader| {
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; 1024 * 1024];
-        let mut total = 0u64;
-        loop {
-            let read = reader
-                .read(&mut buffer)
-                .map_err(|error| format!("Can't read the file: {error}"))?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-            total += read as u64;
+    with_reader(side, stored, |reader, size| {
+        reader_info(reader, size, MAX_HASH_BYTES)
+    })
+}
+fn reader_info(reader: &mut dyn Read, size: u64, limit: u64) -> Result<SideInfo, String> {
+    use sha2::{Digest, Sha256};
+    if size > limit {
+        return Ok(SideInfo { size, sha256: None });
+    }
+    // A live file can grow after its metadata was read. One extra byte tells
+    // that it no longer fits, without reading or hashing the rest of it.
+    let mut reader = reader.take(limit.saturating_add(1));
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut total = 0u64;
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("Can't read the file: {error}"))?;
+        if read == 0 {
+            break;
         }
-        Ok(SideInfo {
-            size: total,
-            sha256: Some(hex(&hasher.finalize())),
-        })
+        total += read as u64;
+        if total > limit {
+            return Ok(SideInfo { size: size.max(total), sha256: None });
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(SideInfo {
+        size: total,
+        sha256: Some(hex(&hasher.finalize())),
     })
 }
 fn info_of(bytes: &[u8]) -> SideInfo {
@@ -1107,6 +1124,67 @@ pub(crate) mod tests {
             )
             .is_err()
         );
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn oversized_zip_binary_metadata_skips_hashing() {
+        let root = temp("hash-metadata-limit");
+        let zip = root.join("large.zip");
+        make_zip(&zip, &[("blob.dat", b"contents")]);
+        // Keep the fixture tiny: its headers describe an entry above the hash
+        // budget. That metadata must be enough to avoid reading its payload.
+        let declared = (MAX_HASH_BYTES + 1) as u32;
+        let mut bytes = fs::read(&zip).unwrap();
+        for (signature, offset) in [(b"PK\x03\x04", 22), (b"PK\x01\x02", 24)] {
+            let start = bytes.windows(4).position(|part| part == signature).unwrap();
+            bytes[start + offset..start + offset + 4].copy_from_slice(&declared.to_le_bytes());
+        }
+        fs::write(&zip, bytes).unwrap();
+        let info = side_info(&Side::Zip(zip), "blob.dat", None).unwrap();
+        assert_eq!(info.size, u64::from(declared));
+        assert!(info.sha256.is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn a_stream_that_outgrows_its_metadata_stops_at_the_hash_budget() {
+        struct Growing {
+            read: usize,
+        }
+        impl Read for Growing {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.read == 9 {
+                    return Err(std::io::Error::other("read beyond the hash budget"));
+                }
+                let count = buffer.len().min(9 - self.read);
+                buffer[..count].fill(b'x');
+                self.read += count;
+                Ok(count)
+            }
+        }
+        let mut reader = Growing { read: 0 };
+        let info = reader_info(&mut reader, 4, 8).unwrap();
+        assert!(info.sha256.is_none());
+        assert_eq!(reader.read, 9, "one byte beyond the budget detects overflow");
+    }
+    #[test]
+    fn a_file_exactly_at_the_hash_budget_keeps_its_complete_hash() {
+        let mut reader = &b"abc"[..];
+        let info = reader_info(&mut reader, 3, 3).unwrap();
+        assert_eq!(info.size, 3);
+        assert_eq!(
+            info.sha256.as_deref(),
+            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+    }
+    #[test]
+    fn an_oversized_folder_file_uses_its_opened_metadata() {
+        let root = temp("folder-hash-limit");
+        fs::write(root.join("blob.dat"), b"ninebytes").unwrap();
+        let info = with_reader(&Side::Folder(root.clone()), "blob.dat", |reader, size| {
+            reader_info(reader, size, 8)
+        }).unwrap();
+        assert_eq!(info.size, 9);
+        assert!(info.sha256.is_none());
         let _ = fs::remove_dir_all(root);
     }
     #[test]

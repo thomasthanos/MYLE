@@ -33,10 +33,116 @@ const hooks = registerHooks({
     return { format: "module", source: compileModule(source, { filename: fileURLToPath(url), generate: "client" }).js.code, shortCircuit: true };
   },
 });
-const { ReleaseSession, failureKey, githubReleases } = await import("../../frontend/app/pages/github-releases/state.svelte.ts");
+const { BuildSession, ReleaseSession, failureKey, githubReleases } = await import("../../frontend/app/pages/github-releases/state.svelte.ts");
 const { githubReleasesApi } = await import("../../frontend/app/pages/github-releases/api.ts");
 const { onStorageChange } = await import("../../frontend/lib/storage.ts");
 hooks.deregister();
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const repo = { id: "fixture", path: "C:/Synthetic/Fixture", name: "Fixture", exists: true };
+const page = (repos = [repo]) => ({ repos, account: null, git: "git", gh: "gh", ai: { providers: [], order: [] }, gbrImport: null });
+const status = (behind = 0) => ({ repoId: repo.id, path: repo.path, exists: true, isRepo: true, remote: null, branch: { branch: "main", head: null, upstream: "origin/main", ahead: 0, behind }, changes: 0, entries: [], workflows: [], problem: null });
+
+test("an older repository status cannot replace a newer refresh", async () => {
+  const original = githubReleasesApi.status;
+  const state = new githubReleases.constructor(); state.page = page();
+  const pending = deferred();
+  githubReleasesApi.status = () => pending.promise;
+  try {
+    const older = state.refresh(repo.id);
+    githubReleasesApi.status = async () => status(2);
+    await state.refresh(repo.id);
+    pending.resolve(status(0)); await older;
+    assert.equal(state.statuses.fixture.branch.behind, 2);
+  } finally { githubReleasesApi.status = original; }
+});
+
+test("an obsolete status failure leaves the current request loading", async () => {
+  const original = githubReleasesApi.status;
+  const state = new githubReleases.constructor(); state.page = page();
+  const first = deferred(), second = deferred();
+  githubReleasesApi.status = () => first.promise;
+  try {
+    const older = state.refresh(repo.id);
+    githubReleasesApi.status = () => second.promise;
+    const newer = state.refresh(repo.id);
+    first.reject(new Error("old failure")); await older;
+    assert.equal(state.refreshing.fixture, true);
+    second.resolve(status(3)); await newer;
+    assert.equal(state.statuses.fixture.problem, null);
+  } finally { second.resolve(status()); githubReleasesApi.status = original; }
+});
+
+test("removing a repository discards its pending local and remote replies", async () => {
+  const original = { status: githubReleasesApi.status, remote: githubReleasesApi.remote, removeRepo: githubReleasesApi.removeRepo };
+  const state = new githubReleases.constructor(); state.page = page();
+  const local = deferred(), remote = deferred();
+  githubReleasesApi.status = () => local.promise;
+  githubReleasesApi.remote = () => remote.promise;
+  githubReleasesApi.removeRepo = async () => page([]);
+  try {
+    const reading = [state.refresh(repo.id), state.loadRemote(repo.id)];
+    await state.removeRepo(repo.id);
+    local.resolve(status(4)); remote.resolve({ releases: [], lastRelease: {}, run: null, problem: null });
+    await Promise.all(reading);
+    assert.equal(state.statuses.fixture, undefined);
+    assert.equal(state.remotes.fixture, undefined);
+    assert.equal(state.refreshing.fixture, undefined);
+  } finally { Object.assign(githubReleasesApi, original); }
+});
+
+test("an older remote failure cannot replace a successful reload", async () => {
+  const original = githubReleasesApi.remote;
+  const state = new githubReleases.constructor(); state.page = page();
+  const pending = deferred(); githubReleasesApi.remote = () => pending.promise;
+  try {
+    const older = state.loadRemote(repo.id);
+    githubReleasesApi.remote = async () => ({ releases: [], lastRelease: {}, run: null, problem: null });
+    await state.loadRemote(repo.id);
+    pending.reject(new Error("outdated failure")); await older;
+    assert.equal(state.remotes.fixture.problem, null);
+  } finally { githubReleasesApi.remote = original; }
+});
+
+test("a quiet fetch received after removal cannot restore a repository or start a remote read", async () => {
+  const original = { fetch: githubReleasesApi.fetch, remote: githubReleasesApi.remote, removeRepo: githubReleasesApi.removeRepo };
+  const state = new githubReleases.constructor(); state.page = page();
+  const pending = deferred(); let remotes = 0;
+  githubReleasesApi.fetch = () => pending.promise;
+  githubReleasesApi.remote = async () => { remotes++; return { releases: [], lastRelease: {}, run: null, problem: null }; };
+  githubReleasesApi.removeRepo = async () => page([]);
+  try {
+    const fetching = state.fetchQuietly(repo.id);
+    await state.removeRepo(repo.id);
+    pending.resolve(status(4)); await fetching;
+    assert.equal(state.statuses.fixture, undefined);
+    assert.equal(remotes, 0);
+  } finally { Object.assign(githubReleasesApi, original); }
+});
+
+test("a status read started before fetching cannot overwrite the fetched branch", async () => {
+  const original = { status: githubReleasesApi.status, fetch: githubReleasesApi.fetch, remote: githubReleasesApi.remote };
+  const state = new githubReleases.constructor(); state.page = page();
+  const pending = deferred(); githubReleasesApi.status = () => pending.promise;
+  githubReleasesApi.fetch = async () => status(3);
+  githubReleasesApi.remote = async () => ({ releases: [], lastRelease: {}, run: null, problem: null });
+  try {
+    const reading = state.refresh(repo.id);
+    await state.fetch(repo.id);
+    pending.resolve(status(0)); await reading;
+    assert.equal(state.statuses.fixture.branch.behind, 3);
+    assert.equal(state.refreshing.fixture, undefined);
+  } finally { Object.assign(githubReleasesApi, original); }
+});
+
+test("a build diagnostic flood retains a bounded recent window through completion", () => {
+  const session = new BuildSession(); session.reset("synthetic", false);
+  const diagnostic = index => ({ severity: "error", message: `error ${index}`, file: null, line: null, column: null, code: null, tool: "fixture", logLine: index });
+  for (let index = 0; index < 1500; index++) session.apply({ event: "diagnostic", data: { diagnostic: diagnostic(index) } });
+  assert.equal(session.diagnostics.length, 1000);
+  assert.equal(session.diagnostics[0].message, "error 500");
+  session.finish({ ok: false, cancelled: false, exitCode: 1, durationMs: 10, lines: 1500, errors: 1500, warnings: 0, diagnostics: Array.from({ length: 1000 }, (_, index) => diagnostic(index)), logPath: null, failure: null });
+  assert.equal(session.diagnostics.at(-1).message, "error 1499");
+});
 test("adding and removing project paths notify account sync only after persistence succeeds", async () => {
   const original = { addRepos: githubReleasesApi.addRepos, removeRepo: githubReleasesApi.removeRepo, refresh: githubReleases.refresh };
   const changes = []; onStorageChange(key => changes.push(key));

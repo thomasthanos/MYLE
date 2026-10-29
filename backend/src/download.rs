@@ -29,7 +29,8 @@ pub fn http_client(user_agent: &str) -> Result<reqwest::Client, String> {
         .map_err(err)
 }
 /// Downloads `url` to `dest`, calling `on_progress(downloaded, total)` at most
-/// every 100 ms (and once at the end). `is_cancelled` is polled between chunks.
+/// every 100 ms (and once at the end). Cancellation is also checked while
+/// waiting for response headers or body chunks.
 /// Returns the lowercase hex SHA-256 of the downloaded file.
 pub async fn download_to(
     client: &reqwest::Client,
@@ -181,6 +182,15 @@ async fn wait_for_cancellation(is_cancelled: &impl Fn() -> bool) {
         tokio::time::sleep(PROGRESS_INTERVAL).await;
     }
 }
+/// Drain queued disk writes before cleanup or a fallback replaces the file,
+/// including when a transfer failed. Keep its original error if both fail.
+async fn finish_writes(
+    file: &mut (impl tokio::io::AsyncWrite + Unpin),
+    result: Result<(), String>,
+) -> Result<(), String> {
+    let flushed = file.flush().await.map_err(err);
+    result.and(flushed)
+}
 /// One connection, written as it arrives and hashed on the way.
 async fn stream(
     response: reqwest::Response,
@@ -220,32 +230,36 @@ async fn stream(
     // Progress goes out on a clock, not only when a chunk lands: a connection that delivers in bursts still moves the bar every 100 ms.
     let mut ticker = tokio::time::interval(PROGRESS_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
-        let chunk = tokio::select! {
-            biased;
-            next = body.next() => match next {
-                Some(chunk) => chunk,
-                None => break,
-            },
-            _ = ticker.tick() => {
-                if is_cancelled() {
-                    return Err(CANCELLED.into());
+    let result = async {
+        loop {
+            let chunk = tokio::select! {
+                biased;
+                next = body.next() => match next {
+                    Some(chunk) => chunk,
+                    None => break,
+                },
+                _ = ticker.tick() => {
+                    if is_cancelled() {
+                        return Err(CANCELLED.into());
+                    }
+                    on_progress(downloaded, shown(downloaded));
+                    continue;
                 }
-                on_progress(downloaded, shown(downloaded));
-                continue;
+            };
+            if is_cancelled() {
+                return Err(CANCELLED.into());
             }
-        };
-        if is_cancelled() {
-            return Err(CANCELLED.into());
+            let chunk = chunk.map_err(err)?;
+            if let Some(hasher) = &mut hasher {
+                hasher.update(&chunk);
+            }
+            file.write_all(&chunk).await.map_err(err)?;
+            downloaded += chunk.len() as u64;
         }
-        let chunk = chunk.map_err(err)?;
-        if let Some(hasher) = &mut hasher {
-            hasher.update(&chunk);
-        }
-        file.write_all(&chunk).await.map_err(err)?;
-        downloaded += chunk.len() as u64;
+        Ok(())
     }
-    file.flush().await.map_err(err)?;
+    .await;
+    finish_writes(&mut file, result).await?;
     if let Some(exact) = exact.filter(|exact| *exact != downloaded) {
         return Err(format!(
             "The download stopped early ({downloaded} of {exact} bytes)."
@@ -372,76 +386,80 @@ async fn fetch_range(
             .await
             .map_err(err)?,
     );
-    let mut position = start;
-    let mut failures = 0;
-    let mut last_error = String::new();
-    let is_stopped = || stop.load(Ordering::Relaxed);
-    while position <= end {
-        if stop.load(Ordering::Relaxed) {
-            return Err(CANCELLED.into());
-        }
-        let resumed_at = position;
-        let response = send_request(
-            client.get(&url).header(RANGE, format!("bytes={position}-{end}")),
-            &is_stopped,
-        ).await;
-        match response {
-            Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
-                // Written where it belongs only if it is the part asked for.
-                if content_range_of(&response).map(|range| range.start) != Some(position) {
-                    return Err("the server sent a different part of the file".into());
-                }
-                file.seek(SeekFrom::Start(position)).await.map_err(err)?;
-                let mut body = response.bytes_stream();
-                loop {
-                    let chunk = tokio::select! {
-                        biased;
-                        _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
-                        chunk = body.next() => chunk,
-                    };
-                    let Some(chunk) = chunk else { break };
-                    if stop.load(Ordering::Relaxed) {
-                        return Err(CANCELLED.into());
+    let result = async {
+        let mut position = start;
+        let mut failures = 0;
+        let mut last_error = String::new();
+        let is_stopped = || stop.load(Ordering::Relaxed);
+        while position <= end {
+            if stop.load(Ordering::Relaxed) {
+                return Err(CANCELLED.into());
+            }
+            let resumed_at = position;
+            let response = send_request(
+                client.get(&url).header(RANGE, format!("bytes={position}-{end}")),
+                &is_stopped,
+            ).await;
+            match response {
+                Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
+                    // Written where it belongs only if it is the part asked for.
+                    if content_range_of(&response).map(|range| range.start) != Some(position) {
+                        return Err("the server sent a different part of the file".into());
                     }
-                    match chunk {
-                        Ok(chunk) => {
-                            let wanted = (end + 1 - position).min(chunk.len() as u64) as usize;
-                            file.write_all(&chunk[..wanted]).await.map_err(err)?;
-                            position += wanted as u64;
-                            done.fetch_add(wanted as u64, Ordering::Relaxed);
-                            if position > end {
+                    file.seek(SeekFrom::Start(position)).await.map_err(err)?;
+                    let mut body = response.bytes_stream();
+                    loop {
+                        let chunk = tokio::select! {
+                            biased;
+                            _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
+                            chunk = body.next() => chunk,
+                        };
+                        let Some(chunk) = chunk else { break };
+                        if stop.load(Ordering::Relaxed) {
+                            return Err(CANCELLED.into());
+                        }
+                        match chunk {
+                            Ok(chunk) => {
+                                let wanted = (end + 1 - position).min(chunk.len() as u64) as usize;
+                                file.write_all(&chunk[..wanted]).await.map_err(err)?;
+                                position += wanted as u64;
+                                done.fetch_add(wanted as u64, Ordering::Relaxed);
+                                if position > end {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                last_error = e.to_string();
                                 break;
                             }
                         }
-                        Err(e) => {
-                            last_error = e.to_string();
-                            break;
-                        }
                     }
                 }
+                // Anything but a part of the file: ranges are not really supported.
+                Ok(response) => return Err(format!("the server answered {}", response.status())),
+                Err(e) if e == CANCELLED => return Err(e),
+                Err(e) => last_error = e,
             }
-            // Anything but a part of the file: ranges are not really supported.
-            Ok(response) => return Err(format!("the server answered {}", response.status())),
-            Err(e) if e == CANCELLED => return Err(e),
-            Err(e) => last_error = e,
+            if position <= end {
+                // Only drops in a row count: a long download over a flaky connection may lose its link many times and still get there.
+                if position > resumed_at {
+                    failures = 0;
+                }
+                failures += 1;
+                if failures > SEGMENT_RETRIES {
+                    return Err(last_error);
+                }
+                tokio::select! {
+                    biased;
+                    _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
+                    _ = tokio::time::sleep(Duration::from_millis(500 * u64::from(failures))) => {}
+                }
+            }
         }
-        if position <= end {
-            // Only drops in a row count: a long download over a flaky connection may lose its link many times and still get there.
-            if position > resumed_at {
-                failures = 0;
-            }
-            failures += 1;
-            if failures > SEGMENT_RETRIES {
-                return Err(last_error);
-            }
-            tokio::select! {
-                biased;
-                _ = wait_for_cancellation(&is_stopped) => return Err(CANCELLED.into()),
-                _ = tokio::time::sleep(Duration::from_millis(500 * u64::from(failures))) => {}
-            }
-        }
+        Ok(())
     }
-    file.flush().await.map_err(err)
+    .await;
+    finish_writes(&mut file, result).await
 }
 /// SHA-256 of a file on disk, read off the async runtime.
 async fn hash_file(path: &Path) -> Result<String, String> {
@@ -523,6 +541,31 @@ pub fn err(e: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn pending_writes_finish_even_when_the_transfer_failed() {
+        let mut file = BufWriter::with_capacity(64, Vec::new());
+        file.write_all(b"partial response").await.unwrap();
+        assert!(file.get_ref().is_empty());
+        let result = finish_writes(&mut file, Err(CANCELLED.into())).await;
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert_eq!(file.get_ref(), b"partial response");
+    }
+    #[tokio::test]
+    async fn pending_writes_report_a_flush_failure_after_a_successful_transfer() {
+        let (writer, reader) = tokio::io::duplex(64);
+        drop(reader);
+        let mut file = BufWriter::with_capacity(64, writer);
+        file.write_all(b"response").await.unwrap();
+        assert!(finish_writes(&mut file, Ok(())).await.is_err());
+    }
+    #[tokio::test]
+    async fn pending_writes_preserve_the_transfer_failure_if_flushing_also_fails() {
+        let (writer, reader) = tokio::io::duplex(64);
+        drop(reader);
+        let mut file = BufWriter::with_capacity(64, writer);
+        file.write_all(b"response").await.unwrap();
+        assert_eq!(finish_writes(&mut file, Err(CANCELLED.into())).await.unwrap_err(), CANCELLED);
+    }
     /// Sends the headers, then leaves every response body open and silent.
     async fn serve_stalled_download(total: u64, ranged: bool, headers: bool) -> (String, Arc<AtomicU64>) {
         use tokio::io::AsyncReadExt;

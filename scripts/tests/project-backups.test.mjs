@@ -164,9 +164,9 @@ const answer = (projectId, state, checkedAt, extra = {}) => ({
   projectId, state, backupId: null, added: 0, modified: 0, deleted: 0, unreadable: 0, files: [], checkedAt, message: null, ...extra,
 });
 const deferred = () => {
-  let resolve;
-  const promise = new Promise((yes) => (resolve = yes));
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
 };
 test("reinstalled projects stay unknown until their surviving backup folder is checked", () => {
   const reinstalled = new state.constructor();
@@ -454,4 +454,75 @@ test("a restore names what it was put together from", async () => {
     Object.assign(api, original);
     while (toast.visible.length) toast.dismiss(toast.visible[0].id);
   }
+});
+
+test("an older page refresh cannot restore settings after a newer refresh", async () => {
+  const original = api.getState;
+  const fresh = new state.constructor();
+  const first = deferred();
+  api.getState = () => first.promise;
+  try {
+    const older = fresh.refresh();
+    api.getState = async () => ({ ...fresh.page, settings: { ...fresh.page.settings, projects: [project("new")] } });
+    await fresh.refresh();
+    first.resolve({ ...fresh.page, settings: { ...fresh.page.settings, projects: [project("old")] } });
+    await older;
+    assert.deepEqual(fresh.projects.map(project => project.id), ["new"]);
+  } finally { api.getState = original; }
+});
+
+test("a page reply captured before saving exclusions cannot revert the saved choice", async () => {
+  const original = { getState: api.getState, setExclusions: api.setExclusions };
+  const fresh = new state.constructor(); const pending = deferred();
+  const oldPage = JSON.parse(JSON.stringify(fresh.page));
+  api.getState = () => pending.promise;
+  api.setExclusions = async () => ({ ...fresh.page.settings, exclusions: ["new-choice"] });
+  try {
+    const reading = fresh.refresh();
+    await fresh.setExclusions(["new-choice"], true, false);
+    pending.resolve(oldPage); await reading;
+    assert.deepEqual([...fresh.page.settings.exclusions], ["new-choice"]);
+  } finally { Object.assign(api, original); }
+});
+
+test("a superseded backup listing cannot clear a newer listing's progress", async () => {
+  const original = api.list;
+  const fresh = new state.constructor();
+  const first = deferred(), second = deferred();
+  api.list = () => first.promise;
+  try {
+    const older = fresh.loadBackups("A");
+    api.list = () => second.promise;
+    const newer = fresh.loadBackups("A");
+    first.resolve([]); await older;
+    assert.equal(fresh.backupsLoading, "A");
+    second.resolve([]); await newer;
+    assert.equal(fresh.backupsLoading, null);
+  } finally { second.resolve([]); api.list = original; }
+});
+
+test("an older backup listing cannot overwrite a refreshed history", async () => {
+  const original = api.list;
+  const fresh = new state.constructor(); const pending = deferred();
+  api.list = () => pending.promise;
+  try {
+    const older = fresh.loadBackups("A");
+    api.list = async () => [{ id: "current", name: "current", monthFolder: "10-2026", year: 2026, month: 10, version: 1, day: 29, kind: "zip", size: 100, modified: now, broken: false }];
+    await fresh.loadBackups("A");
+    pending.resolve([]); await older;
+    assert.equal(fresh.backups.A[0]?.id, "current");
+  } finally { api.list = original; }
+});
+
+test("an obsolete listing failure cannot make a successful history unknown", async () => {
+  const original = api.list;
+  const fresh = new state.constructor(); const pending = deferred();
+  api.list = () => pending.promise;
+  try {
+    const older = fresh.loadBackups("A");
+    api.list = async () => [];
+    await fresh.loadBackups("A");
+    pending.reject(new Error("old failed listing")); await older;
+    assert.equal(fresh.backupErrors.A, undefined);
+  } finally { api.list = original; }
 });

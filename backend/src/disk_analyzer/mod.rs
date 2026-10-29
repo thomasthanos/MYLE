@@ -2,6 +2,7 @@
 mod delete;
 mod elevated;
 mod mft;
+mod probes;
 mod protect;
 mod scan;
 mod tree;
@@ -170,25 +171,8 @@ pub async fn disk_analyzer_drives() -> Result<Vec<Drive>, String> {
         use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
         // SAFETY: no arguments.
         let mask = unsafe { GetLogicalDrives() };
-        let (sender, answers) = std::sync::mpsc::channel();
-        let letters: Vec<char> = (0..26u8).filter(|i| mask & (1 << i) != 0).map(|i| (b'A' + i) as char).collect();
-        for &letter in &letters {
-            let sender = sender.clone();
-            std::thread::spawn(move || {
-                let _ = sender.send(drive(letter));
-            });
-        }
-        drop(sender);
-        let deadline = Instant::now() + Duration::from_millis(2500);
-        let mut drives = Vec::new();
-        for _ in &letters {
-            let left = deadline.saturating_duration_since(Instant::now());
-            match answers.recv_timeout(left) {
-                Ok(Some(drive)) => drives.push(drive),
-                Ok(None) => {}
-                Err(_) => break,
-            }
-        }
+        static PROBES: std::sync::OnceLock<probes::ProbeSet<Drive>> = std::sync::OnceLock::new();
+        let mut drives = PROBES.get_or_init(probes::ProbeSet::default).read(mask, Duration::from_millis(2500), drive);
         drives.sort_by(|a, b| a.letter.cmp(&b.letter));
         Ok(drives)
     })

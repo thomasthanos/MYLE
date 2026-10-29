@@ -1,5 +1,5 @@
 // ! Incremental backups: only the files that changed since the newest full ! backup and the increments made on it. ! ! An increment lives in `<backup root>\<App>\Incremental\`, never in a month ! folder, and its name (`increment-V<base version>-<n>.zip`) never starts ! with `<App>_` nor holds a version above its base's: the backup lists, the ! version numbering and the import (here and in backup_projects) never take ! it for a backup. It holds the added and modified files and a ! `.backup-info.json` (`format: "zip-incremental"`) naming its base, the ! increment before it, the files deleted since, and `state`: every file the ! project then held with its size, CRC-32 and date, so a restore checks ! every byte it puts back. It is written and checked like a full backup ! (`archive::write_verified`). Nothing is ever deleted: full backups stay the ! anchors, and a full backup is made instead whenever an increment would ! make a long or risky chain.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -78,9 +78,62 @@ impl Increment {
         format!("{FOLDER}/{}.zip", self.info.name)
     }
 }
-/// Increments read once while unchanged (size and date), by path.
-type Known = HashMap<PathBuf, (u64, Option<i64>, Arc<Info>)>;
-static INFOS: LazyLock<Mutex<Known>> = LazyLock::new(Default::default);
+/// Keep recent increment details between refreshes. This budgets the
+/// uncompressed metadata bytes; the parsed maps also have allocation overhead.
+const MAX_CACHED_INFOS: usize = 32;
+const MAX_CACHED_INFO_BYTES: usize = 16 * 1024 * 1024;
+struct CachedInfo {
+    path: PathBuf,
+    size: u64,
+    modified: Option<i64>,
+    info: Arc<Info>,
+    encoded_bytes: usize,
+}
+struct InfoCache {
+    /// Least recently used first.
+    entries: VecDeque<CachedInfo>,
+    encoded_bytes: usize,
+    max_entries: usize,
+    max_bytes: usize,
+}
+impl InfoCache {
+    fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self { entries: VecDeque::new(), encoded_bytes: 0, max_entries, max_bytes }
+    }
+    fn remove(&mut self, path: &Path) -> Option<CachedInfo> {
+        let index = self.entries.iter().position(|entry| entry.path == path)?;
+        let entry = self.entries.remove(index)?;
+        self.encoded_bytes -= entry.encoded_bytes;
+        Some(entry)
+    }
+    fn get(&mut self, path: &Path, size: u64, modified: Option<i64>) -> Option<Arc<Info>> {
+        let entry = self.remove(path)?;
+        if entry.size != size || entry.modified != modified {
+            return None;
+        }
+        let info = entry.info.clone();
+        self.encoded_bytes += entry.encoded_bytes;
+        self.entries.push_back(entry);
+        Some(info)
+    }
+    fn insert(&mut self, entry: CachedInfo) {
+        self.remove(&entry.path);
+        // Oversized but valid metadata remains available to its caller without
+        // taking cache ownership. Eviction never changes a reader's Arc.
+        if self.max_entries == 0 || entry.encoded_bytes > self.max_bytes {
+            return;
+        }
+        while self.entries.len() >= self.max_entries
+            || self.encoded_bytes > self.max_bytes - entry.encoded_bytes
+        {
+            let Some(oldest) = self.entries.pop_front() else { break };
+            self.encoded_bytes -= oldest.encoded_bytes;
+        }
+        self.encoded_bytes += entry.encoded_bytes;
+        self.entries.push_back(entry);
+    }
+}
+static INFOS: LazyLock<Mutex<InfoCache>> = LazyLock::new(|| Mutex::new(InfoCache::new(MAX_CACHED_INFOS, MAX_CACHED_INFO_BYTES)));
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -104,20 +157,21 @@ fn info_text(path: &Path) -> Result<String, String> {
 }
 /// The increment at `path`, if it is one.
 fn increment(path: &Path) -> Option<Increment> {
+    increment_cached(path, &INFOS)
+}
+fn increment_cached(path: &Path, cache: &Mutex<InfoCache>) -> Option<Increment> {
     let meta = fs::metadata(path).ok().filter(|meta| meta.is_file())?;
     let (size, modified) = (meta.len(), meta.modified().ok().map(naming::unix_millis));
-    if let Some((known_size, known_modified, info)) = lock(&INFOS).get(path)
-        && *known_size == size
-        && *known_modified == modified
-    {
-        return Some(Increment { path: path.to_path_buf(), info: info.clone(), size, modified });
+    if let Some(info) = lock(cache).get(path, size, modified) {
+        return Some(Increment { path: path.to_path_buf(), info, size, modified });
     }
-    let info: Info = serde_json::from_str(&info_text(path).ok()?).ok()?;
+    let text = info_text(path).ok()?;
+    let info: Info = serde_json::from_str(&text).ok()?;
     if info.format != FORMAT {
         return None;
     }
     let info = Arc::new(info);
-    lock(&INFOS).insert(path.to_path_buf(), (size, modified, info.clone()));
+    lock(cache).insert(CachedInfo { path: path.to_path_buf(), size, modified, info: info.clone(), encoded_bytes: text.len() });
     Some(Increment { path: path.to_path_buf(), info, size, modified })
 }
 /// The increments on the full backup `base`, oldest first. The chain stops
@@ -461,20 +515,45 @@ pub(crate) fn restore(app_dir: &Path, app_name: &str, target: &Path, cancelled: 
     if !is_empty {
         return Err("Choose an empty folder: a restore never replaces files.".into());
     }
-    let result = put_together(target, &wanted, &sources, &empty_folders, cancelled);
+    let mut created = RestoreCreated::default();
+    let result = put_together(target, &wanted, &sources, &empty_folders, cancelled, &mut created);
     if result.is_err() {
-        // The folder was empty: what is in it now came from this restore.
-        if let Ok(entries) = fs::read_dir(target) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
-            }
+        // Another writer can add files after the empty-folder check. Remove
+        // only our own files, and only directories that are still empty.
+        for path in created.files.iter().rev() {
+            let _ = fs::remove_file(path);
+        }
+        for path in created.dirs.iter().rev() {
+            let _ = fs::remove_dir(path);
         }
     }
     let bytes = result?;
     let mut from = vec![base.name.clone()];
     from.extend(chain.iter().map(|increment| increment.info.name.clone()));
     Ok(Restored { folder: target.display().to_string(), files: wanted.len(), bytes, from })
+}
+#[derive(Default)]
+struct RestoreCreated {
+    files: Vec<PathBuf>,
+    dirs: Vec<PathBuf>,
+}
+impl RestoreCreated {
+    fn create_folders(&mut self, path: &Path) -> Result<(), String> {
+        let mut missing = Vec::new();
+        let mut parent = path;
+        while !parent.is_dir() {
+            missing.push(parent.to_path_buf());
+            parent = parent.parent().ok_or("Invalid restore folder.")?;
+        }
+        for dir in missing.into_iter().rev() {
+            match fs::create_dir(&dir) {
+                Ok(()) => self.dirs.push(dir),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && dir.is_dir() => {},
+                Err(error) => return Err(format!("Can't create \"{}\": {error}", dir.display())),
+            }
+        }
+        Ok(())
+    }
 }
 /// The empty folder entries of a full backup.
 fn base_dirs(path: &Path) -> Result<Vec<String>, String> {
@@ -493,6 +572,7 @@ fn put_together(
     sources: &[(PathBuf, BTreeMap<String, FileInfo>)],
     empty_folders: &[String],
     cancelled: &dyn Fn() -> bool,
+    created: &mut RestoreCreated,
 ) -> Result<u64, String> {
     let mut archives: Vec<Option<ZipArchive<BufReader<File>>>> = sources.iter().map(|_| None).collect();
     let mut bytes = 0u64;
@@ -520,16 +600,20 @@ fn put_together(
             .map_err(|error| format!("Can't read \"{key}\" from the backup: {error}"))?;
         let destination = compare::folder_file(target, key)?;
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("Can't create \"{}\": {error}", parent.display()))?;
+            created.create_folders(parent)?;
         }
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&destination)
             .map_err(|error| format!("Can't create \"{}\": {error}", destination.display()))?;
+        created.files.push(destination.clone());
         let mut hasher = crc32fast::Hasher::new();
         let mut written = 0u64;
         loop {
+            if cancelled() {
+                return Err(super::CANCELLED.into());
+            }
             let read = entry.read(&mut buffer).map_err(|error| format!("Can't read \"{key}\" from the backup: {error}"))?;
             if read == 0 {
                 break;
@@ -547,8 +631,11 @@ fn put_together(
         bytes += written;
     }
     for folder in empty_folders {
+        if cancelled() {
+            return Err(super::CANCELLED.into());
+        }
         let path = compare::folder_file(target, folder)?;
-        fs::create_dir_all(&path).map_err(|error| format!("Can't create \"{}\": {error}", path.display()))?;
+        created.create_folders(&path)?;
     }
     Ok(bytes)
 }
@@ -617,6 +704,90 @@ mod tests {
         let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
         names.sort();
         names
+    }
+    fn write_info_fixture(path: &Path) -> usize {
+        let state: BTreeMap<String, Stamp> = (0..256)
+            .map(|n| (format!("src/file-{n}.txt"), Stamp(3, 123, 1)))
+            .collect();
+        let text = serde_json::json!({
+            "format": FORMAT, "name": "increment-V1-1", "base": "2026-10/App_V1.zip",
+            "baseVersion": 1, "sequence": 1, "timestamp": 1, "state": state,
+        });
+        let mut zip = zip::ZipWriter::new(File::create(path).unwrap());
+        zip.start_file(BACKUP_INFO_FILE, zip::write::SimpleFileOptions::default()).unwrap();
+        let text = serde_json::to_vec(&text).unwrap();
+        zip.write_all(&text).unwrap();
+        zip.finish().unwrap();
+        text.len()
+    }
+    #[test]
+    fn cached_increment_eviction_releases_only_cache_ownership() {
+        let scene = Scene::new("cache-lifetime");
+        let path = scene.root.join("increment.zip");
+        write_info_fixture(&path);
+        let cache = Mutex::new(InfoCache::new(2, usize::MAX));
+        let first = increment_cached(&path, &cache).unwrap();
+        let second = increment_cached(&path, &cache).unwrap();
+        assert!(Arc::ptr_eq(&first.info, &second.info), "live readers share the parsed state");
+        let lifetime = Arc::downgrade(&first.info);
+        drop(second);
+        for n in 0..2 {
+            let newer = scene.root.join(format!("newer-{n}.zip"));
+            write_info_fixture(&newer);
+            increment_cached(&newer, &cache).unwrap();
+        }
+        assert_eq!(lock(&cache).entries.len(), 2, "historical cache paths must be evicted");
+        assert_eq!(first.info.state.len(), 256, "eviction leaves existing readers intact");
+        let reloaded = increment_cached(&path, &cache).unwrap();
+        assert!(!Arc::ptr_eq(&first.info, &reloaded.info), "evicted metadata is reparsed");
+        assert_eq!(reloaded.info.state, first.info.state, "reloading preserves the full backup state");
+        drop(first);
+        assert!(lifetime.upgrade().is_none(), "evicted historical state is released after its final reader");
+    }
+    #[test]
+    fn cached_increment_metadata_stays_within_its_byte_budget() {
+        let scene = Scene::new("cache-bytes");
+        let first = scene.root.join("increment.zip");
+        let bytes = write_info_fixture(&first);
+        let cache = Mutex::new(InfoCache::new(32, bytes * 2));
+        for n in 0..16 {
+            let path = scene.root.join(format!("increment-{n}.zip"));
+            write_info_fixture(&path);
+            assert_eq!(increment_cached(&path, &cache).unwrap().info.state.len(), 256);
+        }
+        let retained = lock(&cache);
+        assert!(retained.encoded_bytes <= bytes * 2, "retained {} metadata bytes exceed {}", retained.encoded_bytes, bytes * 2);
+        assert_eq!(retained.entries.len(), 2);
+    }
+    #[test]
+    fn repeated_increment_reads_keep_recent_metadata_between_operations() {
+        let scene = Scene::new("cache-recency");
+        let paths: Vec<_> = (0..3).map(|n| scene.root.join(format!("increment-{n}.zip"))).collect();
+        for path in &paths {
+            write_info_fixture(path);
+        }
+        let cache = Mutex::new(InfoCache::new(2, usize::MAX));
+        let first = Arc::downgrade(&increment_cached(&paths[0], &cache).unwrap().info);
+        let second = Arc::downgrade(&increment_cached(&paths[1], &cache).unwrap().info);
+        let reread = increment_cached(&paths[0], &cache).unwrap();
+        assert!(Arc::ptr_eq(&first.upgrade().unwrap(), &reread.info), "unchanged metadata is reused after the previous reader finished");
+        drop(reread);
+        increment_cached(&paths[2], &cache).unwrap();
+        assert!(first.upgrade().is_some(), "recently reused metadata stays cached");
+        assert!(second.upgrade().is_none(), "the least recently used metadata is released");
+    }
+    #[test]
+    fn oversized_increment_metadata_bypasses_the_cache_without_truncation() {
+        let scene = Scene::new("cache-oversized");
+        let path = scene.root.join("increment.zip");
+        let bytes = write_info_fixture(&path);
+        let cache = Mutex::new(InfoCache::new(2, bytes - 1));
+        let first = increment_cached(&path, &cache).unwrap();
+        let second = increment_cached(&path, &cache).unwrap();
+        assert_eq!(first.info.state.len(), 256);
+        assert_eq!(second.info.state, first.info.state);
+        assert_eq!(lock(&cache).encoded_bytes, 0);
+        assert!(lock(&cache).entries.is_empty(), "large valid metadata must not consume an unbounded cache slot");
     }
     #[test]
     fn an_increment_holds_only_what_changed_and_the_whole_state() {
@@ -693,6 +864,37 @@ mod tests {
         let error = restore(&scene.app_dir(), "App", &target, &|| false).unwrap_err();
         assert!(error.contains("empty folder"), "{error}");
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"uno");
+    }
+    #[test]
+    fn cancelling_a_restore_mid_file_removes_partial_output() {
+        let scene = Scene::new("restore-cancel-mid-file");
+        scene.write("nested/large.bin", &vec![7u8; 1024 * 1024]);
+        scene.full();
+        let target = scene.root.join("restored");
+        let file = target.join("nested/large.bin");
+        let error = restore(&scene.app_dir(), "App", &target, &|| {
+            fs::metadata(&file).is_ok_and(|meta| meta.len() >= 256 * 1024)
+        })
+        .unwrap_err();
+        assert_eq!(error, super::super::CANCELLED);
+        assert_eq!(fs::read_dir(&target).unwrap().count(), 0, "partial output removed");
+    }
+    #[test]
+    fn cancelling_a_restore_preserves_a_file_that_arrived_in_the_target() {
+        let scene = Scene::new("restore-cancel-preserve");
+        scene.write("a.txt", b"backed up");
+        scene.full();
+        let target = scene.root.join("restored");
+        fs::create_dir(&target).unwrap();
+        let arrived = target.join("arrived.txt");
+        let error = restore(&scene.app_dir(), "App", &target, &|| {
+            fs::write(&arrived, b"created by another writer").unwrap();
+            true
+        })
+        .unwrap_err();
+        assert_eq!(error, super::super::CANCELLED);
+        assert_eq!(fs::read(&arrived).unwrap(), b"created by another writer");
+        assert!(!target.join("a.txt").exists());
     }
     #[test]
     fn a_restore_refuses_an_increment_that_does_not_match_its_record() {

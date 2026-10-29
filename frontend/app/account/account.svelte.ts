@@ -40,6 +40,9 @@ export class AccountState {
   /** The first answer about `owner` is in (until then a page waits). */
   accessKnown = $state(false);
   #started = false;
+  #authEpoch = 0;
+  #accessEpoch = 0;
+  #signingOut = false;
   #applying = false;
   #pushTimer: ReturnType<typeof setTimeout> | undefined;
   readonly signedIn = $derived(this.profile !== null);
@@ -47,13 +50,21 @@ export class AccountState {
   async init() {
     if (!isTauri() || this.#started) return;
     this.#started = true;
+    const epoch = this.#authEpoch;
     onStorageChange((key) => this.#onLocalChange(key));
-    void listen<boolean>(ACCESS_EVENT, (event) => (this.owner = event.payload === true));
+    void listen<boolean>(ACCESS_EVENT, (event) => {
+      this.#accessEpoch++;
+      this.owner = event.payload === true && this.profile !== null;
+      this.accessKnown = true;
+    });
     // Checked again now and then (the backend skips it when it checked lately).
     window.addEventListener("focus", () => void this.refreshAccess());
     try {
-      this.profile = await accountApi.profile();
+      const profile = await accountApi.profile();
+      if (epoch !== this.#authEpoch) return;
+      this.profile = profile;
     } catch {
+      if (epoch !== this.#authEpoch) return;
       this.profile = null;
     }
     if (this.profile) {
@@ -64,72 +75,91 @@ export class AccountState {
     }
   }
   async refreshAccess(recheck = false) {
+    const request = ++this.#accessEpoch;
     if (!isTauri() || !this.profile) {
       this.owner = false;
       this.accessKnown = true;
       return;
     }
+    const epoch = this.#authEpoch;
+    const userId = this.profile.id;
+    const current = () => this.#isCurrent(epoch, userId) && request === this.#accessEpoch;
     try {
-      this.owner = await accountApi.access(recheck);
+      const owner = await accountApi.access(recheck);
+      if (current()) this.owner = owner;
     } catch {
-      this.owner = false;
+      if (current()) this.owner = false;
     } finally {
-      this.accessKnown = true;
+      if (current()) this.accessKnown = true;
     }
   }
   async signIn(provider: Provider) {
-    if (this.signingIn || this.profile) return;
+    if (this.signingIn || this.profile || this.#signingOut) return;
+    const epoch = ++this.#authEpoch;
     this.signingIn = provider;
     this.error = null;
     try {
-      this.profile = await accountApi.signIn(provider);
+      const profile = await accountApi.signIn(provider);
+      if (epoch !== this.#authEpoch) return;
+      this.profile = profile;
       await this.refreshAccess();
+      if (!this.#isCurrent(epoch, profile.id)) return;
       toast.success(`Signed in with ${PROVIDER_NAMES[provider]} as ${this.profile.name ?? this.profile.email ?? "you"}.`);
       await this.sync();
     } catch (error) {
+      if (epoch !== this.#authEpoch) return;
       const text = message(error);
       if (!/cancelled/i.test(text)) {
         this.error = text;
         toast.error(`${PROVIDER_NAMES[provider]} sign-in failed: ${text}`);
       }
     } finally {
-      this.signingIn = null;
+      if (epoch === this.#authEpoch) this.signingIn = null;
     }
   }
   cancelSignIn() {
     void accountApi.cancelSignIn();
   }
   async signOut() {
-    if (!this.profile) return;
-    const ok = await confirm({
-      title: "Sign out?",
-      message:
-        "Your settings stay on this PC and in your account. Changes made while signed out are not synced until you sign in again.",
-      confirmLabel: "Sign out",
-    });
-    if (!ok) return;
-    clearTimeout(this.#pushTimer);
+    if (!this.profile || this.#signingOut) return;
+    this.#signingOut = true;
     try {
+      const ok = await confirm({
+        title: "Sign out?",
+        message:
+          "Your settings stay on this PC and in your account. Changes made while signed out are not synced until you sign in again.",
+        confirmLabel: "Sign out",
+      });
+      if (!ok) return;
+      // Invalidate callbacks even if this same account signs in again later.
+      this.#authEpoch++;
+      this.syncing = false;
+      this.#applying = false;
+      clearTimeout(this.#pushTimer);
       await accountApi.signOut();
+      this.profile = null;
+      this.signingIn = null;
+      this.owner = false;
+      this.accessKnown = true;
+      this.error = null;
+      toast.info("Signed out.");
     } catch (error) {
       toast.error(`Could not sign out: ${message(error)}`);
-      return;
+    } finally {
+      this.#signingOut = false;
     }
-    this.profile = null;
-    this.owner = false;
-    this.error = null;
-    toast.info("Signed out.");
   }
   /** Reads the cloud copy and keeps whichever side changed last. */
   async sync(announce = false) {
-    if (!this.profile || this.syncing) return;
+    if (!this.profile || this.syncing || this.#signingOut) return;
+    const epoch = this.#authEpoch;
     const userId = this.profile.id;
     clearTimeout(this.#pushTimer);
     this.syncing = true;
     this.error = null;
     try {
       const cloud = await accountApi.pull();
-      if (this.profile?.id !== userId) return;
+      if (!this.#isCurrent(epoch, userId)) return;
       const local = localUpdatedAt();
       let pushed = false;
       let pushProjects = false;
@@ -139,6 +169,7 @@ export class AccountState {
         const remoteChanged = cloud.githubReleasesUpdatedAt ?? cloud.updatedAt;
         if (!projectsChanged || remoteChanged > projectsChanged) {
           await applyGithubProjects(cloud.githubReleases);
+          if (!this.#isCurrent(epoch, userId)) return;
           writeRaw(PROJECTS_UPDATED_AT_KEY, remoteChanged);
         } else if (projectsChanged > remoteChanged) {
           pushProjects = true;
@@ -148,24 +179,28 @@ export class AccountState {
         this.#applying = true;
         try {
           const note = await apply(cloud, false);
+          if (!this.#isCurrent(epoch, userId)) return;
           writeRaw(UPDATED_AT_KEY, cloud.updatedAt);
           if (note) toast.info(note);
           else if (announce || local) toast.success("Settings updated from your account.");
         } finally {
-          this.#applying = false;
+          if (epoch === this.#authEpoch) this.#applying = false;
         }
       } else if (!isSnapshot(cloud) || (local && local > cloud.updatedAt)) {
         await this.#push();
+        if (!this.#isCurrent(epoch, userId)) return;
         pushed = true;
       }
       // Upgrade an existing account once, even when its timestamp equals this PC's. Older snapshots never meant "delete all local project paths".
       if (!pushed && this.owner && isSnapshot(cloud) && (cloud.githubReleases == null || pushProjects)) {
         const snapshot = await collect(localUpdatedAt() ?? cloud.updatedAt, true);
+        if (!this.#isCurrent(epoch, userId)) return;
         if (snapshot.githubReleases && (snapshot.githubReleases.paths.length || snapshot.githubReleasesUpdatedAt || pushProjects)) {
           snapshot.updatedAt = new Date().toISOString();
           snapshot.githubReleasesUpdatedAt ??= snapshot.updatedAt;
-          if (this.profile?.id !== userId) return;
+          if (!this.#isCurrent(epoch, userId)) return;
           await accountApi.push(snapshot);
+          if (!this.#isCurrent(epoch, userId)) return;
           writeRaw(UPDATED_AT_KEY, snapshot.updatedAt);
           writeRaw(PROJECTS_UPDATED_AT_KEY, snapshot.githubReleasesUpdatedAt);
         }
@@ -173,9 +208,9 @@ export class AccountState {
       this.#markSynced();
       if (announce) toast.success("Everything is in sync.");
     } catch (error) {
-      this.#fail(error);
+      if (this.#isCurrent(epoch, userId)) this.#fail(error);
     } finally {
-      this.syncing = false;
+      if (epoch === this.#authEpoch) this.syncing = false;
     }
   }
   #onLocalChange(key: string) {
@@ -192,41 +227,58 @@ export class AccountState {
   async #pushNow() {
     if (!this.profile) return;
     // A sync is running: try again after it rather than drop this change.
-    if (this.syncing) {
+    if (this.syncing || this.#signingOut) {
       this.#schedulePush();
       return;
     }
+    const epoch = this.#authEpoch;
+    const userId = this.profile.id;
     this.syncing = true;
     try {
       await this.#push();
+      if (!this.#isCurrent(epoch, userId)) return;
       this.#markSynced();
       this.error = null;
     } catch (error) {
-      this.#fail(error);
+      if (this.#isCurrent(epoch, userId)) this.#fail(error);
     } finally {
-      this.syncing = false;
+      if (epoch === this.#authEpoch) this.syncing = false;
     }
   }
   async #push() {
+    const epoch = this.#authEpoch;
     const userId = this.profile?.id;
     if (!userId) return;
     const updatedAt = localUpdatedAt() ?? new Date().toISOString();
     writeRaw(UPDATED_AT_KEY, updatedAt);
     const snapshot = await collect(updatedAt, this.owner);
-    if (this.profile?.id !== userId) throw new Error("The account changed. Sync again with the current account.");
+    if (!this.#isCurrent(epoch, userId)) throw new Error("The account changed. Sync again with the current account.");
     if (snapshot.githubReleases) snapshot.githubReleasesUpdatedAt ??= updatedAt;
     await accountApi.push(snapshot);
+    if (!this.#isCurrent(epoch, userId)) return;
     if (snapshot.githubReleasesUpdatedAt) writeRaw(PROJECTS_UPDATED_AT_KEY, snapshot.githubReleasesUpdatedAt);
   }
   #markSynced() {
     this.lastSyncedAt = Date.now();
     writeRaw(SYNCED_AT_KEY, JSON.stringify(this.lastSyncedAt));
   }
+  #isCurrent(epoch: number, userId: string) {
+    return epoch === this.#authEpoch && this.profile?.id === userId;
+  }
   #fail(error: unknown) {
     const text = message(error);
     this.error = text;
     // The backend drops a session it can no longer refresh.
-    if (/sign in again|not signed in/i.test(text)) this.profile = null;
+    if (/sign in again|not signed in/i.test(text)) {
+      this.#authEpoch++;
+      this.profile = null;
+      this.owner = false;
+      this.accessKnown = true;
+      this.signingIn = null;
+      this.syncing = false;
+      this.#applying = false;
+      clearTimeout(this.#pushTimer);
+    }
   }
 }
 export const account = new AccountState();

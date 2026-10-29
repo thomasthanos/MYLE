@@ -107,6 +107,57 @@ pub fn kill_tree(pid: u32) {
         .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
+/// A Windows Job Object that kills its processes when closed.
+pub(crate) struct JobObject(windows_sys::Win32::Foundation::HANDLE);
+// SAFETY: a job handle may be used and closed from any thread.
+unsafe impl Send for JobObject {}
+unsafe impl Sync for JobObject {}
+impl JobObject {
+    pub(crate) fn new() -> Option<JobObject> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        // SAFETY: plain Win32 calls; the handle is owned by the returned value and closed in Drop; `info` lives across the call.
+        unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if handle.is_null() {
+                return None;
+            }
+            let job = JobObject(handle);
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            (ok != 0).then_some(job)
+        }
+    }
+    pub(crate) fn assign(&self, process: windows_sys::Win32::Foundation::HANDLE) -> bool {
+        // SAFETY: both handles are valid for the call.
+        unsafe {
+            windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.0, process) != 0
+        }
+    }
+    pub(crate) fn kill(&self) {
+        // SAFETY: the job handle is valid until Drop.
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1);
+        }
+    }
+}
+impl Drop for JobObject {
+    fn drop(&mut self) {
+        // SAFETY: closing the handle we own; the job's processes end with it.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

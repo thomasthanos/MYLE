@@ -283,6 +283,8 @@ class SpotifyHubState {
     } finally {
       this.startingAction = null;
       this.liveJob = null;
+      // A page revisit may have cached this job; completion must release it even if detection fails.
+      if (this.snapshot) this.snapshot.activeJob = null;
       this.stopping = false;
       operationGate.end("spotify-hub");
       await this.load(true);

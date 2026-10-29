@@ -273,6 +273,26 @@ test("a late scan settings response cannot overwrite a newer preference", async 
   wait.resolve(old); await settle();
   assert.equal(state.page.settings.schedule, "daily");
 });
+
+for (const method of ["scan", "refresh", "discover"]) {
+  test(`a delayed ${method} result cannot restore history from before account folder recovery`, async () => {
+    const oldScan = clone(scan());
+    const pending = deferred(); const calls = [];
+    const folder = "G:\\Recovered backup fixtures";
+    api.scan = async (mode) => {
+      calls.push(mode);
+      if (calls.length === 1) return pending.promise;
+      return scan({ backupFolder: folder, inBackup: [entry("recovered", { hasBackup: true, status: "backupOnly", snapshots: [{ id: "recovered.zip", timestamp: "2026-10-29", bytes: 50, label: null, isSafety: false }] })] });
+    };
+    const reading = state[method](); await settle();
+    await state.applySyncedSettings({ ...state.page.settings, backupFolder: folder });
+    pending.resolve(oldScan); await reading; await settle();
+    assert.equal(state.page.settings.backupFolder, folder);
+    assert.equal(state.scanResult.backupFolder, folder);
+    assert.deepEqual(state.scanResult.inBackup.map(game => game.id), ["recovered"]);
+    assert.equal(calls.length, 2, "the recovered folder is checked after the obsolete scan releases its lock");
+  });
+}
 test("a refresh refused while the scheduled backup runs waits for it, then shows what it backed up", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let running = true; const scans = [];

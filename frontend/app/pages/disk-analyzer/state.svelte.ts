@@ -29,6 +29,7 @@ export type View = "folders" | "files" | "types";
 /** Children asked for at once. */
 const PAGE = 500;
 const TOP_FILES = 1000;
+const FILTER_DELAY_MS = 150;
 /** How many folder levels the treemap opens. */
 const DEPTH = 10;
 /** A folder's entries smaller than about this many pixels share one block. */
@@ -104,12 +105,17 @@ class DiskAnalyzerState {
   skipped = $state.raw<Skipped[]>([]);
   error = $state<string | null>(null);
   #anchor: number | null = null;
+  #loadPromise: Promise<void> | undefined;
   #area = { width: 0, height: 0 };
   #treemapArea = 0;
   #treemapRequest = 0;
   #navigationRequest = 0;
+  #treeRequest = 0;
+  #scanRequest = 0;
   #filesRequest = 0;
+  #filterTimer: ReturnType<typeof setTimeout> | undefined;
   #typesRequest = 0;
+  #childRequests = new Map<number, { scanId: number; generation: number; promise: Promise<void> }>();
   /** Bumped when the size mode or the sort changes: older answers are dropped. */
   #generation = 0;
   readonly scanId = $derived(this.done?.scanId ?? null);
@@ -127,14 +133,22 @@ class DiskAnalyzerState {
   readonly currentSize = $derived(this.trail.length ? sizeOf(this.trail[this.trail.length - 1], this.sizeMode) : 0);
   async load() {
     if (!isTauri()) return;
-    try {
-      this.drives = await diskApi.drives();
-      if (!this.target) {
-        const first = this.drives.find((d) => d.system) ?? this.drives.find((d) => d.kind === "fixed") ?? this.drives[0];
-        this.target = first?.root ?? null;
+    if (this.#loadPromise) return this.#loadPromise;
+    this.#loadPromise = (async () => {
+      try {
+        this.drives = await diskApi.drives();
+        if (!this.target) {
+          const first = this.drives.find((d) => d.system) ?? this.drives.find((d) => d.kind === "fixed") ?? this.drives[0];
+          this.target = first?.root ?? null;
+        }
+      } catch (err) {
+        this.error = message(err);
       }
-    } catch (err) {
-      this.error = message(err);
+    })();
+    try {
+      await this.#loadPromise;
+    } finally {
+      this.#loadPromise = undefined;
     }
   }
   /** Re-reads the saved view choices (after account sync replaced them). */
@@ -161,13 +175,15 @@ class DiskAnalyzerState {
   async scan() {
     const root = this.target;
     if (!root || this.busy) return;
+    const request = ++this.#scanRequest;
     this.#reset();
     this.phase = "scanning";
     this.progress = { files: 0, dirs: 0, bytes: 0, alloc: 0, current: root };
     try {
       const done = await diskApi.scan(root, this.fastScan, (e) => {
-        if (e.event === "progress") this.progress = e.data;
+        if (request === this.#scanRequest && e.event === "progress") this.progress = e.data;
       });
+      if (request !== this.#scanRequest) return;
       if (!done) {
         this.phase = "idle";
         toast.info("Scan cancelled.");
@@ -180,11 +196,12 @@ class DiskAnalyzerState {
       this.phase = "ready";
       await this.#afterScan();
     } catch (err) {
+      if (request !== this.#scanRequest) return;
       this.phase = "idle";
       this.error = message(err);
       toast.error(`Scan failed: ${message(err)}`);
     } finally {
-      this.progress = null;
+      if (request === this.#scanRequest) this.progress = null;
     }
   }
   cancel() {
@@ -195,8 +212,14 @@ class DiskAnalyzerState {
     writeJson(KEY.fast, on);
   }
   #reset() {
+    this.#childRequests.clear();
+    clearTimeout(this.#filterTimer);
+    this.#filterTimer = undefined;
     this.#navigationRequest++;
+    this.#treeRequest++;
     this.#treemapRequest++;
+    this.#filesRequest++;
+    this.#typesRequest++;
     this.done = null;
     this.root = null;
     this.current = 0;
@@ -206,6 +229,7 @@ class DiskAnalyzerState {
     this.expanded.clear();
     this.selection.clear();
     this.focused = null;
+    this.scrollTo = null;
     this.#anchor = null;
     this.topFiles = null;
     this.extensions = null;
@@ -219,10 +243,12 @@ class DiskAnalyzerState {
     try {
       await Promise.all([this.#loadRoot(), this.#loadTrail(done.rootId), this.loadChildren(done.rootId)]);
     } catch (err) {
-      toast.error(`The results could not be read: ${message(err)}`);
+      if (this.scanId === done.scanId) toast.error(`The results could not be read: ${message(err)}`);
       return;
     }
+    if (this.scanId !== done.scanId) return;
     await this.loadTreemap();
+    if (this.scanId !== done.scanId) return;
     if (this.view === "files") void this.loadTopFiles();
     if (this.view === "types") void this.loadExtensions();
   }
@@ -235,19 +261,31 @@ class DiskAnalyzerState {
   async #loadTrail(id: number) {
     const scanId = this.scanId;
     if (scanId === null) return;
+    const request = this.#navigationRequest;
     const trail = await diskApi.trail(scanId, id);
-    if (this.scanId === scanId) this.trail = trail;
+    if (this.scanId === scanId && request === this.#navigationRequest) this.trail = trail;
   }
   // ------------------------------------------------------------------ The folder list
   /** Loads a folder's children, or its next page (`more`). */
   async loadChildren(id: number, more = false, quiet = false) {
     const scanId = this.scanId;
     if (scanId === null) return;
+    const generation = this.#generation;
+    const pending = this.#childRequests.get(id);
+    if (pending?.scanId === scanId && pending.generation === generation) return pending.promise;
     const before = this.pages.get(id);
-    if (before?.loading) return;
     const offset = more && before ? before.items.length : 0;
     this.#setPage(id, { items: [], total: 0, rest: null, ...before, loading: true });
-    const generation = this.#generation;
+    const promise = this.#readChildren(scanId, generation, id, offset, quiet);
+    const request = { scanId, generation, promise };
+    this.#childRequests.set(id, request);
+    try {
+      await promise;
+    } finally {
+      if (this.#childRequests.get(id) === request) this.#childRequests.delete(id);
+    }
+  }
+  async #readChildren(scanId: number, generation: number, id: number, offset: number, quiet: boolean) {
     try {
       const page = await diskApi.children(scanId, id, offset, PAGE, this.sort, this.sizeMode);
       if (this.scanId !== scanId || generation !== this.#generation) return;
@@ -311,11 +349,15 @@ class DiskAnalyzerState {
   async showInTree(id: number) {
     const scanId = this.scanId;
     if (scanId === null || id === SMALLER_ID) return;
+    const request = ++this.#treeRequest;
+    const current = () => request === this.#treeRequest && this.scanId === scanId;
     try {
       const trail = await diskApi.trail(scanId, id);
+      if (!current()) return;
       for (const crumb of trail.slice(0, -1)) {
         this.expanded.add(crumb.id);
-        if (!this.pages.has(crumb.id)) await this.loadChildren(crumb.id);
+        if (!this.pages.has(crumb.id) || this.pages.get(crumb.id)?.loading) await this.loadChildren(crumb.id);
+        if (!current()) return;
       }
       // Past the first page of its folder: load more until it shows.
       const parent = trail.at(-2)?.id;
@@ -323,6 +365,7 @@ class DiskAnalyzerState {
         const page = this.pages.get(parent);
         if (!page || !page.rest || page.items.some((item) => item.id === id)) break;
         await this.loadChildren(parent, true);
+        if (!current()) return;
       }
       this.focused = id;
       this.scrollTo = { id };
@@ -378,6 +421,8 @@ class DiskAnalyzerState {
       if (request !== this.#navigationRequest || this.scanId !== scanId) return;
       this.current = id;
       this.trail = trail;
+      this.#typesRequest++;
+      this.extensions = null;
     } catch (err) {
       if (request !== this.#navigationRequest || this.scanId !== scanId) return;
       toast.error(`That folder could not be shown: ${message(err)}`);
@@ -398,11 +443,13 @@ class DiskAnalyzerState {
     if (save) writeJson(KEY.sizeMode, mode);
     if (this.scanId === null) return;
     this.#generation++;
+    this.#filesRequest++;
+    this.#typesRequest++;
     await Promise.all([
       this.#reloadPages(),
       this.loadTreemap(),
-      this.topFiles ? this.loadTopFiles() : null,
-      this.extensions ? this.loadExtensions() : null,
+      this.topFiles || this.view === "files" ? this.loadTopFiles() : null,
+      this.extensions || this.view === "types" ? this.loadExtensions() : null,
     ]);
   }
   setView(view: View) {
@@ -412,6 +459,8 @@ class DiskAnalyzerState {
     if (view === "types" && !this.extensions) void this.loadExtensions();
   }
   async loadTopFiles() {
+    clearTimeout(this.#filterTimer);
+    this.#filterTimer = undefined;
     const scanId = this.scanId;
     if (scanId === null) return;
     const request = ++this.#filesRequest;
@@ -419,22 +468,32 @@ class DiskAnalyzerState {
       const files = await diskApi.topFiles(scanId, TOP_FILES, this.sizeMode, this.filter.trim() || null);
       if (request === this.#filesRequest && this.scanId === scanId) this.topFiles = files;
     } catch (err) {
-      if (request === this.#filesRequest) toast.error(`The largest files could not be listed: ${message(err)}`);
+      if (request === this.#filesRequest && this.scanId === scanId) toast.error(`The largest files could not be listed: ${message(err)}`);
     }
   }
   setFilter(text: string) {
+    const before = this.filter.trim();
     this.filter = text;
-    void this.loadTopFiles();
+    if (before === text.trim()) return;
+    this.#filesRequest++;
+    clearTimeout(this.#filterTimer);
+    this.#filterTimer = undefined;
+    if (this.scanId === null) return;
+    this.#filterTimer = setTimeout(() => {
+      this.#filterTimer = undefined;
+      void this.loadTopFiles();
+    }, FILTER_DELAY_MS);
   }
   async loadExtensions() {
     const scanId = this.scanId;
     if (scanId === null) return;
     const request = ++this.#typesRequest;
+    const folder = this.current;
     try {
-      const stats = await diskApi.extensions(scanId, this.current, this.sizeMode);
-      if (request === this.#typesRequest && this.scanId === scanId) this.extensions = stats;
+      const stats = await diskApi.extensions(scanId, folder, this.sizeMode);
+      if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) this.extensions = stats;
     } catch (err) {
-      if (request === this.#typesRequest) toast.error(`File types could not be counted: ${message(err)}`);
+      if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) toast.error(`File types could not be counted: ${message(err)}`);
     }
   }
   // ------------------------------------------------------------------ Explorer, the path, the Recycle Bin

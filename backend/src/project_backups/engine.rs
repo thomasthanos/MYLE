@@ -144,8 +144,11 @@ pub(crate) fn backup_project(
     let buffers = vec![(BACKUP_INFO_FILE.to_string(), info)];
     let mut completeness = |written: &archive::Written| -> Result<(), Failure> {
         sink.stage(Stage::CheckingCompleteness);
+        if sink.cancelled() {
+            return Err(Failure::Cancelled);
+        }
         let archived: HashSet<String> = written.manifest.keys().cloned().collect();
-        let missing = walk::audit(&source, &rules, &skip_dirs, &archived, now);
+        let missing = walk::audit(&source, &rules, &skip_dirs, &archived, now, &cancelled)?;
         if missing.is_empty() {
             return Ok(());
         }
@@ -631,6 +634,47 @@ mod tests {
         (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect()
+    }
+    #[test]
+    fn cancellation_during_completeness_removes_staged_archives() {
+        use std::cell::Cell;
+        struct CancelAtAudit(Cell<bool>);
+        impl Sink for CancelAtAudit {
+            fn stage(&self, stage: Stage) {
+                if stage == Stage::CheckingCompleteness {
+                    self.0.set(true);
+                }
+            }
+            fn progress(&self, _: u64, _: u64, _: u64, _: u64) {}
+            fn cancelled(&self) -> bool { self.0.get() }
+        }
+        for staged in [false, true] {
+            let root = temp(if staged { "cancel-audit-staged" } else { "cancel-audit-direct" });
+            let source = root.join("source");
+            put(&source, "a.txt", "a");
+            let backup_root = root.join("backups");
+            let staging = root.join("staging");
+            let project = Project {
+                app_name: "App".into(),
+                source_path: source.display().to_string(),
+                ..Project::default()
+            };
+            let request = BackupRequest {
+                project: &project, rules: input(), backup_root: &backup_root,
+                staging: staged.then_some(staging.as_path()), app_version: "test", delays: &[1],
+            };
+            let result = backup_project(&request, &CancelAtAudit(Cell::new(false)));
+            assert!(matches!(result, Err(Failure::Cancelled)), "cancelled completeness must not publish a backup: {result:?}");
+            let app_dir = backup_root.join("App");
+            assert!(list_backups(&app_dir, "App").is_empty());
+            for month in fs::read_dir(&app_dir).unwrap().flatten() {
+                assert_eq!(fs::read_dir(month.path()).unwrap().count(), 0, "partial archive removed");
+            }
+            if staged {
+                assert_eq!(fs::read_dir(&staging).unwrap().count(), 0, "local staging archive removed");
+            }
+            let _ = fs::remove_dir_all(root);
+        }
     }
     #[test]
     fn a_backup_lands_where_backup_projects_puts_it_and_numbering_continues() {

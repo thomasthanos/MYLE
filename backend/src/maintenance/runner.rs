@@ -219,7 +219,7 @@ impl Tail {
         true
     }
     fn finish(&mut self, on_line: &mut (dyn FnMut(Line) + Send)) {
-        if let Some(line) = self.splitter.finish() {
+        for line in self.splitter.finish() {
             on_line(line);
         }
     }
@@ -229,7 +229,7 @@ fn emit_all(bytes: &[u8], on_line: &mut (dyn FnMut(Line) + Send)) {
     for line in splitter.feed(bytes) {
         on_line(line);
     }
-    if let Some(line) = splitter.finish() {
+    for line in splitter.finish() {
         on_line(line);
     }
 }
@@ -323,6 +323,15 @@ fn ps_quote(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::maintenance::tasks;
+    #[test]
+    fn short_tool_output_keeps_separate_lines_in_the_callback() {
+        let utf16: Vec<u8> = "a\nb\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        for bytes in [b"a\nb\n".to_vec(), utf16] {
+            let mut lines = Vec::new();
+            emit_all(&bytes, &mut |line| lines.push(line.text));
+            assert_eq!(lines, ["a", "b"]);
+        }
+    }
     #[test]
     fn the_cmd_tail_quotes_the_program_and_the_log_but_not_the_arguments() {
         let tail = cmd_tail(

@@ -592,7 +592,7 @@ async fn run_streaming(
             on_line(&line);
         }
     }
-    if let Some(line) = splitter.finish() {
+    for line in splitter.finish() {
         on_line(&line);
     }
     let status = child.wait().await.map_err(err)?;

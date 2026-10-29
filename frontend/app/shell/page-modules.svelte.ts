@@ -3,7 +3,7 @@ import type { PageModule } from "../pages/registry";
 
 /** UI modules are shared by foreground navigation and background preloading. */
 export class PageModules {
-  loaded = $state.raw<Record<string, Component>>({});
+  loaded = $state.raw<Record<string, Component | undefined>>({});
   errors = $state.raw<Record<string, string | undefined>>({});
   #pending = new Map<string, Promise<void>>();
 

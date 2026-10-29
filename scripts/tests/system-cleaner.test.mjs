@@ -131,6 +131,26 @@ test("a scan leaves a tick the user made before it alone", async () => {
   await state.scan();
   assert.equal(state.allSelected, true, "and the next scan ticks everything again");
 });
+test("a failed category scan keeps ownership until its Downloads preview finishes", async () => {
+  let finishDownloads;
+  cleanerApi.categories = async () => categories;
+  cleanerApi.scan = async () => { throw new Error("category scan failed"); };
+  cleanerApi.scanElevated = async () => ({ bytes: 0, locked: [] });
+  cleanerApi.downloadsPreview = () => new Promise((resolve) => { finishDownloads = resolve; });
+  await state.load();
+  const scanning = state.scan();
+  await settle();
+  try {
+    assert.equal(state.busy, true, "another scan cannot replace a preview that is still running");
+    assert.equal(state.phase, "scanning");
+  } finally {
+    finishDownloads({ folder: "D:\\Downloads", items: [], total: 80, kept: [] });
+    await scanning;
+  }
+  assert.equal(state.busy, false);
+  assert.equal(state.sizes.downloads.bytes, 80);
+  assert.equal(state.error, "category scan failed");
+});
 test("what stays in use is told in bytes, without counting the admin pass twice", async () => {
   await scanAll();
   cleanerApi.clean = async (ids, onEvent) => {

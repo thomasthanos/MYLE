@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use super::parse::{Diagnostic, Parser, Severity, strip_ansi};
-use crate::apps::process::hidden;
+use crate::apps::process::{JobObject, hidden};
 use crate::console::LineSplitter;
 use crate::github_releases::store::BuildStats;
 /// Diagnostics kept for the page at most (the log has them all).
@@ -68,57 +68,6 @@ pub struct BuildOutcome {
     pub log_path: Option<String>,
     /// The build could not start (or another failure outside it).
     pub failure: Option<String>,
-}
-/// A Windows Job Object that kills its processes when closed.
-struct JobObject(windows_sys::Win32::Foundation::HANDLE);
-// SAFETY: a job handle may be used and closed from any thread.
-unsafe impl Send for JobObject {}
-unsafe impl Sync for JobObject {}
-impl JobObject {
-    fn new() -> Option<JobObject> {
-        use windows_sys::Win32::System::JobObjects::{
-            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-        // SAFETY: plain Win32 calls; the handle is owned by the returned value and closed in Drop; `info` lives across the call.
-        unsafe {
-            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if handle.is_null() {
-                return None;
-            }
-            let job = JobObject(handle);
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let ok = SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const std::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            );
-            (ok != 0).then_some(job)
-        }
-    }
-    fn assign(&self, process: windows_sys::Win32::Foundation::HANDLE) -> bool {
-        // SAFETY: both handles are valid for the call.
-        unsafe {
-            windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.0, process) != 0
-        }
-    }
-    fn kill(&self) {
-        // SAFETY: the job handle is valid until Drop.
-        unsafe {
-            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1);
-        }
-    }
-}
-impl Drop for JobObject {
-    fn drop(&mut self) {
-        // SAFETY: closing the handle we own; the job's processes end with it.
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.0);
-        }
-    }
 }
 /// An estimate of how far a build is, from the last good one: its time and
 /// the lines it printed, never past 97 % before the end.
@@ -356,7 +305,7 @@ pub(crate) async fn run(
                 }
             }
             Ok(Some(Chunk::OutDone)) => {
-                if let Some(line) = out_split.finish() {
+                for line in out_split.finish() {
                     handle_line(
                         line.text,
                         false,
@@ -371,7 +320,7 @@ pub(crate) async fn run(
                 open -= 1;
             }
             Ok(Some(Chunk::ErrDone)) => {
-                if let Some(line) = err_split.finish() {
+                for line in err_split.finish() {
                     handle_line(
                         line.text,
                         true,

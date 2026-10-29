@@ -94,6 +94,17 @@ fn scan_with(
     threads: usize,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<Option<Tree>, String> {
+    scan_with_reader(root, scan_id, cancel, threads, on_progress, &read_dir)
+}
+
+fn scan_with_reader(
+    root: &Path,
+    scan_id: u64,
+    cancel: &AtomicBool,
+    threads: usize,
+    on_progress: &mut dyn FnMut(&Progress),
+    read: &(impl Fn(&[u16], &mut [u64]) -> Result<Listing, u32> + Sync),
+) -> Result<Option<Tree>, String> {
     let shown = display_path(root);
     let modified = std::fs::metadata(root)
         .ok()
@@ -110,10 +121,14 @@ fn scan_with(
         stop: false,
     });
     let ready = Condvar::new();
-    let (sender, results) = mpsc::channel::<Read>();
     let mut progress = Progress::default();
     let mut throttle = Throttle::new(PROGRESS_EVERY, Instant::now);
     let outcome = std::thread::scope(|scope| {
+        // Listings can be large. Backpressure keeps finished reads bounded by
+        // the worker count while this thread adds names and nodes to the tree.
+        // Keep the receiver inside this scope body: on cancellation/error it
+        // drops before scoped workers are joined, releasing any blocked send.
+        let (sender, results) = mpsc::sync_channel::<Read>(threads.saturating_mul(2).max(1));
         for _ in 0..threads {
             let sender = sender.clone();
             let (work, ready) = (&work, &ready);
@@ -137,7 +152,7 @@ fn scan_with(
                         }
                     }
                     let job = local_jobs.pop().unwrap();
-                    let listing = if cancel.load(Ordering::Relaxed) { Err(0) } else { read_dir(&job.path, &mut buffer) };
+                    let listing = if cancel.load(Ordering::Relaxed) { Err(0) } else { read(&job.path, &mut buffer) };
                     if sender.send(Read { id: job.id, path: job.path, listing }).is_err() {
                         return;
                     }
@@ -577,6 +592,65 @@ mod tests {
         let result = scan_with(&super::super::tree::long_path(&temp.0), 1, &cancel, 1, &mut on_progress).unwrap();
         assert!(result.is_none());
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn slow_tree_aggregation_bounds_ready_listings_and_cancels_without_a_blocked_sender() {
+        use std::sync::Arc;
+        let reads = Arc::new(AtomicUsize::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (paused, pause_seen) = mpsc::channel();
+        let (resume, resume_scan) = mpsc::channel();
+        let (filled, queue_ready) = mpsc::channel();
+        let (overrun, overrun_seen) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
+        let worker = {
+            let reads = Arc::clone(&reads);
+            let cancel = Arc::clone(&cancel);
+            std::thread::spawn(move || {
+                let read = |_: &[u16], _: &mut [u64]| {
+                    let number = reads.fetch_add(1, Ordering::Relaxed);
+                    let mut listing = Listing::default();
+                    if number == 0 {
+                        for i in 0..128 {
+                            let name = format!("folder-{i}");
+                            listing.push(name.as_bytes(), Entry {
+                                name_len: name.len() as u32,
+                                kind: Kind::Dir,
+                                size: 0,
+                                alloc: 0,
+                                modified: 0,
+                                system: false,
+                            });
+                        }
+                    } else {
+                        if number == 3 {
+                            let _ = filled.send(());
+                        }
+                        if number == 16 {
+                            let _ = overrun.send(());
+                        }
+                    }
+                    Ok(listing)
+                };
+                let mut on_progress = |_: &Progress| {
+                    let _ = paused.send(());
+                    resume_scan.recv_timeout(Duration::from_secs(10)).unwrap();
+                };
+                let result = scan_with_reader(Path::new(r"C:\myle-synthetic-listings"), 1, &cancel, 1, &mut on_progress, &read);
+                let _ = finished.send(result.map(|tree| tree.is_some()));
+            })
+        };
+        pause_seen.recv_timeout(Duration::from_secs(5)).unwrap();
+        queue_ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let ran_ahead = overrun_seen.recv_timeout(Duration::from_millis(100)).is_ok();
+        let retained = reads.load(Ordering::Relaxed);
+        cancel.store(true, Ordering::Relaxed);
+        resume.send(()).unwrap();
+        assert!(!completion.recv_timeout(Duration::from_secs(5)).unwrap().unwrap());
+        worker.join().unwrap();
+        assert!(!ran_ahead, "directory workers must wait when tree aggregation is paused");
+        assert!(retained <= 4, "one worker retained {retained} listings instead of a worker-sized queue");
     }
     /// Run by hand for the numbers in the PR: a whole drive (MYLE_SCAN_ROOT,
     /// or C:\), its time, its counts and what the results hold in memory.

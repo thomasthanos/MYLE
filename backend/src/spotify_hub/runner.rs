@@ -125,10 +125,10 @@ pub async fn run_program(
             Ok(None) | Err(_) => open = false,
         }
     }
-    if let Some(line) = stdout_splitter.finish() {
+    for line in stdout_splitter.finish() {
         emit_terminal_line(line, reporter, &mut stdout_display, &mut stderr_display);
     }
-    if let Some(line) = stderr_splitter.finish() {
+    for line in stderr_splitter.finish() {
         emit_terminal_line(line, reporter, &mut stderr_display, &mut stdout_display);
     }
     if cancellation.is_cancelled() {

@@ -42,6 +42,15 @@ impl LineSplitter {
             }
         }
         let text = self.take_decodable();
+        let mut lines = self.process_text(&text);
+        // Show the line in progress, so a repainting percentage is live.
+        if !self.current.is_empty() {
+            lines.push(self.draw());
+        }
+        lines
+    }
+    /// Apply the same terminal controls during streaming and final decoding.
+    fn process_text(&mut self, text: &str) -> Vec<Line> {
         let mut lines = Vec::new();
         for c in text.chars() {
             match c {
@@ -64,15 +73,14 @@ impl LineSplitter {
                 }
             }
         }
-        // Show the line in progress, so a repainting percentage is live.
-        if !self.current.is_empty() {
-            lines.push(self.draw());
-        }
         lines
     }
-    /// The last line, once the process has exited. Idempotent.
-    pub fn finish(&mut self) -> Option<Line> {
-        let encoding = self.encoding.or_else(|| sniff_final(&self.bytes))?;
+    /// All remaining lines once the process has exited. A short run may still
+    /// be waiting for encoding detection and contain several lines. Idempotent.
+    pub fn finish(&mut self) -> Vec<Line> {
+        let Some(encoding) = self.encoding.or_else(|| sniff_final(&self.bytes)) else {
+            return Vec::new();
+        };
         self.encoding = Some(encoding);
         let mut text = self.take_decodable();
         // A "character" still cut off once the output has ended was never UTF-8: it is the last letter of OEM text.
@@ -80,20 +88,18 @@ impl LineSplitter {
             self.encoding = Some(Encoding::Oem);
             text += &self.take_decodable();
         }
-        for c in text.chars() {
-            if c == '\u{8}' {
-                self.current.pop();
-                continue;
-            }
-            if !matches!(c, '\r' | '\n' | '\u{0}' | '\u{feff}') {
-                if self.overwrite {
-                    self.current.clear();
-                    self.overwrite = false;
-                }
-                self.current.push(c);
+        if !self.bytes.is_empty() && self.encoding == Some(Encoding::Utf16Le) {
+            let tail = std::mem::take(&mut self.bytes);
+            text += &decode(&tail, Encoding::Utf16Le);
+            if !tail.len().is_multiple_of(2) {
+                text.push('\u{fffd}');
             }
         }
-        (!self.current.is_empty()).then(|| self.commit())
+        let mut lines = self.process_text(&text);
+        if !self.current.is_empty() {
+            lines.push(self.commit());
+        }
+        lines
     }
     /// Ends the current line and starts a new one.
     fn commit(&mut self) -> Line {
@@ -359,14 +365,47 @@ mod tests {
     fn finish_emits_the_tail_once() {
         let mut splitter = LineSplitter::default();
         splitter.feed(b"a full line here\nand a partial one");
-        assert_eq!(splitter.finish().unwrap().text, "and a partial one");
-        assert_eq!(splitter.finish(), None);
+        assert_eq!(splitter.finish().pop().unwrap().text, "and a partial one");
+        assert!(splitter.finish().is_empty());
     }
     #[test]
     fn finish_decodes_output_too_short_to_sniff() {
         let mut splitter = LineSplitter::default();
         assert!(splitter.feed(b"Ok").is_empty());
-        assert_eq!(splitter.finish().unwrap().text, "Ok");
+        assert_eq!(splitter.finish().pop().unwrap().text, "Ok");
+    }
+    #[test]
+    fn short_multiline_output_keeps_its_line_boundaries_at_eof() {
+        for bytes in [b"a\nb\n".to_vec(), utf16("a\nb\n")] {
+            let mut splitter = LineSplitter::default();
+            let mut lines = splitter.feed(&bytes);
+            lines.extend(splitter.finish());
+            assert_eq!(drawn(&lines), ["a", "b"]);
+            assert!(splitter.finish().is_empty());
+        }
+    }
+    #[test]
+    fn short_repaints_and_blank_lines_are_preserved_at_eof() {
+        let mut splitter = LineSplitter::default();
+        let mut lines = splitter.feed(b"a\rbb\n\nc");
+        lines.extend(splitter.finish());
+        assert_eq!(drawn(&lines), ["bb", "", "c"]);
+    }
+    #[test]
+    fn a_final_utf16_surrogate_is_decoded_lossily_instead_of_lost() {
+        for (tail, expected) in [
+            (vec![0x00, 0xD8], "message \u{fffd}"),
+            (vec![b'x'], "message \u{fffd}"),
+            (vec![0x00, 0xD8, b'x'], "message \u{fffd}\u{fffd}"),
+        ] {
+            let mut bytes = utf16("message ");
+            bytes.extend(tail);
+            let mut splitter = LineSplitter::default();
+            let mut lines = splitter.feed(&bytes);
+            lines.extend(splitter.finish());
+            assert_eq!(drawn(&lines), [expected]);
+            assert!(splitter.bytes.is_empty());
+        }
     }
     #[test]
     fn a_tool_that_never_writes_a_newline_cannot_grow_the_buffer() {
