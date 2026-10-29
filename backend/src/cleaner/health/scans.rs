@@ -644,7 +644,7 @@ fn leftovers(tick: Tick) -> Result<Vec<(Finding, Target)>, String> {
                 let mut findings = Vec::new();
                 for entry in dirs {
                     let done = progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    if done % 3 == 0 || done == total_tasks {
+                    if done.is_multiple_of(3) || done == total_tasks {
                         tick(0.4 + 0.55 * (done as f32 / total_tasks as f32));
                     }
                     let path = entry.path();
