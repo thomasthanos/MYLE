@@ -287,6 +287,25 @@ export type Job = "backup" | "compare" | "restore";
 export const CHANGES_EVENT = "project-backups-changes";
 /** Stands for the project folder itself in a comparison. */
 export const SOURCE_ID = "source";
+
+export interface CandidateFolder {
+  path: string;
+  name: string;
+  gitRemote: string | null;
+  packageName: string | null;
+}
+export interface ProjectRelocation {
+  projectId: string;
+  newSourcePath: string;
+}
+export interface DriveInfo {
+  letter: string;
+  root: string;
+  label: string;
+  filesystem: string;
+  total: number;
+  free: number;
+}
 export type OpenTarget = "root" | "backups" | "source";
 function channel(onEvent: (event: ProjectBackupsEvent) => void): Channel<ProjectBackupsEvent> {
   const value = new Channel<ProjectBackupsEvent>();
@@ -336,4 +355,10 @@ export const projectBackupsApi = {
     invoke<FileDiff>("project_backups_file_diff", { projectId, oldId, newId, oldName, newName }),
   open: (target: OpenTarget, projectId: string | null = null, backupId: string | null = null) =>
     invoke<void>("project_backups_open", { target, projectId, backupId }),
+  scanCandidates: (root: string, maxDepth = 3) =>
+    invoke<CandidateFolder[]>("project_backups_scan_candidates", { root, maxDepth }),
+  relocateProjects: (replacements: ProjectRelocation[]) =>
+    invoke<PageState>("project_backups_relocate_projects", { replacements }),
+  getDrives: () => invoke<DriveInfo[]>("disk_analyzer_drives"),
+
 };

@@ -1053,6 +1053,214 @@ pub async fn project_backups_open(
         tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| error.to_string())
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateFolder {
+    pub path: String,
+    pub name: String,
+    pub git_remote: Option<String>,
+    pub package_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRelocation {
+    pub project_id: String,
+    pub new_source_path: String,
+}
+
+fn scan_folder_for_candidates(
+    dir: &Path,
+    current_depth: usize,
+    max_depth: usize,
+    results: &mut Vec<CandidateFolder>,
+) {
+    if results.len() >= 500 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if results.len() >= 500 {
+            break;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let folder_name = entry.file_name().to_string_lossy().into_owned();
+        let lower = folder_name.to_ascii_lowercase();
+        if lower.starts_with('.') && lower != ".github" {
+            continue;
+        }
+        if matches!(
+            lower.as_str(),
+            "node_modules"
+                | "target"
+                | "dist"
+                | "dist-ssr"
+                | "build"
+                | "bin"
+                | "obj"
+                | ".venv"
+                | "venv"
+                | "env"
+                | "$recycle.bin"
+                | "system volume information"
+                | "windows"
+                | "program files"
+                | "program files (x86)"
+                | "appdata"
+                | "vendor"
+                | ".gradle"
+                | ".idea"
+                | ".vs"
+                | "packages"
+                | "bower_components"
+                | "coverage"
+        ) {
+            continue;
+        }
+        let path = entry.path();
+        let is_git = path.join(".git").exists();
+        let has_package_json = path.join("package.json").is_file();
+        let has_cargo = path.join("Cargo.toml").is_file();
+        let has_manifest = path.join("manifest.json").is_file();
+        let has_pyproject = path.join("pyproject.toml").is_file();
+        let is_candidate = is_git
+            || has_package_json
+            || has_cargo
+            || has_manifest
+            || has_pyproject
+            || current_depth <= 1;
+
+        if is_candidate {
+            let mut git_remote = None;
+            if is_git {
+                git_remote = read_git_remote(&path.join(".git").join("config"));
+            }
+            let mut package_name = None;
+            if has_package_json {
+                package_name = read_json_name(&path.join("package.json"));
+            } else if has_manifest {
+                package_name = read_json_name(&path.join("manifest.json"));
+            } else if has_cargo {
+                package_name = read_cargo_name(&path.join("Cargo.toml"));
+            }
+            results.push(CandidateFolder {
+                path: path.display().to_string(),
+                name: folder_name.clone(),
+                git_remote,
+                package_name,
+            });
+        }
+        if current_depth < max_depth {
+            scan_folder_for_candidates(&path, current_depth + 1, max_depth, results);
+        }
+    }
+}
+
+fn read_git_remote(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let mut in_origin = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_origin = trimmed.eq_ignore_ascii_case(r#"[remote "origin"]"#);
+        } else if in_origin && trimmed.to_ascii_lowercase().starts_with("url =") {
+            let url = trimmed["url =".len()..].trim().to_string();
+            return Some(url);
+        }
+    }
+    None
+}
+
+fn read_json_name(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    value.get("name").and_then(|v| v.as_str()).map(ToString::to_string)
+}
+
+fn read_cargo_name(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("name =") {
+            let name = trimmed["name =".len()..].trim().trim_matches('"').trim_matches('\'');
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Scans a root directory for candidate project folders.
+#[tauri::command]
+pub async fn project_backups_scan_candidates(
+    root: String,
+    max_depth: Option<usize>,
+) -> Result<Vec<CandidateFolder>, String> {
+    blocking(move || {
+        let root_path = PathBuf::from(root.trim());
+        if !root_path.is_dir() {
+            return Err("The specified root path is not an existing folder.".into());
+        }
+        let depth = max_depth.unwrap_or(3);
+        let mut candidates = Vec::new();
+        scan_folder_for_candidates(&root_path, 0, depth, &mut candidates);
+        candidates.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(candidates)
+    })
+    .await?
+}
+
+/// Replaces the source paths of projects in bulk.
+/// Preserves project ID, backup history, last backup details, and exclusions.
+#[tauri::command]
+pub async fn project_backups_relocate_projects(
+    state: State<'_, ProjectBackupsState>,
+    replacements: Vec<ProjectRelocation>,
+) -> Result<PageState, String> {
+    let state_clone = state.inner().clone();
+    blocking(move || {
+        let clouds = clouds();
+        let _edit = store::edit_lock();
+        let mut settings = store::load()?;
+        for item in &replacements {
+            let mut path_str = item
+                .new_source_path
+                .trim()
+                .trim_end_matches(['\\', '/'])
+                .to_string();
+            if path_str.ends_with(':') {
+                path_str.push('\\');
+            }
+            let path = PathBuf::from(&path_str);
+            if !path.is_dir() {
+                return Err(format!(
+                    "The folder '{}' does not exist or is not a directory.",
+                    path_str
+                ));
+            }
+            if let Some(project) = settings.projects.iter_mut().find(|p| p.id == item.project_id) {
+                project.source_path = path.display().to_string();
+                if let Some(last_result) = &mut project.last_result {
+                    if last_result.code.as_deref() == Some("SOURCE_MISSING") {
+                        project.last_result = None;
+                    }
+                }
+            }
+        }
+        store::save(&settings)?;
+        let missing = missing_sources(&settings);
+        let page = page_state(&state_clone, settings, None, clouds, missing);
+        Ok(page)
+    })
+    .await?
+}
+
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
@@ -1161,5 +1369,38 @@ mod recovery_tests {
         assert_eq!(recovered.created_at, 1_792_843_200_000);
         assert_eq!(recovered.zip_size, fs::metadata(increment).unwrap().len());
         assert_eq!(project.last_result.as_ref(), Some(&failed), "recognizing history cannot turn a failed attempt into success");
+    }
+
+    #[test]
+    fn scan_candidates_finds_project_roots_and_skips_internal_dirs() {
+        let temp = std::env::temp_dir().join(format!("myle-scan-test-{}", uuid::Uuid::new_v4()));
+        let proj1 = temp.join("ProjOne");
+        fs::create_dir_all(proj1.join(".git")).unwrap();
+        fs::write(proj1.join("package.json"), br#"{"name":"proj-one"}"#).unwrap();
+
+        let node_modules = proj1.join("node_modules").join("dep");
+        fs::create_dir_all(&node_modules).unwrap();
+        fs::write(node_modules.join("package.json"), br#"{"name":"dep"}"#).unwrap();
+
+        let proj2 = temp.join("Nested").join("ProjTwo");
+        fs::create_dir_all(&proj2).unwrap();
+        fs::write(proj2.join("Cargo.toml"), br#"[package]
+name = "proj_two""#).unwrap();
+
+        let mut results = Vec::new();
+        scan_folder_for_candidates(&temp, 0, 3, &mut results);
+
+        let names: Vec<&str> = results.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"ProjOne"), "must find ProjOne");
+        assert!(names.contains(&"ProjTwo"), "must find ProjTwo");
+        assert!(!names.contains(&"dep"), "must skip node_modules");
+
+        let p1 = results.iter().find(|c| c.name == "ProjOne").unwrap();
+        assert_eq!(p1.package_name.as_deref(), Some("proj-one"));
+
+        let p2 = results.iter().find(|c| c.name == "ProjTwo").unwrap();
+        assert_eq!(p2.package_name.as_deref(), Some("proj_two"));
+
+        let _ = fs::remove_dir_all(&temp);
     }
 }

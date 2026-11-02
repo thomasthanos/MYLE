@@ -548,6 +548,8 @@ pub fn run() {
             project_backups::commands::project_backups_compare,
             project_backups::commands::project_backups_file_diff,
             project_backups::commands::project_backups_open,
+            project_backups::commands::project_backups_scan_candidates,
+            project_backups::commands::project_backups_relocate_projects,
             github_releases::commands::github_releases_get_state,
             github_releases::commands::github_releases_sync_export,
             github_releases::commands::github_releases_sync_import,

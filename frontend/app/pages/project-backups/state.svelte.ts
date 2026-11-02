@@ -4,7 +4,7 @@ import { toast } from "../../../lib/toast.svelte";
 import { confirm } from "../../../lib/confirm.svelte";
 import { nav } from "../../../lib/nav.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
-import { projectBackupsApi as api, CHANGES_EVENT, SOURCE_ID, type BackupEntry, type BackupProvider, type CloudChoice, type PageState, type Project, type ProjectBackupsEvent, type ProjectResult, type Stage } from "./api";
+import { projectBackupsApi as api, CHANGES_EVENT, SOURCE_ID, type BackupEntry, type BackupProvider, type CloudChoice, type PageState, type Project, type ProjectBackupsEvent, type ProjectResult, type Stage, type ProjectRelocation } from "./api";
 import { formatRelative } from "../game-saves/state.svelte";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
@@ -76,6 +76,7 @@ class ProjectBackupsState {
   busy = $state<string | null>(null);
   exclusionsOpen = $state(false);
   editor = $state<EditorView | null>(null);
+  relocateOpen = $state(false);
   compare = $state<CompareView | null>(null);
   /** The project whose backups are listed, and its list. */
   expanded = $state<string | null>(null);
@@ -393,6 +394,26 @@ class ProjectBackupsState {
   closeEditor() {
     this.editor = null;
   }
+  openRelocateModal() {
+    this.relocateOpen = true;
+  }
+  closeRelocateModal() {
+    this.relocateOpen = false;
+  }
+  async relocateProjects(replacements: ProjectRelocation[]) {
+    if (!replacements.length) return;
+    const page = await this.run("relocate", () => api.relocateProjects(replacements));
+    if (!page) return;
+    this.page = page;
+    const updatedIds = replacements.map((r) => r.projectId);
+    this.failures = this.failures.filter((f) => !updatedIds.includes(f.projectId));
+    this.relocateOpen = false;
+    toast.success(`Relocated ${replacements.length} ${replacements.length === 1 ? "project" : "projects"}.`);
+    await this.refresh();
+    void this.startWatching();
+    void this.checkChanges(updatedIds, true);
+  }
+
   /** Saves the project from the editor; after a missing folder was fixed the backup continues. */
   async saveProject(project: Project) {
     const fixMissing = this.editor?.fixMissing ?? false;

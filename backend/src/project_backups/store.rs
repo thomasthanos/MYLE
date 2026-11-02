@@ -137,7 +137,8 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
         }
         Err(error) => return Err(format!("Can't read the Project Backups settings: {error}")),
     };
-    match serde_json::from_str::<Settings>(&text) {
+    let text = text.trim_start_matches('\u{feff}');
+    match serde_json::from_str::<Settings>(text) {
         Ok(mut settings) => {
             migrate(&mut settings);
             Ok(settings)

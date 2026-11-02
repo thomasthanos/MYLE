@@ -30,6 +30,7 @@
   import ComparePanel from "./ComparePanel.svelte";
   import ExclusionsPanel from "./ExclusionsPanel.svelte";
   import ProjectEditor from "./ProjectEditor.svelte";
+  import RelocateModal from "./RelocateModal.svelte";
   import ProjectRow from "./ProjectRow.svelte";
   import StatTile from "./StatTile.svelte";
   import type { BackupProvider, ProjectResult } from "./api";
@@ -54,7 +55,7 @@
 
   /** "/" or Ctrl+F jumps to the project search; Escape clears it. */
   function onKeydown(event: KeyboardEvent) {
-    if (pb.editor || pb.compare || event.defaultPrevented) return;
+    if (pb.editor || pb.compare || pb.relocateOpen || event.defaultPrevented) return;
     const target = event.target as HTMLElement | null;
     const typing = !!target?.closest("input, textarea, select, [contenteditable='true']");
     if ((event.key === "/" && !typing) || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f")) {
@@ -208,7 +209,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="page-root" inert={!!pb.editor || !!pb.compare}>
+<div class="page-root" inert={!!pb.editor || !!pb.compare || pb.relocateOpen}>
   <div class="top">
     <PageHeader
       title="Project Backups"
@@ -386,6 +387,7 @@
         <RefreshCw size={14} class={pb.checking.length ? "spin" : ""} />
       </button>
       <button class="btn" disabled={pb.locked} onclick={() => pb.openEditor(null)}><Plus size={15} /> Add project</button>
+      <button class="btn" disabled={pb.locked} title="Scan drives or replace path prefixes to relocate project folders" onclick={() => pb.openRelocateModal()}><FolderSearch size={15} /> Relocate projects</button>
       {#if pb.projects.length > 1}
         <label class="search">
           <Search size={13} />
@@ -467,7 +469,11 @@
           <h3>{group.title}</h3>
           <span class="group-note">{group.note}</span>
           <span class="group-count">{group.projects.length}</span>
-          {#if group.key === "never" || group.key === "stale" || group.key === "attention"}
+          {#if group.key === "missing"}
+            <button class="btn small primary" disabled={pb.locked} onclick={() => pb.openRelocateModal()}>
+              <FolderSearch size={13} /> Find missing folders
+            </button>
+          {:else if group.key === "never" || group.key === "stale" || group.key === "attention"}
             <button class="btn small" disabled={pb.locked} onclick={() => pb.backup(projectsOf(group))}>
               <CloudUpload size={13} /> Back up {group.key === "attention" ? "these" : "all"}
             </button>
@@ -483,6 +489,7 @@
 
 {#if pb.editor}<ProjectEditor />{/if}
 {#if pb.compare}<ComparePanel />{/if}
+{#if pb.relocateOpen}<RelocateModal />{/if}
 
 <style>
   .page-root { container-type: inline-size; }
