@@ -1188,8 +1188,8 @@ fn read_cargo_name(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("name =") {
-            let name = trimmed["name =".len()..].trim().trim_matches('"').trim_matches('\'');
+        if let Some(name) = trimmed.strip_prefix("name =") {
+            let name = name.trim().trim_matches('"').trim_matches('\'');
             return Some(name.to_string());
         }
     }
@@ -1246,10 +1246,8 @@ pub async fn project_backups_relocate_projects(
             }
             if let Some(project) = settings.projects.iter_mut().find(|p| p.id == item.project_id) {
                 project.source_path = path.display().to_string();
-                if let Some(last_result) = &mut project.last_result {
-                    if last_result.code.as_deref() == Some("SOURCE_MISSING") {
-                        project.last_result = None;
-                    }
+                if project.last_result.as_ref().is_some_and(|result| result.code.as_deref() == Some("SOURCE_MISSING")) {
+                    project.last_result = None;
                 }
             }
         }
