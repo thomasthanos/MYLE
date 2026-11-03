@@ -1210,7 +1210,7 @@ pub async fn project_backups_scan_candidates(
         let depth = max_depth.unwrap_or(3);
         let mut candidates = Vec::new();
         scan_folder_for_candidates(&root_path, 0, depth, &mut candidates);
-        candidates.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        candidates.sort_by_key(|candidate| candidate.name.to_lowercase());
         Ok(candidates)
     })
     .await?
