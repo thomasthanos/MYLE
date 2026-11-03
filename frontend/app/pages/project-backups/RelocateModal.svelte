@@ -67,7 +67,6 @@
   function matchScore(project: Project, candidate: CandidateFolder): number {
     const cName = candidate.name.toLowerCase();
     const cNorm = normalize(candidate.name);
-    const pName = project.name.toLowerCase();
     const pNorm = normalize(project.name);
     const appNorm = normalize(project.appName);
     const oldFolder = getFolderStem(project.sourcePath).toLowerCase();
@@ -229,8 +228,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="backdrop" transition:fade={{ duration: 140 }} role="presentation">
-  <div class="dialog surface" use:portal use:dialogFocus transition:scale={{ duration: 160, start: 0.96 }} role="dialog" aria-modal="true" aria-labelledby="relocate-title">
+<div class="backdrop" transition:fade={{ duration: 140 }} role="presentation" {@attach portal}>
+  <div class="dialog surface" {@attach dialogFocus} transition:scale={{ duration: 160, start: 0.96 }} role="dialog" aria-modal="true" aria-labelledby="relocate-title" tabindex="-1">
     <header>
       <div class="title-area">
         <span class="header-icon"><FolderSearch size={20} /></span>
