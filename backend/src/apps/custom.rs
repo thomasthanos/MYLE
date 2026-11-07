@@ -224,6 +224,13 @@ fn activation_in_effect(entry: &CustomApp) -> bool {
 /// A patch file (e.g. Discord's app/index.js or _app.asar) is current only if
 /// the target application hasn't updated its executables, updater database, or
 /// modules after the patch was created.
+fn modified_time(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+}
+
+/// A patch file (e.g. Discord's app/index.js or _app.asar) is current only if
+/// the target application hasn't updated its executables, updater database, or
+/// modules after the patch was created.
 fn patch_is_current(done_path: &Path) -> bool {
     let Ok(patch_meta) = std::fs::metadata(done_path) else {
         return false;
@@ -249,12 +256,8 @@ fn patch_is_current(done_path: &Path) -> bool {
         {
             // packages/RELEASES is updated when full version packages download/install
             let releases = ancestor.join("packages").join("RELEASES");
-            if let Ok(meta) = std::fs::metadata(&releases) {
-                if let Ok(mod_time) = meta.modified() {
-                    if mod_time > patch_time {
-                        return false;
-                    }
-                }
+            if modified_time(&releases).is_some_and(|t| t > patch_time) {
+                return false;
             }
 
             // The app-* directory holds the Discord binary and resources
@@ -262,21 +265,13 @@ fn patch_is_current(done_path: &Path) -> bool {
                 let app_name = app_ancestor.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if app_name.starts_with("app-") {
                     for exe in ["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "DiscordDevelopment.exe"] {
-                        if let Ok(meta) = std::fs::metadata(app_ancestor.join(exe)) {
-                            if let Ok(mod_time) = meta.modified() {
-                                if mod_time > patch_time {
-                                    return false;
-                                }
-                            }
+                        if modified_time(&app_ancestor.join(exe)).is_some_and(|t| t > patch_time) {
+                            return false;
                         }
                     }
                     let build_info = app_ancestor.join("resources").join("build_info.json");
-                    if let Ok(meta) = std::fs::metadata(&build_info) {
-                        if let Ok(mod_time) = meta.modified() {
-                            if mod_time > patch_time {
-                                return false;
-                            }
-                        }
+                    if modified_time(&build_info).is_some_and(|t| t > patch_time) {
+                        return false;
                     }
                     break;
                 }
