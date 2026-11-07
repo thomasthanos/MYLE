@@ -204,10 +204,87 @@ fn detect(entry: &CustomApp, registered: &[Registered]) -> (bool, Option<String>
     (activation_in_effect(entry), None)
 }
 fn activation_in_effect(entry: &CustomApp) -> bool {
-    entry
-        .activate
-        .as_ref()
-        .is_some_and(|a| !a.done.is_empty() && a.done.iter().all(|p| resolve_path(p).is_some()))
+    let Some(activate) = &entry.activate else {
+        return false;
+    };
+    if activate.done.is_empty() {
+        return false;
+    }
+    let mut resolved_paths = Vec::new();
+    for p in &activate.done {
+        if let Some(resolved) = resolve_path(p) {
+            resolved_paths.push(resolved);
+        } else {
+            return false;
+        }
+    }
+    resolved_paths.iter().all(|p| patch_is_current(p))
+}
+
+/// A patch file (e.g. Discord's app/index.js or _app.asar) is current only if
+/// the target application hasn't updated its executables, updater database, or
+/// modules after the patch was created.
+fn patch_is_current(done_path: &Path) -> bool {
+    let Ok(patch_meta) = std::fs::metadata(done_path) else {
+        return false;
+    };
+    let Ok(patch_time) = patch_meta.modified() else {
+        return false;
+    };
+
+    // If done_path is a packaged archive (e.g. betterdiscord.app.asar), its mtime
+    // may be preserved from upstream. Freshness checks target injected entry scripts
+    // (index.js or _app.asar).
+    let file_name = done_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if file_name.ends_with(".asar") && !file_name.starts_with('_') {
+        return true;
+    }
+
+    for ancestor in done_path.ancestors() {
+        let name = ancestor.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.eq_ignore_ascii_case("Discord")
+            || name.eq_ignore_ascii_case("DiscordPTB")
+            || name.eq_ignore_ascii_case("DiscordCanary")
+            || name.eq_ignore_ascii_case("DiscordDevelopment")
+        {
+            // packages/RELEASES is updated when full version packages download/install
+            let releases = ancestor.join("packages").join("RELEASES");
+            if let Ok(meta) = std::fs::metadata(&releases) {
+                if let Ok(mod_time) = meta.modified() {
+                    if mod_time > patch_time {
+                        return false;
+                    }
+                }
+            }
+
+            // The app-* directory holds the Discord binary and resources
+            for app_ancestor in done_path.ancestors() {
+                let app_name = app_ancestor.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if app_name.starts_with("app-") {
+                    for exe in ["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "DiscordDevelopment.exe"] {
+                        if let Ok(meta) = std::fs::metadata(app_ancestor.join(exe)) {
+                            if let Ok(mod_time) = meta.modified() {
+                                if mod_time > patch_time {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                    let build_info = app_ancestor.join("resources").join("build_info.json");
+                    if let Ok(meta) = std::fs::metadata(&build_info) {
+                        if let Ok(mod_time) = meta.modified() {
+                            if mod_time > patch_time {
+                                return false;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    true
 }
 /// Expands `%VAR%`s and resolves `*` segments to their newest existing match
 /// ("app-1.0.9259" beats "app-1.0.9258"). None if the path does not exist.
@@ -1046,6 +1123,33 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn patch_status_detects_when_host_app_updated() {
+        let dir = std::env::temp_dir().join(format!("myle-patch-test-{}", uuid::Uuid::new_v4().simple()));
+        let discord_root = dir.join("Discord");
+        let app_dir = discord_root.join("app-1.0.9000");
+        let index_js = app_dir.join("resources").join("app").join("index.js");
+        let discord_exe = app_dir.join("Discord.exe");
+        std::fs::create_dir_all(index_js.parent().unwrap()).unwrap();
+        std::fs::write(&discord_exe, b"exe").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&index_js, b"console.log('patched');").unwrap();
+
+        // When Discord hasn't updated, patch is current
+        assert!(patch_is_current(&index_js));
+
+        // When Discord's executable updates after the patch, patch is no longer current
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&discord_exe, b"new exe").unwrap();
+        assert!(!patch_is_current(&index_js), "Discord.exe newer than patch must invalidate activation");
+
+        // When re-patched, patch is current again
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&index_js, b"console.log('re-patched');").unwrap();
+        assert!(patch_is_current(&index_js), "re-patched file newer than Discord.exe must be current");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
     fn env_expansion() {

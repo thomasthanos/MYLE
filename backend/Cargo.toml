@@ -1,6 +1,6 @@
 [package]
 name = "make-your-life-easier"
-version = "10.1.8"
+version = "10.1.9"
 description = "MYLE — Make Your Life Easier"
 authors = ["ThomasThanos"]
 edition = "2024"
