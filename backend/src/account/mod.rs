@@ -130,6 +130,9 @@ fn stop_owner_only_work(app: &AppHandle) {
     if let Some(state) = app.try_state::<crate::github_releases::GithubReleasesState>() {
         state.cancel_all();
     }
+    if let Some(state) = app.try_state::<crate::steam_automation::commands::SteamAutomationState>() {
+        state.stop_all();
+    }
     if let Some(state) = app.try_state::<crate::project_backups::ProjectBackupsState>() {
         state.cancel(None);
         state.cancel_preview();

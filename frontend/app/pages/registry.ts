@@ -6,6 +6,7 @@ import IconGameSaves from "../../lib/icons/IconGameSaves.svelte";
 import IconProjectBackups from "../../lib/icons/IconProjectBackups.svelte";
 import IconGithubReleases from "../../lib/icons/IconGithubReleases.svelte";
 import IconSteamHelper from "../../lib/icons/IconSteamHelper.svelte";
+import IconSteamAutomation from "../../lib/icons/IconSteamAutomation.svelte";
 import IconCreativeHub from "../../lib/icons/IconCreativeHub.svelte";
 import IconWindowsOpt from "../../lib/icons/IconWindowsOpt.svelte";
 import IconSystemCleaner from "../../lib/icons/IconSystemCleaner.svelte";
@@ -70,6 +71,9 @@ const defs = [
   { id: "github-releases", label: "GitHub Releases", group: "owner", icon: IconGithubReleases, ownerOnly: true, fill: true,
     load: () => import("./github-releases/GithubReleases.svelte"),
     description: "Commit, build and release your projects to GitHub." },
+  { id: "steam-automation", label: "Steam Automation", group: "owner", icon: IconSteamAutomation, ownerOnly: true, numbered: false,
+    load: () => import("./steam-automation/SteamAutomation.svelte"),
+    description: "Farm cards, add playtime, unlock achievements and sell duplicates, on their own." },
   { id: "settings", label: "Settings", group: "bottom", icon: IconSettings,
     load: () => import("./settings/Settings.svelte"),
     description: "Your account, sync, appearance and updates." },
