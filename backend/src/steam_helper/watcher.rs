@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+use crate::game_saves::notice::{self, Notice};
 use super::cache::{DiskCache, live_offers, through_cache};
 use super::commands::{SteamHelperState, folder, now};
 use super::model::FreeOffer;
@@ -81,7 +82,9 @@ pub(crate) fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
         loop {
-            let _news = look(&app).await;
+            if let Some(news) = look(&app).await {
+                notice::show(&Notice::free_on_steam(news, now()));
+            }
             tokio::time::sleep(CHECK_EVERY).await;
         }
     });

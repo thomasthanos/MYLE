@@ -5,9 +5,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use tauri::{App, WebviewUrl, WebviewWindowBuilder};
+use crate::steam_helper::watcher::FreeNews;
 const FLAG: &str = "--game-saves-notice=";
 /// Starts MYLE at Game Saves; a running MYLE is told to go there.
 pub const OPEN_FLAG: &str = "--open-game-saves";
+/// The same, for Steam Game Helper.
+pub const OPEN_STEAM_HELPER_FLAG: &str = "--open-steam-helper";
 pub const LABEL: &str = "game-saves-notice";
 const WIDTH: f64 = 380.0;
 const HEIGHT: f64 = 112.0;
@@ -20,6 +23,7 @@ pub enum NoticeKind {
     BackedUp,
     NothingNew,
     Failed,
+    FreeOnSteam,
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +37,9 @@ pub struct Notice {
     pub error: Option<String>,
     /// Unix seconds.
     pub at: u64,
+    /// What became free, for a Steam Game Helper notice.
+    #[serde(default)]
+    pub offer: Option<FreeNews>,
 }
 impl Notice {
     /// From a scheduled run's outcome: games backed up and games that failed,
@@ -51,6 +58,7 @@ impl Notice {
                 failed: failed.clone(),
                 error: None,
                 at,
+                offer: None,
             },
             Err(error) => Notice {
                 kind: NoticeKind::Failed,
@@ -58,8 +66,13 @@ impl Notice {
                 failed: Vec::new(),
                 error: Some(error.clone()),
                 at,
+                offer: None,
             },
         }
+    }
+    /// A game has just become free on Steam.
+    pub fn free_on_steam(news: FreeNews, at: u64) -> Self {
+        Notice { kind: NoticeKind::FreeOnSteam, games: 0, failed: Vec::new(), error: None, at, offer: Some(news) }
     }
     fn encode(&self) -> Option<String> {
         serde_json::to_vec(self).ok().map(|json| URL_SAFE_NO_PAD.encode(json))
@@ -117,11 +130,18 @@ pub fn create_window(app: &App) -> tauri::Result<()> {
     crate::webview_policy::harden(&window)?;
     Ok(())
 }
-/// Opens MYLE at Game Saves: a running MYLE is focused and goes there.
-pub fn open_game_saves() {
+/// The flag that opens the page a notice of this kind is about.
+pub fn open_flag_for(kind: NoticeKind) -> &'static str {
+    match kind {
+        NoticeKind::FreeOnSteam => OPEN_STEAM_HELPER_FLAG,
+        NoticeKind::BackedUp | NoticeKind::NothingNew | NoticeKind::Failed => OPEN_FLAG,
+    }
+}
+/// Opens MYLE at the notice's page: a running MYLE is focused and goes there.
+pub fn open_page(kind: NoticeKind) {
     if let Ok(exe) = std::env::current_exe() {
         let _ = Command::new(&exe)
-            .arg(OPEN_FLAG)
+            .arg(open_flag_for(kind))
             .current_dir(exe.parent().unwrap_or(&exe))
             .creation_flags(DETACHED_PROCESS)
             .spawn();
@@ -138,6 +158,27 @@ mod tests {
         assert!(data.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_eq!(Notice::decode(&data), Some(notice));
         assert_eq!(Notice::decode("not base64!"), None);
+    }
+    #[test]
+    fn a_free_game_notice_survives_the_command_line() {
+        let news = FreeNews { game: "Hades \"II\"".into(), ends_at: Some(1_794_247_200), more: 2 };
+        let notice = Notice::free_on_steam(news.clone(), 1_790_000_000);
+        assert_eq!(notice.kind, NoticeKind::FreeOnSteam);
+        assert_eq!(notice.offer.as_ref(), Some(&news));
+        let data = notice.encode().unwrap();
+        assert_eq!(Notice::decode(&data), Some(notice));
+    }
+    #[test]
+    fn an_older_notice_without_an_offer_still_reads() {
+        let older = r#"{"kind":"backedUp","games":1,"failed":[],"error":null,"at":5}"#;
+        let notice: Notice = serde_json::from_str(older).unwrap();
+        assert_eq!((notice.kind, notice.offer), (NoticeKind::BackedUp, None));
+    }
+    #[test]
+    fn the_click_goes_to_the_right_page() {
+        assert_eq!(open_flag_for(NoticeKind::FreeOnSteam), "--open-steam-helper");
+        assert_eq!(open_flag_for(NoticeKind::BackedUp), "--open-game-saves");
+        assert_eq!(open_flag_for(NoticeKind::Failed), "--open-game-saves");
     }
     #[test]
     fn what_a_scheduled_run_says() {

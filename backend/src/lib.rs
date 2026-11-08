@@ -125,7 +125,8 @@ async fn main_ready(app: AppHandle) -> Result<(), String> {
     hand_over(&app).map_err(|e| e.to_string())
 }
 /// The page to open on start: the Password Manager when the browser extension
-/// started the app (`--open-passwords`), Game Saves from a scheduled backup's notice.
+/// started the app (`--open-passwords`), Game Saves from a scheduled backup's notice, Steam
+/// Game Helper from its own.
 #[tauri::command]
 fn start_page() -> Option<&'static str> {
     page_asked(&std::env::args().collect::<Vec<_>>())
@@ -135,6 +136,8 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
         Some("password-manager")
     } else if args.iter().any(|a| a == game_saves::notice::OPEN_FLAG) {
         Some("game-saves")
+    } else if args.iter().any(|a| a == game_saves::notice::OPEN_STEAM_HELPER_FLAG) {
+        Some("steam-helper")
     } else {
         None
     }
@@ -167,11 +170,11 @@ fn context() -> tauri::Context<tauri::Wry> {
 fn notice_data(notice: tauri::State<'_, game_saves::notice::Notice>) -> game_saves::notice::Notice {
     notice.inner().clone()
 }
-/// The notice closes: by itself, by its ×, or clicked to open Game Saves.
+/// The notice closes: by itself, by its ×, or clicked to open its page.
 #[tauri::command]
-fn notice_done(app: AppHandle, open: bool) {
+fn notice_done(app: AppHandle, notice: tauri::State<'_, game_saves::notice::Notice>, open: bool) {
     if open {
-        game_saves::notice::open_game_saves();
+        game_saves::notice::open_page(notice.kind);
     }
     app.exit(0);
 }
@@ -271,6 +274,10 @@ pub fn run() {
             // A scheduled backup's notice was clicked: go to Game Saves.
             if args.iter().any(|a| a == game_saves::notice::OPEN_FLAG) {
                 let _ = app.emit("myle-navigate", "game-saves");
+            }
+            // Something became free on Steam and its notice was clicked.
+            if args.iter().any(|a| a == game_saves::notice::OPEN_STEAM_HELPER_FLAG) {
+                let _ = app.emit("myle-navigate", "steam-helper");
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -636,4 +643,17 @@ pub fn run() {
             cleanup.run();
         }
     });
+}
+#[cfg(test)]
+mod start_page_tests {
+    use super::page_asked;
+    #[test]
+    fn the_helpers_flag_opens_its_page() {
+        assert_eq!(page_asked(&["x".into(), "--open-steam-helper".into()]), Some("steam-helper"));
+    }
+    #[test]
+    fn the_other_flags_still_open_theirs() {
+        assert_eq!(page_asked(&["x".into(), "--open-game-saves".into()]), Some("game-saves"));
+        assert_eq!(page_asked(&["x".into()]), None);
+    }
 }
