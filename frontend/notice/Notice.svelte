@@ -4,19 +4,22 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import CheckCheck from "@lucide/svelte/icons/check-check";
+  import Gift from "@lucide/svelte/icons/gift";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
+  import { timeLeft } from "../app/pages/steam-helper/model";
 
   interface NoticeData {
-    kind: "backedUp" | "nothingNew" | "failed";
+    kind: "backedUp" | "nothingNew" | "failed" | "freeOnSteam";
     games: number;
     failed: string[];
     error: string | null;
     at: number;
+    offer: { game: string; endsAt: number | null; more: number } | null;
   }
 
   /** How long it stays; longer when something went wrong. */
-  const STAY_MS = { backedUp: 7000, nothingNew: 6000, failed: 12000 };
+  const STAY_MS = { backedUp: 7000, nothingNew: 6000, failed: 12000, freeOnSteam: 10000 };
 
   let notice = $state<NoticeData | null>(null);
   let leaving = $state(false);
@@ -27,6 +30,12 @@
 
   const view = $derived.by(() => {
     if (!notice) return null;
+    if (notice.kind === "freeOnSteam") {
+      const left = timeLeft(notice.offer?.endsAt ?? null, Date.now() / 1000);
+      const more = notice.offer?.more ?? 0;
+      const parts = [notice.offer?.game ?? "A game", left ? `ends in ${left}` : null, more > 0 ? `+${more} more` : null];
+      return { tone: "ok", icon: Gift, title: "Free on Steam", text: parts.filter(Boolean).join(" · ") };
+    }
     if (notice.kind === "backedUp") {
       return {
         tone: "ok",
@@ -53,6 +62,8 @@
       text: some ?? notice.error ?? "The backup could not run.",
     };
   });
+
+  const isSteam = $derived(notice?.kind === "freeOnSteam");
 
   const time = $derived(
     notice ? new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(notice.at * 1000)) : "",
@@ -107,6 +118,7 @@
             failed: new URLSearchParams(location.search).get("kind") === "failed" ? ["Hades II"] : [],
             error: null,
             at: Date.now() / 1000,
+            offer: { game: "PAYDAY 3", endsAt: Date.now() / 1000 + 90_000, more: 2 },
           };
       chime(notice.kind);
       // The time left, paused while the pointer is on the card.
@@ -132,7 +144,7 @@
     class:leaving
     role="button"
     tabindex="-1"
-    title="Open Game Saves"
+    title={isSteam ? "Open Steam Game Helper" : "Open Game Saves"}
     onclick={() => close(true)}
     onkeydown={(event) => event.key === "Enter" && close(true)}
     onpointerenter={() => (paused = true)}
@@ -141,7 +153,7 @@
     <span class="icon"><view.icon size={20} strokeWidth={1.9} /></span>
     <div class="body">
       <div class="head">
-        <span class="app">MYLE · Game Saves</span>
+        <span class="app">{isSteam ? "MYLE · Steam Game Helper" : "MYLE · Game Saves"}</span>
         <span class="time">{time}</span>
       </div>
       <strong>{view.title}</strong>
