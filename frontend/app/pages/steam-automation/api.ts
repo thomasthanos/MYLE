@@ -9,5 +9,4 @@ export interface Status {
 export const steamAutomationApi = {
   status: () => invoke<Status>("steam_automation_status"),
   signIn: () => invoke<void>("steam_automation_sign_in"),
-  capture: () => invoke<string>("steam_automation_capture"),
 };

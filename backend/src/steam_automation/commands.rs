@@ -117,35 +117,3 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
     let _ = window.close();
     Err("Signing in took too long.".to_string())
 }
-/// A temporary tool for Task 4 of the plan: saves what Steam really sends, to build tests from.
-#[tauri::command]
-pub async fn steam_automation_capture(state: State<'_, SteamAutomationState>) -> Result<String, String> {
-    let session = state.session().ok_or("Sign in to Steam first.")?;
-    let client = crate::download::http_client("MYLE")?;
-    let id = session.steam_id;
-    let community = session.cookie_header();
-    let store = session.store_cookie_header().map(str::to_string);
-    let pages = [
-        ("badges.html", format!("{COMMUNITY}/profiles/{id}/badges/?l=english&p=1"), Some(community.clone())),
-        ("licences.html", format!("{STORE}/account/licenses/?l=english"), store.clone()),
-        ("inventory.json", format!("{COMMUNITY}/inventory/{id}/753/6?l=english&count=2000"), Some(community.clone())),
-        ("price.json", format!("{COMMUNITY}/market/priceoverview/?country=GR&currency=3&appid=753&market_hash_name=753-Sack%20of%20Gems"), Some(community)),
-        ("userdata.json", format!("{STORE}/dynamicstore/userdata/"), store),
-    ];
-    let captures = folder()?.join("captures");
-    std::fs::create_dir_all(&captures).map_err(|e| e.to_string())?;
-    let mut report = Vec::new();
-    for (name, url, cookie) in pages {
-        let mut request = client.get(&url);
-        if let Some(cookie) = cookie {
-            request = request.header("Cookie", cookie);
-        }
-        let response = request.send().await.map_err(|e| e.to_string())?;
-        let status = response.status().as_u16();
-        let body = response.bytes().await.map_err(|e| e.to_string())?;
-        std::fs::write(captures.join(name), &body).map_err(|e| e.to_string())?;
-        report.push(format!("{name}: {status}, {} bytes", body.len()));
-        tokio::time::sleep(Duration::from_secs(4)).await;
-    }
-    Ok(format!("{}\n{}", captures.display(), report.join("\n")))
-}

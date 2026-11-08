@@ -570,7 +570,6 @@ pub fn run() {
             project_backups::commands::project_backups_relocate_projects,
             steam_automation::commands::steam_automation_status,
             steam_automation::commands::steam_automation_sign_in,
-            steam_automation::commands::steam_automation_capture,
             steam_helper::commands::steam_helper_free,
             steam_helper::commands::steam_helper_picks,
             steam_helper::commands::steam_helper_row,

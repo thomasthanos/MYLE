@@ -43,7 +43,6 @@
 
 <div class="row">
   <button class="btn" type="button" disabled={busy} onclick={() => run(steamAutomationApi.signIn)}>Sign in to Steam</button>
-  <button class="btn" type="button" disabled={busy || !status?.communitySignedIn} onclick={() => run(steamAutomationApi.capture)}>Capture</button>
 </div>
 
 {#if message}<pre class="message selectable">{message}</pre>{/if}
