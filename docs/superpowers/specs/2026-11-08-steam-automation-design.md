@@ -4,6 +4,27 @@ An owner-only MYLE page that runs card farming, playtime idling, achievement unl
 
 The page was reviewed as a mockup on 2026-11-08. It follows the same all-on-one-page idea the owner picked for Steam Game Helper.
 
+## Changed after the first version
+
+The owner saw the four-panel page and asked for a full section instead, reviewed as a second mockup on 2026-11-09. Everything below still holds except where this section says otherwise.
+
+**One button, its own menu.** `Steam Automation` stays a single sidebar button in Owner Tools. Inside it has its own menu: Games, Idling, Favorites, Card Farming, Achievement Unlocker, Automatic Idler, Inventory Manager. Built in MYLE's own look, with no ads, tiers or upsells.
+
+- **Games:** the whole library with portrait art, playtime and achievement progress, search and sort. A game can be favorited or idled from here.
+- **Idling:** what is running now, each with a stop button, plus Stop all and the Activity list.
+- **Favorites:** the favorited games.
+- **Card Farming:** tabs for games with drops, whitelisted and blacklisted. With a whitelist, only those games are farmed; a blacklisted game never is.
+- **Achievement Unlocker and Automatic Idler:** tabs for all games and the queue, Add all to queue, sort.
+- **Inventory Manager:** every item, with search, sort and filters (trading cards, foil, backgrounds, emoticons, booster packs, on sale, duplicates, locked, selected), a price lookup per item, List, List selected, List all, List duplicates, and Remove listings.
+
+**Start and automatic are separate.** Each of Card Farming, Achievement Unlocker and Automatic Idler has a Start/Stop button for now, and a switch for starting by itself when MYLE opens. Inventory has only the automatic switch for selling duplicates, plus the manual buttons. Everything is off until the owner turns it on.
+
+**Manual selling can sell the last copy,** because the owner chose those items. Bulk actions and Remove listings ask first. A locked item is never sold, by hand or automatically. Automatic selling still sells duplicates only.
+
+**Library data needs no API key.** `store.steampowered.com/pointssummary/ajaxgetasyncconfig` returns a `webapi_token` for the signed-in session, accepted as `access_token` by `IPlayerService/GetOwnedGames` and `GetTopAchievementsForGames` (checked on the owner's account: playtime, totals and unlocked achievements all came back). Art and features come from `GetItems`. A portrait capsule comes from `assets.library_capsule`, falling back to the header image.
+
+**Left out for now:** the Has badge filter, because it cannot be confirmed without a badge page showing a crafted badge; Claim for free games, which is not in the owner's list.
+
 ## Where this fits
 
 Steam Game Helper (`2026-11-08-steam-game-helper-design.md`) is the public, read-only half. This is the half that acts on an account, and only the owner sees it.
