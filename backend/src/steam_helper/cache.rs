@@ -28,6 +28,9 @@ impl DiskCache {
     pub(crate) fn new(dir: PathBuf) -> Self {
         Self { dir }
     }
+    pub(crate) fn has(&self, key: &str) -> bool {
+        self.path(key).exists()
+    }
     fn path(&self, key: &str) -> PathBuf {
         self.dir.join(format!("{key}.json"))
     }
@@ -100,6 +103,12 @@ mod tests {
         })
         .await;
         (section, asked.get())
+    }
+    #[tokio::test]
+    async fn the_cache_knows_which_sections_were_saved() {
+        let cache = seeded().await;
+        assert!(cache.has("deals"));
+        assert!(!cache.has("free"));
     }
     #[tokio::test]
     async fn a_fresh_entry_costs_no_request() {

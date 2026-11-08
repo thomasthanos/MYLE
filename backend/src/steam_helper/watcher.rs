@@ -1,4 +1,5 @@
-//! While MYLE runs, looks for what has newly become free, for the owner only.
+//! While MYLE runs, looks for what has newly become free, once the page has been opened: an
+//! install that never uses the Helper never asks Steam for anything.
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
@@ -49,15 +50,15 @@ fn save_seen(file: &Path, seen: &Seen) {
         let _ = crate::game_saves::atomic::write(file, &bytes);
     }
 }
-/// One look. `None` for anyone but the owner, without touching the network or the disk.
+/// One look. `None` until the page has been opened, without touching the network or the disk.
 pub(crate) async fn tick<S: StoreApi>(
     api: &S,
     cache: &DiskCache,
     seen_file: &Path,
-    is_owner: bool,
+    opened: bool,
     now: u64,
 ) -> Option<FreeNews> {
-    if !is_owner {
+    if !opened {
         return None;
     }
     let section = through_cache(cache, "free", false, now, || free_right_now(api)).await;
@@ -71,11 +72,11 @@ pub(crate) async fn tick<S: StoreApi>(
     Some(FreeNews { game: soonest.game.name.clone(), ends_at: soonest.ends_at, more: new.len() as u32 - 1 })
 }
 async fn look(app: &AppHandle) -> Option<FreeNews> {
-    let is_owner = app.state::<crate::account::AccountState>().is_owner(app);
     let api = app.state::<SteamHelperState>().store().ok()?;
     let folder = folder().ok()?;
     let cache = DiskCache::new(folder.clone());
-    tick(&*api, &cache, &folder.join("seen.json"), is_owner, now()).await
+    let opened = cache.has("free");
+    tick(&*api, &cache, &folder.join("seen.json"), opened, now()).await
 }
 /// Looks shortly after start-up and then every three hours, for as long as MYLE runs.
 pub(crate) fn start(app: AppHandle) {
@@ -189,7 +190,7 @@ mod tests {
         std::fs::write(file, text).unwrap();
     }
     #[tokio::test]
-    async fn someone_else_costs_no_network() {
+    async fn before_the_page_is_ever_opened_it_costs_no_network() {
         let api = store_with(vec![(5, "Game", 9000)]);
         let file = temp("seen.json");
         assert_eq!(tick(&api, &cache_for(&file), &file, false, 1000).await, None);

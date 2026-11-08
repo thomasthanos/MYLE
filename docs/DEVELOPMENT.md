@@ -492,22 +492,23 @@ The choices are written to `HKCU\Software\ThomasThanos\MakeYourLifeEasier` (star
 
 ### Steam Game Helper
 
-An owner-only page: what is free on Steam now, twelve weekly picks, every deal, and the permanently free games. `backend/src/steam_helper/`, page in `frontend/app/pages/steam-helper/`. It reads the public store only: no sign-in, no key, and it never touches an account.
+A page for everyone: what is free on Steam now, twelve weekly picks, every deal, and the permanently free games. `backend/src/steam_helper/`, page in `frontend/app/pages/steam-helper/`. It reads the public store only: no sign-in, no key, and it never touches an account.
 
 - **Sources** (none is a documented API, so a changed answer becomes a section error, never a crash): the store search listing for lists, `IStoreBrowseService/GetItems` for details, `IStoreQueryService/Query` to scan the top 1,000 games for free weekends. Why the search listing and not `Query` for lists is in `docs/superpowers/specs/2026-11-08-steam-game-helper-design.md`.
+- **Steam's limits.** The search listing refuses (429) after about 10 requests in 7 seconds or 30 in 40, and comes back about 15 seconds later; the other API took everything tried. So `store.rs` gives searches their own lane, 1.2 seconds apart, keeps each listing for 10 minutes, and after a 429 closes that lane for 15 seconds and asks again, twice. The page waits for chips to go quiet for 300 ms before asking.
 - **Filters.** Online co-op and Single-player are a union; Story only narrows. Free right now ignores them. Adult games never show: tags Hentai and NSFW, descriptors 3 and 4.
 - **Picks** are at least 85% positive with 5,000 reviews, story games first, chosen once a week per filter combination and saved in `picks.json`. The week starts Monday, local time, and last week's list is left out.
 - **Cache.** One file per section and filter combination, an hour old at most. When Steam fails, the page keeps the saved list and says so. Refresh is held to once a minute.
-- **Notice.** While MYLE runs, `watcher.rs` looks a minute after start and then every 3 hours, and raises the corner notice (`game_saves/notice.rs`) for an offer not seen before. The very first look only remembers. It asks the owner verdict every time, so it costs no network for anyone else.
+- **Notice.** While MYLE runs, `watcher.rs` looks a minute after start and then every 3 hours, and raises the corner notice (`game_saves/notice.rs`) for an offer not seen before. The very first look only remembers. Until the page has been opened once it does nothing, so an install that never uses it never asks Steam.
 ---
 
 ## 6. Owner-only pages
 
-GitHub Releases, Project Backups and Steam Game Helper are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
+GitHub Releases and Project Backups are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
 
 - **Who.** After sign-in, and again when the window comes back after 10 minutes, the backend asks Supabase for the user (`GET /auth/v1/user` with the session's access token, so Supabase checks the token) and admits only an account whose email is the owner's (any case), confirmed, signed in with Discord (`app_metadata.provider`), with a Discord identity of that email marked verified. Nothing the webview sends counts: the page can only ask for a recheck (`account_access`).
 - **Kept.** The verdict is tied to the user id, kept in memory and sealed with DPAPI in `account-access.bin` (roaming folder), so the pages work offline for 30 days after the last check. Signing out, another account or an expired session clears it.
-- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*`, `project_backups_*` or `steam_helper_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
+- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*` or `project_backups_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
 - **Live.** The backend sends `account-access` (true/false) on every change. On false the sidebar hides those pages (`ownerOnly` in `registry.ts`), an open one falls back to the first page (deep links and the start page too), and running builds, releases, backups and previews are cancelled.
 
 ---

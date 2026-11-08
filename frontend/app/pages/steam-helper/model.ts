@@ -61,6 +61,15 @@ export function updatedAgo(updatedAt: number | null, now: number): string {
   return `Updated ${Math.floor(seconds / 86_400)} d ago`;
 }
 
+/** Calls `fn` once things have been quiet for `ms`. */
+export function debounce(fn: () => void, ms: number): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    clearTimeout(timer);
+    timer = setTimeout(fn, ms);
+  };
+}
+
 /** Numbers requests, so that a late answer to an older one can be dropped. */
 export function createLatest(): { next(): number; isCurrent(id: number): boolean } {
   let current = 0;

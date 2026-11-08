@@ -142,7 +142,7 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
         None
     }
 }
-/// Refuses the owner-only pages' commands (GitHub Releases, Project Backups, Steam Game Helper) unless the signed-in account is the owner's,
+/// Refuses the owner-only pages' commands (GitHub Releases, Project Backups) unless the signed-in account is the owner's,
 /// by the verdict the backend got from Supabase (`account::owner`). One check for every command, so a command added to
 /// those pages later is covered too.
 fn owner_gate(
@@ -318,7 +318,7 @@ pub fn run() {
                 // The installer of the last update, if any. This runs before the splash can start a new download into the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
                 let _ = std::fs::remove_dir_all(updater::update_dir());
                 updater::sweep_leftovers_later();
-                // While MYLE runs, the owner hears about games that have just become free.
+                // While MYLE runs, whoever has opened Steam Game Helper hears about games that have just become free.
                 steam_helper::watcher::start(app.handle().clone());
                 // If the splash never gets to call finish_startup (a failed update check, a broken page), show the window anyway.
                 let handle = app.handle().clone();

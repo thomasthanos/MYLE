@@ -1,5 +1,4 @@
-//! What the page asks for. One command per section, so sections arrive as they are ready. Every
-//! command here is refused for anyone but the owner (`account::owner`).
+//! What the page asks for. One command per section, so sections arrive as they are ready.
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};

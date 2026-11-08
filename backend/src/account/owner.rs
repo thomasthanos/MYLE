@@ -6,7 +6,7 @@ pub(crate) const OWNER_EMAIL: &str = "thomasthanos28@gmail.com";
 /// The sign-in provider the owner has to use.
 const OWNER_PROVIDER: &str = "discord";
 /// The commands of the owner-only pages, by name prefix.
-const OWNER_ONLY_COMMANDS: &[&str] = &["github_releases_", "project_backups_", "steam_helper_"];
+const OWNER_ONLY_COMMANDS: &[&str] = &["github_releases_", "project_backups_"];
 /// How long a verdict counts when Supabase can't be reached to check again.
 pub(crate) const OFFLINE_GRACE_SECS: u64 = 30 * 24 * 3600;
 /// A verdict newer than this is not checked again when the page asks.
@@ -142,8 +142,7 @@ mod tests {
     fn only_the_owner_only_pages_commands_are_gated() {
         assert!(is_owner_only_command("github_releases_get_state"));
         assert!(is_owner_only_command("project_backups_backup"));
-        assert!(is_owner_only_command("steam_helper_free"));
-        assert!(!is_owner_only_command("steamhelper_free"));
+        assert!(!is_owner_only_command("steam_helper_free"), "the Helper is for everyone");
         assert!(!is_owner_only_command("account_profile"));
         assert!(!is_owner_only_command("game_saves_restore"));
         assert!(!is_owner_only_command("github_release"));
@@ -157,9 +156,7 @@ mod tests {
             .lines()
             .map(str::trim)
             .filter(|line| {
-                line.starts_with("github_releases::")
-                    || line.starts_with("project_backups::")
-                    || line.starts_with("steam_helper::commands::")
+                line.starts_with("github_releases::") || line.starts_with("project_backups::")
             })
             .filter_map(|line| line.trim_end_matches(',').rsplit("::").next())
             .collect();

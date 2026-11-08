@@ -325,6 +325,27 @@ mod tests {
         let api = FakeStore::new(vec![("Query", Ok(answer_with(vec![weekend]))), ("search/results", Err("down".to_string()))]);
         assert_eq!(free_right_now(&api).await, Err("down".to_string()));
     }
+    /// Page open and then quick filter changes, against the real store, as the app sends them.
+    #[tokio::test]
+    #[ignore]
+    async fn live_quick_filter_changes_are_not_refused() {
+        use crate::steam_helper::picks::weekly_picks;
+        let api = crate::steam_helper::store::HttpStore::new().unwrap();
+        let file = std::env::temp_dir().join(format!("myle-live-{}", uuid::Uuid::new_v4())).join("picks.json");
+        let on = |online_coop, single_player, story_only| Filters { online_coop, single_player, story_only };
+        let (api, file) = (&api, &file);
+        let mut asked = Vec::new();
+        for filters in [on(true, false, false), on(true, false, true), on(false, true, false), on(false, true, true), on(false, false, false), on(true, true, false)] {
+            asked.push(async move {
+                let (deals, free, picks) = tokio::join!(row(api, RowKind::Deals, filters), row(api, RowKind::FreeToPlay, filters), weekly_picks(api, file, filters, 20759));
+                (filters, deals.map(|g| g.len()), free.map(|g| g.len()), picks.map(|g| g.len()))
+            });
+        }
+        for (filters, deals, free, picks) in futures_util::future::join_all(asked).await {
+            println!("{}: deals {deals:?}, free {free:?}, picks {picks:?}", filters.key());
+            assert!(deals.is_ok() && free.is_ok() && picks.is_ok(), "{}", filters.key());
+        }
+    }
     /// By hand when Steam changes something: `cargo test live_steam_still_answers -- --ignored`.
     #[tokio::test]
     #[ignore]

@@ -11,7 +11,7 @@ const STORY_SHARE: usize = 8;
 const MIN_PERCENT: u8 = 85;
 const MIN_REVIEWS: u32 = 5000;
 const TIER_PAGE: u32 = 100;
-const TIER_PAGES: u32 = 2;
+const TIER_PAGES: u32 = 1;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct PickWeek {
     week: i64,
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(picks.iter().map(|g| g.appid).collect::<Vec<_>>(), vec![4]);
     }
     #[tokio::test]
-    async fn a_tier_reads_two_hundred_rows() {
+    async fn a_tier_reads_one_page_of_results() {
         let api = FakeStore::responding(|url| {
             if url.contains("search/results") {
                 return Ok(html_of(&(1..=100).collect::<Vec<u32>>()));
@@ -283,7 +283,7 @@ mod tests {
         });
         weekly_picks(&api, &temp_file(), Filters { story_only: true, ..COOP }, WEEK).await.unwrap();
         let starts: Vec<bool> = [0, 100, 200].iter().map(|s| api.calls().iter().any(|u| u.contains(&format!("start={s}&")))).collect();
-        assert_eq!(starts, vec![true, true, false]);
+        assert_eq!(starts, vec![true, false, false]);
     }
     #[tokio::test]
     async fn an_empty_choice_is_an_error_and_is_not_saved() {

@@ -4,6 +4,8 @@ A new owner-only page in MYLE that answers one question without signing in to an
 
 The layout was picked from three mockups (option B, "all on one page") and shown with live Steam data on 2026-11-08.
 
+**Changed after the first version.** The page is now for everyone, not the owner alone, as the owner asked; the Access section below records the original owner-only setup. The background check runs only once the page has been opened, so an install that never uses it never asks Steam. Steam's search listing turned out to refuse quick traffic (see "Steam's limits" in `docs/DEVELOPMENT.md`), so requests are paced and reused, and picks read 100 rows per tier instead of 200.
+
 ## Where this fits
 
 This is the first of five pieces. Each of the others gets its own design later.

@@ -39,6 +39,7 @@
 | <a href="frontend/app/pages/system-maintenance"><img alt="System Maintenance" src="https://img.shields.io/static/v1?label=&message=System%20Maintenance&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | Windows diagnostics and repairs, one at a time, with their output on screen |
 | <a href="frontend/app/pages/disk-analyzer"><img alt="Disk Analyzer" src="https://img.shields.io/static/v1?label=&message=Disk%20Analyzer&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | Shows what is filling a drive — as a treemap, a folder tree, the largest files and file types — and moves what you pick to the Recycle Bin. Also makes cloud files online-only |
 | <a href="frontend/app/pages/auto-clicker"><img alt="Auto Clicker" src="https://img.shields.io/static/v1?label=&message=Auto%20Clicker&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | Repeats clicks at an interval, or runs a sequence of recorded points, with F6 to start and stop |
+| <a href="frontend/app/pages/steam-helper"><img alt="Steam Game Helper" src="https://img.shields.io/static/v1?label=&message=Steam%20Game%20Helper&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | What is free on Steam right now, twelve weekly picks and every deal, with online co-op and story games first |
 | <a href="frontend/app/pages/password-manager"><img alt="Password Manager" src="https://img.shields.io/static/v1?label=&message=Password%20Manager&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | An end-to-end encrypted vault for your logins and 2FA codes, with Windows Hello, passkeys and browser filling |
 | <a href="frontend/app/pages/settings"><img alt="Settings" src="https://img.shields.io/static/v1?label=&message=Settings&color=8b83ff&labelColor=151c31&style=flat-square" /></a> | Your account and sync, the appearance, start-up and the tray, and updates |
 
@@ -62,7 +63,7 @@
   <img src="docs/assets/how-it-works.svg" alt="Svelte frontend, Rust and Tauri backend, Windows tools, and updates verified with SHA-256" width="100%" />
 </p>
 
-- **One window, thirteen pages.** Svelte 5 in front, Rust and Tauri behind, on the WebView2 runtime Windows already has.
+- **One window, fourteen pages.** Svelte 5 in front, Rust and Tauri behind, on the WebView2 runtime Windows already has.
 - **Your data stays yours.** Everything that matters is written to your own profile: no account is needed, and the parts that can sync are end-to-end encrypted (the Password Manager's vault never leaves a PC unsealed).
 - **Nothing needs administrator rights until it truly does**, and then it is one prompt, through the same program.
 - **Updates are verified.** The app checks its feed, downloads the installer, and installs it only if its SHA-256 matches. If the update fails, it falls back to the setup's own window.

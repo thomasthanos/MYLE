@@ -1,8 +1,10 @@
 import { readJson, writeJson } from "../../../lib/storage";
 import { steamHelperApi, type FreeOffer, type Game, type RowKind, type Section } from "./api";
-import { appendUnique, createLatest, DEFAULT_FILTERS, validFilters, type Filters } from "./model";
+import { appendUnique, createLatest, debounce, DEFAULT_FILTERS, validFilters, type Filters } from "./model";
 
 const FILTERS_KEY = "myle.steamHelper.filters";
+/** Quick clicks on several chips ask Steam once, for the last combination. */
+const FILTER_QUIET_MS = 300;
 
 export type SeeAllSection = "picks" | "deals" | "freeToPlay";
 
@@ -35,6 +37,11 @@ class SteamHelperState {
     more: createLatest(),
   };
 
+  #reloadSoon = debounce(() => {
+    this.#loadFiltered(false);
+    if (this.seeAll && this.seeAll !== "picks") this.#restartMore();
+  }, FILTER_QUIET_MS);
+
   load(force = false) {
     void this.#loadFree(force);
     this.#loadFiltered(force);
@@ -43,8 +50,15 @@ class SteamHelperState {
   setFilter(name: keyof Filters, value: boolean) {
     this.filters = { ...this.filters, [name]: value };
     writeJson(FILTERS_KEY, this.filters);
-    this.#loadFiltered(false);
-    if (this.seeAll && this.seeAll !== "picks") this.#restartMore();
+    // Show at once that the lists are changing, and drop any answer still on its way for the old filters.
+    for (const section of ["picks", "deals", "freeToPlay"] as const) {
+      this.#latest[section].next();
+      this[section] = notLoaded();
+    }
+    this.#latest.more.next();
+    this.moreGames = [];
+    this.moreLoading = this.seeAll !== null && this.seeAll !== "picks";
+    this.#reloadSoon();
   }
 
   openSeeAll(section: SeeAllSection) {
@@ -56,6 +70,7 @@ class SteamHelperState {
     this.seeAll = null;
     this.#latest.more.next();
     this.moreGames = [];
+    this.moreLoading = false;
   }
 
   async loadMore() {

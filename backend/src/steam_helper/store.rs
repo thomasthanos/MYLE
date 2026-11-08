@@ -10,7 +10,11 @@ use super::parse::{self, Item, SearchPage};
 const SEARCH: &str = "https://store.steampowered.com/search/results/?infinite=1&category1=998&cc=gr&l=english";
 const GET_ITEMS: &str = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/";
 const QUERY: &str = "https://api.steampowered.com/IStoreQueryService/Query/v1/";
+const SEARCH_PATH: &str = "https://store.steampowered.com/search/results/";
 const GAP: Duration = Duration::from_millis(150);
+/// Asks again this many times after Steam says it is getting too many requests.
+const RETRIES: u32 = 2;
+const LIMITED: &str = "Steam is limiting requests right now. Try again in a minute.";
 const PER_REQUEST: usize = 50;
 const SCAN_PAGE: u32 = 100;
 const SCAN_PAGES: u32 = 10;
@@ -90,30 +94,113 @@ fn data_request() -> Value {
 pub(crate) trait StoreApi: Send + Sync {
     fn get(&self, url: &str) -> impl Future<Output = Result<String, String>> + Send;
 }
-/// The real store, one request about every 150 ms however many sections ask at once.
-pub(crate) struct HttpStore {
-    client: reqwest::Client,
-    next: Mutex<Instant>,
+/// Steam's search answered 429 after 10 requests in 7 seconds, and after 31 in 36 seconds spaced
+/// 1.2 seconds apart, and came back about 15 seconds later. Its other API took everything. So
+/// searches get their own slower lane, and a listing is kept for a while and not asked for twice.
+///
+/// What goes over the network: a status and a body.
+pub(crate) trait Transport: Send + Sync {
+    fn fetch(&self, url: &str) -> impl Future<Output = Result<(u16, String), String>> + Send;
 }
-impl HttpStore {
-    pub(crate) fn new() -> Result<Self, String> {
-        Ok(Self { client: crate::download::http_client("MYLE")?, next: Mutex::new(Instant::now()) })
+pub(crate) struct Reqwest {
+    client: reqwest::Client,
+}
+impl Transport for Reqwest {
+    async fn fetch(&self, url: &str) -> Result<(u16, String), String> {
+        let unreachable = |_: reqwest::Error| "Steam could not be reached.".to_string();
+        let response = self.client.get(url).send().await.map_err(unreachable)?;
+        let status = response.status().as_u16();
+        Ok((status, response.text().await.map_err(unreachable)?))
     }
 }
-impl StoreApi for HttpStore {
-    async fn get(&self, url: &str) -> Result<String, String> {
-        let slot = {
-            let mut next = self.next.lock().await;
-            let slot = (*next).max(Instant::now());
-            *next = slot + GAP;
-            slot
-        };
-        tokio::time::sleep_until(slot).await;
-        let response = self.client.get(url).send().await.map_err(|_| "Steam could not be reached.".to_string())?;
-        if !response.status().is_success() {
-            return Err(format!("Steam answered {}.", response.status().as_u16()));
+#[derive(Clone, Copy)]
+pub(crate) struct Timing {
+    pub search_gap: Duration,
+    pub api_gap: Duration,
+    pub cool_down: Duration,
+    pub listing_fresh: Duration,
+}
+const TIMING: Timing = Timing {
+    search_gap: Duration::from_millis(1200),
+    api_gap: GAP,
+    cool_down: Duration::from_secs(15),
+    listing_fresh: Duration::from_secs(600),
+};
+/// The real store, however many sections ask at once.
+pub(crate) struct PacedStore<T> {
+    transport: T,
+    timing: Timing,
+    search: Mutex<Instant>,
+    api: Mutex<Instant>,
+    listings: Mutex<HashMap<String, (Instant, String)>>,
+}
+pub(crate) type HttpStore = PacedStore<Reqwest>;
+impl HttpStore {
+    pub(crate) fn new() -> Result<Self, String> {
+        Ok(Self::with_timing(Reqwest { client: crate::download::http_client("MYLE")? }, TIMING))
+    }
+}
+impl<T: Transport> PacedStore<T> {
+    pub(crate) fn with_timing(transport: T, timing: Timing) -> Self {
+        let now = Instant::now();
+        Self { transport, timing, search: Mutex::new(now), api: Mutex::new(now), listings: Mutex::new(HashMap::new()) }
+    }
+    async fn saved_listing(&self, url: &str) -> Option<String> {
+        let listings = self.listings.lock().await;
+        let (saved_at, body) = listings.get(url)?;
+        (saved_at.elapsed() < self.timing.listing_fresh).then(|| body.clone())
+    }
+    async fn keep_listing(&self, url: &str, body: &str) {
+        let mut listings = self.listings.lock().await;
+        let fresh = self.timing.listing_fresh;
+        listings.retain(|_, (saved_at, _)| saved_at.elapsed() < fresh);
+        listings.insert(url.to_string(), (Instant::now(), body.to_string()));
+    }
+    /// Keeps this lane closed for the cool-down.
+    async fn hold_back(&self, lane: &Mutex<Instant>) {
+        let mut lane = lane.lock().await;
+        *lane = (*lane).max(Instant::now() + self.timing.cool_down);
+    }
+    /// Waits until this lane is free and takes it. Everyone waiting looks again when they wake,
+    /// so a cool-down holds back requests that were already in line.
+    async fn take_turn(lane: &Mutex<Instant>, gap: Duration) {
+        loop {
+            let ready_at = {
+                let mut lane = lane.lock().await;
+                let now = Instant::now();
+                if now >= *lane {
+                    *lane = now + gap;
+                    return;
+                }
+                *lane
+            };
+            tokio::time::sleep_until(ready_at).await;
         }
-        response.text().await.map_err(|_| "Steam could not be reached.".to_string())
+    }
+}
+impl<T: Transport> StoreApi for PacedStore<T> {
+    async fn get(&self, url: &str) -> Result<String, String> {
+        let is_search = url.starts_with(SEARCH_PATH);
+        if is_search && let Some(saved) = self.saved_listing(url).await {
+            return Ok(saved);
+        }
+        let (lane, gap) = if is_search { (&self.search, self.timing.search_gap) } else { (&self.api, self.timing.api_gap) };
+        for _ in 0..=RETRIES {
+            Self::take_turn(lane, gap).await;
+            let (status, body) = self.transport.fetch(url).await?;
+            if status == 429 {
+                self.hold_back(lane).await;
+                continue;
+            }
+            if !(200..300).contains(&status) {
+                return Err(format!("Steam answered {status}."));
+            }
+            if is_search {
+                self.keep_listing(url, &body).await;
+            }
+            return Ok(body);
+        }
+        Err(LIMITED.to_string())
     }
 }
 pub(crate) async fn listing<S: StoreApi>(
@@ -178,6 +265,102 @@ pub(crate) async fn scan_free_weekends<S: StoreApi>(api: &S) -> Result<Vec<Item>
         }
     }
     Ok(found)
+}
+#[cfg(test)]
+mod pacing_tests {
+    use std::collections::VecDeque;
+    use std::sync::Mutex as StdMutex;
+    use super::*;
+    const SEARCH_URL: &str = "https://store.steampowered.com/search/results/?infinite=1&a=1";
+    const OTHER_SEARCH: &str = "https://store.steampowered.com/search/results/?infinite=1&a=2";
+    const API_URL: &str = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?x=1";
+    const fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+    const QUICK: Timing = Timing { search_gap: ms(40), api_gap: ms(0), cool_down: ms(120), listing_fresh: ms(60_000) };
+    #[derive(Default)]
+    struct Scripted {
+        answers: StdMutex<VecDeque<(u16, &'static str)>>,
+        times: StdMutex<Vec<Instant>>,
+    }
+    impl Transport for Scripted {
+        async fn fetch(&self, _url: &str) -> Result<(u16, String), String> {
+            self.times.lock().unwrap().push(Instant::now());
+            let (status, body) = self.answers.lock().unwrap().pop_front().unwrap_or((200, "fine"));
+            Ok((status, body.to_string()))
+        }
+    }
+    fn store(answers: &[(u16, &'static str)], timing: Timing) -> PacedStore<Scripted> {
+        let transport = Scripted { answers: StdMutex::new(answers.iter().copied().collect()), times: StdMutex::default() };
+        PacedStore::with_timing(transport, timing)
+    }
+    fn times(store: &PacedStore<Scripted>) -> Vec<Instant> {
+        store.transport.times.lock().unwrap().clone()
+    }
+    #[tokio::test]
+    async fn searches_are_spaced_further_apart_than_other_calls() {
+        let api = store(&[], QUICK);
+        api.get(SEARCH_URL).await.unwrap();
+        api.get(OTHER_SEARCH).await.unwrap();
+        let at = times(&api);
+        assert!(at[1] - at[0] >= ms(40), "{:?}", at[1] - at[0]);
+    }
+    #[tokio::test]
+    async fn other_calls_do_not_wait_for_searches() {
+        let api = store(&[], Timing { search_gap: ms(60_000), ..QUICK });
+        api.get(SEARCH_URL).await.unwrap();
+        let before = Instant::now();
+        api.get(API_URL).await.unwrap();
+        assert!(before.elapsed() < ms(5_000));
+    }
+    #[tokio::test]
+    async fn a_refused_request_waits_and_tries_again() {
+        let api = store(&[(429, "slow down")], QUICK);
+        assert_eq!(api.get(SEARCH_URL).await.as_deref(), Ok("fine"));
+        let at = times(&api);
+        assert_eq!(at.len(), 2);
+        assert!(at[1] - at[0] >= ms(120), "{:?}", at[1] - at[0]);
+    }
+    #[tokio::test]
+    async fn steam_still_refusing_after_the_retries_is_a_clear_error() {
+        let api = store(&[(429, ""), (429, ""), (429, "")], Timing { cool_down: ms(10), ..QUICK });
+        assert_eq!(api.get(SEARCH_URL).await, Err(LIMITED.to_string()));
+        assert_eq!(times(&api).len(), 3);
+    }
+    #[tokio::test]
+    async fn a_cool_down_holds_back_searches_already_in_line() {
+        let api = store(&[(429, "")], QUICK);
+        let (first, second) = tokio::join!(api.get(SEARCH_URL), api.get(OTHER_SEARCH));
+        assert!(first.is_ok() && second.is_ok());
+        let at = times(&api);
+        assert_eq!(at.len(), 3);
+        assert!(at[1] - at[0] >= ms(120), "the second request waited out the refusal: {:?}", at[1] - at[0]);
+    }
+    #[tokio::test]
+    async fn the_same_listing_is_asked_for_only_once() {
+        let api = store(&[(200, "listing"), (200, "changed")], QUICK);
+        assert_eq!(api.get(SEARCH_URL).await.as_deref(), Ok("listing"));
+        assert_eq!(api.get(SEARCH_URL).await.as_deref(), Ok("listing"));
+        assert_eq!(times(&api).len(), 1);
+    }
+    #[tokio::test]
+    async fn an_old_listing_is_asked_for_again() {
+        let api = store(&[(200, "listing"), (200, "newer")], Timing { listing_fresh: ms(0), ..QUICK });
+        api.get(SEARCH_URL).await.unwrap();
+        assert_eq!(api.get(SEARCH_URL).await.as_deref(), Ok("newer"));
+    }
+    #[tokio::test]
+    async fn only_listings_are_kept() {
+        let api = store(&[(200, "one"), (200, "two")], QUICK);
+        api.get(API_URL).await.unwrap();
+        assert_eq!(api.get(API_URL).await.as_deref(), Ok("two"));
+    }
+    #[tokio::test]
+    async fn a_failed_listing_is_not_kept() {
+        let api = store(&[(503, "busy"), (200, "listing")], QUICK);
+        assert_eq!(api.get(SEARCH_URL).await, Err("Steam answered 503.".to_string()));
+        assert_eq!(api.get(SEARCH_URL).await.as_deref(), Ok("listing"));
+    }
 }
 #[cfg(test)]
 pub(crate) mod fake {

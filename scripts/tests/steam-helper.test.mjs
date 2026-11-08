@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FILTERS, validFilters, timeLeft, isLive, dealOver, reviewLabel, reviewTone, appendUnique, updatedAgo, createLatest } from "../../frontend/app/pages/steam-helper/model.ts";
+import { DEFAULT_FILTERS, validFilters, timeLeft, isLive, dealOver, debounce, reviewLabel, reviewTone, appendUnique, updatedAgo, createLatest } from "../../frontend/app/pages/steam-helper/model.ts";
 test("online co-op starts on, the rest off", () => assert.deepEqual(DEFAULT_FILTERS, { onlineCoop: true, singlePlayer: false, storyOnly: false }));
 test("a saved filter must have the right shape", () => {
   assert.ok(validFilters(DEFAULT_FILTERS));
@@ -44,6 +44,18 @@ test("updated time", () => {
   assert.equal(updatedAgo(990, 1000), "Updated just now");
   assert.equal(updatedAgo(1000 - 3 * 3600, 1000), "Updated 3 h ago");
   assert.equal(updatedAgo(null, 1000), "");
+});
+test("several quick chip clicks reload once, after the last", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reloads = 0;
+  const reload = debounce(() => reloads++, 300);
+  reload();
+  t.mock.timers.tick(200);
+  reload();
+  t.mock.timers.tick(299);
+  assert.equal(reloads, 0);
+  t.mock.timers.tick(1);
+  assert.equal(reloads, 1);
 });
 test("only the latest request counts", () => {
   const latest = createLatest();

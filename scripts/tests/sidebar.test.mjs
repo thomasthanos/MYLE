@@ -20,10 +20,10 @@ test("the registry lists every page once, grouped", () => {
   assert.deepEqual(
     sections(all).map((section) => [section.group, section.pages.map((page) => page.id)]),
     [
-      ["apps", ["install-apps", "creative-hub", "spotify-hub", "auto-clicker"]],
+      ["apps", ["install-apps", "creative-hub", "spotify-hub", "auto-clicker", "steam-helper"]],
       ["data", ["password-manager", "game-saves"]],
       ["system", ["windows-optimization", "system-cleaner", "system-maintenance"]],
-      ["owner", ["project-backups", "github-releases", "steam-helper"]],
+      ["owner", ["project-backups", "github-releases"]],
     ],
   );
   assert.deepEqual(all.filter((page) => page.group === "bottom").map((page) => page.id), ["settings"]);
@@ -35,7 +35,7 @@ test("Auto Clicker is available to everyone without changing existing numbered s
 });
 test("the owner-only pages are their own group, loaded only when opened", () => {
   const owner = all.filter((page) => page.ownerOnly);
-  assert.deepEqual(owner.map((page) => page.id).sort(), ["github-releases", "project-backups", "steam-helper"]);
+  assert.deepEqual(owner.map((page) => page.id).sort(), ["github-releases", "project-backups"]);
   for (const page of owner) {
     assert.equal(page.group, "owner", page.id);
     assert.ok(page.lazy, `${page.id} is not loaded lazily`);
@@ -80,7 +80,9 @@ test("Ctrl+9 and Ctrl+0 open the owner pages only when available", () => {
   assert.equal(pageForShortcut(all, keys("0", { code: "Digit0" }))?.id, "github-releases");
   assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
 });
-test("Steam Game Helper takes no number, so the owner's shortcuts stay", () => {
+test("Steam Game Helper is for everyone and takes no number, so the shortcuts stay", () => {
+  assert.ok(everyone.some((page) => page.id === "steam-helper"));
+  assert.equal(shortcutOf(everyone, "steam-helper"), null);
   assert.equal(shortcutOf(all, "steam-helper"), null);
   assert.equal(shortcutOf(all, "project-backups"), "Ctrl+9");
   assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
