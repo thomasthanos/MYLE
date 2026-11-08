@@ -210,7 +210,7 @@ fn is_due_with_clock(
 /// Unix seconds projected onto this PC's local wall clock, matching the
 /// offset-free task boundaries. Apply the zone's DST rule for each timestamp,
 /// including a last attempt from before a clock change.
-fn local_seconds(seconds: u64) -> Option<u64> {
+pub(crate) fn local_seconds(seconds: u64) -> Option<u64> {
     local_seconds_in_zone(seconds, None)
 }
 fn local_seconds_in_zone(

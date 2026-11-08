@@ -3,7 +3,7 @@ pub(crate) mod commands;
 pub(crate) mod covers;
 mod detection;
 mod engine;
-mod headless;
+pub(crate) mod headless;
 mod models;
 pub(crate) mod notice;
 mod parser;
