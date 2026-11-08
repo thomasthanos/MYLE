@@ -14,7 +14,7 @@ for (const page of all) {
 const everyone = all.filter((page) => !page.ownerOnly);
 const keys = (key, extra = {}) => ({ key, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, ...extra });
 test("the registry lists every page once, grouped", () => {
-  assert.equal(all.length, 12);
+  assert.equal(all.length, 13);
   assert.equal(new Set(all.map((page) => page.id)).size, all.length);
   assert.equal(all[0].id, "install-apps", "the page the app opens on comes first");
   assert.deepEqual(
@@ -23,7 +23,7 @@ test("the registry lists every page once, grouped", () => {
       ["apps", ["install-apps", "creative-hub", "spotify-hub", "auto-clicker"]],
       ["data", ["password-manager", "game-saves"]],
       ["system", ["windows-optimization", "system-cleaner", "system-maintenance"]],
-      ["owner", ["project-backups", "github-releases"]],
+      ["owner", ["project-backups", "github-releases", "steam-helper"]],
     ],
   );
   assert.deepEqual(all.filter((page) => page.group === "bottom").map((page) => page.id), ["settings"]);
@@ -35,14 +35,14 @@ test("Auto Clicker is available to everyone without changing existing numbered s
 });
 test("the owner-only pages are their own group, loaded only when opened", () => {
   const owner = all.filter((page) => page.ownerOnly);
-  assert.deepEqual(owner.map((page) => page.id).sort(), ["github-releases", "project-backups"]);
+  assert.deepEqual(owner.map((page) => page.id).sort(), ["github-releases", "project-backups", "steam-helper"]);
   for (const page of owner) {
     assert.equal(page.group, "owner", page.id);
     assert.ok(page.lazy, `${page.id} is not loaded lazily`);
   }
   assert.ok(all.filter((page) => page.group === "owner").every((page) => page.ownerOnly));
   // Nothing imports them eagerly.
-  assert.ok(!/^import (GithubReleases|ProjectBackups) from/m.test(registry));
+  assert.ok(!/^import (GithubReleases|ProjectBackups|SteamHelper) from/m.test(registry));
   // Everyone else never sees the group.
   assert.ok(!sections(everyone).some((section) => section.group === "owner"));
 });
@@ -78,6 +78,11 @@ test("Ctrl+9 and Ctrl+0 open the owner pages only when available", () => {
   assert.equal(pageForShortcut(everyone, keys("0", { code: "Digit0" })), undefined);
   assert.equal(shortcutOf(everyone, "project-backups"), null);
   assert.equal(pageForShortcut(all, keys("0", { code: "Digit0" }))?.id, "github-releases");
+  assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
+});
+test("Steam Game Helper takes no number, so the owner's shortcuts stay", () => {
+  assert.equal(shortcutOf(all, "steam-helper"), null);
+  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+9");
   assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
 });
 test("sidebar toggle accepts the B key in Latin and Greek keyboard layouts", () => {

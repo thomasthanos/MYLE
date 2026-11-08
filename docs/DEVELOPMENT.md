@@ -103,7 +103,7 @@ scripts/
   update-psl.mjs              extension/psl.js from the psl crate's list
   update-sidestore.mjs        refreshes the SideStore source
   prepare-extension.mjs       the Firefox mirror, plus the store zips
-  tests/                      37 node --test suites for everything outside Rust
+  tests/                      41 node --test suites for everything outside Rust
 site/                         the static site (Cloudflare Pages; wrangler.toml)
 frontend/                     Svelte 5 + TypeScript, the Vite root
   index.html                  main window → main.ts → app/
@@ -124,7 +124,7 @@ backend/                      Rust + Tauri
   src/lib.rs                  start-up, the splash → main hand-over, the command table
   src/<feature>/              account, apps, autoclicker, cleaner, cloud, debloat, disk_analyzer,
                               game_saves, github_releases, maintenance, passwords,
-                              project_backups, spotify_hub, windows_optimization
+                              project_backups, spotify_hub, steam_helper, windows_optimization
   src/updater.rs              the updater (feed on R2, GitHub Releases as fallback)
   src/whats_new.rs            the "What's new" notes
   src/storage.rs              where settings and data live (and the one-time folder move)
@@ -490,16 +490,25 @@ The Password Manager on phones: see, copy and edit the logins, with their 2FA co
 
 The choices are written to `HKCU\Software\ThomasThanos\MakeYourLifeEasier` (start-up, tray) or to the settings file (`theme`), and the setup keeps its own remembered shortcut state in step (`src/startup.rs`, `src/shortcut_preferences.rs`).
 
+### Steam Game Helper
+
+An owner-only page: what is free on Steam now, twelve weekly picks, every deal, and the permanently free games. `backend/src/steam_helper/`, page in `frontend/app/pages/steam-helper/`. It reads the public store only: no sign-in, no key, and it never touches an account.
+
+- **Sources** (none is a documented API, so a changed answer becomes a section error, never a crash): the store search listing for lists, `IStoreBrowseService/GetItems` for details, `IStoreQueryService/Query` to scan the top 1,000 games for free weekends. Why the search listing and not `Query` for lists is in `docs/superpowers/specs/2026-11-08-steam-game-helper-design.md`.
+- **Filters.** Online co-op and Single-player are a union; Story only narrows. Free right now ignores them. Adult games never show: tags Hentai and NSFW, descriptors 3 and 4.
+- **Picks** are at least 85% positive with 5,000 reviews, story games first, chosen once a week per filter combination and saved in `picks.json`. The week starts Monday, local time, and last week's list is left out.
+- **Cache.** One file per section and filter combination, an hour old at most. When Steam fails, the page keeps the saved list and says so. Refresh is held to once a minute.
+- **Notice.** While MYLE runs, `watcher.rs` looks a minute after start and then every 3 hours, and raises the corner notice (`game_saves/notice.rs`) for an offer not seen before. The very first look only remembers. It asks the owner verdict every time, so it costs no network for anyone else.
 ---
 
 ## 6. Owner-only pages
 
-GitHub Releases and Project Backups are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
+GitHub Releases, Project Backups and Steam Game Helper are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
 
 - **Who.** After sign-in, and again when the window comes back after 10 minutes, the backend asks Supabase for the user (`GET /auth/v1/user` with the session's access token, so Supabase checks the token) and admits only an account whose email is the owner's (any case), confirmed, signed in with Discord (`app_metadata.provider`), with a Discord identity of that email marked verified. Nothing the webview sends counts: the page can only ask for a recheck (`account_access`).
 - **Kept.** The verdict is tied to the user id, kept in memory and sealed with DPAPI in `account-access.bin` (roaming folder), so the pages work offline for 30 days after the last check. Signing out, another account or an expired session clears it.
-- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*` or `project_backups_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
-- **Live.** The backend sends `account-access` (true/false) on every change. On false the sidebar hides both pages (`ownerOnly` in `registry.ts`), an open one falls back to the first page (deep links and the start page too), and running builds, releases, backups and previews are cancelled.
+- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*`, `project_backups_*` or `steam_helper_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
+- **Live.** The backend sends `account-access` (true/false) on every change. On false the sidebar hides those pages (`ownerOnly` in `registry.ts`), an open one falls back to the first page (deep links and the start page too), and running builds, releases, backups and previews are cancelled.
 
 ---
 
@@ -510,6 +519,7 @@ GitHub Releases and Project Backups are for the app's owner only (`backend/src/a
 | Program | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\MYLE.exe` (existing installs keep this folder) |
 | Settings, account, Game Saves, Project Backups, GitHub Releases, the vault | `%APPDATA%\ThomasThanos\MakeYourLifeEasier` |
 | Cache, WebView2 (localStorage), JSON stores, undo records | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data` |
+| Steam Game Helper's cache, weekly picks and seen offers | `%LOCALAPPDATA%ThomasThanosMakeYourLifeEasierdatasteam-helper` |
 | Desktop shortcut | the Windows Desktop known folder (may redirect to OneDrive) · `MYLE.lnk` |
 | Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\MYLE.lnk` |
 | Launch with Windows (opt-in) | `…\Start Menu\Programs\Startup\MYLE.lnk` (with `--autostart`) |
@@ -610,6 +620,7 @@ Preview the window in a browser: `npx vite` and `http://localhost:1420/installer
 | `scripts/smoke-test-setup.ps1` | a silent install, an update and an uninstall, with checks (CI) |
 | `scripts/verify-install.ps1` | one install, or with `-Removed` one uninstall |
 | `cargo test <feature>` | one feature's tests, e.g. `cargo test project_backups` |
+| `cargo test live_steam_still_answers -- --ignored` | asks the real Steam store, for checking by hand when Steam changes something |
 
 Some suites only make sense on real Windows and are `#[ignore]`d or gated:
 

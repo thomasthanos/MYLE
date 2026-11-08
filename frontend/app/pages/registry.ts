@@ -5,6 +5,7 @@ import IconSpotifyHub from "../../lib/icons/IconSpotifyHub.svelte";
 import IconGameSaves from "../../lib/icons/IconGameSaves.svelte";
 import IconProjectBackups from "../../lib/icons/IconProjectBackups.svelte";
 import IconGithubReleases from "../../lib/icons/IconGithubReleases.svelte";
+import IconSteamHelper from "../../lib/icons/IconSteamHelper.svelte";
 import IconCreativeHub from "../../lib/icons/IconCreativeHub.svelte";
 import IconWindowsOpt from "../../lib/icons/IconWindowsOpt.svelte";
 import IconSystemCleaner from "../../lib/icons/IconSystemCleaner.svelte";
@@ -66,6 +67,9 @@ const defs = [
   { id: "github-releases", label: "GitHub Releases", group: "owner", icon: IconGithubReleases, ownerOnly: true, fill: true,
     load: () => import("./github-releases/GithubReleases.svelte"),
     description: "Commit, build and release your projects to GitHub." },
+  { id: "steam-helper", label: "Steam Game Helper", group: "owner", icon: IconSteamHelper, ownerOnly: true, numbered: false,
+    load: () => import("./steam-helper/SteamHelper.svelte"),
+    description: "Free games, this week's picks and the best deals on Steam." },
   { id: "settings", label: "Settings", group: "bottom", icon: IconSettings,
     load: () => import("./settings/Settings.svelte"),
     description: "Your account, sync, appearance and updates." },
