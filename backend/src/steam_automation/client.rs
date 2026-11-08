@@ -1,10 +1,11 @@
 //! Talks to the Steam client already installed on this PC, through its own `steamclient64.dll`, so
 //! nothing of Valve's ships with MYLE. The method numbers below are the positions in the C++
 //! interfaces of Valve's published Steamworks headers, fixed by the version strings asked for.
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::iter::once;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::System::LibraryLoader::{
     GetProcAddress, LOAD_WITH_ALTERED_SEARCH_PATH, LoadLibraryExW, SetDllDirectoryW,
 };
@@ -13,6 +14,19 @@ const UNSUPPORTED: &str = "This Steam version is not supported.";
 // ISteamClient.
 const CREATE_STEAM_PIPE: usize = 0;
 const CONNECT_TO_GLOBAL_USER: usize = 2;
+const GET_ISTEAM_USER_STATS: usize = 13;
+// ISteamUserStats, version 012, the last with RequestCurrentStats.
+const STATS_VERSION: &str = "STEAMUSERSTATS_INTERFACE_VERSION012";
+const REQUEST_CURRENT_STATS: usize = 0;
+const GET_ACHIEVEMENT: usize = 6;
+const SET_ACHIEVEMENT: usize = 7;
+const STORE_STATS: usize = 10;
+const GET_NUM_ACHIEVEMENTS: usize = 14;
+const GET_ACHIEVEMENT_NAME: usize = 15;
+const USER_STATS_RECEIVED: i32 = 1101;
+const USER_STATS_STORED: i32 = 1102;
+const RESULT_OK: i32 = 1;
+const CALLBACK_LIMIT: Duration = Duration::from_secs(15);
 type This = *mut c_void;
 type CreateInterface = unsafe extern "C" fn(*const c_char, *mut i32) -> This;
 type GetCallback = unsafe extern "C" fn(i32, *mut CallbackMsg, *mut i32) -> bool;
@@ -104,8 +118,87 @@ impl SteamClient {
             Some((message.callback, body))
         }
     }
+    /// This game's achievements and stats.
+    pub(crate) fn user_stats(&self) -> Result<UserStats<'_>, String> {
+        let version = CString::new(STATS_VERSION).map_err(|e| e.to_string())?;
+        // SAFETY: `client` is the live interface asked for by version, and the method has this signature.
+        let stats = unsafe {
+            let get: unsafe extern "C" fn(This, i32, i32, *const c_char) -> This = method(self.client, GET_ISTEAM_USER_STATS);
+            get(self.client, self.user, self.pipe, version.as_ptr())
+        };
+        if stats.is_null() {
+            return Err(UNSUPPORTED.to_string());
+        }
+        Ok(UserStats { client: self, stats })
+    }
     /// Empties Steam's waiting messages, as a game does while it runs.
     pub(crate) fn pump(&self) {
         while self.next_callback().is_some() {}
+    }
+}
+/// One game's achievements, through ISteamUserStats.
+pub(crate) struct UserStats<'a> {
+    client: &'a SteamClient,
+    stats: This,
+}
+impl UserStats<'_> {
+    /// Waits for Steam's answer of this kind and checks that it succeeded.
+    fn wait_for(&self, callback: i32) -> Result<(), String> {
+        let started = Instant::now();
+        while started.elapsed() < CALLBACK_LIMIT {
+            while let Some((kind, body)) = self.client.next_callback() {
+                if kind == callback {
+                    let result = body.get(8..12).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                    return if result == Some(RESULT_OK) { Ok(()) } else { Err("Steam refused.".to_string()) };
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err("Steam took too long to answer.".to_string())
+    }
+    /// Asks Steam for this game's stats. Nothing below works until this has succeeded.
+    pub(crate) fn load(&self) -> Result<(), String> {
+        // SAFETY: `stats` is the live interface asked for by version, and the method has this signature.
+        let asked = unsafe {
+            let request: unsafe extern "C" fn(This) -> bool = method(self.stats, REQUEST_CURRENT_STATS);
+            request(self.stats)
+        };
+        if !asked {
+            return Err("Steam would not give the achievements.".to_string());
+        }
+        self.wait_for(USER_STATS_RECEIVED)
+    }
+    /// Each achievement's internal name and whether it is unlocked.
+    pub(crate) fn achievements(&self) -> Vec<(String, bool)> {
+        // SAFETY: as above; a returned name is Steam's own null-terminated string, copied at once.
+        unsafe {
+            let count: unsafe extern "C" fn(This) -> u32 = method(self.stats, GET_NUM_ACHIEVEMENTS);
+            let name_of: unsafe extern "C" fn(This, u32) -> *const c_char = method(self.stats, GET_ACHIEVEMENT_NAME);
+            let achieved: unsafe extern "C" fn(This, *const c_char, *mut bool) -> bool = method(self.stats, GET_ACHIEVEMENT);
+            (0..count(self.stats))
+                .filter_map(|index| {
+                    let name = name_of(self.stats, index);
+                    if name.is_null() {
+                        return None;
+                    }
+                    let mut unlocked = false;
+                    achieved(self.stats, name, &mut unlocked).then(|| (CStr::from_ptr(name).to_string_lossy().into_owned(), unlocked))
+                })
+                .collect()
+        }
+    }
+    /// Unlocks one achievement and waits for Steam to confirm it was stored.
+    pub(crate) fn unlock(&self, name: &str) -> Result<(), String> {
+        let name = CString::new(name).map_err(|e| e.to_string())?;
+        // SAFETY: as above; `name` lives for the call.
+        let stored = unsafe {
+            let set: unsafe extern "C" fn(This, *const c_char) -> bool = method(self.stats, SET_ACHIEVEMENT);
+            let store: unsafe extern "C" fn(This) -> bool = method(self.stats, STORE_STATS);
+            set(self.stats, name.as_ptr()) && store(self.stats)
+        };
+        if !stored {
+            return Err("Steam refused.".to_string());
+        }
+        self.wait_for(USER_STATS_STORED)
     }
 }

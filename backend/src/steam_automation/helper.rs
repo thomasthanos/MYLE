@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
+use super::achievements::AchievementList;
 use super::client::SteamClient;
 const PUMP_EVERY: Duration = Duration::from_secs(1);
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,12 +44,32 @@ fn run_game(appid: u32) -> Result<(), String> {
         std::thread::sleep(PUMP_EVERY);
     }
 }
+/// Prints this game's achievements as JSON, for the app to read.
+fn list_achievements(appid: u32) -> Result<(), String> {
+    let client = SteamClient::open(&steam_path()?, appid)?;
+    let stats = client.user_stats()?;
+    stats.load()?;
+    let all = stats.achievements();
+    let list = AchievementList {
+        names: all.iter().map(|(name, _)| name.clone()).collect(),
+        locked: all.into_iter().filter(|(_, unlocked)| !unlocked).map(|(name, _)| name).collect(),
+    };
+    println!("{}", serde_json::to_string(&list).map_err(|e| e.to_string())?);
+    Ok(())
+}
+fn unlock_achievement(appid: u32, name: &str) -> Result<(), String> {
+    let client = SteamClient::open(&steam_path()?, appid)?;
+    let stats = client.user_stats()?;
+    stats.load()?;
+    stats.unlock(name)
+}
 /// Runs a helper if this process was started as one. `None` means a normal app launch.
 pub fn run_helper_from_args() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     let result = match mode_from_args(&args)? {
         HelperMode::Run(appid) => run_game(appid),
-        HelperMode::Achievements(_) | HelperMode::Unlock { .. } => Err("Not available yet.".to_string()),
+        HelperMode::Achievements(appid) => list_achievements(appid),
+        HelperMode::Unlock { appid, name } => unlock_achievement(appid, &name),
     };
     Some(match result {
         Ok(()) => 0,
