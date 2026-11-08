@@ -311,6 +311,8 @@ pub fn run() {
                 // The installer of the last update, if any. This runs before the splash can start a new download into the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
                 let _ = std::fs::remove_dir_all(updater::update_dir());
                 updater::sweep_leftovers_later();
+                // While MYLE runs, the owner hears about games that have just become free.
+                steam_helper::watcher::start(app.handle().clone());
                 // If the splash never gets to call finish_startup (a failed update check, a broken page), show the window anyway.
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {

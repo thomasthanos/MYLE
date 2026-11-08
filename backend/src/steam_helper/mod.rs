@@ -7,3 +7,4 @@ pub(crate) mod parse;
 pub(crate) mod picks;
 pub(crate) mod sections;
 pub(crate) mod store;
+pub(crate) mod watcher;
