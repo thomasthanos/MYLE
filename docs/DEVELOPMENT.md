@@ -103,7 +103,7 @@ scripts/
   update-psl.mjs              extension/psl.js from the psl crate's list
   update-sidestore.mjs        refreshes the SideStore source
   prepare-extension.mjs       the Firefox mirror, plus the store zips
-  tests/                      41 node --test suites for everything outside Rust
+  tests/                      42 node --test suites for everything outside Rust
 site/                         the static site (Cloudflare Pages; wrangler.toml)
 frontend/                     Svelte 5 + TypeScript, the Vite root
   index.html                  main window → main.ts → app/
@@ -124,7 +124,8 @@ backend/                      Rust + Tauri
   src/lib.rs                  start-up, the splash → main hand-over, the command table
   src/<feature>/              account, apps, autoclicker, cleaner, cloud, debloat, disk_analyzer,
                               game_saves, github_releases, maintenance, passwords,
-                              project_backups, spotify_hub, steam_helper, windows_optimization
+                              project_backups, spotify_hub, steam_automation, steam_helper,
+                              windows_optimization
   src/updater.rs              the updater (feed on R2, GitHub Releases as fallback)
   src/whats_new.rs            the "What's new" notes
   src/storage.rs              where settings and data live (and the one-time folder move)
@@ -500,15 +501,24 @@ A page for everyone: what is free on Steam now, twelve weekly picks, every deal,
 - **Picks** are at least 85% positive with 5,000 reviews, story games first, chosen once a week per filter combination and saved in `picks.json`. The week starts Monday, local time, and last week's list is left out.
 - **Cache.** One file per section and filter combination, an hour old at most. When Steam fails, the page keeps the saved list and says so. Refresh is held to once a minute.
 - **Notice.** While MYLE runs, `watcher.rs` looks a minute after start and then every 3 hours, and raises the corner notice (`game_saves/notice.rs`) for an offer not seen before. The very first look only remembers. Until the page has been opened once it does nothing, so an install that never uses it never asks Steam.
+### Steam Automation
+
+An owner-only page: card farming, playtime idling, achievement unlocking and selling duplicate cards, each with its own switch, all off until the owner turns them on. `backend/src/steam_automation/`, page in `frontend/app/pages/steam-automation/`. Design in `docs/superpowers/specs/2026-11-08-steam-automation-design.md`.
+
+- **How a game runs.** Each is its own `MYLE.exe --steam-run=<appid>`, which loads the `steamclient64.dll` already in the Steam folder and connects as that game. Nothing of Valve's ships with MYLE. Helpers belong to a job object, so they cannot outlive the app.
+- **Sign-in.** Steam's own login page opens in a window with no access to MYLE's commands, in its own WebView2 profile. MYLE reads only the resulting cookies, sealed with DPAPI. The store has its own login cookie, separate from Steam Community's.
+- **The loop.** `engine.rs` ticks every minute. `decide.rs` is the pure rule for what should be running: card farming runs alone, the idler and achievements wait for it, and a real game, a wrong account, no Steam or Pause stops everything.
+- **Selling.** Duplicates only; one of each card is always kept, and foils count as different cards. Every listing still needs confirming in Steam Guard, which MYLE never does.
+- **Steam's rules.** Section 4C of the Steam Subscriber Agreement forbids automation of this kind. It is the owner's choice, on their own account, which is why this page is not offered to anyone else.
 ---
 
 ## 6. Owner-only pages
 
-GitHub Releases and Project Backups are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
+GitHub Releases, Project Backups and Steam Automation are for the app's owner only (`backend/src/account/owner.rs`, the address in `OWNER_EMAIL`). The backend decides, never the page:
 
 - **Who.** After sign-in, and again when the window comes back after 10 minutes, the backend asks Supabase for the user (`GET /auth/v1/user` with the session's access token, so Supabase checks the token) and admits only an account whose email is the owner's (any case), confirmed, signed in with Discord (`app_metadata.provider`), with a Discord identity of that email marked verified. Nothing the webview sends counts: the page can only ask for a recheck (`account_access`).
 - **Kept.** The verdict is tied to the user id, kept in memory and sealed with DPAPI in `account-access.bin` (roaming folder), so the pages work offline for 30 days after the last check. Signing out, another account or an expired session clears it.
-- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*` or `project_backups_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
+- **Enforced.** `owner_gate` in `lib.rs` wraps the invoke handler: every command named `github_releases_*`, `project_backups_*` or `steam_automation_*` is refused unless the verdict admits the session's user. A test reads `lib.rs` and fails if one of those modules' commands is registered under another name.
 - **Live.** The backend sends `account-access` (true/false) on every change. On false the sidebar hides those pages (`ownerOnly` in `registry.ts`), an open one falls back to the first page (deep links and the start page too), and running builds, releases, backups and previews are cancelled.
 
 ---
@@ -521,6 +531,7 @@ GitHub Releases and Project Backups are for the app's owner only (`backend/src/a
 | Settings, account, Game Saves, Project Backups, GitHub Releases, the vault | `%APPDATA%\ThomasThanos\MakeYourLifeEasier` |
 | Cache, WebView2 (localStorage), JSON stores, undo records | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data` |
 | Steam Game Helper's cache, weekly picks and seen offers | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data\steam-helper` |
+| Steam Automation's settings, sealed session, activity and library | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data\steam-automation` |
 | Desktop shortcut | the Windows Desktop known folder (may redirect to OneDrive) · `MYLE.lnk` |
 | Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\MYLE.lnk` |
 | Launch with Windows (opt-in) | `…\Start Menu\Programs\Startup\MYLE.lnk` (with `--autostart`) |

@@ -64,6 +64,7 @@ pub struct InventoryView {
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    pub ready: bool,
     pub steam_running: bool,
     pub community_signed_in: bool,
     pub community_ok: bool,
@@ -219,6 +220,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             FarmStep::Done => "done",
         };
         Status {
+            ready: true,
             steam_running: world.steam_running,
             community_signed_in: session_exists,
             community_ok: session_exists && self.community_ok,
@@ -448,6 +450,7 @@ mod tests {
         let status = rig.engine.tick(input(farming()), T0).await;
         assert_eq!(running(&rig), BTreeSet::from([GAME]));
         assert_eq!((status.farm.games_left, status.farm.drops_left), (1, 3));
+        assert!(status.ready, "the page can tell a real answer from no answer yet");
     }
     #[tokio::test]
     async fn a_real_game_stops_and_closing_it_resumes() {

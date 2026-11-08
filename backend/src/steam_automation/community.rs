@@ -115,11 +115,13 @@ mod fake {
     use std::sync::Mutex;
     use super::*;
     type Answer = Box<dyn Fn(&str) -> Result<String, CommunityError> + Send + Sync>;
+    /// A posted request: its address, its form and its referer.
+    type Posted = (String, Vec<(String, String)>, String);
     pub(crate) struct FakeCommunity {
         answer: Answer,
         post_answer: Mutex<Option<Answer>>,
         gets: Mutex<Vec<String>>,
-        posts: Mutex<Vec<(String, Vec<(String, String)>, String)>>,
+        posts: Mutex<Vec<Posted>>,
     }
     impl FakeCommunity {
         pub(crate) fn answering(answer: impl Fn(&str) -> Result<String, CommunityError> + Send + Sync + 'static) -> Self {
@@ -132,7 +134,7 @@ mod fake {
         pub(crate) fn gets(&self) -> Vec<String> {
             self.gets.lock().unwrap().clone()
         }
-        pub(crate) fn posts(&self) -> Vec<(String, Vec<(String, String)>, String)> {
+        pub(crate) fn posts(&self) -> Vec<Posted> {
             self.posts.lock().unwrap().clone()
         }
     }
