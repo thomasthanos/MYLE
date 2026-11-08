@@ -17,7 +17,6 @@ mod shown_window;
 mod shell_identity;
 mod shortcut_preferences;
 mod spotify_hub;
-#[allow(dead_code)]
 mod steam_automation;
 mod steam_helper;
 mod startup;
@@ -327,6 +326,7 @@ pub fn run() {
                 updater::sweep_leftovers_later();
                 // While MYLE runs, whoever has opened Steam Game Helper hears about games that have just become free.
                 steam_helper::watcher::start(app.handle().clone());
+                steam_automation::engine::start(app.handle().clone());
                 // If the splash never gets to call finish_startup (a failed update check, a broken page), show the window anyway.
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -570,6 +570,10 @@ pub fn run() {
             project_backups::commands::project_backups_relocate_projects,
             steam_automation::commands::steam_automation_status,
             steam_automation::commands::steam_automation_sign_in,
+            steam_automation::commands::steam_automation_settings,
+            steam_automation::commands::steam_automation_set_settings,
+            steam_automation::commands::steam_automation_pause,
+            steam_automation::commands::steam_automation_library,
             steam_helper::commands::steam_helper_free,
             steam_helper::commands::steam_helper_picks,
             steam_helper::commands::steam_helper_row,

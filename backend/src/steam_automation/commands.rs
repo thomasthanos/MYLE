@@ -1,25 +1,40 @@
 //! What the page asks for. Every command here is refused for anyone but the owner (`account::owner`).
 use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::Duration;
-use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::Notify;
+use super::community::{Community, HttpCommunity};
+use super::engine::Status;
+use super::library::{self, LibraryGame, Saved};
+use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
-use super::steam_state;
+use super::settings::{self, Settings};
+use crate::steam_helper::commands::SteamHelperState;
 const LOGIN_LABEL: &str = "steam-login";
+const REFRESH_LABEL: &str = "steam-refresh";
 const LOGIN_PAGE: &str = "https://steamcommunity.com/login/home/?goto=";
 const COMMUNITY: &str = "https://steamcommunity.com";
 const STORE: &str = "https://store.steampowered.com";
+const USERDATA: &str = "https://store.steampowered.com/dynamicstore/userdata/";
 /// How long the sign-in window waits: the owner may need their phone.
 const SIGN_IN_SECONDS: u32 = 600;
 /// How long the store is given to hand over its own cookie after signing in.
 const STORE_SECONDS: u32 = 15;
+/// How long a hidden page is given to renew an expired session.
+const REFRESH_SECONDS: u32 = 20;
 #[derive(Default)]
 pub struct SteamAutomationState {
     session: Mutex<Option<Session>>,
+    settings: Mutex<Option<Settings>>,
+    status: Mutex<Status>,
+    paused: AtomicBool,
+    poke: Notify,
+    runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
 }
 impl SteamAutomationState {
-    fn session(&self) -> Option<Session> {
+    pub(crate) fn session(&self) -> Option<Session> {
         let mut session = self.session.lock().unwrap_or_else(|p| p.into_inner());
         if session.is_none() {
             *session = folder().ok().and_then(|folder| session::load(&folder.join("session.bin")));
@@ -31,33 +46,76 @@ impl SteamAutomationState {
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         new.save(&folder.join("session.bin"))?;
         *self.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(new);
+        self.poke.notify_one();
         Ok(())
     }
+    pub(crate) fn settings(&self) -> Settings {
+        let mut settings = self.settings.lock().unwrap_or_else(|p| p.into_inner());
+        settings.get_or_insert_with(|| folder().map(|folder| settings::load(&folder.join("settings.json"))).unwrap_or_default()).clone()
+    }
+    pub(crate) fn paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+    pub(crate) fn set_status(&self, status: Status) {
+        *self.status.lock().unwrap_or_else(|p| p.into_inner()) = status;
+    }
+    pub(crate) fn set_runner(&self, runner: Arc<ProcessRunner<HelperSpawner>>) {
+        let _ = self.runner.set(runner);
+    }
+    pub(crate) async fn poked(&self) {
+        self.poke.notified().await;
+    }
     /// Stops everything that acts on the account.
-    pub(crate) fn stop_all(&self) {}
+    pub(crate) fn stop_all(&self) {
+        if let Some(runner) = self.runner.get() {
+            runner.stop_all();
+        }
+    }
 }
-fn folder() -> Result<PathBuf, String> {
+pub(crate) fn folder() -> Result<PathBuf, String> {
     Ok(crate::storage::local_dir()?.join("steam-automation"))
 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Status {
-    steam_running: bool,
-    community_signed_in: bool,
-    same_account: bool,
+pub(crate) fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 #[tauri::command]
 pub fn steam_automation_status(state: State<'_, SteamAutomationState>) -> Status {
-    let steam = steam_state::read();
-    let session = state.session();
-    Status {
-        steam_running: steam.is_some(),
-        community_signed_in: session.is_some(),
-        same_account: match (&steam, &session) {
-            (Some(steam), Some(session)) => steam_state::same_account(steam.active_user, session.steam_id),
-            _ => false,
-        },
+    state.status.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+#[tauri::command]
+pub fn steam_automation_settings(state: State<'_, SteamAutomationState>) -> Settings {
+    state.settings()
+}
+#[tauri::command]
+pub fn steam_automation_set_settings(state: State<'_, SteamAutomationState>, settings: Settings) -> Result<(), String> {
+    settings::save(&folder()?.join("settings.json"), &settings)?;
+    *state.settings.lock().unwrap_or_else(|p| p.into_inner()) = Some(settings);
+    state.poke.notify_one();
+    Ok(())
+}
+#[tauri::command]
+pub fn steam_automation_pause(state: State<'_, SteamAutomationState>, paused: bool) {
+    state.paused.store(paused, Ordering::SeqCst);
+    state.poke.notify_one();
+}
+/// The owner's games, from a saved copy while it is a day old or less.
+#[tauri::command]
+pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAutomationState>) -> Result<Vec<LibraryGame>, String> {
+    let file = folder()?.join("library.json");
+    let saved: Option<Saved> = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    if let Some(saved) = saved.filter(|saved| saved.is_fresh(now())) {
+        return Ok(saved.games);
     }
+    let session = state.session().ok_or("Sign in to Steam first.")?;
+    let community = HttpCommunity::new()?;
+    community.set_session(Some(session));
+    let answer = community.get(USERDATA).await.map_err(|_| "Steam did not send your library.".to_string())?;
+    let owned = library::parse_owned(&answer)?;
+    let store = app.state::<SteamHelperState>().store()?;
+    let games = library::from_owned(&*store, &owned).await?;
+    let bytes = serde_json::to_vec(&Saved { saved_at: now(), games: games.clone() }).map_err(|e| e.to_string())?;
+    let _ = crate::game_saves::atomic::write(&file, &bytes);
+    Ok(games)
 }
 fn is_steam_site(url: &Url) -> bool {
     url.host_str().is_some_and(|host| {
@@ -116,4 +174,38 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
     }
     let _ = window.close();
     Err("Signing in took too long.".to_string())
+}
+/// Loads Steam Community once, hidden, in the signed-in profile, which renews an expired session
+/// if Steam still remembers the owner. `true` when a new session was saved.
+pub(crate) async fn refresh_session(app: &AppHandle) -> bool {
+    let (Ok(community), Ok(store), Ok(folder)) = (COMMUNITY.parse::<Url>(), STORE.parse::<Url>(), folder()) else {
+        return false;
+    };
+    if app.get_webview_window(LOGIN_LABEL).is_some() || app.get_webview_window(REFRESH_LABEL).is_some() {
+        return false;
+    }
+    let state = app.state::<SteamAutomationState>();
+    let before = state.session();
+    let Ok(window) = WebviewWindowBuilder::new(app, REFRESH_LABEL, WebviewUrl::External(community.clone()))
+        .visible(false)
+        .data_directory(folder.join("webview-steam"))
+        .on_navigation(is_steam_site)
+        .build()
+    else {
+        return false;
+    };
+    let mut refreshed = false;
+    for _ in 0..REFRESH_SECONDS {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let Some(found) = session::from_cookies(&cookies(&window, &community)) else {
+            continue;
+        };
+        let found = found.with_store_cookies(&cookies(&window, &store));
+        if Some(&found) != before.as_ref() {
+            refreshed = state.set_session(found).is_ok();
+            break;
+        }
+    }
+    let _ = window.close();
+    refreshed
 }

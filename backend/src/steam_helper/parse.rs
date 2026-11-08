@@ -25,6 +25,9 @@ pub(crate) struct Item {
     pub game: Game,
     pub adult: bool,
     pub free_weekend: Option<FreeWeekend>,
+    /// Steam's item type: 0 is a game.
+    pub item_type: Option<u64>,
+    pub features: Vec<u64>,
 }
 /// A `GetItems` or `Query` answer.
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +94,8 @@ fn item(value: &Value) -> Option<Item> {
         adult: tags.iter().any(|t| ADULT_TAGS.contains(t))
             || descriptors.iter().any(|d| ADULT_DESCRIPTORS.contains(d)),
         free_weekend: value.get("free_weekend").and_then(free_weekend),
+        item_type: number(value, "type"),
+        features: ids(value.get("categories").and_then(|c| c.get("feature_categoryids")), None),
     })
 }
 fn free_weekend(value: &Value) -> Option<FreeWeekend> {

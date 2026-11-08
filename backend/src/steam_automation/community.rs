@@ -52,12 +52,19 @@ fn form_body(form: &[(&str, String)]) -> String {
 }
 pub(crate) struct HttpCommunity {
     client: reqwest::Client,
-    session: Session,
+    session: std::sync::Mutex<Option<Session>>,
     next: Mutex<Instant>,
 }
 impl HttpCommunity {
-    pub(crate) fn new(session: Session) -> Result<Self, String> {
-        Ok(Self { client: crate::download::http_client("MYLE")?, session, next: Mutex::new(Instant::now()) })
+    pub(crate) fn new() -> Result<Self, String> {
+        Ok(Self { client: crate::download::http_client("MYLE")?, session: std::sync::Mutex::new(None), next: Mutex::new(Instant::now()) })
+    }
+    pub(crate) fn set_session(&self, session: Option<Session>) {
+        *self.session.lock().unwrap_or_else(|p| p.into_inner()) = session;
+    }
+    fn cookie(&self, url: &str) -> Result<String, CommunityError> {
+        let session = self.session.lock().unwrap_or_else(|p| p.into_inner());
+        session.as_ref().and_then(|session| cookie_for(url, session)).ok_or(CommunityError::SignedOut)
     }
     async fn wait_for_turn(&self) {
         let slot = {
@@ -80,7 +87,7 @@ impl HttpCommunity {
 }
 impl Community for HttpCommunity {
     async fn get(&self, url: &str) -> Result<String, CommunityError> {
-        let cookie = cookie_for(url, &self.session).ok_or(CommunityError::SignedOut)?;
+        let cookie = self.cookie(url)?;
         self.wait_for_turn().await;
         if url.contains("priceoverview") {
             tokio::time::sleep(PRICE_EXTRA).await;
@@ -88,7 +95,7 @@ impl Community for HttpCommunity {
         self.finish(self.client.get(url).header("Cookie", cookie)).await
     }
     async fn post(&self, url: &str, form: &[(&str, String)], referer: &str) -> Result<String, CommunityError> {
-        let cookie = cookie_for(url, &self.session).ok_or(CommunityError::SignedOut)?;
+        let cookie = self.cookie(url)?;
         self.wait_for_turn().await;
         let request = self
             .client
