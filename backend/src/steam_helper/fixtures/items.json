@@ -1,0 +1,68 @@
+{
+  "response": {
+    "store_items": [
+      {
+        "item_type": 0, "id": 239140, "success": 1, "visible": true, "name": "Dying Light", "appid": 239140, "type": 0,
+        "categories": { "supported_player_categoryids": [2, 1, 9, 38], "feature_categoryids": [22, 35] },
+        "content_descriptorids": [2, 5],
+        "tags": [{ "tagid": 1662, "weight": 1400 }, { "tagid": 3843, "weight": 900 }],
+        "reviews": { "summary_filtered": { "review_count": 376585, "percent_positive": 95, "review_score": 9, "review_score_label": "Overwhelmingly Positive" } },
+        "best_purchase_option": {
+          "packageid": 45760, "formatted_final_price": "2,49€", "formatted_original_price": "24,99€", "discount_pct": 90,
+          "active_discounts": [{ "discount_amount": 2250, "discount_description": "", "discount_end_date": 1794243600 }]
+        },
+        "assets": { "asset_url_format": "steam/apps/239140/${FILENAME}?t=1", "header": "9d1b810b85ae46a0acbdfddf583ccbb81271183e/header.jpg" }
+      },
+      {
+        "id": 420110, "success": 1, "name": "NEKOPARA Vol. 2", "appid": 420110,
+        "categories": { "supported_player_categoryids": [2] },
+        "content_descriptorids": [1, 5],
+        "tags": [{ "tagid": 4085 }, { "tagid": 12095 }, { "tagid": 6650 }, { "tagid": 3799 }, { "tagid": 9130 }],
+        "reviews": { "summary_filtered": { "review_count": 11100, "percent_positive": 97 } },
+        "best_purchase_option": { "formatted_final_price": "3,90€", "formatted_original_price": "9,75€", "discount_pct": 60 }
+      },
+      {
+        "id": 1086940, "success": 1, "name": "Baldur's Gate 3", "appid": 1086940,
+        "categories": { "supported_player_categoryids": [2, 1, 9, 38] },
+        "content_descriptorids": [1, 2, 5],
+        "tags": [{ "tagid": 1742 }, { "tagid": 12095 }, { "tagid": 3843 }, { "tagid": 6650 }],
+        "reviews": { "summary_filtered": { "review_count": 760728, "percent_positive": 96 } },
+        "best_purchase_option": { "formatted_final_price": "59,99€", "discount_pct": 0 }
+      },
+      {
+        "id": 1091500, "success": 1, "name": "Cyberpunk 2077", "appid": 1091500,
+        "categories": { "supported_player_categoryids": [2] },
+        "content_descriptorids": [1, 2, 5],
+        "tags": [{ "tagid": 6650 }, { "tagid": 4182 }, { "tagid": 1742 }],
+        "reviews": { "summary_filtered": { "review_count": 903380, "percent_positive": 87 } },
+        "best_purchase_option": { "formatted_final_price": "59,99€" }
+      },
+      {
+        "id": 230410, "success": 1, "name": "Warframe", "appid": 230410, "is_free": true,
+        "categories": { "supported_player_categoryids": [2, 1, 9, 38] },
+        "tags": [{ "tagid": 3843 }],
+        "reviews": { "summary_filtered": { "review_count": 682554, "percent_positive": 87 } }
+      },
+      {
+        "id": 1272080, "success": 1, "name": "PAYDAY 3", "appid": 1272080,
+        "categories": { "supported_player_categoryids": [2, 1, 9, 38, 27] },
+        "reviews": { "summary_filtered": { "review_count": 49899, "percent_positive": 46 } },
+        "best_purchase_option": { "formatted_final_price": "8,54€", "formatted_original_price": "28,49€", "discount_pct": 70, "active_discounts": [{ "discount_end_date": 1794506400 }] },
+        "free_weekend": { "start_time": 1793901600, "end_time": 1794247200 }
+      },
+      {
+        "id": 4435490, "success": 1, "name": "Call of Duty®: Modern Warfare® 4", "appid": 4435490,
+        "categories": { "supported_player_categoryids": [2, 1, 49, 36, 9, 38, 27] },
+        "reviews": { "summary_filtered": { "review_count": 11668, "percent_positive": 71 } },
+        "best_purchase_option": { "formatted_final_price": "69,99€" },
+        "free_weekend": { "start_time": 1793995200, "end_time": 1794420000, "text": "Call of Duty®: Modern Warfare® 4 - DMZ Free Trial", "appid": 4269880 }
+      },
+      { "id": 1, "success": 1, "name": "Adult only descriptor", "appid": 1, "content_descriptorids": [3] },
+      { "id": 2, "success": 1, "name": "Frequent nudity descriptor", "appid": 2, "content_descriptorids": [4] },
+      { "id": 3, "success": 1, "name": "NSFW tag", "appid": 3, "tags": [{ "tagid": 24904 }] },
+      { "id": 9, "success": 1, "name": "Bare game", "appid": 9 },
+      { "id": 10, "success": 2 },
+      { "appid": 11 }
+    ]
+  }
+}

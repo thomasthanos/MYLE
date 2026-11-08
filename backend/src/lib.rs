@@ -17,6 +17,8 @@ mod shown_window;
 mod shell_identity;
 mod shortcut_preferences;
 mod spotify_hub;
+#[allow(dead_code)]
+mod steam_helper;
 mod startup;
 mod taskbar;
 mod storage;
