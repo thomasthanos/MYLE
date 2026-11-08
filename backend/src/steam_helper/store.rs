@@ -124,9 +124,16 @@ pub(crate) async fn listing<S: StoreApi>(
     start: u32,
     count: u32,
 ) -> Result<SearchPage, String> {
-    parse::search_page(&api.get(&search_url(kind, mode, story, start, count)).await?)
+    let page = parse::search_page(&api.get(&search_url(kind, mode, story, start, count)).await?)?;
+    // Steam counts results, yet the page shows none: the page has changed. Past the first page
+    // it only means the list has run out.
+    if start == 0 && page.rows == 0 && page.total > 0 {
+        return Err(parse::UNEXPECTED.to_string());
+    }
+    Ok(page)
 }
-/// Details for `ids`, in that order. A game Steam does not return is left out.
+/// Details for `ids`, in that order. A game Steam does not return is left out, but a batch
+/// with nothing usable in it is an error, so a changed answer never looks like an empty one.
 pub(crate) async fn details<S: StoreApi>(api: &S, ids: &[u32]) -> Result<Vec<Item>, String> {
     let mut found = HashMap::new();
     for batch in ids.chunks(PER_REQUEST) {
@@ -135,7 +142,11 @@ pub(crate) async fn details<S: StoreApi>(api: &S, ids: &[u32]) -> Result<Vec<Ite
             "context": context(),
             "data_request": data_request(),
         });
-        for item in parse::items(&api.get(&with_input(GET_ITEMS, &input)?).await?)? {
+        let answer = parse::items(&api.get(&with_input(GET_ITEMS, &input)?).await?)?;
+        if answer.items.is_empty() {
+            return Err(parse::UNEXPECTED.to_string());
+        }
+        for item in answer.items {
             found.insert(item.game.appid, item);
         }
     }
@@ -155,9 +166,13 @@ pub(crate) async fn scan_free_weekends<S: StoreApi>(api: &S) -> Result<Vec<Item>
             "context": context(),
             "data_request": data_request(),
         });
-        let items = parse::items(&api.get(&with_input(QUERY, &input)?).await?)?;
-        let short = (items.len() as u32) < SCAN_PAGE;
-        found.extend(items.into_iter().filter(|item| item.free_weekend.is_some()));
+        let answer = parse::items(&api.get(&with_input(QUERY, &input)?).await?)?;
+        // Steam always has top sellers, so none at all means the answer has changed.
+        if page == 0 && answer.items.is_empty() {
+            return Err(parse::UNEXPECTED.to_string());
+        }
+        let short = (answer.listed as u32) < SCAN_PAGE;
+        found.extend(answer.items.into_iter().filter(|item| item.free_weekend.is_some()));
         if short {
             break;
         }
@@ -287,9 +302,58 @@ mod tests {
         assert!(api.calls().is_empty());
     }
     #[tokio::test]
+    async fn a_batch_that_comes_back_empty_is_an_error() {
+        let api = FakeStore::responding(|_| Ok(answer_with(vec![])));
+        assert!(details(&api, &[1, 2]).await.is_err());
+    }
+    #[tokio::test]
+    async fn a_batch_with_nothing_readable_is_an_error() {
+        let api = FakeStore::responding(|_| Ok(answer_with(vec![json!({ "renamed": 1 })])));
+        assert!(details(&api, &[1, 2]).await.is_err());
+    }
+    fn listing_answering(total: u32) -> FakeStore {
+        FakeStore::new(vec![("search/results", Ok(json!({ "total_count": total, "results_html": "<a></a>" }).to_string()))])
+    }
+    #[tokio::test]
+    async fn a_listing_that_counts_results_but_shows_none_is_an_error() {
+        assert!(listing(&listing_answering(498), ListingKind::Deals, None, false, 0, 100).await.is_err());
+    }
+    #[tokio::test]
+    async fn running_off_the_end_of_a_listing_is_fine() {
+        let page = listing(&listing_answering(498), ListingKind::Deals, None, false, 100, 50).await.unwrap();
+        assert!(page.ids.is_empty());
+    }
+    #[tokio::test]
+    async fn a_listing_with_no_results_is_fine() {
+        assert!(listing(&listing_answering(0), ListingKind::FreeToKeep, None, false, 0, 100).await.is_ok());
+    }
+    #[tokio::test]
+    async fn an_empty_first_scan_page_is_an_error() {
+        let api = FakeStore::responding(|_| Ok(answer_with(vec![])));
+        assert!(scan_free_weekends(&api).await.is_err());
+    }
+    #[tokio::test]
+    async fn an_unreadable_entry_does_not_end_the_scan() {
+        let api = FakeStore::responding(|url| {
+            let start = input_of(url)["query"]["start"].as_u64().unwrap();
+            let games = if start == 0 {
+                (0..100).map(|i| if i == 7 { json!({ "appid": 8 }) } else { json!({ "appid": i + 1, "name": "Paid" }) }).collect()
+            } else {
+                vec![json!({ "appid": 200, "name": "Paid" })]
+            };
+            Ok(answer_with(games))
+        });
+        scan_free_weekends(&api).await.unwrap();
+        assert_eq!(api.calls().len(), 2);
+    }
+    #[tokio::test]
     async fn a_failed_batch_is_an_error() {
         let api = FakeStore::responding(|url| {
-            if input_of(url)["ids"][0]["appid"] == 51 { Err("down".into()) } else { Ok(answer_with(vec![])) }
+            if input_of(url)["ids"][0]["appid"] == 51 {
+                Err("down".into())
+            } else {
+                Ok(answer_with(vec![json!({ "appid": 1, "name": "Game" })]))
+            }
         });
         let ids: Vec<u32> = (1..=60).collect();
         assert_eq!(details(&api, &ids).await, Err("down".to_string()));

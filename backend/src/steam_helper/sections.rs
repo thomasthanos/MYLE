@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use super::model::{Filters, FreeOffer, Game, OfferKind};
-use super::parse::Item;
+use super::parse::{Item, UNEXPECTED};
 use super::store::{ListingKind, StoreApi, details, listing, modes, scan_free_weekends};
 const ROW_SIZE: usize = 8;
 const ROW_MIN_REVIEWS: u32 = 1000;
@@ -49,12 +49,14 @@ pub(crate) fn offers_from(weekends: Vec<Item>, to_keep: Vec<Item>) -> Vec<FreeOf
             game: item.game,
             kind: OfferKind::FreeWeekend,
             label: label.unwrap_or("Free weekend").to_string(),
+            starts_at: weekend.start_time,
             ends_at: Some(weekend.end_time),
             offer_id: offer_id(trial, Some(weekend.end_time)),
         });
     }
     for item in to_keep {
-        if item.adult || !seen.insert(item.game.appid) {
+        // The search index can lag behind the price: only a game Steam still has at 100% off counts.
+        if item.adult || item.game.discount_percent != 100 || !seen.insert(item.game.appid) {
             continue;
         }
         let ends_at = item.game.deal_ends_at;
@@ -63,6 +65,7 @@ pub(crate) fn offers_from(weekends: Vec<Item>, to_keep: Vec<Item>) -> Vec<FreeOf
             game: item.game,
             kind: OfferKind::FreeToKeep,
             label: "Free to keep".to_string(),
+            starts_at: None,
             ends_at,
         });
     }
@@ -104,6 +107,10 @@ async fn ranked_lists<S: StoreApi>(
 pub(crate) async fn row<S: StoreApi>(api: &S, kind: RowKind, filters: Filters) -> Result<Vec<Game>, String> {
     let (lists, _) = ranked_lists(api, kind, filters, 0, ROW_PAGE).await?;
     let mut games = merge_ranked(lists);
+    // These listings are sorted by reviews and leave out games with none.
+    if !games.is_empty() && games.iter().all(|game| game.review_count == 0) {
+        return Err(UNEXPECTED.to_string());
+    }
     games.retain(|game| game.review_count >= ROW_MIN_REVIEWS);
     games.truncate(ROW_SIZE);
     Ok(games)
@@ -147,7 +154,7 @@ mod tests {
         Item {
             game: g(appid, 80, 5000),
             adult: false,
-            free_weekend: Some(FreeWeekend { end_time, text: text.map(str::to_string), appid: trial }),
+            free_weekend: Some(FreeWeekend { start_time: None, end_time, text: text.map(str::to_string), appid: trial }),
         }
     }
     const TRIAL: &str = "Call of Duty®: Modern Warfare® 4 - DMZ Free Trial";
@@ -163,6 +170,7 @@ mod tests {
     fn to_keep(appid: u32, ends: Option<u64>) -> Item {
         let mut game = g(appid, 0, 0);
         game.deal_ends_at = ends;
+        game.discount_percent = 100;
         Item { game, adult: false, free_weekend: None }
     }
     #[test]
@@ -182,6 +190,18 @@ mod tests {
         let out = offers_from(vec![], vec![to_keep(7, Some(1794300000))]);
         assert_eq!(out[0].ends_at, Some(1794300000));
         assert_eq!(out[0].offer_id, "7:1794300000");
+    }
+    #[test]
+    fn a_game_no_longer_fully_discounted_is_not_free_to_keep() {
+        let mut was_free = to_keep(7, None);
+        was_free.game.discount_percent = 50;
+        assert!(offers_from(vec![], vec![was_free]).is_empty());
+    }
+    #[test]
+    fn a_free_weekend_carries_its_start() {
+        let mut soon = payday();
+        soon.free_weekend.as_mut().unwrap().start_time = Some(5000);
+        assert_eq!(offers_from(vec![soon], vec![])[0].starts_at, Some(5000));
     }
     #[test]
     fn adult_offers_are_dropped() {
@@ -263,6 +283,18 @@ mod tests {
         assert_eq!(page.next_cursor, Some(150));
         assert!(api.calls()[0].contains("start=100&count=50"));
     }
+    // Sorting by reviews leaves out games with none, so this can only mean Steam changed its answer.
+    #[tokio::test]
+    async fn a_row_where_no_game_has_reviews_is_an_error() {
+        let api = FakeStore::responding(|url| {
+            if url.contains("search/results") {
+                return Ok(html_of(4..=6));
+            }
+            let games = input_of(url)["ids"].as_array().unwrap().iter().map(|id| json!({ "appid": id["appid"], "name": "Game" })).collect();
+            Ok(answer_with(games))
+        });
+        assert!(row(&api, RowKind::Deals, COOP).await.is_err());
+    }
     #[tokio::test]
     async fn see_all_ends_on_a_short_page() {
         let api = store_with(30);
@@ -280,14 +312,17 @@ mod tests {
                     "appid": 5, "name": "Weekend", "free_weekend": { "end_time": 2000 }
                 })]));
             }
-            Ok(answer_with(vec![game_json(77, 0, false)]))
+            let mut gift = game_json(77, 0, false);
+            gift["best_purchase_option"] = json!({ "discount_pct": 100, "is_free_to_keep": true });
+            Ok(answer_with(vec![gift]))
         });
         let offers = free_right_now(&api).await.unwrap();
         assert_eq!(offers.iter().map(|o| (o.game.appid, o.kind)).collect::<Vec<_>>(), vec![(5, OfferKind::FreeWeekend), (77, OfferKind::FreeToKeep)]);
     }
     #[tokio::test]
     async fn a_giveaway_listing_that_fails_is_an_error() {
-        let api = FakeStore::new(vec![("Query", Ok(answer_with(vec![]))), ("search/results", Err("down".to_string()))]);
+        let weekend = json!({ "appid": 5, "name": "Weekend", "free_weekend": { "end_time": 2000 } });
+        let api = FakeStore::new(vec![("Query", Ok(answer_with(vec![weekend]))), ("search/results", Err("down".to_string()))]);
         assert_eq!(free_right_now(&api).await, Err("down".to_string()));
     }
     /// By hand when Steam changes something: `cargo test live_steam_still_answers -- --ignored`.

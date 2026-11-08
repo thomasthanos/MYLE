@@ -13,13 +13,18 @@ export function validFilters(value: unknown): boolean {
   return [filters.onlineCoop, filters.singlePlayer, filters.storyOnly].every((flag) => typeof flag === "boolean");
 }
 
-/** `5d`, `23h` or `30m` until `endsAt`, in Unix seconds; `null` when it has no end. */
+/** `5d`, `23h` or `30m` until `endsAt`, in Unix seconds; `null` when it has no end or has passed. */
 export function timeLeft(endsAt: number | null, now: number): string | null {
-  if (endsAt === null) return null;
-  const left = Math.max(0, endsAt - now);
+  if (endsAt === null || endsAt < now) return null;
+  const left = endsAt - now;
   if (left >= 86_400) return `${Math.floor(left / 86_400)}d`;
   if (left >= 3_600) return `${Math.floor(left / 3_600)}h`;
   return `${Math.max(1, Math.floor(left / 60))}m`;
+}
+
+/** Whether a discount has run out. */
+export function dealOver(discountPercent: number, dealEndsAt: number | null, now: number): boolean {
+  return discountPercent > 0 && dealEndsAt !== null && dealEndsAt < now;
 }
 
 /** Whether an offer has not ended yet. */

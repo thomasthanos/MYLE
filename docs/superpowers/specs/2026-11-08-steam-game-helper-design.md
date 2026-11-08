@@ -115,7 +115,7 @@ No login and no API key are needed. All of this was observed against live Steam 
 | Price | `best_purchase_option.discount_pct`, `.formatted_final_price`, `.formatted_original_price` |
 | Deal end (Unix seconds) | `best_purchase_option.active_discounts[0].discount_end_date` |
 | Cover | `assets.header`, relative to `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/<appid>/` (the CSP's `img-src https:` already allows it) |
-| Free weekend | `free_weekend.end_time`, optional `.text`, optional `.appid` |
+| Free weekend | `free_weekend.end_time`, optional `.start_time`, `.text`, `.appid` |
 
 **Lists of games: the store search listing.** `https://store.steampowered.com/search/results/?infinite=1&category1=998&cc=gr&l=english&sort_by=Reviews_DESC&start=<n>&count=<n>` returns JSON with `total_count` and `results_html`. Take the app ids from `data-ds-appid="…"` with `regex-lite`, skip any value that is not one number, and fetch details through `GetItems`. Never render this HTML. `count` works at 25, 50 and 100 (anything lower returns 25), and a page can hold a row without a single numeric id, so advance `start` by the rows returned, not by the ids kept.
 
@@ -127,11 +127,15 @@ No login and no API key are needed. All of this was observed against live Steam 
 | Online co-op / Single-player | `category2=38` / `category2=2` |
 | Story only | `tags=1742` |
 
+A row in the 100%-off listing counts as free to keep only if `GetItems` still reports `discount_pct` 100, because the search index can lag behind the price (a real giveaway on 2026-11-08 reported 100 and `is_free_to_keep: true`).
+
+A changed answer must never look like an empty one, because an empty list would replace the saved one and read as "nothing is free". These are errors: a listing whose first page counts results but shows none, a `GetItems` batch with nothing usable, a first `Query` page with nothing usable, a ranked row in which no game has any reviews, and a weekly choice that comes out empty.
+
 With both mode filters on, query each separately, merge by app id and order by percent positive, then review count.
 
 How much to read: one 100-row page is enough to fill the main-page Deals and Free to play rows (with online co-op on, 48 and 40 games had 1,000 reviews or more on the first page). Picks read the first 200 rows of each tier: online co-op with story had 52 qualifying games, all on the first page, and plain online co-op had 70 on the first page.
 
-**Free weekends: `IStoreQueryService/Query`.** Scan the first 1,000 games with `query: {start, count: 100, sort: 12, filters: {released_only: true, type_filters: {include_games: true}}}` and keep items with `free_weekend`. Treat offers sharing a `free_weekend.appid` as one (Call of Duty and Modern Warfare 4 were the same DMZ trial). All four matching items were in the first 300 games, and a scan of 3,000 found no more. A free weekend on an obscure game outside that range would be missed, which is accepted.
+**Free weekends: `IStoreQueryService/Query`.** Scan the first 1,000 games with `query: {start, count: 100, sort: 12, filters: {released_only: true, type_filters: {include_games: true}}}` and keep items with `free_weekend`. Treat offers sharing a `free_weekend.appid` as one (Call of Duty and Modern Warfare 4 were the same DMZ trial), and leave out an offer until its `start_time` has passed. All four matching items were in the first 300 games, and a scan of 3,000 found no more. A free weekend on an obscure game outside that range would be missed, which is accepted.
 
 **Do not use `Query` for anything else.** Observed problems:
 

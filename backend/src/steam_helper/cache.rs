@@ -69,9 +69,12 @@ where
         },
     }
 }
-/// Drops offers that have ended, however recently they were saved.
+/// Keeps the offers that are running now, however recently they were saved.
 pub(crate) fn live_offers(offers: Vec<FreeOffer>, now: u64) -> Vec<FreeOffer> {
-    offers.into_iter().filter(|offer| offer.ends_at.is_none_or(|end| end >= now)).collect()
+    offers
+        .into_iter()
+        .filter(|offer| offer.starts_at.is_none_or(|start| start <= now) && offer.ends_at.is_none_or(|end| end >= now))
+        .collect()
 }
 #[cfg(test)]
 mod tests {
@@ -164,9 +167,17 @@ mod tests {
             },
             kind: OfferKind::FreeWeekend,
             label: "Free weekend".into(),
+            starts_at: None,
             ends_at,
             offer_id: "1:0".into(),
         }
+    }
+    #[test]
+    fn an_offer_that_has_not_started_is_not_live() {
+        let soon = FreeOffer { starts_at: Some(1001), ..offer(Some(5000)) };
+        let started = FreeOffer { starts_at: Some(1000), ..offer(Some(5000)) };
+        let live = live_offers(vec![soon, started], 1000);
+        assert_eq!(live.iter().map(|o| o.starts_at).collect::<Vec<_>>(), vec![Some(1000)]);
     }
     #[test]
     fn an_offer_past_its_end_is_not_live() {

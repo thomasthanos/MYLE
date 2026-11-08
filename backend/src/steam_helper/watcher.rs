@@ -116,6 +116,7 @@ mod tests {
             },
             kind: OfferKind::FreeWeekend,
             label: "Free weekend".into(),
+            starts_at: None,
             ends_at,
             offer_id: id.to_string(),
         }
@@ -229,6 +230,21 @@ mod tests {
         let api = store_with(vec![(5, "Game", 9000)]);
         assert_eq!(tick(&api, &cache_for(&file), &file, true, 1000).await, None);
         assert!(serde_json::from_slice::<Seen>(&std::fs::read(&file).unwrap()).is_ok());
+    }
+    #[tokio::test]
+    async fn an_offer_is_news_when_it_starts_and_not_before() {
+        let file = temp("seen.json");
+        write_seen(&file, r#"{"offers":{}}"#);
+        let cache = cache_for(&file);
+        let api = FakeStore::responding(|url| {
+            if url.contains("search/results") {
+                return Ok(json!({ "total_count": 0, "results_html": "" }).to_string());
+            }
+            Ok(answer_with(vec![json!({ "appid": 5, "name": "Soon", "free_weekend": { "start_time": 5000, "end_time": 90000 } })]))
+        });
+        assert_eq!(tick(&api, &cache, &file, true, 1000).await, None);
+        let news = tick(&api, &cache, &file, true, 9000).await.unwrap();
+        assert_eq!(news.game, "Soon");
     }
     #[tokio::test]
     async fn an_offer_that_has_ended_is_not_news() {

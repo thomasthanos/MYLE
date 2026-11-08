@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FILTERS, validFilters, timeLeft, isLive, reviewLabel, reviewTone, appendUnique, updatedAgo, createLatest } from "../../frontend/app/pages/steam-helper/model.ts";
+import { DEFAULT_FILTERS, validFilters, timeLeft, isLive, dealOver, reviewLabel, reviewTone, appendUnique, updatedAgo, createLatest } from "../../frontend/app/pages/steam-helper/model.ts";
 test("online co-op starts on, the rest off", () => assert.deepEqual(DEFAULT_FILTERS, { onlineCoop: true, singlePlayer: false, storyOnly: false }));
 test("a saved filter must have the right shape", () => {
   assert.ok(validFilters(DEFAULT_FILTERS));
@@ -14,6 +14,13 @@ test("time left reads short", () => {
   assert.equal(timeLeft(1000 + 1800, 1000), "30m");
   assert.equal(timeLeft(1000 + 20, 1000), "1m", "the last minute still shows");
   assert.equal(timeLeft(null, 1000), null);
+});
+test("a deal that has ended shows no time and counts as over", () => {
+  assert.equal(timeLeft(999, 1000), null);
+  assert.equal(dealOver(90, 999, 1000), true);
+  assert.equal(dealOver(90, 1000, 1000), false);
+  assert.equal(dealOver(90, null, 1000), false);
+  assert.equal(dealOver(0, 999, 1000), false);
 });
 test("an offer past its end is no longer live", () => {
   assert.equal(isLive(999, 1000), false);

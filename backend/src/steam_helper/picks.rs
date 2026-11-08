@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use super::model::{Filters, Game};
+use super::parse::UNEXPECTED;
 use super::store::{ListingKind, Mode, StoreApi, details, listing, modes};
 const PICKS: usize = 12;
 const STORY_SHARE: usize = 8;
@@ -118,6 +119,10 @@ pub(crate) async fn weekly_picks<S: StoreApi>(
         others.into_iter().filter(|id| !story.contains(id)).collect()
     };
     let appids = choose(week, &story, &other, &last.appids, filters.story_only);
+    // Saving an empty list would leave the section blank until next Monday.
+    if appids.is_empty() {
+        return Err(UNEXPECTED.to_string());
+    }
     let games = games_for(api, &appids).await?;
     saved.insert(key, PickWeek { week, appids });
     save(file, &saved);
@@ -273,11 +278,24 @@ mod tests {
             if url.contains("search/results") {
                 return Ok(html_of(&(1..=100).collect::<Vec<u32>>()));
             }
-            Ok(answer_with(vec![]))
+            let games = input_of(url)["ids"].as_array().unwrap().iter().map(|id| game_json(id["appid"].as_u64().unwrap() as u32, 10)).collect();
+            Ok(answer_with(games))
         });
         weekly_picks(&api, &temp_file(), Filters { story_only: true, ..COOP }, WEEK).await.unwrap();
         let starts: Vec<bool> = [0, 100, 200].iter().map(|s| api.calls().iter().any(|u| u.contains(&format!("start={s}&")))).collect();
         assert_eq!(starts, vec![true, true, false]);
+    }
+    #[tokio::test]
+    async fn an_empty_choice_is_an_error_and_is_not_saved() {
+        let api = FakeStore::responding(|url| {
+            if url.contains("search/results") {
+                return Ok(html_of(&[1]));
+            }
+            Ok(answer_with(vec![json!({ "appid": 1, "name": "Low" })]))
+        });
+        let file = temp_file();
+        assert!(weekly_picks(&api, &file, COOP, WEEK).await.is_err());
+        assert!(!file.exists());
     }
     #[tokio::test]
     async fn a_failure_saves_nothing() {

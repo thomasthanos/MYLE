@@ -5,7 +5,7 @@ use regex_lite::Regex;
 use serde_json::Value;
 use super::model::Game;
 const IMAGES: &str = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps";
-const UNEXPECTED: &str = "Steam sent something unexpected.";
+pub(crate) const UNEXPECTED: &str = "Steam sent something unexpected.";
 const CATEGORY_SINGLE_PLAYER: u64 = 2;
 const CATEGORY_ONLINE_COOP: u64 = 38;
 const TAG_STORY_RICH: u64 = 1742;
@@ -15,6 +15,7 @@ static ROW_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"data-ds-appid="([^"]*)""#).expect("a valid pattern"));
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FreeWeekend {
+    pub start_time: Option<u64>,
     pub end_time: u64,
     pub text: Option<String>,
     pub appid: Option<u32>,
@@ -25,6 +26,13 @@ pub(crate) struct Item {
     pub adult: bool,
     pub free_weekend: Option<FreeWeekend>,
 }
+/// A `GetItems` or `Query` answer.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Answer {
+    pub items: Vec<Item>,
+    /// Entries Steam listed, counting those this reader could not use.
+    pub listed: usize,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SearchPage {
     pub ids: Vec<u32>,
@@ -33,16 +41,11 @@ pub(crate) struct SearchPage {
     pub total: u32,
 }
 /// The games in a `GetItems` or `Query` answer.
-pub(crate) fn items(json: &str) -> Result<Vec<Item>, String> {
+pub(crate) fn items(json: &str) -> Result<Answer, String> {
     let value: Value = serde_json::from_str(json).map_err(|_| UNEXPECTED.to_string())?;
     let response = value.get("response").ok_or(UNEXPECTED)?;
-    Ok(response
-        .get("store_items")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(item)
-        .collect())
+    let entries = response.get("store_items").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    Ok(Answer { items: entries.iter().filter_map(item).collect(), listed: entries.len() })
 }
 /// The app ids of a store search page. The HTML is only searched, never shown.
 pub(crate) fn search_page(json: &str) -> Result<SearchPage, String> {
@@ -92,6 +95,7 @@ fn item(value: &Value) -> Option<Item> {
 }
 fn free_weekend(value: &Value) -> Option<FreeWeekend> {
     Some(FreeWeekend {
+        start_time: number(value, "start_time"),
         end_time: number(value, "end_time")?,
         text: text(Some(value), "text"),
         appid: number(value, "appid").and_then(|id| u32::try_from(id).ok()),
@@ -119,7 +123,7 @@ mod tests {
     use super::*;
     const ITEMS: &str = include_str!("fixtures/items.json");
     fn by_id(appid: u32) -> Item {
-        items(ITEMS).unwrap().into_iter().find(|i| i.game.appid == appid).unwrap()
+        items(ITEMS).unwrap().items.into_iter().find(|i| i.game.appid == appid).unwrap()
     }
     #[test]
     fn a_game_is_read_whole() {
@@ -162,6 +166,7 @@ mod tests {
         assert_eq!((w.end_time, w.appid), (1794420000, Some(4269880)));
         assert_eq!(w.text.as_deref(), Some("Call of Duty®: Modern Warfare® 4 - DMZ Free Trial"));
         let plain = by_id(1272080).free_weekend.unwrap();
+        assert_eq!(plain.start_time, Some(1793901600));
         assert_eq!((plain.end_time, plain.text), (1794247200, None));
         assert!(by_id(239140).free_weekend.is_none());
     }
@@ -173,9 +178,9 @@ mod tests {
     }
     #[test]
     fn entries_without_a_name_or_id_are_skipped() {
-        let list = items(ITEMS).unwrap();
-        assert!(list.iter().all(|i| i.game.appid != 10 && i.game.appid != 11));
-        assert_eq!(list.len(), 11);
+        let answer = items(ITEMS).unwrap();
+        assert!(answer.items.iter().all(|i| i.game.appid != 10 && i.game.appid != 11));
+        assert_eq!((answer.items.len(), answer.listed), (11, 13));
     }
     #[test]
     fn what_is_not_steams_answer_is_an_error() {
@@ -186,7 +191,7 @@ mod tests {
     }
     #[test]
     fn a_response_with_no_list_is_empty() {
-        assert!(items(r#"{"response":{}}"#).unwrap().is_empty());
+        assert!(items(r#"{"response":{}}"#).unwrap().items.is_empty());
     }
     #[test]
     fn search_counts_rows_and_skips_bundles() {

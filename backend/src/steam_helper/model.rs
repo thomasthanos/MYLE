@@ -49,6 +49,8 @@ pub struct FreeOffer {
     pub game: Game,
     pub kind: OfferKind,
     pub label: String,
+    #[serde(default)]
+    pub starts_at: Option<u64>,
     pub ends_at: Option<u64>,
     pub offer_id: String,
 }

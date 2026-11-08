@@ -519,7 +519,7 @@ GitHub Releases, Project Backups and Steam Game Helper are for the app's owner o
 | Program | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\MYLE.exe` (existing installs keep this folder) |
 | Settings, account, Game Saves, Project Backups, GitHub Releases, the vault | `%APPDATA%\ThomasThanos\MakeYourLifeEasier` |
 | Cache, WebView2 (localStorage), JSON stores, undo records | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data` |
-| Steam Game Helper's cache, weekly picks and seen offers | `%LOCALAPPDATA%ThomasThanosMakeYourLifeEasierdatasteam-helper` |
+| Steam Game Helper's cache, weekly picks and seen offers | `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data\steam-helper` |
 | Desktop shortcut | the Windows Desktop known folder (may redirect to OneDrive) · `MYLE.lnk` |
 | Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\MYLE.lnk` |
 | Launch with Windows (opt-in) | `…\Start Menu\Programs\Startup\MYLE.lnk` (with `--autostart`) |

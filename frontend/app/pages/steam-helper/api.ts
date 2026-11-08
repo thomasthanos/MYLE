@@ -24,6 +24,7 @@ export interface FreeOffer {
   game: Game;
   kind: OfferKind;
   label: string;
+  startsAt: number | null;
   endsAt: number | null;
   offerId: string;
 }

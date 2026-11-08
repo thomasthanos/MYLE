@@ -1,12 +1,13 @@
 <script lang="ts">
   import { openUrl } from "@tauri-apps/plugin-opener";
   import type { Game } from "./api";
-  import { reviewLabel, reviewTone, timeLeft } from "./model";
+  import { dealOver, reviewLabel, reviewTone, timeLeft } from "./model";
 
   let { game, now, showModes = false }: { game: Game; now: number; showModes?: boolean } = $props();
 
   const tone = $derived(reviewTone(game.reviewPercent, game.reviewCount));
   const review = $derived(reviewLabel(game.reviewPercent, game.reviewCount));
+  const over = $derived(dealOver(game.discountPercent, game.dealEndsAt, now));
   const left = $derived(game.discountPercent > 0 ? timeLeft(game.dealEndsAt, now) : null);
   const modes = $derived(
     [game.onlineCoop && "Online co-op", game.story && "Story", game.singlePlayer && "Single-player"].filter(Boolean).join(" · "),
@@ -26,6 +27,8 @@
     <span class="price">
       {#if game.isFree}
         <span class="free">Free to play</span>
+      {:else if over}
+        <span class="ended">Deal ended</span>
       {:else}
         {#if game.discountPercent > 0}
           <span class="off">-{game.discountPercent}%</span>
@@ -55,6 +58,7 @@
   .was { color: var(--text-3); font-size: 11.5px; text-decoration: line-through; }
   .now { font-weight: 700; }
   .free { color: var(--ok); font-weight: 700; }
+  .ended { color: var(--text-3); font-size: 12px; }
   .left { margin-left: auto; color: var(--warn); font-size: 11px; white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
 </style>
