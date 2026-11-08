@@ -2,4 +2,5 @@
 //! Steam's public store with no sign-in. Owner-only (`account::owner`).
 pub(crate) mod model;
 pub(crate) mod parse;
+pub(crate) mod sections;
 pub(crate) mod store;
