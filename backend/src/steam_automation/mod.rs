@@ -4,6 +4,7 @@ pub(crate) mod badges;
 pub(crate) mod client;
 pub(crate) mod commands;
 pub(crate) mod community;
+pub(crate) mod decide;
 pub(crate) mod helper;
 pub(crate) mod runner;
 pub(crate) mod session;

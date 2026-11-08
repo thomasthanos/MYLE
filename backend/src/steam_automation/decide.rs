@@ -1,3 +1,87 @@
+//! Which games should be running right now. Nothing here touches Steam, so every rule can be tested.
+use std::collections::BTreeSet;
+use super::badges::{BadgeGame, bought_recently, is_refundable};
+/// Steam starts dropping cards after this much playtime.
+const FARM_THRESHOLD_MINUTES: u32 = 120;
+const MAX_GAMES: usize = 32;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FarmStep {
+    Accumulate(Vec<u32>),
+    Solo(u32),
+    Done,
+}
+/// What card farming should do next. `licences` is `None` when purchase dates could not be read.
+pub(crate) fn farm_step(games: &[BadgeGame], licences: Option<&[(String, u64)]>, now: u64) -> FarmStep {
+    let allowed: Vec<&BadgeGame> = games
+        .iter()
+        .filter(|game| !is_refundable(licences.map(|list| bought_recently(&game.name, list, now)), game.minutes_played))
+        .collect();
+    let mut building: Vec<&BadgeGame> = allowed.iter().copied().filter(|game| game.minutes_played < FARM_THRESHOLD_MINUTES).collect();
+    if !building.is_empty() {
+        building.sort_by_key(|game| (std::cmp::Reverse(game.minutes_played), game.appid));
+        return FarmStep::Accumulate(building.iter().take(MAX_GAMES).map(|game| game.appid).collect());
+    }
+    match allowed.iter().min_by_key(|game| (game.drops, game.appid)) {
+        Some(game) => FarmStep::Solo(game.appid),
+        None => FarmStep::Done,
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct World {
+    pub steam_running: bool,
+    pub account_ok: bool,
+    pub real_game: Option<u32>,
+    pub user_paused: bool,
+    pub farm_on: bool,
+    pub farm: FarmStep,
+    pub idle_on: bool,
+    pub idle_games: Vec<u32>,
+    pub session_ok: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum Waiting {
+    NoSteam,
+    OtherAccount,
+    RealGame(u32),
+    Paused,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Decision {
+    pub games: BTreeSet<u32>,
+    pub waiting: Option<Waiting>,
+    pub achievements_may_run: bool,
+    pub inventory_may_run: bool,
+}
+fn stopped(waiting: Waiting) -> Decision {
+    Decision { games: BTreeSet::new(), waiting: Some(waiting), achievements_may_run: false, inventory_may_run: false }
+}
+pub(crate) fn decide(world: &World) -> Decision {
+    if !world.steam_running {
+        return stopped(Waiting::NoSteam);
+    }
+    if !world.account_ok {
+        return stopped(Waiting::OtherAccount);
+    }
+    if let Some(game) = world.real_game {
+        return stopped(Waiting::RealGame(game));
+    }
+    if world.user_paused {
+        return stopped(Waiting::Paused);
+    }
+    let farming = if world.farm_on { &world.farm } else { &FarmStep::Done };
+    let games: BTreeSet<u32> = match farming {
+        FarmStep::Accumulate(list) => list.iter().copied().collect(),
+        FarmStep::Solo(game) => BTreeSet::from([*game]),
+        FarmStep::Done if world.idle_on => world.idle_games.iter().copied().collect(),
+        FarmStep::Done => BTreeSet::new(),
+    };
+    Decision {
+        games,
+        waiting: None,
+        achievements_may_run: *farming == FarmStep::Done,
+        inventory_may_run: world.session_ok,
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
