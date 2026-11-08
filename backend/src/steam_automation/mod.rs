@@ -7,6 +7,7 @@ pub(crate) mod commands;
 pub(crate) mod community;
 pub(crate) mod decide;
 pub(crate) mod helper;
+pub(crate) mod inventory;
 pub(crate) mod runner;
 pub(crate) mod session;
 pub(crate) mod steam_state;

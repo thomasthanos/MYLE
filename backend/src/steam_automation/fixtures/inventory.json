@@ -1,0 +1,24 @@
+{
+  "assets": [
+    { "appid": 753, "contextid": "6", "assetid": "1001", "classid": "10", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1002", "classid": "10", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1003", "classid": "10", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1004", "classid": "11", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1005", "classid": "12", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1006", "classid": "12", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1007", "classid": "13", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1008", "classid": "14", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1009", "classid": "14", "instanceid": "0", "amount": "1" },
+    { "appid": 753, "contextid": "6", "assetid": "1010", "classid": "15", "instanceid": "0", "amount": "1044" }
+  ],
+  "descriptions": [
+    { "appid": 753, "classid": "10", "instanceid": "0", "marketable": 1, "type": "Portal 2 Trading Card", "market_hash_name": "620-Wheatley", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] },
+    { "appid": 753, "classid": "11", "instanceid": "0", "marketable": 1, "type": "Portal 2 Trading Card", "market_hash_name": "620-GLaDOS", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] },
+    { "appid": 753, "classid": "12", "instanceid": "0", "marketable": 1, "type": "Portal 2 Emoticon", "market_hash_name": "620-Smile", "tags": [{ "category": "item_class", "internal_name": "item_class_4" }] },
+    { "appid": 753, "classid": "13", "instanceid": "0", "marketable": 1, "type": "Foil Trading Card", "market_hash_name": "620-Wheatley (Foil)", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] },
+    { "appid": 753, "classid": "14", "instanceid": "0", "marketable": 0, "type": "Portal 2 Trading Card", "market_hash_name": "620-Chell", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] },
+    { "appid": 753, "classid": "15", "instanceid": "0", "marketable": 1, "type": "Steam Gems", "market_hash_name": "753-Gems", "tags": [{ "category": "item_class", "internal_name": "item_class_7" }] }
+  ],
+  "total_inventory_count": 10,
+  "success": 1
+}

@@ -16,7 +16,7 @@ static PLAYTIME: LazyLock<Regex> = LazyLock::new(|| regex(r"([\d,]+(?:\.\d+)?) h
 static DROPS: LazyLock<Regex> = LazyLock::new(|| regex(r#"progress_info_bold">(\d+) card drops? remaining"#));
 static TITLE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="badge_title">\s*([^<]*?)\s*(?:&nbsp;|<)"#));
 static PAGE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="pagelink"[^>]*>(\d+)<"#));
-static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>"#));
+static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td\s+class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>"#));
 static BLOCK: LazyLock<Regex> = LazyLock::new(|| regex(r"(?s)<div.*?</div>"));
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct BadgeGame {

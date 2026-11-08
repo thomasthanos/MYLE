@@ -5,6 +5,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use super::session::Session;
 const GAP: Duration = Duration::from_secs(3);
+/// Price lookups are limited harder than pages, so they wait 4 seconds in all.
+const PRICE_EXTRA: Duration = Duration::from_secs(1);
 const COMMUNITY_ORIGIN: &str = "https://steamcommunity.com";
 const STORE_HOST: &str = "store.steampowered.com";
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,15 +39,15 @@ pub(crate) fn cookie_for(url: &str, session: &Session) -> Option<String> {
     }
     Some(session.cookie_header())
 }
+pub(super) fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
 fn form_body(form: &[(&str, String)]) -> String {
-    let encode = |text: &str| {
-        text.bytes()
-            .map(|byte| match byte {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
-                other => format!("%{other:02X}"),
-            })
-            .collect::<String>()
-    };
     form.iter().map(|(key, value)| format!("{}={}", encode(key), encode(value))).collect::<Vec<_>>().join("&")
 }
 pub(crate) struct HttpCommunity {
@@ -80,6 +82,9 @@ impl Community for HttpCommunity {
     async fn get(&self, url: &str) -> Result<String, CommunityError> {
         let cookie = cookie_for(url, &self.session).ok_or(CommunityError::SignedOut)?;
         self.wait_for_turn().await;
+        if url.contains("priceoverview") {
+            tokio::time::sleep(PRICE_EXTRA).await;
+        }
         self.finish(self.client.get(url).header("Cookie", cookie)).await
     }
     async fn post(&self, url: &str, form: &[(&str, String)], referer: &str) -> Result<String, CommunityError> {
