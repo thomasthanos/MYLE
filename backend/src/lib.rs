@@ -17,7 +17,6 @@ mod shown_window;
 mod shell_identity;
 mod shortcut_preferences;
 mod spotify_hub;
-#[allow(dead_code)]
 mod steam_helper;
 mod startup;
 mod taskbar;
@@ -140,7 +139,7 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
         None
     }
 }
-/// Refuses the owner-only pages' commands (GitHub Releases, Project Backups) unless the signed-in account is the owner's,
+/// Refuses the owner-only pages' commands (GitHub Releases, Project Backups, Steam Game Helper) unless the signed-in account is the owner's,
 /// by the verdict the backend got from Supabase (`account::owner`). One check for every command, so a command added to
 /// those pages later is covered too.
 fn owner_gate(
@@ -290,6 +289,7 @@ pub fn run() {
         .manage(disk_analyzer_state.clone())
         .manage(autoclicker_state.clone())
         .manage(cloud::online_only::OnlineOnlyState::default())
+        .manage(steam_helper::commands::SteamHelperState::default())
         .setup({
             let cleanup = cleanup.clone();
             move |app| {
@@ -552,6 +552,10 @@ pub fn run() {
             project_backups::commands::project_backups_open,
             project_backups::commands::project_backups_scan_candidates,
             project_backups::commands::project_backups_relocate_projects,
+            steam_helper::commands::steam_helper_free,
+            steam_helper::commands::steam_helper_picks,
+            steam_helper::commands::steam_helper_row,
+            steam_helper::commands::steam_helper_more,
             github_releases::commands::github_releases_get_state,
             github_releases::commands::github_releases_sync_export,
             github_releases::commands::github_releases_sync_import,
