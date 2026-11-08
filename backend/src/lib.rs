@@ -17,6 +17,8 @@ mod shown_window;
 mod shell_identity;
 mod shortcut_preferences;
 mod spotify_hub;
+#[allow(dead_code)]
+mod steam_automation;
 mod steam_helper;
 mod startup;
 mod taskbar;
@@ -41,6 +43,10 @@ pub fn run_windows_auto_logon_helper() -> Option<i32> {
 /// Handles the debloater's administrator helper before Tauri starts.
 pub fn run_debloat_helper() -> Option<i32> {
     debloat::run_elevated_helper_from_args()
+}
+/// Handles one running Steam game (Steam Automation) before Tauri starts.
+pub fn run_steam_helper() -> Option<i32> {
+    steam_automation::helper::run_helper_from_args()
 }
 /// Handles the Disk Analyzer's fast-scan helper before Tauri starts.
 pub fn run_disk_analyzer_helper() -> Option<i32> {
