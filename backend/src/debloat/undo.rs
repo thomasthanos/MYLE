@@ -36,7 +36,7 @@ pub struct Store {
 }
 impl Store {
     fn path() -> Result<PathBuf, String> {
-        Ok(crate::storage::local_dir()?.join("debloat-undo.json"))
+        crate::storage::local_item("debloat-undo.json")
     }
     pub fn load() -> Store {
         Self::path()

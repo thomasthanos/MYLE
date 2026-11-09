@@ -115,9 +115,9 @@ pub fn create_window(app: &App) -> tauri::Result<()> {
         .focused(false)
         .devtools(cfg!(debug_assertions))
         .background_color(tauri::window::Color(0, 0, 0, 0));
-    if let Ok(dir) = crate::storage::local_dir() {
+    if let Ok(dir) = crate::storage::local_item("webview-notice") {
         // Its own profile: the main window's may be open with other options.
-        builder = builder.data_directory(dir.join("webview-notice"));
+        builder = builder.data_directory(dir);
     }
     if let Some(monitor) = app.primary_monitor()? {
         let scale = monitor.scale_factor();

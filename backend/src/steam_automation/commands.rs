@@ -171,7 +171,7 @@ fn say(error: CommunityError) -> String {
     }
 }
 pub(crate) fn folder() -> Result<PathBuf, String> {
-    Ok(crate::storage::local_dir()?.join("steam-automation"))
+    crate::storage::local_item("steam-automation")
 }
 pub(crate) fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)

@@ -25,7 +25,7 @@ struct Stored {
     wrapped_key: String,
 }
 fn path() -> Result<PathBuf, String> {
-    Ok(crate::storage::local_dir()?.join(FILE))
+    crate::storage::local_item(FILE)
 }
 fn load() -> Option<Stored> {
     let bytes = Zeroizing::new(crate::account::vault::load(&path().ok()?)?);

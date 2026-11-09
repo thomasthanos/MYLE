@@ -53,9 +53,7 @@ fn is_fresh(fetched_at: u64, now: u64) -> bool {
 }
 fn cache_file(app: &AppHandle) -> Option<PathBuf> {
     let _ = app;
-    crate::storage::local_dir()
-        .ok()
-        .map(|d| d.join("resolver-cache.json"))
+    crate::storage::local_item("resolver-cache.json").ok()
 }
 fn cached(app: &AppHandle, key: &str, resolver: &Resolver) -> Option<Resolved> {
     let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());

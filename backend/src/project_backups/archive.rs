@@ -668,9 +668,7 @@ pub(crate) fn zip_is_readable(path: &Path) -> bool {
             .is_some()
 }
 pub(crate) fn staging_dir() -> Option<PathBuf> {
-    crate::storage::local_dir()
-        .ok()
-        .map(|dir| dir.join("project-backups-staging"))
+    crate::storage::local_item("project-backups-staging").ok()
 }
 #[cfg(test)]
 pub(crate) mod tests {

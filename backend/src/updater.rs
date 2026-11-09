@@ -518,10 +518,9 @@ const HAND_OVER_WAIT: Duration = Duration::from_secs(20);
 /// outcomes and timings.
 pub(crate) fn log(line: &str) {
     const MAX_BYTES: u64 = 64 * 1024;
-    let Ok(dir) = crate::storage::local_dir() else {
+    let Ok(path) = crate::storage::local_item("update.log") else {
         return;
     };
-    let path = dir.join("update.log");
     // Keep it small: start over once it grows past the cap.
     if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > MAX_BYTES) {
         let _ = std::fs::remove_file(&path);
@@ -530,7 +529,9 @@ pub(crate) fn log(line: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
     let entry = format!("{seconds} v{} {line}\n", env!("CARGO_PKG_VERSION"));
-    let _ = std::fs::create_dir_all(&dir);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         use std::io::Write;
         let _ = file.write_all(entry.as_bytes());

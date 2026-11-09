@@ -87,7 +87,7 @@ fn state_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(STATE_FILE))
 }
 fn cache_path() -> Result<PathBuf, String> {
-    crate::storage::local_dir().map(|dir| dir.join(CACHE_FILE))
+    crate::storage::local_item(CACHE_FILE)
 }
 fn read_json<T: for<'de> Deserialize<'de> + Default>(path: Result<PathBuf, String>) -> T {
     path.ok()
