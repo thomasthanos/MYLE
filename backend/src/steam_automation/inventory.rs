@@ -59,6 +59,7 @@ pub struct ListOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct Listing {
     pub listing_id: String,
+    pub asset_id: String,
     pub hash_name: String,
     pub name: String,
     pub icon_url: Option<String>,
@@ -250,6 +251,7 @@ fn listing(entry: &Value, root: &Value, waiting_confirmation: bool) -> Option<Li
     let cents = |key: &str| entry.get(key).and_then(Value::as_u64).unwrap_or(0) as u32;
     Some(Listing {
         listing_id: text(entry, "listingid")?.to_string(),
+        asset_id: asset.and_then(|asset| text(asset, "id")).unwrap_or_default().to_string(),
         hash_name: label("market_hash_name"),
         name: label("name"),
         icon_url: details.and_then(icon_url),
@@ -502,7 +504,7 @@ mod tests {
     fn listings_are_read_with_their_details() {
         let (found, total) = parse_listings(LISTINGS).unwrap();
         assert_eq!(total, 2);
-        assert_eq!(found[0], Listing { listing_id: "900".to_string(), hash_name: "620-A".to_string(), name: "From assets".to_string(), icon_url: Some("https://community.fastly.steamstatic.com/economy/image/def/184x184".to_string()), buyer_cents: 31, waiting_confirmation: false });
+        assert_eq!(found[0], Listing { listing_id: "900".to_string(), asset_id: "55".to_string(), hash_name: "620-A".to_string(), name: "From assets".to_string(), icon_url: Some("https://community.fastly.steamstatic.com/economy/image/def/184x184".to_string()), buyer_cents: 31, waiting_confirmation: false });
         assert_eq!((found[1].name.as_str(), found[1].buyer_cents, found[1].waiting_confirmation), ("On the listing", 12, true));
     }
     #[test]
