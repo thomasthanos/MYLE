@@ -1,6 +1,6 @@
 //! The owner's games, with playtime and achievement progress. Asks with a token Steam gives the
 //! signed-in store session, so no API key is involved.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use super::achievements::eligible;
@@ -12,6 +12,9 @@ const TOKEN_URL: &str = "https://store.steampowered.com/pointssummary/ajaxgetasy
 const USERDATA_URL: &str = "https://store.steampowered.com/dynamicstore/userdata/";
 const OWNED_GAMES: &str = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/";
 const TOP_ACHIEVEMENTS: &str = "https://api.steampowered.com/IPlayerService/GetTopAchievementsForGames/v1/";
+const PLAYED_TIMES: &str = "https://api.steampowered.com/IPlayerService/ClientGetLastPlayedTimes/v1/";
+const FAMILY_GROUP: &str = "https://api.steampowered.com/IFamilyGroupsService/GetFamilyGroupForUser/v1/";
+const FAMILY_APPS: &str = "https://api.steampowered.com/IFamilyGroupsService/GetSharedLibraryApps/v1/";
 const PROGRESS_PER_REQUEST: usize = 200;
 const NO_LIBRARY: &str = "Steam did not send your library.";
 const SIGNED_OUT: &str = "Your Steam sign-in has expired. Sign in again.";
@@ -27,6 +30,8 @@ pub struct LibraryGame {
     pub achievements_unlocked: u32,
     pub achievements_total: u32,
     pub achievements_ok: bool,
+    /// Reached through the owner's Steam Family, so it drops no cards.
+    pub shared: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Saved {
@@ -107,46 +112,93 @@ pub(crate) fn apply_progress(games: &mut [LibraryGame], text: &str) -> Result<()
     }
     Ok(())
 }
+/// What the owner's Steam Family shares. A family is an extra, so any trouble here means none.
+async fn family_apps<S: StoreApi>(store: &S, token: &str, steam_id: u64) -> Vec<OwnedGame> {
+    let group = store
+        .get(&format!("{FAMILY_GROUP}?access_token={token}&steamid={steam_id}&include_family_group_response=false"))
+        .await
+        .ok()
+        .and_then(|text| json(&text).ok())
+        .and_then(|value| value.get("response")?.get("family_groupid")?.as_str().map(str::to_string));
+    let Some(group) = group else {
+        return Vec::new();
+    };
+    let url = format!("{FAMILY_APPS}?access_token={token}&family_groupid={group}&include_own=true&include_excluded=false&include_free=true&include_non_games=false&language=english&steamid={steam_id}");
+    let Some(answer) = store.get(&url).await.ok().and_then(|text| json(&text).ok()) else {
+        return Vec::new();
+    };
+    let apps = answer.get("response").and_then(|r| r.get("apps")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    apps.iter()
+        .filter_map(|app| {
+            Some(OwnedGame {
+                appid: u32::try_from(app.get("appid")?.as_u64()?).ok()?,
+                name: app.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                minutes: 0,
+            })
+        })
+        .collect()
+}
+/// Minutes on everything this account has run. Unlike the owned list, it covers family games.
+async fn played_times<S: StoreApi>(store: &S, token: &str) -> HashMap<u32, u32> {
+    let Some(answer) = store.get(&format!("{PLAYED_TIMES}?access_token={token}&min_last_played=0")).await.ok().and_then(|text| json(&text).ok()) else {
+        return HashMap::new();
+    };
+    let games = answer.get("response").and_then(|r| r.get("games")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    games
+        .iter()
+        .filter_map(|game| Some((u32::try_from(game.get("appid")?.as_u64()?).ok()?, game.get("playtime_forever")?.as_u64()? as u32)))
+        .collect()
+}
 async fn read<C: Community>(community: &C, url: &str) -> Result<String, String> {
     community.get(url).await.map_err(|error| match error {
         CommunityError::SignedOut => SIGNED_OUT.to_string(),
         _ => NO_LIBRARY.to_string(),
     })
 }
-/// The games among the licences, joined with what Steam knows of the owner's play. A played game
-/// the store no longer knows keeps its name, so it does not vanish from the library.
+/// The games among the licences and the Steam Family, joined with what Steam knows of the owner's
+/// play. Licences also cover DLC, so only games count there, while anything Steam itself lists as
+/// owned or shared is kept. Such a game keeps its name when the store no longer knows it.
 pub(crate) async fn fetch<C: Community, S: StoreApi>(community: &C, store: &S, steam_id: u64) -> Result<Vec<LibraryGame>, String> {
     let token = parse_token(&read(community, TOKEN_URL).await?)?;
     let mut licensed = parse_owned(&read(community, USERDATA_URL).await?)?;
     let url = format!("{OWNED_GAMES}?access_token={token}&steamid={steam_id}&include_appinfo=true&include_played_free_games=true&skip_unvetted_apps=false");
     let played = parse_owned_games(&store.get(&url).await?)?;
-    licensed.extend(played.iter().map(|game| game.appid).filter(|appid| !licensed.contains(appid)).collect::<Vec<_>>());
-    let mut minutes: HashMap<u32, u32> = played.iter().map(|game| (game.appid, game.minutes)).collect();
+    let family = family_apps(store, &token, steam_id).await;
+    let times = played_times(store, &token).await;
+    let own: HashSet<u32> = licensed.iter().copied().chain(played.iter().map(|game| game.appid)).collect();
+    let shared: Vec<OwnedGame> = family.into_iter().filter(|game| !own.contains(&game.appid)).collect();
+    let listed: HashSet<u32> = played.iter().chain(&shared).map(|game| game.appid).collect();
+    licensed.extend(listed.iter().filter(|appid| !licensed.contains(appid)).collect::<Vec<_>>());
+    let shared_ids: HashSet<u32> = shared.iter().map(|game| game.appid).collect();
+    let minutes: HashMap<u32, u32> = played.iter().map(|game| (game.appid, game.minutes)).collect();
+    let minutes_of = |appid: u32| minutes.get(&appid).copied().unwrap_or(0).max(times.get(&appid).copied().unwrap_or(0));
     let items = details(store, &licensed).await?;
-    let known: std::collections::HashSet<u32> = items.iter().map(|item| item.game.appid).collect();
+    let known: HashSet<u32> = items.iter().map(|item| item.game.appid).collect();
     let mut games: Vec<LibraryGame> = items
         .into_iter()
-        .filter(|item| item.item_type == Some(STEAM_GAME))
+        .filter(|item| item.item_type == Some(STEAM_GAME) || listed.contains(&item.game.appid))
         .map(|item| {
             let features: Vec<u32> = item.features.iter().filter_map(|id| u32::try_from(*id).ok()).collect();
             LibraryGame {
                 appid: item.game.appid,
                 cover_url: item.portrait_url.or_else(|| item.game.cover_url.clone()),
                 header_url: item.game.cover_url,
-                minutes: minutes.remove(&item.game.appid).unwrap_or(0),
+                minutes: minutes_of(item.game.appid),
                 name: item.game.name,
                 achievements_unlocked: 0,
                 achievements_total: 0,
                 achievements_ok: eligible(&features),
+                shared: shared_ids.contains(&item.game.appid),
             }
         })
         .collect();
-    games.extend(played.into_iter().filter(|game| !known.contains(&game.appid)).map(|game| LibraryGame {
+    games.extend(played.into_iter().chain(shared).filter(|game| !known.contains(&game.appid)).map(|game| LibraryGame {
+        minutes: minutes_of(game.appid),
+        shared: shared_ids.contains(&game.appid),
         appid: game.appid,
         name: game.name,
         cover_url: None,
         header_url: None,
-        minutes: game.minutes,
         achievements_unlocked: 0,
         achievements_total: 0,
         achievements_ok: false,
@@ -178,7 +230,7 @@ mod tests {
     use crate::steam_helper::store::fake::{FakeStore, answer_with, input_of};
     const ME: u64 = 76561198000000001;
     fn game(appid: u32) -> LibraryGame {
-        LibraryGame { appid, name: format!("App {appid}"), cover_url: None, header_url: None, minutes: 0, achievements_unlocked: 0, achievements_total: 0, achievements_ok: false }
+        LibraryGame { appid, name: format!("App {appid}"), cover_url: None, header_url: None, minutes: 0, achievements_unlocked: 0, achievements_total: 0, achievements_ok: false, shared: false }
     }
     #[test]
     fn owned_apps_are_read() {
@@ -241,6 +293,9 @@ mod tests {
     /// 620 is a game with cards, 239140 has none played, 999 is a DLC, 5 is played but gone from the store.
     fn store() -> FakeStore {
         FakeStore::responding(|url| {
+            if url.contains("IFamilyGroupsService") || url.contains("ClientGetLastPlayedTimes") {
+                return Err("not in a family".to_string());
+            }
             if url.contains("GetOwnedGames") {
                 return Ok(json!({ "response": { "games": [{ "appid": 620, "name": "Owned name", "playtime_forever": 90 }, { "appid": 5, "name": "Delisted", "playtime_forever": 7 }] } }).to_string());
             }
@@ -299,6 +354,9 @@ mod tests {
             Ok(owned.clone())
         });
         let store = FakeStore::responding(|url| {
+            if url.contains("IFamilyGroupsService") || url.contains("ClientGetLastPlayedTimes") {
+                return Err("not in a family".to_string());
+            }
             if url.contains("GetOwnedGames") {
                 return Ok(json!({ "response": { "games": [] } }).to_string());
             }
@@ -312,6 +370,62 @@ mod tests {
         let progress: Vec<String> = store.calls().into_iter().filter(|url| url.contains("GetTopAchievementsForGames")).collect();
         assert_eq!(progress.len(), 2);
         assert!(progress[0].contains("appids[199]=") && !progress[0].contains("appids[200]="));
+    }
+    /// The owner has 620, and the family adds 77 and shares 620 back.
+    fn family_store() -> FakeStore {
+        FakeStore::responding(|url| {
+            if url.contains("GetFamilyGroupForUser") {
+                return Ok(json!({ "response": { "family_groupid": "42", "is_not_member_of_any_group": false } }).to_string());
+            }
+            if url.contains("GetSharedLibraryApps") {
+                return Ok(json!({ "response": { "apps": [{ "appid": 620, "name": "Portal 2" }, { "appid": 77, "name": "Family game" }] } }).to_string());
+            }
+            if url.contains("ClientGetLastPlayedTimes") {
+                return Ok(json!({ "response": { "games": [{ "appid": 77, "playtime_forever": 33 }, { "appid": 620, "playtime_forever": 1 }] } }).to_string());
+            }
+            if url.contains("GetOwnedGames") {
+                return Ok(json!({ "response": { "games": [{ "appid": 620, "name": "Portal 2", "playtime_forever": 90 }] } }).to_string());
+            }
+            if url.contains("GetTopAchievementsForGames") {
+                return Ok(json!({ "response": { "games": [] } }).to_string());
+            }
+            let games = input_of(url)["ids"].as_array().unwrap().iter().map(|id| {
+                let appid = id["appid"].as_u64().unwrap();
+                json!({ "appid": appid, "name": if appid == 77 { "Family game" } else { "Portal 2" }, "type": if appid == 999 { 4 } else { 0 } })
+            }).collect();
+            Ok(answer_with(games))
+        })
+    }
+    #[tokio::test]
+    async fn family_games_are_listed_and_marked() {
+        let games = fetch(&community(), &family_store(), ME).await.unwrap();
+        let family = games.iter().find(|g| g.appid == 77).unwrap();
+        assert!(family.shared);
+        assert!(!games.iter().find(|g| g.appid == 620).unwrap().shared, "the owner's own copy is not a shared one");
+    }
+    #[tokio::test]
+    async fn playtime_on_family_games_is_found_without_lowering_the_rest() {
+        let games = fetch(&community(), &family_store(), ME).await.unwrap();
+        assert_eq!(games.iter().find(|g| g.appid == 77).unwrap().minutes, 33);
+        assert_eq!(games.iter().find(|g| g.appid == 620).unwrap().minutes, 90);
+    }
+    #[tokio::test]
+    async fn a_game_steam_counts_as_owned_is_kept_whatever_its_type() {
+        let store = FakeStore::responding(|url| {
+            if url.contains("IFamilyGroupsService") || url.contains("ClientGetLastPlayedTimes") {
+                return Err("no".to_string());
+            }
+            if url.contains("GetOwnedGames") {
+                return Ok(json!({ "response": { "games": [{ "appid": 620, "name": "A tool", "playtime_forever": 5 }] } }).to_string());
+            }
+            if url.contains("GetTopAchievementsForGames") {
+                return Ok(json!({ "response": { "games": [] } }).to_string());
+            }
+            let games = input_of(url)["ids"].as_array().unwrap().iter().map(|id| json!({ "appid": id["appid"], "name": "An app", "type": 6 })).collect();
+            Ok(answer_with(games))
+        });
+        let ids: Vec<u32> = fetch(&community(), &store, ME).await.unwrap().iter().map(|g| g.appid).collect();
+        assert_eq!(ids, vec![620]);
     }
     #[tokio::test]
     async fn an_expired_session_says_to_sign_in() {
