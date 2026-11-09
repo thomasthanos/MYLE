@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { waitingText, euros, validMinimum, untilText, farmLine, plural, playtimeText, achievementsText, sortGames, searchGames, toggleInList, addAll, canQueueIdle, duplicateIds, listable, filterItems, sortItems, parseEuros, priceText, requestedPrice, suggestedPrice, runningSource, listEach, kindLabel } from "../../frontend/app/pages/steam-automation/model.ts";
+import { waitingText, euros, validMinimum, untilText, farmPanel, plural, playtimeText, achievementsText, sortGames, searchGames, toggleInList, addAll, canQueueIdle, duplicateIds, listable, filterItems, sortItems, parseEuros, priceText, requestedPrice, runningSource, listEach, kindLabel, sellable, freshLowest } from "../../frontend/app/pages/steam-automation/model.ts";
 test("the banner says why things are waiting", () => {
   assert.equal(waitingText({ kind: "realGame", appid: 9 }), "Paused while you play. Everything picks up again when you close your game.");
   assert.equal(waitingText({ kind: "noSteam", appid: null }), "Steam is not running.");
@@ -71,7 +71,7 @@ test("the idler's queue stops at thirty-two", () => {
 const item = (assetId, hashName, kind = "card", marketable = true, name = hashName, game = "G") => ({ assetId, hashName, kind, marketable, name, game, iconUrl: null, amount: 1 });
 const items = [item("1", "A"), item("2", "A"), item("3", "A"), item("4", "B", "foil"), item("5", "C", "background"), item("6", "D", "emoticon"), item("7", "E", "booster"), item("8", "F", "card", false), item("9", "F", "card", false)];
 const none = () => new Set();
-const marks = (over = {}) => ({ selected: none(), locked: none(), onSale: none(), duplicates: duplicateIds(items, none()), ...over });
+const marks = (over = {}) => ({ locked: none(), onSale: none(), duplicates: duplicateIds(items, none()), ...over });
 test("duplicates keep one of each card and count only sellable cards", () => {
   assert.deepEqual([...duplicateIds(items, none())], ["2", "3"]);
 });
@@ -93,7 +93,6 @@ test("each filter shows what it says", () => {
   assert.deepEqual(ids(filterItems(items, "booster", "", marks())), ["7"]);
   assert.deepEqual(ids(filterItems(items, "duplicates", "", marks())), ["2", "3"]);
   assert.deepEqual(ids(filterItems(items, "locked", "", marks({ locked: new Set(["5"]) }))), ["5"]);
-  assert.deepEqual(ids(filterItems(items, "selected", "", marks({ selected: new Set(["6"]) }))), ["6"]);
   assert.deepEqual(ids(filterItems(items, "onSale", "", marks({ onSale: new Set(["7"]) }))), ["7"]);
 });
 test("the inventory search looks at the item and its game", () => {
@@ -129,10 +128,13 @@ test("a price shows without the euro sign in its field", () => {
   assert.equal(priceText(31), "0,31");
   assert.equal(priceText(200), "2,00");
 });
-test("the suggested price is a cent under the market, never below the minimum", () => {
-  assert.equal(suggestedPrice(31, 5), 30);
-  assert.equal(suggestedPrice(5, 5), 5);
-  assert.equal(suggestedPrice(2, 5), 5);
+test("what cannot be sold is not shown", () => {
+  assert.deepEqual(ids(sellable(items)), ["1", "2", "3", "4", "5", "6", "7"]);
+});
+test("a looked-up price is not used once it is old", () => {
+  assert.equal(freshLowest({ cents: 31, at: 1000 }, 1000 + 599)?.cents, 31);
+  assert.equal(freshLowest({ cents: 31, at: 1000 }, 1000 + 600), null);
+  assert.equal(freshLowest(undefined, 1000), null);
 });
 test("each kind of item has a plain name", () => {
   assert.equal(kindLabel("card"), "Trading card");
@@ -177,10 +179,17 @@ test("times ahead read simply", () => {
   assert.equal(untilText(1000, 1000), "soon");
   assert.equal(untilText(null, 1000), "");
 });
-test("card farming says what it is doing", () => {
-  assert.equal(farmLine({ phase: "building", gamesLeft: 3, dropsLeft: 9 }), "9 cards left to drop, across 3 games");
-  assert.equal(farmLine({ phase: "solo", gamesLeft: 1, dropsLeft: 1 }), "1 card left to drop, in 1 game");
-  assert.equal(farmLine({ phase: "done", gamesLeft: 0, dropsLeft: 0 }), "No cards left to drop");
-  assert.equal(farmLine({ phase: "reading", gamesLeft: 0, dropsLeft: 0 }), "Reading your card drops from Steam");
-  assert.equal(farmLine({ phase: "signedOut", gamesLeft: 2, dropsLeft: 3 }), "Waiting for you to sign in to Steam again");
+const farm = (phase, gamesLeft = 2, dropsLeft = 6) => ({ phase, gamesLeft, dropsLeft });
+test("before starting, card farming says what would happen", () => {
+  assert.equal(farmPanel(false, farm("done"), 6, 2, null).title, "6 cards to collect from 2 games");
+  assert.equal(farmPanel(false, farm("done"), 1, 1, null).title, "1 card to collect from 1 game");
+  assert.equal(farmPanel(false, farm("done"), 0, 0, null).title, "No cards left to collect");
+});
+test("while running, card farming says what it is doing now", () => {
+  assert.equal(farmPanel(true, farm("reading"), 6, 2, null).title, "Checking your games for cards");
+  assert.equal(farmPanel(true, farm("signedOut"), 6, 2, null).title, "Waiting for you to sign in to Steam");
+  assert.equal(farmPanel(true, farm("building"), 6, 2, null).title, "Warming up 2 games");
+  assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").title, "Farming Detroit");
+  assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").detail, "5 cards left to collect.");
+  assert.equal(farmPanel(true, farm("done", 0, 0), 0, 0, null).title, "All your cards have dropped");
 });

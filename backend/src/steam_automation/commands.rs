@@ -1,14 +1,15 @@
 //! What the page asks for. Every command here is refused for anyone but the owner (`account::owner`).
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Notify;
 use super::badges::{BadgeGame, read_badges};
 use super::community::{CommunityError, HttpCommunity};
-use super::engine::{Started, Status};
+use super::claim::{self, Claimed};
+use super::engine::{Pressed, Started, Status};
 use super::inventory::{self, InventoryItem, ListOutcome, ListRequest, Listing};
 use super::library::{self, LibraryAnswer, LibraryGame, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
@@ -39,10 +40,12 @@ pub struct SteamAutomationState {
     drops: Mutex<Option<(u64, Vec<BadgeGame>)>>,
     inventory: Mutex<Option<(u64, Vec<InventoryItem>)>>,
     /// Assets listed by hand this session, so the same one is never sent twice.
-    listed: tokio::sync::Mutex<HashSet<String>>,
+    listed: Arc<tokio::sync::Mutex<HashSet<String>>>,
     /// One line to Steam for the engine and the page, so together they stay within its limits.
     community: OnceLock<Arc<HttpCommunity>>,
     generation: AtomicU64,
+    rejected: AtomicBool,
+    pressed: Mutex<Pressed>,
     library: Mutex<Option<Vec<LibraryGame>>>,
     poke: Notify,
     runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
@@ -77,6 +80,38 @@ impl SteamAutomationState {
         let community = self.community()?;
         community.set_session(Some(session.clone()));
         Ok((community, session))
+    }
+    /// Listed by hand or automatically, so neither lists what the other just did.
+    pub(crate) fn listed(&self) -> Arc<tokio::sync::Mutex<HashSet<String>>> {
+        self.listed.clone()
+    }
+    /// A page action was told the session is no good. The engine hears of it on its next look.
+    fn note_refused(&self, error: &CommunityError) {
+        if *error == CommunityError::SignedOut {
+            self.rejected.store(true, Ordering::SeqCst);
+            self.poke.notify_one();
+        }
+    }
+    pub(crate) fn take_rejected(&self) -> bool {
+        self.rejected.swap(false, Ordering::SeqCst)
+    }
+    fn refused(&self, error: CommunityError) -> String {
+        self.note_refused(&error);
+        say(error)
+    }
+    pub(crate) fn take_pressed(&self) -> Pressed {
+        std::mem::take(&mut *self.pressed.lock().unwrap_or_else(|p| p.into_inner()))
+    }
+    /// So a game just added shows up the next time the library is looked at.
+    fn mark_library_old(&self) {
+        let Ok(file) = folder().map(|folder| folder.join("library.json")) else {
+            return;
+        };
+        if let Some(saved) = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
+            && let Ok(bytes) = serde_json::to_vec(&Saved { saved_at: 0, games: saved.games })
+        {
+            let _ = crate::game_saves::atomic::write(&file, &bytes);
+        }
     }
     /// Goes up whenever a new session is saved, even one with the same cookies.
     pub(crate) fn session_generation(&self) -> u64 {
@@ -176,6 +211,9 @@ pub fn steam_automation_set_started(state: State<'_, SteamAutomationState>, feat
         _ => return Err("Unknown feature.".to_string()),
     }
     *state.started.lock().unwrap_or_else(|p| p.into_inner()) = Some(started);
+    if on {
+        state.pressed.lock().unwrap_or_else(|p| p.into_inner()).all = true;
+    }
     state.poke.notify_one();
     Ok(())
 }
@@ -185,6 +223,7 @@ pub fn steam_automation_idle_game(state: State<'_, SteamAutomationState>, appid:
     let mut manual = state.manual.lock().unwrap_or_else(|p| p.into_inner());
     if on {
         manual.insert(appid);
+        state.pressed.lock().unwrap_or_else(|p| p.into_inner()).games.push(appid);
     } else {
         manual.remove(&appid);
     }
@@ -207,7 +246,7 @@ pub async fn steam_automation_drops(state: State<'_, SteamAutomationState>, forc
         return Ok(games);
     }
     let (community, session) = state.signed_in()?;
-    let games = read_badges(&community, session.steam_id).await.map_err(say)?;
+    let games = read_badges(&community, session.steam_id).await.map_err(|error| state.refused(error))?;
     *state.drops.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), games.clone()));
     Ok(games)
 }
@@ -219,7 +258,7 @@ pub async fn steam_automation_inventory(state: State<'_, SteamAutomationState>, 
         return Ok(items);
     }
     let (community, session) = state.signed_in()?;
-    let items = inventory::read_items(&community, session.steam_id).await.map_err(say)?;
+    let items = inventory::read_items(&community, session.steam_id).await.map_err(|error| state.refused(error))?;
     *state.inventory.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), items.clone()));
     Ok(items)
 }
@@ -227,7 +266,7 @@ pub async fn steam_automation_inventory(state: State<'_, SteamAutomationState>, 
 #[tauri::command]
 pub async fn steam_automation_price(state: State<'_, SteamAutomationState>, hash_name: String) -> Result<Option<u32>, String> {
     let (community, _) = state.signed_in()?;
-    inventory::lowest_price(&community, &hash_name).await.map_err(say)
+    inventory::lowest_price(&community, &hash_name).await.map_err(|error| state.refused(error))
 }
 /// Lists one item. The page sends them one at a time so it can show how far it has got.
 #[tauri::command]
@@ -236,17 +275,31 @@ pub async fn steam_automation_list_item(state: State<'_, SteamAutomationState>, 
     let settings = state.settings();
     let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
     let mut listed = state.listed.lock().await;
-    inventory::list_item(&community, &session, &item, settings.minimum_cents, &locked, &mut listed).await.map_err(say)
+    inventory::list_item(&community, &session, &item, settings.minimum_cents, &locked, &mut listed).await.map_err(|error| state.refused(error))
 }
 #[tauri::command]
 pub async fn steam_automation_listings(state: State<'_, SteamAutomationState>) -> Result<Vec<Listing>, String> {
     let (community, _) = state.signed_in()?;
-    inventory::read_listings(&community).await.map_err(say)
+    inventory::read_listings(&community).await.map_err(|error| state.refused(error))
 }
 #[tauri::command]
-pub async fn steam_automation_remove_listing(state: State<'_, SteamAutomationState>, listing_id: String) -> Result<(), String> {
+pub async fn steam_automation_remove_listing(state: State<'_, SteamAutomationState>, listing_id: String, asset_id: String) -> Result<(), String> {
     let (community, session) = state.signed_in()?;
-    inventory::remove_listing(&community, &session, &listing_id).await.map_err(say)
+    let mut listed = state.listed.lock().await;
+    inventory::remove_listing(&community, &session, &listing_id, &asset_id, &mut listed).await.map_err(|error| state.refused(error))
+}
+/// Adds a game that is free to keep to the owner's account.
+#[tauri::command]
+pub async fn steam_automation_claim(app: AppHandle, state: State<'_, SteamAutomationState>, appid: u32) -> Result<Claimed, String> {
+    let (community, session) = state.signed_in()?;
+    let store = app.state::<SteamHelperState>().store()?;
+    let claimed = claim::claim(&community, &*store, &session, appid).await;
+    match &claimed {
+        Ok(_) => state.mark_library_old(),
+        Err(reason) if reason == library::SIGNED_OUT => state.note_refused(&CommunityError::SignedOut),
+        Err(_) => {}
+    }
+    claimed
 }
 /// The owner's games, from a saved copy while it is a day old or less unless `force` asks again.
 #[tauri::command]
@@ -264,6 +317,9 @@ pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAuto
         }
         Err(reason) => Err(reason),
     };
+    if fetched.as_ref().is_err_and(|reason| reason == library::SIGNED_OUT) {
+        state.note_refused(&CommunityError::SignedOut);
+    }
     let answer = library::settle(saved, fetched, now())?;
     if answer.problem.is_none() {
         *state.library.lock().unwrap_or_else(|p| p.into_inner()) = Some(answer.games.clone());
@@ -421,6 +477,16 @@ mod tests {
         assert!(!page("https://steamcommunity.com/login/home/?goto="));
         assert!(page("https://steamcommunity.com/id/someone"));
         assert!(page("https://store.steampowered.com/"));
+    }
+    #[test]
+    fn a_session_a_page_action_found_rejected_asks_for_sign_in() {
+        let state = SteamAutomationState::default();
+        assert!(!state.take_rejected());
+        state.note_refused(&CommunityError::Limited);
+        assert!(!state.take_rejected());
+        state.note_refused(&CommunityError::SignedOut);
+        assert!(state.take_rejected());
+        assert!(!state.take_rejected(), "once told is enough");
     }
     #[test]
     fn every_saved_session_counts_as_new() {

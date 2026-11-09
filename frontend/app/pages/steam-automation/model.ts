@@ -6,10 +6,18 @@ export interface WaitingView {
 
 export type GameSort = "playtime" | "name" | "achievements";
 export type ItemSort = "name" | "game" | "kind";
-export type ItemFilter = "all" | "card" | "foil" | "background" | "emoticon" | "booster" | "onSale" | "duplicates" | "locked" | "selected";
+export type ItemFilter = "all" | "card" | "foil" | "background" | "emoticon" | "booster" | "onSale" | "duplicates" | "locked";
 export type RunningSource = "hand" | "idler" | "farming";
 
 export const IDLE_LIMIT = 32;
+/** A price looked up longer ago than this says little about the Market now. */
+const LOWEST_KEEP_SECS = 600;
+
+/** The cheapest price a lookup found, null when the Market had none, and when it looked. */
+export interface Lowest {
+  cents: number | null;
+  at: number;
+}
 export const GAME_SORTS: { value: GameSort; label: string }[] = [
   { value: "playtime", label: "Playtime (high to low)" },
   { value: "name", label: "Name (A to Z)" },
@@ -40,7 +48,6 @@ interface ItemLike {
 }
 
 export interface ItemMarks {
-  selected: Set<string>;
   locked: Set<string>;
   onSale: Set<string>;
   duplicates: Set<string>;
@@ -107,11 +114,6 @@ export function requestedPrice(typed: string | undefined): number | null | "inva
   return parseEuros(typed) ?? "invalid";
 }
 
-/** A cent under the cheapest listing, and never below the owner's minimum. */
-export function suggestedPrice(lowest: number, minimum: number): number {
-  return Math.max(lowest - 1, minimum);
-}
-
 export function kindLabel(kind: string): string {
   return KINDS[kind] ?? "Item";
 }
@@ -124,13 +126,30 @@ export function untilText(at: number | null, now: number): string {
   return `in ${Math.floor(seconds / 3_600)} h`;
 }
 
-export function farmLine(farm: { phase: string; gamesLeft: number; dropsLeft: number }): string {
-  if (farm.phase === "done") return "No cards left to drop";
-  if (farm.phase === "reading") return "Reading your card drops from Steam";
-  if (farm.phase === "signedOut") return "Waiting for you to sign in to Steam again";
-  const cards = `${farm.dropsLeft} card${farm.dropsLeft === 1 ? "" : "s"}`;
-  const games = farm.gamesLeft === 1 ? "in 1 game" : `across ${farm.gamesLeft} games`;
-  return `${cards} left to drop, ${games}`;
+/** What the top of Card farming says: the plan before starting, what is happening once started. */
+export function farmPanel(
+  started: boolean,
+  farm: { phase: string; gamesLeft: number; dropsLeft: number },
+  cards: number,
+  games: number,
+  current: string | null,
+): { title: string; detail: string } {
+  if (!started) {
+    if (cards === 0) return { title: "No cards left to collect", detail: "Games that can still drop trading cards will show up here." };
+    return { title: `${plural(cards, "card")} to collect from ${plural(games, "game")}`, detail: "Press Start and MYLE plays these games in the background until every card has dropped. Untick a game to leave it out." };
+  }
+  switch (farm.phase) {
+    case "reading":
+      return { title: "Checking your games for cards", detail: "This takes a few seconds." };
+    case "signedOut":
+      return { title: "Waiting for you to sign in to Steam", detail: "MYLE cannot see your cards until you do." };
+    case "building":
+      return { title: `Warming up ${plural(farm.gamesLeft, "game")}`, detail: "Steam starts dropping cards after 2 hours of playtime, so these run together first." };
+    case "solo":
+      return { title: current ? `Farming ${current}` : "Farming your cards", detail: `${plural(farm.dropsLeft, "card")} left to collect.` };
+    default:
+      return { title: "All your cards have dropped", detail: "New games with cards will show up here." };
+  }
 }
 
 export function playtimeText(minutes: number): string {
@@ -186,6 +205,15 @@ export function duplicateIds(items: ItemLike[], onSale: Set<string>): Set<string
   return found;
 }
 
+/** The inventory as the page shows it: only what could go on the Market. */
+export function sellable<T extends ItemLike>(items: T[]): T[] {
+  return items.filter((item) => item.marketable);
+}
+
+export function freshLowest(entry: Lowest | undefined, now: number): Lowest | null {
+  return entry && now - entry.at < LOWEST_KEEP_SECS ? entry : null;
+}
+
 export function listable<T extends ItemLike>(items: T[], locked: Set<string>, onSale: Set<string>): T[] {
   return items.filter((item) => item.marketable && !locked.has(item.assetId) && !onSale.has(item.assetId));
 }
@@ -200,8 +228,6 @@ function passes(item: ItemLike, filter: ItemFilter, marks: ItemMarks): boolean {
       return marks.duplicates.has(item.assetId);
     case "locked":
       return marks.locked.has(item.assetId);
-    case "selected":
-      return marks.selected.has(item.assetId);
     default:
       return item.kind === filter;
   }

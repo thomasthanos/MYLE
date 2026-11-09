@@ -34,6 +34,8 @@ export interface Section<T> {
   updatedAt: number | null;
   stale: boolean;
   error: string | null;
+  /** Recent enough that Steam need not be asked. */
+  fresh: boolean;
 }
 
 export type RowKind = "deals" | "freeToPlay";
@@ -44,8 +46,11 @@ export interface MorePage {
 }
 
 export const steamHelperApi = {
-  free: (force: boolean) => invoke<Section<FreeOffer>>("steam_helper_free", { force }),
-  picks: (filters: Filters, force: boolean) => invoke<Section<Game>>("steam_helper_picks", { filters, force }),
-  row: (kind: RowKind, filters: Filters, force: boolean) => invoke<Section<Game>>("steam_helper_row", { kind, filters, force }),
+  free: (force: boolean, saved = false) => invoke<Section<FreeOffer>>("steam_helper_free", { force, saved }),
+  picks: (filters: Filters, force: boolean, saved = false) => invoke<Section<Game>>("steam_helper_picks", { filters, force, saved }),
+  row: (kind: RowKind, filters: Filters, force: boolean, saved = false) => invoke<Section<Game>>("steam_helper_row", { kind, filters, force, saved }),
+  install: (appid: number) => invoke<void>("steam_helper_install", { appid }),
+  ownedGames: () => invoke<{ games: { appid: number }[] }>("steam_automation_library", { force: false }),
+  claim: (appid: number) => invoke<"added" | "alreadyOwned">("steam_automation_claim", { appid }),
   more: (kind: RowKind, filters: Filters, cursor: number) => invoke<MorePage>("steam_helper_more", { kind, filters, cursor }),
 };

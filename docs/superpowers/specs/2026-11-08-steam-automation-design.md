@@ -29,6 +29,18 @@ The owner saw the four-panel page and asked for a full section instead, reviewed
 
 **Left out for now:** the Has badge filter, because it cannot be confirmed without a badge page showing a crafted badge; Claim for free games, which is not in the owner's list.
 
+## Changed again after using it
+
+The owner used the section and asked for fewer parts and something easier to understand, on 2026-11-09. Where this differs from the section above, this wins.
+
+- **Four parts across the top,** not a second sidebar: Games, Card farming, Achievements, Inventory.
+- **Idling and Favorites are ways of looking at Games.** Pressing Idle on a game runs it now. "Keep idling these when MYLE opens" brings the list back at launch, and only then does the refund check apply. The Automatic Idler is this.
+- **What is running is always on show,** in one strip with Stop all, wherever the owner is.
+- **Each feature opens with a panel** saying in plain words what is happening and what will happen, with its Start and "Start when MYLE opens".
+- **Card farming has one choice per game:** farm it or skip it, as a tick under the game. The whitelist is gone.
+- **The Inventory shows only what can be sold,** with filters as chips, and Remove listings under On sale.
+- **Free games.** A game free to keep has Add to account, for the owner, using the Steam sign-in. A free weekend or free-to-play game opens Steam's own install window, for anyone.
+
 ## Where this fits
 
 Steam Game Helper (`2026-11-08-steam-game-helper-design.md`) is the public, read-only half. This is the half that acts on an account, and only the owner sees it.

@@ -8,6 +8,8 @@ const ROW: &str = r#"class="badge_row is_link""#;
 const REFUND_SECONDS: u64 = 15 * 86_400;
 const REFUND_MINUTES: u32 = 120;
 const COMMUNITY: &str = "https://steamcommunity.com";
+/// How a licence bought with money is listed. Free grants and retail keys cannot be refunded.
+const BOUGHT_IN_STORE: &str = "Steam Store";
 const LICENCES_URL: &str = "https://store.steampowered.com/account/licenses/?l=english";
 fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
@@ -17,7 +19,7 @@ static PLAYTIME: LazyLock<Regex> = LazyLock::new(|| regex(r"([\d,]+(?:\.\d+)?) h
 static DROPS: LazyLock<Regex> = LazyLock::new(|| regex(r#"progress_info_bold">(\d+) card drops? remaining"#));
 static TITLE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="badge_title">\s*([^<]*?)\s*(?:&nbsp;|<)"#));
 static PAGE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="pagelink"[^>]*>(\d+)<"#));
-static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td\s+class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>"#));
+static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td\s+class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>(?:\s*<td\s+class="license_acquisition_col">\s*([^<]*?)\s*</td>)?"#));
 static BLOCK: LazyLock<Regex> = LazyLock::new(|| regex(r"(?s)<div.*?</div>"));
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,10 +78,11 @@ fn parse_date(text: &str) -> Option<u64> {
     let year: i64 = parts.next()?.parse().ok()?;
     u64::try_from(days_from_civil(year, month, day) * 86_400).ok()
 }
-/// Each licence's name and when it was added.
+/// The name and date of each licence that could be refunded.
 pub(crate) fn parse_licences(html: &str) -> Vec<(String, u64)> {
     LICENCE
         .captures_iter(html)
+        .filter(|row| row.get(3).is_none_or(|how| how.as_str() == BOUGHT_IN_STORE))
         .filter_map(|row| {
             let date = parse_date(row.get(1)?.as_str().trim())?;
             let cell = BLOCK.replace_all(row.get(2)?.as_str(), "");
@@ -97,15 +100,15 @@ fn plain(name: &str) -> String {
 pub(crate) struct RefundCheck {
     dates_known: bool,
     recent: Vec<String>,
-    /// A recent licence matches no game the owner has, so it may be any of them under another name.
-    unmatched: bool,
+    /// A recent licence that matches no game the owner has, so it may be any of them under another name.
+    unmatched: Option<String>,
 }
 impl RefundCheck {
     pub(crate) fn new(licences: Option<&[(String, u64)]>, library: &[String], now: u64) -> Self {
         let games: Vec<String> = library.iter().map(|name| plain(name)).filter(|name| !name.is_empty()).collect();
-        let recent: Vec<String> = licences.unwrap_or_default().iter().filter(|(_, date)| now.saturating_sub(*date) <= REFUND_SECONDS).map(|(name, _)| plain(name)).collect();
-        let unmatched = recent.iter().any(|licence| !games.iter().any(|game| licence.contains(game)));
-        Self { dates_known: licences.is_some(), recent, unmatched }
+        let bought: Vec<&String> = licences.unwrap_or_default().iter().filter(|(_, date)| now.saturating_sub(*date) <= REFUND_SECONDS).map(|(name, _)| name).collect();
+        let unmatched = bought.iter().find(|name| !games.iter().any(|game| plain(name).contains(game))).map(|name| name.to_string());
+        Self { dates_known: licences.is_some(), recent: bought.iter().map(|name| plain(name)).collect(), unmatched }
     }
     fn bought_recently(&self, game: &str) -> Option<bool> {
         if !self.dates_known {
@@ -115,7 +118,11 @@ impl RefundCheck {
         if self.recent.iter().any(|licence| licence.contains(&game)) {
             return Some(true);
         }
-        (!self.unmatched).then_some(false)
+        self.unmatched.is_none().then_some(false)
+    }
+    /// The recent purchase that could not be tied to a game, to say why short games are waiting.
+    pub(crate) fn unmatched(&self) -> Option<&str> {
+        self.unmatched.as_deref()
     }
     pub(crate) fn protects(&self, game: &str, minutes_played: u32) -> bool {
         is_refundable(self.bought_recently(game), minutes_played)
@@ -228,6 +235,23 @@ mod tests {
         let refunds = check(&[("Mystery Bundle", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + DAY);
         assert!(refunds.protects("Portal 2", 10), "it may be this game under another name");
         assert!(!refunds.protects("Portal 2", 130), "past two hours there is no refund to lose");
+    }
+    #[test]
+    fn the_purchase_that_cannot_be_matched_is_named() {
+        let refunds = check(&[("Mystery Bundle", NOV_8_2026), ("Portal 2", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + DAY);
+        assert_eq!(refunds.unmatched(), Some("Mystery Bundle"));
+        assert_eq!(check(&[("Portal 2", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + DAY).unmatched(), None);
+    }
+    #[test]
+    fn only_what_was_bought_in_the_store_can_be_refunded() {
+        let row = |name: &str, how: &str| format!(r#"<tr><td  class="license_date_col">8 Nov, 2026</td><td>{name}</td><td class="license_acquisition_col">{how}</td></tr>"#);
+        let html = format!("{}{}{}", row("A free thing", "Complimentary"), row("A key", "Retail"), row("Paid for", "Steam Store"));
+        assert_eq!(parse_licences(&html), vec![("Paid for".to_string(), NOV_8_2026)]);
+    }
+    #[test]
+    fn a_licence_row_that_does_not_say_how_it_was_got_still_counts() {
+        let html = r#"<td  class="license_date_col">8 Nov, 2026</td><td>Paid for</td>"#;
+        assert_eq!(parse_licences(html).len(), 1);
     }
     #[test]
     fn unreadable_dates_protect_short_games() {

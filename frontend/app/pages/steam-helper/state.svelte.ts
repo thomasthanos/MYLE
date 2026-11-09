@@ -1,4 +1,7 @@
+import { nav } from "../../../lib/nav.svelte";
 import { readJson, writeJson } from "../../../lib/storage";
+import { toast } from "../../../lib/toast.svelte";
+import { account } from "../../account/account.svelte";
 import { steamHelperApi, type FreeOffer, type Game, type RowKind, type Section } from "./api";
 import { appendUnique, createLatest, debounce, DEFAULT_FILTERS, validFilters, type Filters } from "./model";
 
@@ -12,7 +15,7 @@ export interface SectionState<T> extends Section<T> {
   loading: boolean;
 }
 
-const notLoaded = <T>(): SectionState<T> => ({ items: [], updatedAt: null, stale: false, error: null, loading: true });
+const notLoaded = <T>(): SectionState<T> => ({ items: [], updatedAt: null, stale: false, error: null, fresh: false, loading: true });
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Survives navigation: the page component is destroyed when you leave it. */
@@ -27,6 +30,9 @@ class SteamHelperState {
   moreLoading = $state(false);
   moreError = $state<string | null>(null);
   moreDone = $state(false);
+  /** Only the owner's account can have games added from here. */
+  owned = $state<Set<number>>(new Set());
+  adding = $state<Set<number>>(new Set());
 
   #cursor = 0;
   #latest = {
@@ -45,6 +51,41 @@ class SteamHelperState {
   load(force = false) {
     void this.#loadFree(force);
     this.#loadFiltered(force);
+    void this.#loadOwned();
+  }
+
+  async #loadOwned() {
+    if (!account.owner) return;
+    try {
+      const answer = await steamHelperApi.ownedGames();
+      this.owned = new Set(answer.games.map((game) => game.appid));
+    } catch {
+      // Not signed in to Steam yet: every Add button is still there and says so if pressed.
+    }
+  }
+
+  async addToAccount(appid: number, name: string) {
+    this.adding = new Set([...this.adding, appid]);
+    try {
+      const result = await steamHelperApi.claim(appid);
+      this.owned = new Set([...this.owned, appid]);
+      toast.success(result === "added" ? `${name} is now in your Steam library.` : `${name} is already in your Steam library.`);
+    } catch (error) {
+      const message = messageOf(error);
+      toast.error(message, message.toLowerCase().includes("sign in") ? { label: "Open Steam Automation", run: () => nav.go("steam-automation") } : undefined);
+    } finally {
+      const left = new Set(this.adding);
+      left.delete(appid);
+      this.adding = left;
+    }
+  }
+
+  async install(appid: number) {
+    try {
+      await steamHelperApi.install(appid);
+    } catch (error) {
+      toast.error(messageOf(error));
+    }
   }
 
   setFilter(name: keyof Filters, value: boolean) {
@@ -107,6 +148,13 @@ class SteamHelperState {
     const latest = this.#latest.free;
     const request = latest.next();
     this.free.loading = true;
+    if (!force) {
+      // What was saved shows at once. Steam is only waited for when that is out of date.
+      const saved = await steamHelperApi.free(false, true).catch(() => null);
+      if (!latest.isCurrent(request)) return;
+      if (saved?.items.length) this.free = { ...saved, loading: !saved.fresh };
+      if (saved?.fresh && saved.items.length) return;
+    }
     try {
       const section = await steamHelperApi.free(force);
       if (latest.isCurrent(request)) this.free = { ...section, loading: false };
@@ -117,17 +165,23 @@ class SteamHelperState {
 
   #loadFiltered(force: boolean) {
     const filters = this.filters;
-    void this.#loadGames("picks", () => steamHelperApi.picks(filters, force));
-    void this.#loadGames("deals", () => steamHelperApi.row("deals", filters, force));
-    void this.#loadGames("freeToPlay", () => steamHelperApi.row("freeToPlay", filters, force));
+    void this.#loadGames("picks", force, (saved) => steamHelperApi.picks(filters, force, saved));
+    void this.#loadGames("deals", force, (saved) => steamHelperApi.row("deals", filters, force, saved));
+    void this.#loadGames("freeToPlay", force, (saved) => steamHelperApi.row("freeToPlay", filters, force, saved));
   }
 
-  async #loadGames(name: SeeAllSection, ask: () => Promise<Section<Game>>) {
+  async #loadGames(name: SeeAllSection, force: boolean, ask: (saved: boolean) => Promise<Section<Game>>) {
     const latest = this.#latest[name];
     const request = latest.next();
     this[name].loading = true;
+    if (!force) {
+      const saved = await ask(true).catch(() => null);
+      if (!latest.isCurrent(request)) return;
+      if (saved?.items.length) this[name] = { ...saved, loading: !saved.fresh };
+      if (saved?.fresh && saved.items.length) return;
+    }
     try {
-      const section = await ask();
+      const section = await ask(false);
       if (latest.isCurrent(request)) this[name] = { ...section, loading: false };
     } catch (error) {
       if (latest.isCurrent(request)) this[name] = { ...this[name], error: messageOf(error), loading: false };

@@ -14,6 +14,7 @@ export interface Status {
   manual: number[];
   idleSkipped: number;
   storeStale: boolean;
+  unmatchedLicence: string | null;
   running: number[];
   farm: { phase: "building" | "solo" | "reading" | "signedOut" | "done" | ""; gamesLeft: number; dropsLeft: number; skippedRefundable: number; nextCheckAt: number | null };
   achievements: { total: number; locked: number; nextAt: number | null; waitingForFarming: boolean };
@@ -30,7 +31,6 @@ export interface Settings {
   achievementGames: number[];
   minimumCents: number;
   favorites: number[];
-  cardWhitelist: number[];
   cardBlacklist: number[];
   lockedAssets: string[];
   paused: boolean;
@@ -110,5 +110,5 @@ export const steamAutomationApi = {
   price: (hashName: string) => invoke<number | null>("steam_automation_price", { hashName }),
   listItem: (item: ListRequest) => invoke<ListOutcome>("steam_automation_list_item", { item }),
   listings: () => invoke<Listing[]>("steam_automation_listings"),
-  removeListing: (listingId: string) => invoke<void>("steam_automation_remove_listing", { listingId }),
+  removeListing: (listingId: string, assetId: string) => invoke<void>("steam_automation_remove_listing", { listingId, assetId }),
 };

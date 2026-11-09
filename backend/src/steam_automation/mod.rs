@@ -2,6 +2,7 @@
 //! cards, through the Steam client signed in on this PC. Owner-only (`account::owner`).
 pub(crate) mod achievements;
 pub(crate) mod badges;
+pub(crate) mod claim;
 pub(crate) mod client;
 pub(crate) mod commands;
 pub(crate) mod community;

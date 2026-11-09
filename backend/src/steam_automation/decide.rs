@@ -34,14 +34,9 @@ pub(crate) fn farm_step(games: &[BadgeGame], refunds: &RefundCheck) -> FarmStep 
         None => FarmStep::Done,
     }
 }
-/// The games card farming may touch: a whitelist with anything on it narrows them, and a
-/// blacklisted game is never farmed.
-pub(crate) fn filter_cards(games: &[BadgeGame], whitelist: &[u32], blacklist: &[u32]) -> Vec<BadgeGame> {
-    games
-        .iter()
-        .filter(|game| (whitelist.is_empty() || whitelist.contains(&game.appid)) && !blacklist.contains(&game.appid))
-        .cloned()
-        .collect()
+/// The games card farming may touch: all of them but those the owner chose to skip.
+pub(crate) fn filter_cards(games: &[BadgeGame], skipped: &[u32]) -> Vec<BadgeGame> {
+    games.iter().filter(|game| !skipped.contains(&game.appid)).cloned().collect()
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct World {
@@ -178,17 +173,13 @@ mod tests {
         ids.iter().copied().collect()
     }
     #[test]
-    fn the_whitelist_narrows_what_is_farmed() {
-        let found = filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[2], &[]);
+    fn a_skipped_game_is_not_farmed() {
+        let found = filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[1]);
         assert_eq!(found.iter().map(|game| game.appid).collect::<Vec<_>>(), vec![2]);
     }
     #[test]
-    fn an_empty_whitelist_means_every_game() {
-        assert_eq!(filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[], &[]).len(), 2);
-    }
-    #[test]
-    fn the_blacklist_always_wins() {
-        assert!(filter_cards(&[g(1, 1, 500)], &[1], &[1]).is_empty());
+    fn with_nothing_skipped_every_game_is_farmed() {
+        assert_eq!(filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[]).len(), 2);
     }
     #[test]
     fn a_game_idled_by_hand_runs_with_nothing_started() {

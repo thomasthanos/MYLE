@@ -17,7 +17,7 @@ const FAMILY_GROUP: &str = "https://api.steampowered.com/IFamilyGroupsService/Ge
 const FAMILY_APPS: &str = "https://api.steampowered.com/IFamilyGroupsService/GetSharedLibraryApps/v1/";
 const PROGRESS_PER_REQUEST: usize = 200;
 const NO_LIBRARY: &str = "Steam did not send your library.";
-const SIGNED_OUT: &str = "Your Steam sign-in has expired. Sign in again.";
+pub(crate) const SIGNED_OUT: &str = "Your Steam sign-in has expired. Sign in again.";
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryGame {
@@ -149,6 +149,10 @@ async fn played_times<S: StoreApi>(store: &S, token: &str) -> HashMap<u32, u32> 
         .filter_map(|game| Some((u32::try_from(game.get("appid")?.as_u64()?).ok()?, game.get("playtime_forever")?.as_u64()? as u32)))
         .collect()
 }
+/// The token is refused when the session behind it has ended.
+fn plainly(reason: String) -> String {
+    if reason.ends_with("401.") || reason.ends_with("403.") { SIGNED_OUT.to_string() } else { reason }
+}
 async fn read<C: Community>(community: &C, url: &str) -> Result<String, String> {
     community.get(url).await.map_err(|error| match error {
         CommunityError::SignedOut => SIGNED_OUT.to_string(),
@@ -162,7 +166,7 @@ pub(crate) async fn fetch<C: Community, S: StoreApi>(community: &C, store: &S, s
     let token = parse_token(&read(community, TOKEN_URL).await?)?;
     let mut licensed = parse_owned(&read(community, USERDATA_URL).await?)?;
     let url = format!("{OWNED_GAMES}?access_token={token}&steamid={steam_id}&include_appinfo=true&include_played_free_games=true&skip_unvetted_apps=false");
-    let played = parse_owned_games(&store.get(&url).await?)?;
+    let played = parse_owned_games(&store.get(&url).await.map_err(plainly)?)?;
     let family = family_apps(store, &token, steam_id).await;
     let times = played_times(store, &token).await;
     let own: HashSet<u32> = licensed.iter().copied().chain(played.iter().map(|game| game.appid)).collect();
@@ -209,7 +213,7 @@ pub(crate) async fn fetch<C: Community, S: StoreApi>(community: &C, store: &S, s
         for (index, appid) in batch.iter().enumerate() {
             url.push_str(&format!("&appids[{index}]={appid}"));
         }
-        apply_progress(&mut games, &store.get(&url).await?)?;
+        apply_progress(&mut games, &store.get(&url).await.map_err(plainly)?)?;
     }
     games.sort_by_cached_key(|game| game.name.to_lowercase());
     Ok(games)
@@ -431,6 +435,11 @@ mod tests {
     async fn an_expired_session_says_to_sign_in() {
         let community = FakeCommunity::answering(|_| Err(CommunityError::SignedOut));
         assert_eq!(fetch(&community, &store(), ME).await.unwrap_err(), "Your Steam sign-in has expired. Sign in again.");
+    }
+    #[tokio::test]
+    async fn a_refused_token_says_to_sign_in() {
+        let store = FakeStore::responding(|_| Err("Steam answered 401.".to_string()));
+        assert_eq!(fetch(&community(), &store, ME).await.unwrap_err(), SIGNED_OUT);
     }
     #[test]
     fn a_refresh_replaces_what_was_saved() {

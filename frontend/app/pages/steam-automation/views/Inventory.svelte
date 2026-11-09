@@ -4,47 +4,48 @@
   import LockOpen from "@lucide/svelte/icons/lock-open";
   import Package from "@lucide/svelte/icons/package";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import ProgressBar from "../../../../lib/components/ProgressBar.svelte";
   import Select from "../../../../lib/components/Select.svelte";
   import { confirm } from "../../../../lib/confirm.svelte";
   import type { InventoryItem, Listing } from "../api";
-  import { duplicateIds, euros, filterItems, ITEM_SORTS, kindLabel, listable, parseEuros, plural, requestedPrice, sortItems, untilText, validMinimum, type ItemFilter, type ItemMarks } from "../model";
-  import { steamAutomationState as page } from "../state.svelte";
+  import FeaturePanel from "../FeaturePanel.svelte";
+  import { euros, filterItems, ITEM_SORTS, kindLabel, parseEuros, plural, requestedPrice, untilText, validMinimum, type ItemFilter } from "../model";
+  import { steamAutomationState as page, type BulkKind } from "../state.svelte";
 
   const FILTERS: { value: ItemFilter; label: string }[] = [
-    { value: "all", label: "Everything" },
-    { value: "card", label: "Trading cards" },
+    { value: "all", label: "All" },
+    { value: "card", label: "Cards" },
     { value: "foil", label: "Foil" },
     { value: "background", label: "Backgrounds" },
     { value: "emoticon", label: "Emoticons" },
-    { value: "booster", label: "Booster packs" },
-    { value: "onSale", label: "On sale" },
+    { value: "booster", label: "Boosters" },
     { value: "duplicates", label: "Duplicates" },
     { value: "locked", label: "Locked" },
-    { value: "selected", label: "Selected" },
+    { value: "onSale", label: "On sale" },
   ];
 
+  let now = $state(Date.now() / 1000);
   const all = $derived(page.inventory ?? []);
-  const duplicates = $derived(duplicateIds(all, page.onSale));
-  const marks = $derived<ItemMarks>({ selected: page.selected, locked: page.locked, onSale: page.onSale, duplicates });
-  const shown = $derived(sortItems(filterItems(all, page.itemFilter, page.itemQuery, marks), page.itemSort));
-  const showingListings = $derived(page.itemFilter === "onSale");
-  const canList = $derived(listable(all, page.locked, page.onSale));
-  const canListNow = $derived(listable(shown, page.locked, page.onSale));
-  const canListIds = $derived(new Set(canList.map((item) => item.assetId)));
-  const selectedItems = $derived(canList.filter((item) => page.selected.has(item.assetId)));
-  const duplicateItems = $derived(canList.filter((item) => duplicates.has(item.assetId)));
-  const waiting = $derived(page.listings.filter((listing) => listing.waitingConfirmation).length);
+  const onSaleView = $derived(page.itemFilter === "onSale");
   const busy = $derived(!!page.job);
+  const ready = $derived(page.listingsKnown && !busy && !page.inventoryLoading);
+  const selectedItems = $derived(page.bulkItems("selected"));
+  const shownItems = $derived(page.bulkItems("all"));
+  const duplicateItems = $derived(page.bulkItems("duplicates"));
+  const autoOn = $derived(page.settings?.inventoryOn ?? false);
+  const panelDetail = $derived.by(() => {
+    const floor = euros(page.settings?.minimumCents ?? 5);
+    const next = autoOn && page.status?.inventory.nextAt ? ` Next run ${untilText(page.status.inventory.nextAt, now)}.` : "";
+    return `Every 6 hours MYLE lists your spare cards just under the cheapest price, never below ${floor}. One of each is always kept.${next}`;
+  });
 
   function countOf(filter: ItemFilter): number {
-    return filter === "onSale" ? page.listings.length : filterItems(all, filter, "", marks).length;
+    return filter === "onSale" ? page.listings.length : filterItems(all, filter, "", page.marks).length;
   }
 
-  async function ask(items: InventoryItem[], title: string, lastCopies: boolean, label: string) {
-    const warning = lastCopies ? " This can include your last copy of a card." : " One of each card is kept.";
-    const message = `${plural(items.length, "item")} will go on the Steam Market at the price in its field, or a cent under the cheapest listing if the field is empty.${warning} Each one still needs confirming in Steam Guard.`;
-    if (await confirm({ title, message, confirmLabel: "List items", danger: true })) void page.listItems(items, label);
+  async function bulk(kind: BulkKind, count: number, title: string, label: string) {
+    const warning = kind === "duplicates" ? "One of each card is kept." : "This can include your last copy of a card.";
+    const message = `${plural(count, "item")} will go on the Steam Market at the price you typed, or just under the cheapest listing where you typed none. ${warning} Each one still needs confirming in Steam Guard.`;
+    if (await confirm({ title, message, confirmLabel: "List items", danger: true })) void page.listBulk(kind, label);
   }
 
   async function removeAll() {
@@ -63,65 +64,56 @@
 
   onMount(() => {
     void page.loadInventory(false);
+    const clock = setInterval(() => (now = Date.now() / 1000), 15_000);
+    return () => clearInterval(clock);
   });
 </script>
 
-<div class="bar">
-  <h2>Inventory Manager</h2>
-  <span class="count">{all.length}</span>
-  <span class="grow"></span>
-  {#if page.settings}
-    <label class="auto">Sell duplicates automatically<input class="switch" type="checkbox" checked={page.settings.inventoryOn} onchange={(event) => void page.change({ inventoryOn: event.currentTarget.checked })} /></label>
+{#if page.settings}
+  <FeaturePanel title="Sell duplicates automatically" detail={panelDetail} active={autoOn}>
+    <label class="floor">Never below<input class="input" type="text" inputmode="decimal" aria-label="Lowest price for automatic selling, in euros" value={euros(page.settings.minimumCents)} onchange={(event) => setMinimum(event.currentTarget.value)} /></label>
+    <input class="switch" type="checkbox" aria-label="Sell duplicates automatically" checked={autoOn} onchange={(event) => void page.change({ inventoryOn: event.currentTarget.checked })} />
+  </FeaturePanel>
+{/if}
+
+<div class="row">
+  <div class="chips" role="group" aria-label="Show">
+    {#each FILTERS as filter (filter.value)}
+      <button class="chip" class:active={page.itemFilter === filter.value} type="button" aria-pressed={page.itemFilter === filter.value} onclick={() => (page.itemFilter = filter.value)}>{filter.label}<span class="count">{countOf(filter.value)}</span></button>
+    {/each}
+  </div>
+</div>
+
+<div class="row">
+  {#if onSaleView}
+    <span class="grow"></span>
+    <button class="btn" type="button" disabled={busy || page.listings.length === 0} onclick={() => void removeAll()}>Remove all listings</button>
+  {:else}
+    <input class="input search" type="search" placeholder="Search" aria-label="Search your inventory" bind:value={page.itemQuery} />
+    <Select bind:value={page.itemSort} options={ITEM_SORTS} ariaLabel="Sort by" />
+    <span class="grow"></span>
+    {#if selectedItems.length > 0}
+      <button class="btn primary" type="button" disabled={!ready} onclick={() => void bulk("selected", selectedItems.length, "List the selected items?", "Listing selected items")}>List selected ({selectedItems.length})</button>
+    {/if}
+    <button class="btn" type="button" disabled={!ready || duplicateItems.length === 0} onclick={() => void bulk("duplicates", duplicateItems.length, "List your duplicates?", "Listing duplicates")}>List duplicates ({duplicateItems.length})</button>
+    <button class="btn" type="button" disabled={!ready || shownItems.length === 0} onclick={() => void bulk("all", shownItems.length, "List everything shown?", "Listing items")}>List all ({shownItems.length})</button>
   {/if}
-  <button class="btn" type="button" disabled={busy || selectedItems.length === 0} onclick={() => void ask(selectedItems, "List the selected items?", true, "Listing selected items")}>List selected ({selectedItems.length})</button>
-  <button class="btn" type="button" disabled={busy || canListNow.length === 0 || showingListings} onclick={() => void ask(canListNow, "List everything shown?", true, "Listing items")}>List all ({showingListings ? 0 : canListNow.length})</button>
-  <button class="btn" type="button" disabled={busy || duplicateItems.length === 0} onclick={() => void ask(duplicateItems, "List your duplicates?", false, "Listing duplicates")}>List duplicates ({duplicateItems.length})</button>
-  <button class="btn" type="button" disabled={busy || page.listings.length === 0} onclick={() => void removeAll()}>Remove listings ({page.listings.length})</button>
   <button class="icon-btn" type="button" aria-label="Read the inventory again" title="Read the inventory again" disabled={page.inventoryLoading || busy} onclick={() => void page.loadInventory(true)}><RefreshCw size={15} /></button>
 </div>
 
-{#if page.job}
-  <div class="job surface">
-    <div class="job-line"><span>{page.job.label}: {page.job.progress.done} of {page.job.total}</span><button class="btn small" type="button" onclick={() => page.stopJob()}>Stop</button></div>
-    <ProgressBar value={page.job.progress.done / page.job.total} label={page.job.label} />
+{#if page.inventoryError}
+  <div class="empty" role="alert"><p>{page.inventoryError}</p><button class="btn small" type="button" onclick={() => void page.loadInventory(true)}>Try again</button></div>
+{:else if page.inventoryLoading && all.length === 0}
+  <p class="empty" aria-busy="true">Reading your inventory from Steam…</p>
+{:else if onSaleView}
+  <div class="items">
+    {#each page.listings as listing (listing.listingId)}{@render forSale(listing)}{:else}<p class="empty">Nothing on sale.</p>{/each}
+  </div>
+{:else}
+  <div class="items">
+    {#each page.shownItems as item (item.assetId)}{@render entry(item)}{:else}<p class="empty">Nothing here.</p>{/each}
   </div>
 {/if}
-{#if page.settings?.inventoryOn && page.status?.inventory.nextAt}<p class="note">Next automatic run {untilText(page.status.inventory.nextAt, Date.now() / 1000)}. It sells duplicates only and always keeps one of each.</p>{/if}
-{#if waiting > 0}<p class="note warn">{plural(waiting, "listing")} waiting for your confirmation in Steam Guard. MYLE never approves these for you.</p>{/if}
-
-<div class="layout">
-  <aside>
-    <input class="input" type="search" placeholder="Search" aria-label="Search your inventory" bind:value={page.itemQuery} />
-    <p class="label">Sort by</p>
-    <Select bind:value={page.itemSort} options={ITEM_SORTS} ariaLabel="Sort by" fullWidth />
-    <p class="label">Filter</p>
-    <div class="filters">
-      {#each FILTERS as filter (filter.value)}
-        <button class="filter" class:on={page.itemFilter === filter.value} type="button" aria-pressed={page.itemFilter === filter.value} onclick={() => (page.itemFilter = filter.value)}>{filter.label}<i>{countOf(filter.value)}</i></button>
-      {/each}
-    </div>
-    {#if page.settings}
-      <p class="label">Never below</p>
-      <input class="input" type="text" inputmode="decimal" aria-label="Lowest price for automatic selling, in euros" value={euros(page.settings.minimumCents)} onchange={(event) => setMinimum(event.currentTarget.value)} />
-    {/if}
-  </aside>
-
-  <div class="items-area">
-    {#if page.inventoryError}
-      <div class="empty" role="alert"><p>{page.inventoryError}</p><button class="btn small" type="button" onclick={() => void page.loadInventory(true)}>Try again</button></div>
-    {:else if page.inventoryLoading && all.length === 0}
-      <p class="empty" aria-busy="true">Reading your inventory from Steam…</p>
-    {:else if showingListings}
-      <div class="items">
-        {#each page.listings as listing (listing.listingId)}{@render onSale(listing)}{:else}<p class="empty">Nothing on sale.</p>{/each}
-      </div>
-    {:else}
-      <div class="items">
-        {#each shown as item (item.assetId)}{@render entry(item)}{:else}<p class="empty">Nothing matches.</p>{/each}
-      </div>
-    {/if}
-  </div>
-</div>
 
 {#snippet art(url: string | null)}
   {#if url}<img src={url} alt="" loading="lazy" decoding="async" />{:else}<span class="blank"><Package size={20} /></span>{/if}
@@ -130,29 +122,28 @@
 {#snippet entry(item: InventoryItem)}
   {@const locked = page.locked.has(item.assetId)}
   {@const sale = page.onSale.has(item.assetId)}
-  {@const known = page.lowest[item.hashName]}
+  {@const lowest = page.lowestOf(item.hashName, now)}
+  {@const canPick = !locked && !sale}
   <article class="item surface" class:picked={page.selected.has(item.assetId)}>
     <div class="top">
-      <input class="check" type="checkbox" aria-label={`Select ${item.name}`} checked={page.selected.has(item.assetId)} disabled={!canListIds.has(item.assetId)} onchange={() => page.toggleSelected(item.assetId)} />
+      <input class="check" type="checkbox" aria-label={`Select ${item.name}`} checked={page.selected.has(item.assetId)} disabled={!canPick} onchange={() => page.toggleSelected(item.assetId)} />
       {@render art(item.iconUrl)}
-      <div class="meta"><b title={item.name}>{item.name}</b><span title={item.game}>{item.game}</span><span class="type">{kindLabel(item.kind)}{item.amount > 1 ? ` × ${item.amount.toLocaleString("en-US")}` : ""}</span></div>
-      <button class="icon-btn" class:active={locked} type="button" aria-pressed={locked} aria-label={locked ? `Unlock ${item.name}` : `Lock ${item.name}`} title={locked ? "Locked, never sold" : "Lock so it is never sold"} onclick={() => page.toggleLocked(item.assetId)}>{#if locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}</button>
+      <div class="meta"><b title={item.name}>{item.name}</b><span title={item.game}>{item.game}</span><span class="type">{kindLabel(item.kind)}</span></div>
+      <button class="icon-btn" class:active={locked} type="button" aria-pressed={locked} aria-label={locked ? `Unlock ${item.name}` : `Lock ${item.name}`} title={locked ? "Locked: it will never be sold" : "Lock it so it is never sold"} onclick={() => page.toggleLocked(item.assetId)}>{#if locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}</button>
     </div>
     {#if sale}
       <p class="state">On sale</p>
-    {:else if !item.marketable}
-      <p class="state">Cannot be sold</p>
     {:else}
-      <button class="link" type="button" disabled={page.pricing.has(item.assetId)} onclick={() => void page.lookupPrice(item)}>{page.pricing.has(item.assetId) ? "Checking the Market…" : known === null ? "No market price" : known !== undefined ? `Lowest now ${euros(known)}` : "Get market price"}</button>
       <div class="price">
-        <input class="input" class:bad={priceBad(item)} type="text" inputmode="decimal" placeholder="Market price" aria-label={`Price for ${item.name}, in euros`} aria-invalid={priceBad(item)} bind:value={page.prices[item.assetId]} />
+        <input class="input" class:bad={priceBad(item)} type="text" inputmode="decimal" placeholder={lowest && lowest.cents !== null ? euros(lowest.cents) : "Market price"} title="Leave empty to sell just under the cheapest listing" aria-label={`Price for ${item.name}, in euros`} aria-invalid={priceBad(item)} disabled={locked} bind:value={page.prices[item.assetId]} />
         <button class="btn small" type="button" disabled={busy || locked || priceBad(item)} onclick={() => void page.listItems([item], "Listing")}>List</button>
       </div>
+      <button class="link" type="button" disabled={page.pricing.has(item.assetId)} onclick={() => void page.lookupPrice(item)}>{page.pricing.has(item.assetId) ? "Checking…" : lowest ? (lowest.cents === null ? "No market price" : `Cheapest now ${euros(lowest.cents)}`) : "Check the Market price"}</button>
     {/if}
   </article>
 {/snippet}
 
-{#snippet onSale(listing: Listing)}
+{#snippet forSale(listing: Listing)}
   <article class="item surface">
     <div class="top">
       {@render art(listing.iconUrl)}
@@ -163,19 +154,14 @@
 {/snippet}
 
 <style>
-  .job { display: grid; gap: 7px; margin-bottom: 12px; padding: 10px 12px; }
-  .job-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; }
-  .layout { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 16px; align-items: start; }
-  aside { position: sticky; top: 0; display: flex; flex-direction: column; gap: 4px; }
-  .label { margin: 10px 2px 3px; color: var(--text-3); font-size: 11px; font-weight: 700; }
-  .filters { display: flex; flex-direction: column; gap: 1px; }
-  .filter { display: flex; justify-content: space-between; align-items: center; padding: 6px 9px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
-  .filter:hover { background: var(--hover); }
-  .filter.on { background: var(--selected); color: var(--text-1); }
-  .filter i { color: var(--text-3); font-style: normal; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-  .items-area { min-width: 0; }
-  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 10px; }
-  .item { padding: 10px; min-width: 0; content-visibility: auto; contain-intrinsic-size: 216px 138px; }
+  .floor { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12.5px; }
+  .floor .input { width: 76px; height: 30px; text-align: right; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .grow { flex: 1 1 0; }
+  .search { flex: 0 1 220px; min-width: 140px; }
+  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(226px, 1fr)); gap: 10px; }
+  .item { padding: 10px; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 226px auto 132px; }
   .item.picked { border-color: rgb(var(--accent-rgb) / 0.6); }
   .top { display: flex; gap: 9px; align-items: center; }
   img, .blank { flex: none; width: 54px; height: 62px; border-radius: 7px; object-fit: contain; background: var(--input-fill); }
@@ -185,15 +171,14 @@
   .meta b { font-size: 13px; }
   .meta span { color: var(--text-2); font-size: 11.5px; }
   .meta .type { justify-self: start; max-width: 100%; margin-top: 2px; padding: 0 6px; border-radius: 5px; background: var(--chip-fill); }
-  .state { margin: 9px 0 2px; color: var(--text-3); font-size: 12px; text-align: center; }
-  .link { display: block; width: 100%; margin-top: 7px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; text-align: center; cursor: pointer; }
-  .link:hover:not(:disabled), .link:focus-visible { text-decoration: underline; }
-  .link:disabled { color: var(--text-3); cursor: progress; }
-  .price { display: flex; gap: 6px; align-items: center; margin-top: 7px; }
+  .state { margin: 11px 0 3px; color: var(--ok); font-size: 12px; font-weight: 700; text-align: center; }
+  .price { display: flex; gap: 6px; align-items: center; margin-top: 9px; }
   .price.end { justify-content: flex-end; }
   .price .input { flex: 1; min-width: 0; height: 28px; font-size: 12.5px; text-align: right; }
   .price .input.bad { border-color: var(--danger); }
-  .empty { grid-column: 1 / -1; margin: 32px auto; color: var(--text-3); font-size: 13px; text-align: center; }
+  .link { display: block; width: 100%; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; text-align: center; cursor: pointer; }
+  .link:hover:not(:disabled), .link:focus-visible { text-decoration: underline; }
+  .link:disabled { color: var(--text-3); cursor: progress; }
+  .empty { grid-column: 1 / -1; margin: 40px auto; color: var(--text-3); font-size: 13px; text-align: center; }
   .empty p { margin: 0 0 10px; }
-  @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } aside { position: static; } }
 </style>

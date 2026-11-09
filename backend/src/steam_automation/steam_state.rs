@@ -2,7 +2,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use winreg::RegKey;
-use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use winreg::enums::HKEY_CURRENT_USER;
 /// A SteamID64's low 32 bits are the account number the registry keeps.
@@ -43,12 +43,16 @@ pub(crate) fn process_alive(pid: u32) -> bool {
     unsafe {
         let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
         if process.is_null() {
-            return false;
+            return alive_though_unopenable(GetLastError());
         }
         let alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
         CloseHandle(process);
         alive
     }
+}
+/// A Steam started as administrator cannot be opened from here, which does not make it gone.
+fn alive_though_unopenable(error: u32) -> bool {
+    error == ERROR_ACCESS_DENIED
 }
 /// A game Steam is running that MYLE did not start.
 pub(crate) fn real_game(running: &[u32], ours: &BTreeSet<u32>) -> Option<u32> {
@@ -61,6 +65,11 @@ pub(crate) fn same_account(active_user: u32, steam_id64: u64) -> bool {
 mod tests {
     use std::collections::BTreeSet;
     use super::*;
+    #[test]
+    fn a_steam_that_refuses_to_be_opened_is_still_running() {
+        assert!(alive_though_unopenable(5));
+        assert!(!alive_though_unopenable(87), "no such process");
+    }
     #[test]
     fn our_own_games_are_not_a_real_game() {
         assert_eq!(real_game(&[620], &BTreeSet::from([620])), None);

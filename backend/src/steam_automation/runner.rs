@@ -5,6 +5,7 @@ use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use crate::apps::process::JobObject;
 const MAX_GAMES: usize = 32;
@@ -21,14 +22,17 @@ pub(crate) trait GameRunner: Send + Sync {
     fn apply(&self, wanted: &BTreeSet<u32>) -> Result<(), String>;
     fn running(&self) -> BTreeSet<u32>;
     fn stop_all(&self);
+    /// Whether everything was stopped on purpose since the last time this was asked.
+    fn take_stopped_all(&self) -> bool;
 }
 pub(crate) struct ProcessRunner<S: Spawner> {
     spawner: S,
     children: Mutex<BTreeMap<u32, S::Child>>,
+    stopped_all: AtomicBool,
 }
 impl<S: Spawner> ProcessRunner<S> {
     pub(crate) fn new(spawner: S) -> Self {
-        Self { spawner, children: Mutex::new(BTreeMap::new()) }
+        Self { spawner, children: Mutex::new(BTreeMap::new()), stopped_all: AtomicBool::new(false) }
     }
     fn children(&self) -> std::sync::MutexGuard<'_, BTreeMap<u32, S::Child>> {
         let mut children = self.children.lock().unwrap_or_else(|p| p.into_inner());
@@ -70,6 +74,10 @@ impl<S: Spawner> GameRunner for ProcessRunner<S> {
             child.kill();
         }
         children.clear();
+        self.stopped_all.store(true, Ordering::SeqCst);
+    }
+    fn take_stopped_all(&self) -> bool {
+        self.stopped_all.swap(false, Ordering::SeqCst)
     }
 }
 impl Child for std::process::Child {
@@ -117,6 +125,7 @@ impl Spawner for HelperSpawner {
 pub(crate) struct FakeRunner {
     pub current: Mutex<BTreeSet<u32>>,
     pub stops: Mutex<u32>,
+    pub stopped_all: Mutex<bool>,
 }
 #[cfg(test)]
 impl GameRunner for FakeRunner {
@@ -130,13 +139,15 @@ impl GameRunner for FakeRunner {
     fn stop_all(&self) {
         *self.stops.lock().unwrap() += 1;
         self.current.lock().unwrap().clear();
+        *self.stopped_all.lock().unwrap() = true;
+    }
+    fn take_stopped_all(&self) -> bool {
+        std::mem::take(&mut *self.stopped_all.lock().unwrap())
     }
 }
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
     use super::*;
     #[derive(Default)]
     struct Log {
@@ -208,6 +219,14 @@ mod tests {
         runner.spawner.alive.lock().unwrap()[0].1.store(false, Ordering::SeqCst);
         runner.apply(&BTreeSet::from([1])).unwrap();
         assert_eq!(spawned(&runner), vec![1, 1]);
+    }
+    #[test]
+    fn stopping_everything_is_reported_once() {
+        let runner = runner();
+        assert!(!runner.take_stopped_all());
+        runner.stop_all();
+        assert!(runner.take_stopped_all());
+        assert!(!runner.take_stopped_all());
     }
     #[test]
     fn stopping_kills_everything() {

@@ -2,6 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import type { Game } from "./api";
   import { dealOver, reviewLabel, reviewTone, timeLeft } from "./model";
+  import { steamHelperState as helper } from "./state.svelte";
 
   let { game, now, showModes = false }: { game: Game; now: number; showModes?: boolean } = $props();
 
@@ -14,6 +15,7 @@
   );
 </script>
 
+<article class="wrap">
 <button class="card" type="button" title="Open {game.name} on Steam" onclick={() => void openUrl(game.storeUrl)}>
   {#if game.coverUrl}
     <img src={game.coverUrl} alt="" loading="lazy" />
@@ -40,10 +42,23 @@
     </span>
   </span>
 </button>
+{#if game.isFree}
+  <div class="act">
+    {#if helper.owned.has(game.appid)}
+      <span class="have">In your library</span>
+    {:else}
+      <button class="btn small" type="button" title="Opens Steam to add it to your library" onclick={() => void helper.install(game.appid)}>Add in Steam</button>
+    {/if}
+  </div>
+{/if}
+</article>
 
 <style>
-  .card { display: block; width: 100%; min-width: 0; padding: 0; overflow: hidden; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--surface-fill); box-shadow: var(--surface-depth); color: var(--text-1); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out); }
-  .card:hover, .card:focus-visible { border-color: rgb(var(--accent-rgb) / 0.55); }
+  .wrap { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--surface-fill); box-shadow: var(--surface-depth); transition: border-color var(--dur-fast) var(--ease-out); }
+  .wrap:hover, .wrap:focus-within { border-color: rgb(var(--accent-rgb) / 0.55); }
+  .card { display: block; flex: 1; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; text-align: left; cursor: pointer; }
+  .act { display: flex; justify-content: flex-end; align-items: center; min-height: 36px; padding: 5px 8px; border-top: 1px solid var(--panel-rim); }
+  .have { color: var(--ok); font-size: 12px; font-weight: 700; }
   img, .no-art { display: block; width: 100%; aspect-ratio: 460 / 215; object-fit: cover; }
   .no-art { background: var(--input-fill); }
   .body { display: block; padding: 7px 9px 9px; }
@@ -60,5 +75,5 @@
   .free { color: var(--ok); font-weight: 700; }
   .ended { color: var(--text-3); font-size: 12px; }
   .left { margin-left: auto; color: var(--warn); font-size: 11px; white-space: nowrap; }
-  @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .wrap { transition: none; } }
 </style>

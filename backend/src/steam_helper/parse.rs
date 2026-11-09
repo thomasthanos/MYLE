@@ -29,6 +29,8 @@ pub(crate) struct Item {
     pub item_type: Option<u64>,
     /// The tall library art, which not every game has.
     pub portrait_url: Option<String>,
+    /// What to buy to get it. A game free to keep is added by this.
+    pub package_id: Option<u32>,
     pub features: Vec<u64>,
 }
 /// A `GetItems` or `Query` answer.
@@ -99,6 +101,7 @@ fn item(value: &Value) -> Option<Item> {
         free_weekend: value.get("free_weekend").and_then(free_weekend),
         item_type: number(value, "type"),
         portrait_url: asset("library_capsule").map(|path| format!("{IMAGES}/{appid}/{path}")),
+        package_id: purchase.and_then(|p| number(p, "packageid")).and_then(|id| u32::try_from(id).ok()),
         features: ids(value.get("categories").and_then(|c| c.get("feature_categoryids")), None),
     })
 }

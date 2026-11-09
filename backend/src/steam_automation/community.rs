@@ -9,6 +9,7 @@ const GAP: Duration = Duration::from_secs(3);
 const PRICE_EXTRA: Duration = Duration::from_secs(1);
 const COMMUNITY_ORIGIN: &str = "https://steamcommunity.com";
 const STORE_HOST: &str = "store.steampowered.com";
+const STORE_ORIGIN: &str = "https://store.steampowered.com";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum CommunityError {
     SignedOut,
@@ -46,6 +47,10 @@ pub(super) fn encode(text: &str) -> String {
             other => format!("%{other:02X}"),
         })
         .collect()
+}
+/// The site a form is being sent from, as Steam expects to see it.
+fn origin_of(url: &str) -> &'static str {
+    if url.contains(STORE_HOST) { STORE_ORIGIN } else { COMMUNITY_ORIGIN }
 }
 fn form_body(form: &[(&str, String)]) -> String {
     form.iter().map(|(key, value)| format!("{}={}", encode(key), encode(value))).collect::<Vec<_>>().join("&")
@@ -111,7 +116,7 @@ impl Community for HttpCommunity {
             .header("Cookie", cookie)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("Referer", referer)
-            .header("Origin", COMMUNITY_ORIGIN)
+            .header("Origin", origin_of(url))
             .body(form_body(form));
         self.finish(request).await
     }
@@ -168,6 +173,11 @@ mod tests {
     #[test]
     fn form_values_are_encoded() {
         assert_eq!(form_body(&[("sessionid", "a b".to_string()), ("price", "27".to_string()), ("x", "é&".to_string())]), "sessionid=a%20b&price=27&x=%C3%A9%26");
+    }
+    #[test]
+    fn a_form_says_which_site_it_came_from() {
+        assert_eq!(origin_of("https://steamcommunity.com/market/sellitem/"), "https://steamcommunity.com");
+        assert_eq!(origin_of("https://store.steampowered.com/freelicense/addfreelicense"), "https://store.steampowered.com");
     }
     #[test]
     fn a_normal_page_is_fine() {

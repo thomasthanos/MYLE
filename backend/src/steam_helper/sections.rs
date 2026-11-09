@@ -155,7 +155,7 @@ mod tests {
             game: g(appid, 80, 5000),
             adult: false,
             item_type: Some(0),
-            portrait_url: None,
+            portrait_url: None, package_id: None,
             features: Vec::new(),
             free_weekend: Some(FreeWeekend { start_time: None, end_time, text: text.map(str::to_string), appid: trial }),
         }
@@ -174,7 +174,7 @@ mod tests {
         let mut game = g(appid, 0, 0);
         game.deal_ends_at = ends;
         game.discount_percent = 100;
-        Item { game, adult: false, free_weekend: None, item_type: Some(0), portrait_url: None, features: Vec::new() }
+        Item { game, adult: false, free_weekend: None, item_type: Some(0), portrait_url: None, package_id: None, features: Vec::new() }
     }
     #[test]
     fn offers_group_by_trial_and_end_soonest_first() {

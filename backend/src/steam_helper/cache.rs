@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::model::FreeOffer;
 const FRESH_SECS: u64 = 3600;
 const MIN_FORCE_SECS: u64 = 60;
+/// Older than this and a list says more about last week than about now.
+const SHOWN_FOR_SECS: u64 = 7 * 86_400;
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Section<T> {
@@ -15,6 +17,8 @@ pub(crate) struct Section<T> {
     /// These are older answers: asking again just failed.
     pub stale: bool,
     pub error: Option<String>,
+    /// Recent enough that Steam need not be asked.
+    pub fresh: bool,
 }
 #[derive(Deserialize, Serialize)]
 struct Entry<T> {
@@ -56,7 +60,7 @@ where
     let limit = if force { MIN_FORCE_SECS } else { FRESH_SECS };
     let saved = match cache.read::<T>(key) {
         Some(entry) if now.saturating_sub(entry.saved_at) < limit => {
-            return Section { items: entry.items, updated_at: Some(entry.saved_at), stale: false, error: None };
+            return Section { items: entry.items, updated_at: Some(entry.saved_at), stale: false, error: None, fresh: true };
         }
         other => other,
     };
@@ -64,12 +68,19 @@ where
         Ok(items) => {
             let entry = Entry { saved_at: now, items };
             cache.write(key, &entry);
-            Section { items: entry.items, updated_at: Some(now), stale: false, error: None }
+            Section { items: entry.items, updated_at: Some(now), stale: false, error: None, fresh: true }
         }
         Err(error) => match saved {
-            Some(entry) => Section { items: entry.items, updated_at: Some(entry.saved_at), stale: true, error: Some(error) },
-            None => Section { items: Vec::new(), updated_at: None, stale: false, error: Some(error) },
+            Some(entry) => Section { items: entry.items, updated_at: Some(entry.saved_at), stale: true, error: Some(error), fresh: false },
+            None => Section { items: Vec::new(), updated_at: None, stale: false, error: Some(error), fresh: false },
         },
+    }
+}
+/// What was saved for this section, without asking Steam, for the page to show at once.
+pub(crate) fn saved_section<T: Serialize + DeserializeOwned>(cache: &DiskCache, key: &str, now: u64) -> Section<T> {
+    match cache.read::<T>(key).filter(|entry| now.saturating_sub(entry.saved_at) < SHOWN_FOR_SECS) {
+        Some(entry) => Section { fresh: now.saturating_sub(entry.saved_at) < FRESH_SECS, items: entry.items, updated_at: Some(entry.saved_at), stale: false, error: None },
+        None => Section { items: Vec::new(), updated_at: None, stale: false, error: None, fresh: false },
     }
 }
 /// Keeps the offers that are running now, however recently they were saved.
@@ -109,6 +120,27 @@ mod tests {
         let cache = seeded().await;
         assert!(cache.has("deals"));
         assert!(!cache.has("free"));
+    }
+    const WEEK: u64 = 7 * 86_400;
+    #[tokio::test]
+    async fn what_was_saved_comes_back_without_asking_steam() {
+        let section: Section<u32> = saved_section(&seeded().await, "deals", 1001);
+        assert_eq!((section.items, section.updated_at, section.fresh), (vec![1], Some(1000), true));
+    }
+    #[tokio::test]
+    async fn a_saved_answer_past_the_hour_is_shown_and_says_it_should_be_refreshed() {
+        let section: Section<u32> = saved_section(&seeded().await, "deals", 1000 + 3600);
+        assert_eq!((section.items, section.fresh), (vec![1], false));
+    }
+    #[tokio::test]
+    async fn an_answer_older_than_a_week_is_not_shown() {
+        let section: Section<u32> = saved_section(&seeded().await, "deals", 1000 + WEEK);
+        assert_eq!((section.items, section.updated_at, section.fresh), (vec![], None, false));
+    }
+    #[tokio::test]
+    async fn nothing_saved_is_empty_and_not_fresh() {
+        let section: Section<u32> = saved_section(&cache(), "deals", 1000);
+        assert_eq!((section.items, section.fresh), (vec![], false));
     }
     #[tokio::test]
     async fn a_fresh_entry_costs_no_request() {

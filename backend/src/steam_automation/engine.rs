@@ -28,7 +28,19 @@ const HANDS_OFF_MAX_SECS: u64 = 3600;
 const SESSION_RETRY_SECS: u64 = 30 * 60;
 /// Achievement lists read in one tick, so a long list of games cannot hold everything up.
 const LISTS_PER_TICK: usize = 3;
-pub(crate) type KeepGoing = Arc<dyn Fn() -> bool + Send + Sync>;
+/// What is about to act on the account.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Job {
+    Selling,
+    Unlocking,
+}
+pub(crate) type KeepGoing = Arc<dyn Fn(Job) -> bool + Send + Sync>;
+/// Things the owner pressed since the last tick: a helper's waiting period does not outrank them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Pressed {
+    pub all: bool,
+    pub games: Vec<u32>,
+}
 /// What is running for now. Starts from the automatic switches when MYLE opens and is never saved.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,8 +61,9 @@ pub(crate) struct TickInput {
     pub started: Started,
     pub manual: Vec<u32>,
     pub library: Vec<LibraryGame>,
-    /// Asked before each listing, so a long run can be stopped.
+    /// Asked before each listing or unlock, so a long tick can be stopped.
     pub keep_going: KeepGoing,
+    pub pressed: Pressed,
     pub user_paused: bool,
     pub is_owner: bool,
 }
@@ -98,6 +111,7 @@ pub struct Status {
     pub manual: Vec<u32>,
     pub idle_skipped: u32,
     pub store_stale: bool,
+    pub unmatched_licence: Option<String>,
     pub running: Vec<u32>,
     pub farm: FarmView,
     pub achievements: AchievementsView,
@@ -137,12 +151,12 @@ pub(crate) struct Engine<C, A> {
     queue: UnlockQueue,
     lists: HashMap<u32, AchievementList>,
     next_unlock_at: u64,
-    listed: HashSet<String>,
+    listed: Arc<tokio::sync::Mutex<HashSet<String>>>,
     report: SellReport,
     next_inventory_at: u64,
 }
 impl<C: Community, A: AchievementTool> Engine<C, A> {
-    pub(crate) fn new(runner: Arc<dyn GameRunner>, community: C, tool: A, random: Box<dyn FnMut() -> u64 + Send>) -> Self {
+    pub(crate) fn new(runner: Arc<dyn GameRunner>, community: C, tool: A, listed: Arc<tokio::sync::Mutex<HashSet<String>>>, random: Box<dyn FnMut() -> u64 + Send>) -> Self {
         Self {
             runner,
             community,
@@ -163,12 +177,16 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             queue: UnlockQueue::default(),
             lists: HashMap::new(),
             next_unlock_at: 0,
-            listed: HashSet::new(),
+            listed,
             report: SellReport::default(),
             next_inventory_at: 0,
         }
     }
     /// A new session has arrived, so Steam gets another chance to accept it.
+    /// A page action found the session refused, and with nothing started the engine would not have.
+    pub(crate) fn session_rejected(&mut self) {
+        self.community_ok = false;
+    }
     #[cfg(test)]
     pub(crate) fn community_lost_for_test(&mut self) {
         self.community_ok = false;
@@ -233,9 +251,25 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             }
         }
     }
+    /// What the owner pressed comes before any waiting period.
+    fn forgive(&mut self, pressed: Pressed) {
+        if pressed.all {
+            self.hands_off.clear();
+            self.strikes.clear();
+        }
+        for appid in pressed.games {
+            self.hands_off.remove(&appid);
+            self.strikes.remove(&appid);
+        }
+    }
     /// The games that should really run. A helper that ended without MYLE asking means the owner
     /// pressed Stop in Steam, or Steam would not run it, so that game is left alone for a while.
     fn supervise(&mut self, games: &BTreeSet<u32>, now: u64) -> BTreeSet<u32> {
+        // Pressed while this tick was reading: what it decided is already out of date.
+        if self.runner.take_stopped_all() {
+            self.last_wanted.clear();
+            return BTreeSet::new();
+        }
         let alive = self.runner.running();
         let expected: Vec<u32> = self.last_wanted.intersection(games).copied().collect();
         for appid in expected {
@@ -254,7 +288,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         self.last_wanted = wanted.clone();
         wanted
     }
-    async fn run_achievements(&mut self, picked: &[u32], now: u64) {
+    async fn run_achievements(&mut self, picked: &[u32], keep_going: &KeepGoing, now: u64) {
         let missing: Vec<u32> = picked.iter().copied().filter(|appid| !self.lists.contains_key(appid)).take(LISTS_PER_TICK).collect();
         for appid in missing {
             let list = self.tool.list(appid).await.unwrap_or_else(|reason| {
@@ -270,6 +304,10 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         let Some((appid, name)) = self.queue.next(picked, &self.lists, random) else {
             return;
         };
+        // Reading the lists can take minutes, and the owner may have stopped this since.
+        if !keep_going(Job::Unlocking) {
+            return;
+        }
         match self.tool.unlock(appid, &name).await {
             Ok(()) => {
                 if let Some(list) = self.lists.get_mut(&appid) {
@@ -286,10 +324,15 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
     }
     async fn run_inventory(&mut self, session: &Session, settings: &Settings, keep_going: KeepGoing, now: u64) {
         let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
-        let (report, error) = sell_duplicates(&self.community, session, settings.minimum_cents, &locked, &mut self.listed, &*keep_going).await;
+        let (report, error) = sell_duplicates(&self.community, session, settings.minimum_cents, &locked, &mut *self.listed.lock().await, &|| keep_going(Job::Selling)).await;
         if report.listed > 0 {
             let cards = if report.listed == 1 { "card" } else { "cards" };
-            self.activity.push(now, format!("Listed {} duplicate {cards}", report.listed));
+            let confirm = match report.waiting_confirmation {
+                0 => "",
+                1 => " Confirm it in Steam Guard.",
+                _ => " Confirm them in Steam Guard.",
+            };
+            self.activity.push(now, format!("Listed {} duplicate {cards}.{confirm}", report.listed));
         }
         self.report = SellReport { waiting_confirmation: self.report.waiting_confirmation + report.waiting_confirmation, ..report };
         self.next_inventory_at = now + if error.is_some() { RETRY_SECS } else { INVENTORY_SECS };
@@ -323,6 +366,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             manual: world.manual.clone(),
             idle_skipped,
             store_stale: self.store_stale,
+            unmatched_licence: refunds.unmatched().map(str::to_string),
             running: self.runner.running().into_iter().collect(),
             farm: FarmView {
                 phase,
@@ -352,7 +396,9 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             self.last_wanted.clear();
             return Status::default();
         }
-        let TickInput { steam, session, settings, started, manual, library, keep_going, user_paused, .. } = input;
+        let TickInput { steam, session, settings, started, manual, library, keep_going, user_paused, pressed, .. } = input;
+        self.forgive(pressed);
+        self.hands_off.retain(|_, until| *until > now);
         let account_ok = match (&steam, &session) {
             (Some(steam), Some(session)) => same_account(steam.active_user, session.steam_id),
             _ => true,
@@ -368,7 +414,8 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         if (started.farm || started.idle) && clear_to_run && self.community_ok && session.is_some() && now >= self.next_purchases_at {
             self.read_purchases(now).await;
         }
-        let candidates = filter_cards(&self.farm_games, &settings.card_whitelist, &settings.card_blacklist);
+        // A game being left alone must not hold up the games behind it.
+        let candidates: Vec<BadgeGame> = filter_cards(&self.farm_games, &settings.card_blacklist).into_iter().filter(|game| !self.hands_off.contains_key(&game.appid)).collect();
         let names: Vec<String> = library.iter().map(|game| game.name.clone()).collect();
         let refunds = RefundCheck::new(self.licences.as_deref(), &names, now);
         let farm = match (started.farm, self.farm_read) {
@@ -396,7 +443,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             self.activity.push(now, reason);
         }
         if decision.achievements_may_run && started.achievements {
-            self.run_achievements(&settings.achievement_games, now).await;
+            self.run_achievements(&settings.achievement_games, &keep_going, now).await;
         }
         if decision.inventory_may_run && settings.inventory_on && now >= self.next_inventory_at
             && let Some(session) = &session
@@ -422,7 +469,7 @@ pub(crate) fn start(app: AppHandle) {
         state.set_runner(runner.clone());
         let random = || uuid::Uuid::new_v4().as_u128() as u64;
         let job = spawner_job.clone();
-        let mut engine = Engine::new(runner.clone(), community, HelperTool { job }, Box::new(random));
+        let mut engine = Engine::new(runner.clone(), community, HelperTool { job }, state.listed(), Box::new(random));
         let activity_file = folder.join("activity.json");
         engine.activity = Activity::load(&activity_file);
         let mut last_generation = 0;
@@ -430,6 +477,9 @@ pub(crate) fn start(app: AppHandle) {
         tokio::time::sleep(FIRST_TICK).await;
         loop {
             let session = state.session();
+            if state.take_rejected() {
+                engine.session_rejected();
+            }
             let generation = state.session_generation();
             if generation != last_generation {
                 engine.session_changed();
@@ -440,10 +490,16 @@ pub(crate) fn start(app: AppHandle) {
             let keep_going: KeepGoing = {
                 let app = app.clone();
                 let runner = runner.clone();
-                Arc::new(move || {
+                Arc::new(move |job: Job| {
+                    let state = app.state::<SteamAutomationState>();
+                    let settings = state.settings();
+                    let wanted = match job {
+                        Job::Selling => settings.inventory_on,
+                        Job::Unlocking => state.started(&settings).achievements,
+                    };
                     let ours = runner.running();
                     let real = steam_state::read().and_then(|steam| real_game(&steam.running, &ours));
-                    !app.state::<SteamAutomationState>().paused() && real.is_none() && app.state::<crate::account::AccountState>().is_owner(&app)
+                    wanted && !settings.paused && real.is_none() && app.state::<crate::account::AccountState>().is_owner(&app)
                 })
             };
             let input = TickInput {
@@ -453,6 +509,7 @@ pub(crate) fn start(app: AppHandle) {
                 manual: state.manual(),
                 library: state.library_games(),
                 keep_going,
+                pressed: state.take_pressed(),
                 settings,
                 user_paused: state.paused(),
                 is_owner: app.state::<crate::account::AccountState>().is_owner(&app),
@@ -501,6 +558,7 @@ mod tests {
     fn badges(drops: u32) -> String {
         format!(r#"<div class="badge_row is_link"><a href="x/gamecards/{GAME}/"></a> 9.0 hrs on record <span class="progress_info_bold">{drops} card drops remaining</span><div class="badge_title">Portal 2 &nbsp;<span></span></div></div>"#)
     }
+    const NOTHING_LISTED: &str = r#"{"success":true,"total_count":0,"listings":[]}"#;
     const LICENCES: &str = r#"<td  class="license_date_col">1 Jan, 2020</td> <td>Portal 2</td>"#;
     #[derive(Default)]
     struct FakeTool {
@@ -526,7 +584,7 @@ mod tests {
         let runner = Arc::new(FakeRunner::default());
         let tool = Arc::new(FakeTool::default());
         let drops = Arc::new(AtomicU32::new(3));
-        let engine = Engine::new(runner.clone(), community(drops.clone()), tool.clone(), Box::new(|| 0));
+        let engine = Engine::new(runner.clone(), community(drops.clone()), tool.clone(), Arc::default(), Box::new(|| 0));
         Rig { runner, tool, drops, engine }
     }
     fn normal_community(drops: Arc<AtomicU32>) -> FakeCommunity {
@@ -536,6 +594,9 @@ mod tests {
             }
             if url.contains("licenses") {
                 return Ok(LICENCES.to_string());
+            }
+            if url.contains("mylistings") {
+                return Ok(NOTHING_LISTED.to_string());
             }
             Ok(r#"{"assets":[],"descriptions":[],"success":1}"#.to_string())
         })
@@ -547,7 +608,7 @@ mod tests {
     fn input(settings: Settings) -> TickInput {
         let started = Started { farm: settings.farm_on, idle: settings.idle_on, achievements: settings.achievements_on };
         let library = [(7, "Seven", 500), (8, "Eight", 500), (GAME, "Portal 2", 540)].map(|(appid, name, minutes)| owned(appid, name, minutes)).to_vec();
-        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, started, manual: Vec::new(), library, keep_going: Arc::new(|| true), user_paused: false, is_owner: true }
+        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, started, manual: Vec::new(), library, keep_going: Arc::new(|_| true), pressed: Pressed::default(), user_paused: false, is_owner: true }
     }
     fn owned(appid: u32, name: &str, minutes: u32) -> LibraryGame {
         LibraryGame { appid, name: name.to_string(), cover_url: None, header_url: None, minutes, achievements_unlocked: 0, achievements_total: 0, achievements_ok: true, shared: false }
@@ -687,17 +748,11 @@ mod tests {
         assert_eq!(running(&rig), BTreeSet::from([GAME]));
     }
     #[tokio::test]
-    async fn a_game_off_the_whitelist_is_not_farmed() {
+    async fn a_skipped_game_is_not_farmed() {
         let mut rig = rig();
-        let status = rig.engine.tick(input(Settings { card_whitelist: vec![1], ..farming() }), T0).await;
+        let status = rig.engine.tick(input(Settings { card_blacklist: vec![GAME], ..farming() }), T0).await;
         assert!(running(&rig).is_empty());
         assert_eq!((status.farm.games_left, status.farm.drops_left), (0, 0));
-    }
-    #[tokio::test]
-    async fn a_blacklisted_game_is_not_farmed() {
-        let mut rig = rig();
-        rig.engine.tick(input(Settings { card_blacklist: vec![GAME], ..farming() }), T0).await;
-        assert!(running(&rig).is_empty());
     }
     #[tokio::test]
     async fn a_game_idled_by_hand_is_run_and_reported() {
@@ -819,14 +874,86 @@ mod tests {
         let posted = Arc::new(AtomicU32::new(0));
         let mut rig = rig_with(|_| {
             let posted = posted.clone();
-            FakeCommunity::answering(move |url| Ok(if url.contains("priceoverview") { r#"{"lowest_price":"0,31€"}"#.to_string() } else { inventory.to_string() }))
+            FakeCommunity::answering(move |url| Ok(if url.contains("mylistings") { NOTHING_LISTED.to_string() } else if url.contains("priceoverview") { r#"{"lowest_price":"0,31€"}"#.to_string() } else { inventory.to_string() }))
                 .answering_posts(move |_| {
                     if posted.fetch_add(1, Ordering::SeqCst) == 0 { Ok(r#"{"success":true,"needs_mobile_confirmation":true}"#.to_string()) } else { Err(CommunityError::SignedOut) }
                 })
         });
         let status = rig.engine.tick(input(Settings { inventory_on: true, ..Settings::default() }), T0).await;
         assert_eq!((status.inventory.listed, status.inventory.waiting_confirmation), (1, 1));
-        assert!(status.activity.iter().any(|entry| entry.text == "Listed 1 duplicate card"), "{:?}", status.activity);
+        assert!(status.activity.iter().any(|entry| entry.text == "Listed 1 duplicate card. Confirm it in Steam Guard."), "{:?}", status.activity);
+    }
+    #[tokio::test]
+    async fn pausing_during_the_list_reads_stops_the_unlock() {
+        let mut rig = rig();
+        rig.tool.lists.lock().unwrap().insert(GAME, AchievementList { names: vec!["A".into()], locked: vec!["A".into()] });
+        let keep_going: KeepGoing = Arc::new(|job| job != Job::Unlocking);
+        rig.engine.tick(TickInput { keep_going, ..input(achievements()) }, T0).await;
+        assert!(rig.tool.unlocked.lock().unwrap().is_empty());
+    }
+    fn two_games(drops: Arc<AtomicU32>) -> FakeCommunity {
+        FakeCommunity::answering(move |url| {
+            if url.contains("/badges/") {
+                let _ = drops.load(Ordering::SeqCst);
+                let row = |appid: u32, name: &str, left: u32| format!(r#"<div class="badge_row is_link"><a href="x/gamecards/{appid}/"></a> 9.0 hrs on record <span class="progress_info_bold">{left} card drops remaining</span><div class="badge_title">{name} &nbsp;<span></span></div></div>"#);
+                return Ok(format!("{}{}", row(GAME, "Portal 2", 1), row(7, "Seven", 2)));
+            }
+            Ok(LICENCES.to_string())
+        })
+    }
+    #[tokio::test]
+    async fn a_game_left_alone_does_not_hold_up_the_next_one() {
+        let mut rig = rig_with(two_games);
+        rig.engine.tick(input(farming()), T0).await;
+        assert_eq!(running(&rig), BTreeSet::from([GAME]));
+        rig.runner.current.lock().unwrap().remove(&GAME);
+        rig.engine.tick(input(farming()), T0 + 60).await;
+        rig.engine.tick(input(farming()), T0 + 120).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn stop_all_during_a_read_is_not_counted_as_stopping_by_itself() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        rig.runner.stop_all();
+        let status = rig.engine.tick(input(idling(vec![7])), T0 + 1).await;
+        assert!(status.activity.is_empty(), "{:?}", status.activity);
+        assert!(running(&rig).is_empty(), "this tick started before the press");
+        rig.engine.tick(input(idling(vec![7])), T0 + 2).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]), "no waiting period was imposed");
+    }
+    #[tokio::test]
+    async fn pressing_play_clears_the_wait() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        rig.runner.current.lock().unwrap().remove(&7);
+        rig.engine.tick(input(idling(vec![7])), T0 + 60).await;
+        assert!(running(&rig).is_empty());
+        let pressed = Pressed { all: false, games: vec![7] };
+        rig.engine.tick(TickInput { pressed, ..input(idling(vec![7])) }, T0 + 61).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn pressing_start_clears_every_wait() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        rig.runner.current.lock().unwrap().remove(&7);
+        rig.engine.tick(input(idling(vec![7])), T0 + 60).await;
+        rig.engine.tick(TickInput { pressed: Pressed { all: true, games: vec![] }, ..input(idling(vec![7])) }, T0 + 61).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn a_session_refused_elsewhere_shows_on_the_page() {
+        let mut rig = rig();
+        rig.engine.session_rejected();
+        assert!(!rig.engine.tick(input(Settings::default()), T0).await.community_ok);
+    }
+    #[tokio::test]
+    async fn the_page_is_told_which_purchase_could_not_be_matched() {
+        const RECENT: &str = r#"<td  class="license_date_col">14 Jan, 2027</td> <td>Mystery Bundle</td>"#;
+        let mut rig = rig_with(|_| FakeCommunity::answering(|url| Ok(if url.contains("licenses") { RECENT.to_string() } else { String::new() })));
+        let status = rig.engine.tick(input(idling(vec![7])), T0).await;
+        assert_eq!(status.unmatched_licence.as_deref(), Some("Mystery Bundle"));
     }
     #[test]
     fn someone_who_is_not_the_owner_never_opens_the_hidden_page() {

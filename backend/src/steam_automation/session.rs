@@ -48,6 +48,10 @@ impl Session {
         }
         self
     }
+    /// The store's own session id, which store forms must carry.
+    pub(crate) fn store_session_id(&self) -> Option<&str> {
+        self.store_cookie.as_deref()?.split("; ").find_map(|part| part.split_once('=').filter(|(name, _)| *name == SESSION_COOKIE).map(|(_, value)| value))
+    }
     pub(crate) fn cookie_header(&self) -> String {
         format!("{LOGIN_COOKIE}={}; {SESSION_COOKIE}={}", self.steam_login_secure, self.session_id)
     }
@@ -103,6 +107,12 @@ mod tests {
         let earlier = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "1%7C%7Cold"), pair("sessionid", "o")]);
         let newer = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "1%7C%7Cnew"), pair("sessionid", "n")]).keeping_store_cookie_of(Some(&earlier));
         assert_eq!(newer.store_cookie_header(), Some("steamLoginSecure=1%7C%7Cnew; sessionid=n"));
+    }
+    #[test]
+    fn the_store_session_id_comes_from_its_cookie() {
+        let session = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "1%7C%7Cstore"), pair("sessionid", "def")]);
+        assert_eq!(session.store_session_id(), Some("def"));
+        assert_eq!(from_cookies(&signed_in()).unwrap().store_session_id(), None);
     }
     #[test]
     fn no_store_cookies_means_no_store_header() {

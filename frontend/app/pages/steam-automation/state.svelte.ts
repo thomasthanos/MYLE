@@ -1,14 +1,14 @@
 import { toast } from "../../../lib/toast.svelte";
 import { steamAutomationApi as api, type BadgeGame, type Feature, type InventoryItem, type LibraryGame, type Listing, type Settings, type Status } from "./api";
-import { listEach, messageOf, plural, priceText, requestedPrice, suggestedPrice, toggleInList, type GameSort, type ItemFilter, type ItemSort, type JobResult } from "./model";
+import { duplicateIds, filterItems, freshLowest, IDLE_LIMIT, listable, listEach, messageOf, plural, requestedPrice, sellable, sortItems, toggleInList, type GameSort, type ItemFilter, type ItemMarks, type ItemSort, type JobResult, type Lowest } from "./model";
 
 const POLL_MS = 5_000;
 /** Long enough for the backend to have acted on a change, so the next look shows it. */
 const SETTLE_MS = 500;
 
-export type View = "games" | "idling" | "favorites" | "cards" | "achievements" | "idler" | "inventory";
-export type CardSort = "drops" | "name" | "playtime";
-type Queue = "idleGames" | "achievementGames";
+export type View = "games" | "cards" | "achievements" | "inventory";
+export type GamesShown = "all" | "favorites" | "idling";
+export type BulkKind = "selected" | "all" | "duplicates";
 
 interface Job {
   label: string;
@@ -39,13 +39,14 @@ class SteamAutomationState {
   inventoryLoading = $state(false);
   inventoryError = $state<string | null>(null);
   listings = $state<Listing[]>([]);
+  /** Selling in bulk needs to know what is already on the Market. */
+  listingsKnown = $state(false);
   selected = $state<Set<string>>(new Set());
-  /** What is typed in each item's price field. */
+  /** What the owner typed in each item's price field. Empty means the Market's price at the time. */
   prices = $state<Record<string, string>>({});
-  /** The Market's cheapest price by item name, null when it has none. */
-  lowest = $state<Record<string, number | null>>({});
+  lowest = $state<Record<string, Lowest>>({});
   pricing = $state<Set<string>>(new Set());
-  /** Listed since the last look at the Market. */
+  /** Listed since the inventory was last read. */
   justListed = $state<Set<string>>(new Set());
   itemFilter = $state<ItemFilter>("all");
   itemSort = $state<ItemSort>("name");
@@ -53,15 +54,16 @@ class SteamAutomationState {
   job = $state<Job | null>(null);
 
   find = $state({
-    games: { query: "", sort: "playtime" as GameSort },
-    favorites: { query: "", sort: "playtime" as GameSort },
-    achievements: { query: "", sort: "playtime" as GameSort, tab: "all" as "all" | "queue" },
-    idler: { query: "", sort: "playtime" as GameSort, tab: "all" as "all" | "queue" },
-    cards: { query: "", sort: "drops" as CardSort, tab: "drops" as "drops" | "whitelist" | "blacklist" },
+    games: { query: "", sort: "playtime" as GameSort, show: "all" as GamesShown },
+    achievements: { query: "", sort: "playtime" as GameSort, show: "all" as "all" | "queue" },
   });
 
   onSale = $derived(new Set([...this.listings.map((listing) => listing.assetId), ...this.justListed]));
   locked = $derived(new Set(this.settings?.lockedAssets ?? []));
+  marks = $derived<ItemMarks>({ locked: this.locked, onSale: this.onSale, duplicates: duplicateIds(this.inventory ?? [], this.onSale) });
+  shownItems = $derived(sortItems(filterItems(this.inventory ?? [], this.itemFilter, this.itemQuery, this.marks), this.itemSort));
+  /** Steam Guard is the owner's to do, wherever in the section they are. */
+  waitingConfirmation = $derived(this.listings.filter((listing) => listing.waitingConfirmation).length);
 
   #timer: ReturnType<typeof setInterval> | undefined;
   #stopJob = false;
@@ -70,6 +72,7 @@ class SteamAutomationState {
     void this.refresh();
     void this.#loadSettings();
     void this.loadLibrary(false);
+    void this.#readListings();
     clearInterval(this.#timer);
     this.#timer = setInterval(() => void this.refresh(), POLL_MS);
   }
@@ -80,8 +83,11 @@ class SteamAutomationState {
 
   async refresh() {
     try {
+      const before = this.status?.inventory.waitingConfirmation ?? 0;
       this.status = await api.status();
       this.error = null;
+      // An automatic run has just put more on the Market.
+      if (this.status.inventory.waitingConfirmation !== before) void this.#readListings();
     } catch (error) {
       this.error = messageOf(error);
     }
@@ -123,11 +129,13 @@ class SteamAutomationState {
       await api.signIn();
       await this.refresh();
       await this.loadLibrary(true);
+      await this.#readListings();
     });
     this.signingIn = false;
   }
 
   async setPaused(paused: boolean) {
+    if (paused) this.stopJob();
     if (this.settings) this.settings = { ...this.settings, paused };
     await this.#attempt(() => api.pause(paused));
     this.#settle();
@@ -139,12 +147,26 @@ class SteamAutomationState {
     this.#settle();
   }
 
+  isIdling(appid: number): boolean {
+    return !!this.status?.manual.includes(appid) || (!!this.status?.started.idle && !!this.settings?.idleGames.includes(appid));
+  }
+
+  /** Runs now, and is remembered for when MYLE next opens if that switch is on. */
   async idleGame(appid: number, on: boolean) {
+    if (!this.settings) return;
+    const others = this.settings.idleGames.filter((id) => id !== appid);
+    if (on && others.length >= IDLE_LIMIT) {
+      toast.info(`Steam runs up to ${IDLE_LIMIT} games at once.`);
+      return;
+    }
+    void this.change({ idleGames: on ? [...others, appid] : others });
     await this.#attempt(() => api.idleGame(appid, on));
     this.#settle();
   }
 
   async stopAll() {
+    this.stopJob();
+    void this.change({ idleGames: [] });
     await this.#attempt(() => api.stopAll());
     this.#settle();
   }
@@ -153,15 +175,12 @@ class SteamAutomationState {
     if (this.settings) void this.change({ favorites: toggleInList(this.settings.favorites, appid) });
   }
 
-  toggleQueue(queue: Queue, appid: number) {
-    if (this.settings) void this.change({ [queue]: toggleInList(this.settings[queue], appid) });
+  toggleAchievementGame(appid: number) {
+    if (this.settings) void this.change({ achievementGames: toggleInList(this.settings.achievementGames, appid) });
   }
 
-  /** A game is on one list at most, so moving it to one takes it off the other. */
-  toggleCardList(list: "cardWhitelist" | "cardBlacklist", appid: number) {
-    if (!this.settings) return;
-    const other = list === "cardWhitelist" ? "cardBlacklist" : "cardWhitelist";
-    void this.change({ [list]: toggleInList(this.settings[list], appid), [other]: this.settings[other].filter((id) => id !== appid) });
+  toggleSkipped(appid: number) {
+    if (this.settings) void this.change({ cardBlacklist: toggleInList(this.settings.cardBlacklist, appid) });
   }
 
   toggleLocked(assetId: string) {
@@ -207,26 +226,37 @@ class SteamAutomationState {
     this.inventoryLoading = true;
     this.inventoryError = null;
     try {
-      this.inventory = await api.inventory(force);
-      await this.#loadListings();
+      this.inventory = sellable(await api.inventory(force));
+      this.listings = await api.listings();
+      this.listingsKnown = true;
       this.justListed = new Set();
     } catch (error) {
+      this.listingsKnown = false;
       this.inventoryError = messageOf(error);
     } finally {
       this.inventoryLoading = false;
     }
   }
 
-  async #loadListings() {
-    this.listings = await api.listings();
+  /** Quietly: a failure here is said by the sign-in state, not by an error of its own. */
+  async #readListings() {
+    try {
+      this.listings = await api.listings();
+      this.listingsKnown = true;
+    } catch {
+      this.listingsKnown = false;
+    }
+  }
+
+  lowestOf(hashName: string, now: number) {
+    return freshLowest(this.lowest[hashName], now);
   }
 
   async lookupPrice(item: InventoryItem) {
     this.pricing = new Set([...this.pricing, item.assetId]);
     await this.#attempt(async () => {
       const cents = await api.price(item.hashName);
-      this.lowest = { ...this.lowest, [item.hashName]: cents };
-      if (cents !== null) this.prices = { ...this.prices, [item.assetId]: priceText(suggestedPrice(cents, this.settings?.minimumCents ?? 1)) };
+      this.lowest = { ...this.lowest, [item.hashName]: { cents, at: Date.now() / 1000 } };
     });
     const left = new Set(this.pricing);
     left.delete(item.assetId);
@@ -248,6 +278,21 @@ class SteamAutomationState {
 
   stopJob() {
     this.#stopJob = true;
+  }
+
+  bulkItems(kind: BulkKind): InventoryItem[] {
+    const can = listable(this.inventory ?? [], this.locked, this.onSale);
+    if (kind === "selected") return can.filter((item) => this.selected.has(item.assetId));
+    if (kind === "duplicates") return can.filter((item) => this.marks.duplicates.has(item.assetId));
+    return listable(this.shownItems, this.locked, this.onSale);
+  }
+
+  /** The inventory may be days old by now, so "one of each is kept" is worked out again first. */
+  async listBulk(kind: BulkKind, label: string) {
+    if (this.job) return;
+    await this.loadInventory(true);
+    if (!this.listingsKnown) return;
+    await this.listItems(this.bulkItems(kind), label);
   }
 
   async listItems(items: InventoryItem[], label: string) {
@@ -272,12 +317,12 @@ class SteamAutomationState {
       toast.success(`Listed ${plural(result.listed, "item")}.${waiting}`);
     }
     if (result.skipped > 0 && items.length > 1) toast.info(`${plural(result.skipped, "item")} could not be listed.`);
-    await this.#attempt(() => this.#loadListings());
+    await this.#readListings();
   }
 
   async removeListings(listings: Listing[]) {
     const result = await this.#run("Removing listings", listings, async (listing) => {
-      await api.removeListing(listing.listingId);
+      await api.removeListing(listing.listingId, listing.assetId);
       this.listings = this.listings.filter((entry) => entry.listingId !== listing.listingId);
       const left = new Set(this.justListed);
       left.delete(listing.assetId);

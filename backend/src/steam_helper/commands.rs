@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
-use super::cache::{DiskCache, Section, live_offers, through_cache};
+use super::cache::{DiskCache, Section, live_offers, saved_section, through_cache};
 use super::model::{Filters, FreeOffer, Game};
 use super::picks::{week_key, weekly_picks};
 use super::sections::{MorePage, RowKind, free_right_now, more, row};
@@ -40,11 +40,11 @@ fn picks_key(filters: Filters, week: i64) -> String {
     format!("picks-{}-{}", (week / 7) % 2, filters.key())
 }
 #[tauri::command]
-pub async fn steam_helper_free(state: State<'_, SteamHelperState>, force: bool) -> Result<Section<FreeOffer>, String> {
+pub async fn steam_helper_free(state: State<'_, SteamHelperState>, force: bool, saved: bool) -> Result<Section<FreeOffer>, String> {
     let api = state.store()?;
     let cache = DiskCache::new(folder()?);
     let now = now();
-    let mut section = through_cache(&cache, "free", force, now, || free_right_now(&*api)).await;
+    let mut section = if saved { saved_section(&cache, "free", now) } else { through_cache(&cache, "free", force, now, || free_right_now(&*api)).await };
     section.items = live_offers(section.items, now);
     Ok(section)
 }
@@ -53,6 +53,7 @@ pub async fn steam_helper_picks(
     state: State<'_, SteamHelperState>,
     filters: Filters,
     force: bool,
+    saved: bool,
 ) -> Result<Section<Game>, String> {
     let api = state.store()?;
     let folder = folder()?;
@@ -60,6 +61,9 @@ pub async fn steam_helper_picks(
     let week = this_week(now)?;
     let file = folder.join("picks.json");
     let cache = DiskCache::new(folder);
+    if saved {
+        return Ok(saved_section(&cache, &picks_key(filters, week), now));
+    }
     Ok(through_cache(&cache, &picks_key(filters, week), force, now, || weekly_picks(&*api, &file, filters, week)).await)
 }
 #[tauri::command]
@@ -68,12 +72,26 @@ pub async fn steam_helper_row(
     kind: RowKind,
     filters: Filters,
     force: bool,
+    saved: bool,
 ) -> Result<Section<Game>, String> {
     let api = state.store()?;
     let cache = DiskCache::new(folder()?);
     let name = if kind == RowKind::Deals { "deals" } else { "free-to-play" };
     let key = format!("{name}-{}", filters.key());
+    if saved {
+        return Ok(saved_section(&cache, &key, now()));
+    }
     Ok(through_cache(&cache, &key, force, now(), || row(&*api, kind, filters)).await)
+}
+/// Hands a game to Steam's own install window, which adds it to the library. Takes only a number,
+/// so nothing else can be opened through it.
+#[tauri::command]
+pub fn steam_helper_install(app: tauri::AppHandle, appid: u32) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(install_url(appid), None::<&str>).map_err(|_| "Steam could not be opened.".to_string())
+}
+fn install_url(appid: u32) -> String {
+    format!("steam://install/{appid}")
 }
 #[tauri::command]
 pub async fn steam_helper_more(
@@ -97,6 +115,10 @@ mod tests {
     #[test]
     fn saved_picks_do_not_pile_up() {
         assert_eq!(picks_key(COOP, 20759), picks_key(COOP, 20759 + 14));
+    }
+    #[test]
+    fn steam_is_asked_to_install_by_number() {
+        assert_eq!(install_url(620), "steam://install/620");
     }
     #[test]
     fn filter_combinations_are_saved_apart() {

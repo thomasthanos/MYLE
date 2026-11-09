@@ -1,41 +1,31 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Ban from "@lucide/svelte/icons/ban";
-  import Check from "@lucide/svelte/icons/check";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { BadgeGame, LibraryGame } from "../api";
-  import GameGrid from "../GameGrid.svelte";
+  import FeaturePanel from "../FeaturePanel.svelte";
   import GameTile from "../GameTile.svelte";
-  import { farmLine, plural, searchGames, sortGames, untilText } from "../model";
+  import { farmPanel, plural, untilText } from "../model";
   import StartButton from "../StartButton.svelte";
-  import { steamAutomationState as page, type CardSort } from "../state.svelte";
+  import { steamAutomationState as page } from "../state.svelte";
 
-  type CardGame = LibraryGame & { drops?: number };
-  const SORTS: { value: CardSort; label: string }[] = [
-    { value: "drops", label: "Drops remaining" },
-    { value: "name", label: "Name (A to Z)" },
-    { value: "playtime", label: "Playtime (high to low)" },
-  ];
+  type CardGame = LibraryGame & { drops: number };
+  let now = $state(Date.now() / 1000);
 
-  const find = page.find.cards;
   const blank = (appid: number, name: string): LibraryGame => ({ appid, name, coverUrl: null, headerUrl: null, minutes: 0, achievementsUnlocked: 0, achievementsTotal: 0, achievementsOk: false, shared: false });
   const known = $derived(new Map((page.library ?? []).map((game) => [game.appid, game])));
-  const withDrops = $derived((page.drops ?? []).map((game: BadgeGame): CardGame => ({ ...(known.get(game.appid) ?? blank(game.appid, game.name)), drops: game.drops, minutes: game.minutesPlayed })));
-  const dropsOf = $derived(new Map(withDrops.map((game) => [game.appid, game.drops])));
-  const listed = (ids: number[]): CardGame[] => ids.map((appid) => ({ ...(known.get(appid) ?? blank(appid, `Game ${appid}`)), drops: dropsOf.get(appid) }));
-  const whitelist = $derived(listed(page.settings?.cardWhitelist ?? []));
-  const blacklist = $derived(listed(page.settings?.cardBlacklist ?? []));
-  const shown = $derived(find.tab === "drops" ? withDrops : find.tab === "whitelist" ? whitelist : blacklist);
-
-  const games = $derived.by(() => {
-    const found = searchGames(shown, find.query);
-    if (find.sort === "drops") return [...found].sort((a, b) => (b.drops ?? 0) - (a.drops ?? 0) || a.name.localeCompare(b.name));
-    return sortGames(found, find.sort);
-  });
-
+  const skipped = $derived(page.settings?.cardBlacklist ?? []);
+  const games = $derived(
+    (page.drops ?? [])
+      .map((game: BadgeGame): CardGame => ({ ...(known.get(game.appid) ?? blank(game.appid, game.name)), drops: game.drops, minutes: game.minutesPlayed }))
+      .sort((a, b) => Number(skipped.includes(a.appid)) - Number(skipped.includes(b.appid)) || b.drops - a.drops || a.name.localeCompare(b.name)),
+  );
+  const chosen = $derived(games.filter((game) => !skipped.includes(game.appid)));
+  const cards = $derived(chosen.reduce((sum, game) => sum + game.drops, 0));
   const status = $derived(page.status);
-  const emptyText = $derived(find.tab === "drops" ? "No games have card drops left." : find.tab === "whitelist" ? "Nothing whitelisted, so every game with drops can be farmed." : "Nothing blacklisted.");
-  let now = $state(Date.now() / 1000);
+  const started = $derived(status?.started.farm ?? false);
+  const current = $derived(chosen.find((game) => status?.running.includes(game.appid))?.name ?? null);
+  const panel = $derived(farmPanel(started, status?.farm ?? { phase: "done", gamesLeft: 0, dropsLeft: 0 }, cards, chosen.length, current));
+  const next = $derived(started && status?.farm.nextCheckAt ? untilText(status.farm.nextCheckAt, now) : "");
 
   onMount(() => {
     void page.loadDrops(false);
@@ -44,38 +34,50 @@
   });
 </script>
 
-{#snippet tabs()}
-  <div class="tabs" role="tablist" aria-label="Which games">
-    <button class="tab" class:on={find.tab === "drops"} type="button" role="tab" aria-selected={find.tab === "drops"} onclick={() => (find.tab = "drops")}>Games with drops<i>{withDrops.length}</i></button>
-    <button class="tab" class:on={find.tab === "whitelist"} type="button" role="tab" aria-selected={find.tab === "whitelist"} onclick={() => (find.tab = "whitelist")}>Whitelisted<i>{whitelist.length}</i></button>
-    <button class="tab" class:on={find.tab === "blacklist"} type="button" role="tab" aria-selected={find.tab === "blacklist"} onclick={() => (find.tab = "blacklist")}>Blacklisted<i>{blacklist.length}</i></button>
+<FeaturePanel title={panel.title} detail={next ? `${panel.detail} Next check ${next}.` : panel.detail} active={started}>
+  {#if page.settings}
+    <label class="auto"><input class="switch" type="checkbox" checked={page.settings.farmOn} onchange={(event) => void page.change({ farmOn: event.currentTarget.checked })} />Start when MYLE opens</label>
+  {/if}
+  <StartButton feature="farm" disabled={chosen.length === 0} hint="No games to farm" />
+</FeaturePanel>
+
+{#if status?.unmatchedLicence && started}
+  <p class="note">Games under 2 hours are waiting, in case one of them is "{status.unmatchedLicence}", which you can still refund.</p>
+{:else if status?.farm.skippedRefundable && started}
+  <p class="note">{plural(status.farm.skippedRefundable, "game")} left alone because you can still refund {status.farm.skippedRefundable === 1 ? "it" : "them"}.</p>
+{/if}
+
+<div class="row">
+  <h3>Games with cards left</h3>
+  <span class="count">{games.length}</span>
+  <span class="grow"></span>
+  <button class="icon-btn" type="button" aria-label="Look for cards again" title="Look for cards again" disabled={page.dropsLoading} onclick={() => void page.loadDrops(true)}><RefreshCw size={15} /></button>
+</div>
+
+{#if games.length > 0}
+  <div class="grid">
+    {#each games as game (game.appid)}
+      {@const on = !skipped.includes(game.appid)}
+      <GameTile {game} drops={game.drops} running={status?.running.includes(game.appid)} muted={!on} state={status?.running.includes(game.appid) ? "Farming now" : ""}>
+        {#snippet caption()}
+          <label><input class="check" type="checkbox" checked={on} aria-label={`Farm cards in ${game.name}`} onchange={() => page.toggleSkipped(game.appid)} />{on ? "Will be farmed" : "Skipped"}</label>
+        {/snippet}
+      </GameTile>
+    {/each}
   </div>
-{/snippet}
+{:else if page.dropsLoading}
+  <p class="empty" aria-busy="true">Looking for cards…</p>
+{:else if page.dropsError}
+  <div class="empty" role="alert"><p>{page.dropsError}</p><button class="btn small" type="button" onclick={() => void page.loadDrops(true)}>Try again</button></div>
+{:else}
+  <p class="empty">No games have cards left to drop.</p>
+{/if}
 
-{#snippet tile(game: CardGame)}
-  {@const white = page.settings?.cardWhitelist.includes(game.appid) ?? false}
-  {@const black = page.settings?.cardBlacklist.includes(game.appid) ?? false}
-  <GameTile {game} drops={game.drops} running={page.status?.running.includes(game.appid)}>
-    {#snippet actions()}
-      <button type="button" class:on={white} aria-pressed={white} aria-label={white ? `Take ${game.name} off the whitelist` : `Whitelist ${game.name}`} title={white ? "Take off the whitelist" : "Whitelist"} onclick={() => page.toggleCardList("cardWhitelist", game.appid)}><Check size={15} /></button>
-      <button type="button" class:on={black} aria-pressed={black} aria-label={black ? `Take ${game.name} off the blacklist` : `Blacklist ${game.name}`} title={black ? "Take off the blacklist" : "Never farm this game"} onclick={() => page.toggleCardList("cardBlacklist", game.appid)}><Ban size={14} /></button>
-    {/snippet}
-  </GameTile>
-{/snippet}
-
-<GameGrid {games} bind:query={find.query} bind:sort={find.sort} sorts={SORTS} placeholder="Search" empty={emptyText} loading={find.tab === "drops" && page.dropsLoading} error={find.tab === "drops" ? page.dropsError : null} onretry={() => void page.loadDrops(true)} {tabs} {tile}>
-  {#snippet controls()}
-    {#if page.settings}
-      <label class="auto">Run automatically<input class="switch" type="checkbox" checked={page.settings.farmOn} onchange={(event) => void page.change({ farmOn: event.currentTarget.checked })} /></label>
-    {/if}
-    <button class="icon-btn" type="button" aria-label="Read the card drops again" title="Read the card drops again" disabled={page.dropsLoading} onclick={() => void page.loadDrops(true)}><RefreshCw size={15} /></button>
-    <StartButton feature="farm" />
-  {/snippet}
-  {#snippet note()}
-    {#if status?.started.farm}
-      <p class="note">
-        {farmLine(status.farm)}{#if status.farm.nextCheckAt}. Next check {untilText(status.farm.nextCheckAt, now)}{/if}{#if status.farm.skippedRefundable > 0}. Skipping {plural(status.farm.skippedRefundable, "game")} that can still be refunded{/if}.
-      </p>
-    {/if}
-  {/snippet}
-</GameGrid>
+<style>
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  h3 { margin: 0; font-size: 13.5px; font-weight: 700; }
+  .grow { flex: 1 1 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 12px; }
+  .empty { margin: 40px auto; color: var(--text-3); font-size: 13px; text-align: center; }
+  .empty p { margin: 0 0 10px; }
+</style>
