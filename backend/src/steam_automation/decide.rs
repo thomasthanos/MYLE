@@ -26,6 +26,15 @@ pub(crate) fn farm_step(games: &[BadgeGame], licences: Option<&[(String, u64)]>,
         None => FarmStep::Done,
     }
 }
+/// The games card farming may touch: a whitelist with anything on it narrows them, and a
+/// blacklisted game is never farmed.
+pub(crate) fn filter_cards(games: &[BadgeGame], whitelist: &[u32], blacklist: &[u32]) -> Vec<BadgeGame> {
+    games
+        .iter()
+        .filter(|game| (whitelist.is_empty() || whitelist.contains(&game.appid)) && !blacklist.contains(&game.appid))
+        .cloned()
+        .collect()
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct World {
     pub steam_running: bool,
@@ -36,6 +45,7 @@ pub(crate) struct World {
     pub farm: FarmStep,
     pub idle_on: bool,
     pub idle_games: Vec<u32>,
+    pub manual: Vec<u32>,
     pub session_ok: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,12 +79,15 @@ pub(crate) fn decide(world: &World) -> Decision {
         return stopped(Waiting::Paused);
     }
     let farming = if world.farm_on { &world.farm } else { &FarmStep::Done };
-    let games: BTreeSet<u32> = match farming {
+    let mut games: BTreeSet<u32> = match farming {
         FarmStep::Accumulate(list) => list.iter().copied().collect(),
         FarmStep::Solo(game) => BTreeSet::from([*game]),
         FarmStep::Done if world.idle_on => world.idle_games.iter().copied().collect(),
         FarmStep::Done => BTreeSet::new(),
     };
+    let room = MAX_GAMES.saturating_sub(games.len());
+    let by_hand: Vec<u32> = world.manual.iter().copied().filter(|game| !games.contains(game)).take(room).collect();
+    games.extend(by_hand);
     Decision {
         games,
         waiting: None,
@@ -142,11 +155,46 @@ mod tests {
             farm: FarmStep::Done,
             idle_on: true,
             idle_games: vec![7],
+            manual: vec![],
             session_ok: true,
         }
     }
     fn games(ids: &[u32]) -> BTreeSet<u32> {
         ids.iter().copied().collect()
+    }
+    #[test]
+    fn the_whitelist_narrows_what_is_farmed() {
+        let found = filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[2], &[]);
+        assert_eq!(found.iter().map(|game| game.appid).collect::<Vec<_>>(), vec![2]);
+    }
+    #[test]
+    fn an_empty_whitelist_means_every_game() {
+        assert_eq!(filter_cards(&[g(1, 1, 500), g(2, 1, 500)], &[], &[]).len(), 2);
+    }
+    #[test]
+    fn the_blacklist_always_wins() {
+        assert!(filter_cards(&[g(1, 1, 500)], &[1], &[1]).is_empty());
+    }
+    #[test]
+    fn a_game_idled_by_hand_runs_with_nothing_started() {
+        let d = decide(&World { farm_on: false, idle_on: false, manual: vec![9], ..world() });
+        assert_eq!(d.games, games(&[9]));
+    }
+    #[test]
+    fn a_game_idled_by_hand_runs_alongside_farming() {
+        assert_eq!(decide(&World { farm: FarmStep::Solo(5), manual: vec![9], ..world() }).games, games(&[5, 9]));
+    }
+    #[test]
+    fn games_idled_by_hand_stop_when_everything_stops() {
+        stopped(World { real_game: Some(3), manual: vec![9], ..world() }, Waiting::RealGame(3));
+        stopped(World { user_paused: true, manual: vec![9], ..world() }, Waiting::Paused);
+    }
+    #[test]
+    fn farming_keeps_its_places_when_there_are_too_many() {
+        let many: Vec<u32> = (100..140).collect();
+        let d = decide(&World { farm: FarmStep::Accumulate((1..=30).collect()), manual: many, ..world() });
+        assert_eq!(d.games.len(), 32);
+        assert!((1..=30).all(|id| d.games.contains(&id)));
     }
     #[test]
     fn farming_runs_alone() {

@@ -1,17 +1,20 @@
 //! What the page asks for. Every command here is refused for anyone but the owner (`account::owner`).
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Notify;
-use super::community::HttpCommunity;
-use super::engine::Status;
+use super::badges::{BadgeGame, read_badges};
+use super::community::{CommunityError, HttpCommunity};
+use super::engine::{Started, Status};
 use super::library::{self, LibraryAnswer, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
 use super::settings::{self, Settings};
 use crate::steam_helper::commands::SteamHelperState;
+const DROPS_FRESH_SECS: u64 = 600;
 const LOGIN_LABEL: &str = "steam-login";
 const REFRESH_LABEL: &str = "steam-refresh";
 const LOGIN_PAGE: &str = "https://steamcommunity.com/login/home/?goto=";
@@ -28,6 +31,10 @@ pub struct SteamAutomationState {
     session: Mutex<Option<Session>>,
     settings: Mutex<Option<Settings>>,
     status: Mutex<Status>,
+    /// Empty until the first look at the saved switches.
+    started: Mutex<Option<Started>>,
+    manual: Mutex<BTreeSet<u32>>,
+    drops: Mutex<Option<(u64, Vec<BadgeGame>)>>,
     paused: AtomicBool,
     poke: Notify,
     runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
@@ -51,6 +58,12 @@ impl SteamAutomationState {
     pub(crate) fn settings(&self) -> Settings {
         let mut settings = self.settings.lock().unwrap_or_else(|p| p.into_inner());
         settings.get_or_insert_with(|| folder().map(|folder| settings::load(&folder.join("settings.json"))).unwrap_or_default()).clone()
+    }
+    pub(crate) fn started(&self, settings: &Settings) -> Started {
+        *self.started.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(|| Started::from_settings(settings))
+    }
+    pub(crate) fn manual(&self) -> Vec<u32> {
+        self.manual.lock().unwrap_or_else(|p| p.into_inner()).iter().copied().collect()
     }
     pub(crate) fn paused(&self) -> bool {
         self.paused.load(Ordering::SeqCst)
@@ -96,6 +109,61 @@ pub fn steam_automation_set_settings(state: State<'_, SteamAutomationState>, set
 pub fn steam_automation_pause(state: State<'_, SteamAutomationState>, paused: bool) {
     state.paused.store(paused, Ordering::SeqCst);
     state.poke.notify_one();
+}
+/// Starts or stops one feature for now. The automatic switches only decide what happens when MYLE opens.
+#[tauri::command]
+pub fn steam_automation_set_started(state: State<'_, SteamAutomationState>, feature: String, on: bool) -> Result<(), String> {
+    let settings = state.settings();
+    let mut started = state.started(&settings);
+    match feature.as_str() {
+        "farm" => started.farm = on,
+        "idle" => started.idle = on,
+        "achievements" => started.achievements = on,
+        _ => return Err("Unknown feature.".to_string()),
+    }
+    *state.started.lock().unwrap_or_else(|p| p.into_inner()) = Some(started);
+    state.poke.notify_one();
+    Ok(())
+}
+/// Idles one game by hand, or stops it.
+#[tauri::command]
+pub fn steam_automation_idle_game(state: State<'_, SteamAutomationState>, appid: u32, on: bool) {
+    let mut manual = state.manual.lock().unwrap_or_else(|p| p.into_inner());
+    if on {
+        manual.insert(appid);
+    } else {
+        manual.remove(&appid);
+    }
+    drop(manual);
+    state.poke.notify_one();
+}
+/// Stops everything that is running, by feature and by hand. The automatic switches stay as they are.
+#[tauri::command]
+pub fn steam_automation_stop_all(state: State<'_, SteamAutomationState>) {
+    *state.started.lock().unwrap_or_else(|p| p.into_inner()) = Some(Started::default());
+    state.manual.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    state.stop_all();
+    state.poke.notify_one();
+}
+/// The games with card drops left, kept for a few minutes because each page takes seconds to read.
+#[tauri::command]
+pub async fn steam_automation_drops(state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<BadgeGame>, String> {
+    let kept = state.drops.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    if !force && let Some((read_at, games)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
+        let _ = read_at;
+        return Ok(games);
+    }
+    let session = state.session().ok_or("Sign in to Steam first.")?;
+    let steam_id = session.steam_id;
+    let community = HttpCommunity::new()?;
+    community.set_session(Some(session));
+    let games = read_badges(&community, steam_id).await.map_err(|error| match error {
+        CommunityError::SignedOut => "Your Steam sign-in has expired. Sign in again.".to_string(),
+        CommunityError::Limited => "Steam is limiting requests right now. Try again in a minute.".to_string(),
+        CommunityError::Other(reason) => reason,
+    })?;
+    *state.drops.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), games.clone()));
+    Ok(games)
 }
 /// The owner's games, from a saved copy while it is a day old or less unless `force` asks again.
 #[tauri::command]

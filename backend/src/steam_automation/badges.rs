@@ -18,8 +18,9 @@ static TITLE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="badge_title">\s
 static PAGE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="pagelink"[^>]*>(\d+)<"#));
 static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td\s+class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>"#));
 static BLOCK: LazyLock<Regex> = LazyLock::new(|| regex(r"(?s)<div.*?</div>"));
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct BadgeGame {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BadgeGame {
     pub appid: u32,
     pub name: String,
     pub drops: u32,

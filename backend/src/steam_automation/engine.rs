@@ -8,7 +8,7 @@ use super::achievements::{AchievementList, AchievementTool, HelperTool, UnlockQu
 use super::badges::{BadgeGame, bought_recently, is_refundable, read_badges, read_licences};
 use super::commands::{SteamAutomationState, folder, now, refresh_session};
 use super::community::{Community, CommunityError, HttpCommunity};
-use super::decide::{FarmStep, Waiting, World, decide, farm_step};
+use super::decide::{FarmStep, Waiting, World, decide, farm_step, filter_cards};
 use super::inventory::{SellReport, sell_duplicates};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::Session;
@@ -23,10 +23,25 @@ const RETRY_SECS: u64 = 3600;
 const SESSION_RETRY_SECS: u64 = 30 * 60;
 /// Achievement lists read in one tick, so a long list of games cannot hold everything up.
 const LISTS_PER_TICK: usize = 3;
+/// What is running for now. Starts from the automatic switches when MYLE opens and is never saved.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Started {
+    pub farm: bool,
+    pub idle: bool,
+    pub achievements: bool,
+}
+impl Started {
+    pub(crate) fn from_settings(settings: &Settings) -> Self {
+        Self { farm: settings.farm_on, idle: settings.idle_on, achievements: settings.achievements_on }
+    }
+}
 pub(crate) struct TickInput {
     pub steam: Option<SteamState>,
     pub session: Option<Session>,
     pub settings: Settings,
+    pub started: Started,
+    pub manual: Vec<u32>,
     pub user_paused: bool,
     pub is_owner: bool,
 }
@@ -70,11 +85,24 @@ pub struct Status {
     pub community_ok: bool,
     pub waiting: Option<WaitingView>,
     pub purchase_dates_unknown: bool,
+    pub started: Started,
+    pub manual: Vec<u32>,
     pub running: Vec<u32>,
     pub farm: FarmView,
     pub achievements: AchievementsView,
     pub inventory: InventoryView,
     pub activity: Vec<ActivityEntry>,
+}
+/// What one tick found, for the page.
+struct Seen<'a> {
+    world: &'a World,
+    farm: &'a FarmStep,
+    candidates: &'a [BadgeGame],
+    waiting: Option<Waiting>,
+    settings: &'a Settings,
+    started: Started,
+    session_exists: bool,
+    now: u64,
 }
 pub(crate) struct Engine<C, A> {
     runner: Arc<dyn GameRunner>,
@@ -205,9 +233,9 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             }
         }
     }
-    fn view(&self, world: &World, farm: &FarmStep, waiting: Option<Waiting>, settings: &Settings, session_exists: bool, now: u64) -> Status {
-        let skipped = self
-            .farm_games
+    fn view(&self, seen: Seen<'_>) -> Status {
+        let Seen { world, farm, candidates, waiting, settings, started, session_exists, now } = seen;
+        let skipped = candidates
             .iter()
             .filter(|game| {
                 let recent = self.licences.as_deref().map(|list| bought_recently(&game.name, list, now));
@@ -231,19 +259,21 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
                 Waiting::Paused => WaitingView { kind: "paused", appid: None },
             }),
             purchase_dates_unknown: self.farm_read && self.licences.is_none(),
+            started,
+            manual: world.manual.clone(),
             running: self.runner.running().into_iter().collect(),
             farm: FarmView {
                 phase,
-                games_left: self.farm_games.len() as u32,
-                drops_left: self.farm_games.iter().map(|game| game.drops).sum(),
+                games_left: candidates.len() as u32,
+                drops_left: candidates.iter().map(|game| game.drops).sum(),
                 skipped_refundable: skipped,
-                next_check_at: (settings.farm_on && self.farm_read).then_some(self.next_badges_at),
+                next_check_at: (started.farm && self.farm_read).then_some(self.next_badges_at),
             },
             achievements: AchievementsView {
                 total: self.lists.values().map(|list| list.names.len() as u32).sum(),
                 locked: self.lists.values().map(|list| list.locked.len() as u32).sum(),
-                next_at: (settings.achievements_on && self.next_unlock_at > now).then_some(self.next_unlock_at),
-                waiting_for_farming: settings.achievements_on && settings.farm_on && *farm != FarmStep::Done,
+                next_at: (started.achievements && self.next_unlock_at > now).then_some(self.next_unlock_at),
+                waiting_for_farming: started.achievements && started.farm && *farm != FarmStep::Done,
             },
             inventory: InventoryView {
                 listed: self.report.listed,
@@ -259,7 +289,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             self.runner.stop_all();
             return Status::default();
         }
-        let TickInput { steam, session, settings, user_paused, .. } = input;
+        let TickInput { steam, session, settings, started, manual, user_paused, .. } = input;
         let account_ok = match (&steam, &session) {
             (Some(steam), Some(session)) => same_account(steam.active_user, session.steam_id),
             _ => true,
@@ -267,13 +297,14 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         let ours = self.runner.running();
         let real = steam.as_ref().and_then(|steam| real_game(&steam.running, &ours));
         let clear_to_run = steam.is_some() && account_ok && real.is_none() && !user_paused;
-        if settings.farm_on && clear_to_run && self.community_ok && now >= self.next_badges_at
+        if started.farm && clear_to_run && self.community_ok && now >= self.next_badges_at
             && let Some(session) = &session
         {
             self.read_farm(session.steam_id, now).await;
         }
-        let farm = if settings.farm_on {
-            farm_step(&self.farm_games, self.licences.as_deref(), now)
+        let candidates = filter_cards(&self.farm_games, &settings.card_whitelist, &settings.card_blacklist);
+        let farm = if started.farm {
+            farm_step(&candidates, self.licences.as_deref(), now)
         } else {
             FarmStep::Done
         };
@@ -282,17 +313,18 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             account_ok,
             real_game: real,
             user_paused,
-            farm_on: settings.farm_on,
+            farm_on: started.farm,
             farm: farm.clone(),
-            idle_on: settings.idle_on,
+            idle_on: started.idle,
             idle_games: settings.idle_games.clone(),
+            manual,
             session_ok: session.is_some() && self.community_ok,
         };
         let decision = decide(&world);
         if let Err(reason) = self.runner.apply(&decision.games) {
             self.activity.push(now, reason);
         }
-        if decision.achievements_may_run && settings.achievements_on {
+        if decision.achievements_may_run && started.achievements {
             self.run_achievements(&settings.achievement_games, now).await;
         }
         if decision.inventory_may_run && settings.inventory_on && now >= self.next_inventory_at
@@ -300,7 +332,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         {
             self.run_inventory(session, settings.minimum_cents, now).await;
         }
-        self.view(&world, &farm, decision.waiting, &settings, session.is_some(), now)
+        self.view(Seen { world: &world, farm: &farm, candidates: &candidates, waiting: decision.waiting, settings: &settings, started, session_exists: session.is_some(), now })
     }
 }
 /// Starts the loop that runs for as long as MYLE does.
@@ -326,10 +358,13 @@ pub(crate) fn start(app: AppHandle) {
                 last_session = session.clone();
             }
             engine.community.set_session(session.clone());
+            let settings = state.settings();
             let input = TickInput {
                 steam: steam_state::read(),
                 session: session.clone(),
-                settings: state.settings(),
+                started: state.started(&settings),
+                manual: state.manual(),
+                settings,
                 user_paused: state.paused(),
                 is_owner: app.state::<crate::account::AccountState>().is_owner(&app),
             };
@@ -417,8 +452,10 @@ mod tests {
     fn rig() -> Rig {
         rig_with(normal_community)
     }
+    /// Everything the switches ask for has been started.
     fn input(settings: Settings) -> TickInput {
-        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, user_paused: false, is_owner: true }
+        let started = Started { farm: settings.farm_on, idle: settings.idle_on, achievements: settings.achievements_on };
+        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, started, manual: Vec::new(), user_paused: false, is_owner: true }
     }
     fn farming() -> Settings {
         Settings { farm_on: true, ..Settings::default() }
@@ -533,6 +570,55 @@ mod tests {
         assert_eq!(inventory_reads(&rig), 1);
         rig.engine.tick(input(settings), T0 + 6 * HOUR).await;
         assert_eq!(inventory_reads(&rig), 2);
+    }
+    #[test]
+    fn the_automatic_switches_decide_what_starts_when_myle_opens() {
+        let settings = Settings { farm_on: true, achievements_on: true, ..Settings::default() };
+        assert_eq!(Started::from_settings(&settings), Started { farm: true, idle: false, achievements: true });
+    }
+    #[tokio::test]
+    async fn an_automatic_switch_alone_does_not_keep_a_stopped_feature_running() {
+        let mut rig = rig();
+        let settings = farming();
+        rig.engine.tick(TickInput { started: Started::default(), ..input(settings) }, T0).await;
+        assert!(running(&rig).is_empty());
+        assert!(rig.engine.community.gets().is_empty());
+    }
+    #[tokio::test]
+    async fn start_works_with_the_automatic_switch_off() {
+        let mut rig = rig();
+        let started = Started { farm: true, ..Started::default() };
+        rig.engine.tick(TickInput { started, ..input(Settings::default()) }, T0).await;
+        assert_eq!(running(&rig), BTreeSet::from([GAME]));
+    }
+    #[tokio::test]
+    async fn a_game_off_the_whitelist_is_not_farmed() {
+        let mut rig = rig();
+        let status = rig.engine.tick(input(Settings { card_whitelist: vec![1], ..farming() }), T0).await;
+        assert!(running(&rig).is_empty());
+        assert_eq!((status.farm.games_left, status.farm.drops_left), (0, 0));
+    }
+    #[tokio::test]
+    async fn a_blacklisted_game_is_not_farmed() {
+        let mut rig = rig();
+        rig.engine.tick(input(Settings { card_blacklist: vec![GAME], ..farming() }), T0).await;
+        assert!(running(&rig).is_empty());
+    }
+    #[tokio::test]
+    async fn a_game_idled_by_hand_is_run_and_reported() {
+        let mut rig = rig();
+        let started = Started { farm: true, ..Started::default() };
+        let status = rig.engine.tick(TickInput { manual: vec![7], started, ..input(farming()) }, T0).await;
+        assert_eq!(running(&rig), BTreeSet::from([7, GAME]));
+        assert_eq!(status.manual, vec![7]);
+        assert_eq!(status.started, started);
+    }
+    #[tokio::test]
+    async fn stopping_achievements_stops_unlocking() {
+        let mut rig = rig();
+        rig.tool.lists.lock().unwrap().insert(GAME, AchievementList { names: vec!["A".into()], locked: vec!["A".into()] });
+        rig.engine.tick(TickInput { started: Started::default(), ..input(achievements()) }, T0).await;
+        assert!(rig.tool.unlocked.lock().unwrap().is_empty());
     }
     #[tokio::test]
     async fn the_idler_runs_the_picked_games() {

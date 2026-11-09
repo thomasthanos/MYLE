@@ -12,6 +12,10 @@ pub struct Settings {
     pub idle_games: Vec<u32>,
     pub achievement_games: Vec<u32>,
     pub minimum_cents: u32,
+    pub favorites: Vec<u32>,
+    pub card_whitelist: Vec<u32>,
+    pub card_blacklist: Vec<u32>,
+    pub locked_assets: Vec<String>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -23,6 +27,10 @@ impl Default for Settings {
             idle_games: Vec::new(),
             achievement_games: Vec::new(),
             minimum_cents: 5,
+            favorites: Vec::new(),
+            card_whitelist: Vec::new(),
+            card_blacklist: Vec::new(),
+            locked_assets: Vec::new(),
         }
     }
 }
@@ -99,6 +107,21 @@ mod tests {
         let settings = load(&path);
         assert!(settings.farm_on);
         assert_eq!(settings.minimum_cents, 5);
+    }
+    #[test]
+    fn older_settings_have_empty_lists() {
+        let path = temp("settings.json");
+        std::fs::write(&path, r#"{"farmOn":true,"idleGames":[7]}"#).unwrap();
+        let settings = load(&path);
+        assert_eq!(settings.idle_games, vec![7]);
+        assert!(settings.favorites.is_empty() && settings.card_whitelist.is_empty() && settings.card_blacklist.is_empty() && settings.locked_assets.is_empty());
+    }
+    #[test]
+    fn the_new_lists_come_back_as_saved() {
+        let path = temp("settings.json");
+        let settings = Settings { favorites: vec![1], card_whitelist: vec![2], card_blacklist: vec![3], locked_assets: vec!["9".to_string()], ..Settings::default() };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path), settings);
     }
     #[test]
     fn activity_keeps_the_last_two_hundred() {
