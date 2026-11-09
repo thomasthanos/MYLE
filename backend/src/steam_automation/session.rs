@@ -41,6 +41,13 @@ impl Session {
             .map(|(login, session)| format!("{LOGIN_COOKIE}={login}; {SESSION_COOKIE}={session}"));
         self
     }
+    /// Keeps the store cookie of an earlier session when this one has none.
+    pub(crate) fn keeping_store_cookie_of(mut self, earlier: Option<&Session>) -> Self {
+        if self.store_cookie.is_none() {
+            self.store_cookie = earlier.and_then(|earlier| earlier.store_cookie.clone());
+        }
+        self
+    }
     pub(crate) fn cookie_header(&self) -> String {
         format!("{LOGIN_COOKIE}={}; {SESSION_COOKIE}={}", self.steam_login_secure, self.session_id)
     }
@@ -84,6 +91,18 @@ mod tests {
     fn the_store_has_its_own_cookies() {
         let session = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "76561198000000001%7C%7Cstore"), pair("sessionid", "def")]);
         assert_eq!(session.store_cookie_header(), Some("steamLoginSecure=76561198000000001%7C%7Cstore; sessionid=def"));
+    }
+    #[test]
+    fn a_session_without_a_store_cookie_keeps_the_earlier_one() {
+        let earlier = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "76561198000000001%7C%7Cstore"), pair("sessionid", "def")]);
+        let newer = from_cookies(&signed_in()).unwrap().keeping_store_cookie_of(Some(&earlier));
+        assert_eq!(newer.store_cookie_header(), earlier.store_cookie_header());
+    }
+    #[test]
+    fn a_newer_store_cookie_wins() {
+        let earlier = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "1%7C%7Cold"), pair("sessionid", "o")]);
+        let newer = from_cookies(&signed_in()).unwrap().with_store_cookies(&[pair("steamLoginSecure", "1%7C%7Cnew"), pair("sessionid", "n")]).keeping_store_cookie_of(Some(&earlier));
+        assert_eq!(newer.store_cookie_header(), Some("steamLoginSecure=1%7C%7Cnew; sessionid=n"));
     }
     #[test]
     fn no_store_cookies_means_no_store_header() {

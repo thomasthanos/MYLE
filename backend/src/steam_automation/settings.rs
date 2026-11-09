@@ -16,6 +16,7 @@ pub struct Settings {
     pub card_whitelist: Vec<u32>,
     pub card_blacklist: Vec<u32>,
     pub locked_assets: Vec<String>,
+    pub paused: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -31,6 +32,7 @@ impl Default for Settings {
             card_whitelist: Vec::new(),
             card_blacklist: Vec::new(),
             locked_assets: Vec::new(),
+            paused: false,
         }
     }
 }
@@ -52,14 +54,21 @@ pub struct ActivityEntry {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Activity {
     pub entries: Vec<ActivityEntry>,
+    #[serde(skip)]
+    changed: bool,
 }
 impl Activity {
     pub(crate) fn push(&mut self, at: u64, text: String) {
         self.entries.push(ActivityEntry { at, text });
+        self.changed = true;
         if self.entries.len() > ACTIVITY_KEPT {
             let extra = self.entries.len() - ACTIVITY_KEPT;
             self.entries.drain(..extra);
         }
+    }
+    /// Whether anything was added since the last time this was asked.
+    pub(crate) fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
     }
     pub(crate) fn load(path: &Path) -> Self {
         std::fs::read(path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
@@ -122,6 +131,22 @@ mod tests {
         let settings = Settings { favorites: vec![1], card_whitelist: vec![2], card_blacklist: vec![3], locked_assets: vec!["9".to_string()], ..Settings::default() };
         save(&path, &settings).unwrap();
         assert_eq!(load(&path), settings);
+    }
+    #[test]
+    fn pause_is_remembered_and_starts_off() {
+        assert!(!Settings::default().paused);
+        let path = temp("settings.json");
+        let settings = Settings { paused: true, ..Settings::default() };
+        save(&path, &settings).unwrap();
+        assert!(load(&path).paused);
+    }
+    #[test]
+    fn activity_knows_when_it_has_something_new() {
+        let mut activity = Activity::default();
+        assert!(!activity.take_changed());
+        activity.push(1, "one".to_string());
+        assert!(activity.take_changed());
+        assert!(!activity.take_changed(), "once told is enough");
     }
     #[test]
     fn activity_keeps_the_last_two_hundred() {

@@ -1,15 +1,16 @@
 //! Runs the four features on their own: each tick looks at the world, decides, and acts.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use super::achievements::{AchievementList, AchievementTool, HelperTool, UnlockQueue, next_delay_secs};
-use super::badges::{BadgeGame, bought_recently, is_refundable, read_badges, read_licences};
+use super::badges::{BadgeGame, RefundCheck, read_badges, read_licences};
 use super::commands::{SteamAutomationState, folder, now, refresh_session};
 use super::community::{Community, CommunityError};
-use super::decide::{FarmStep, Waiting, World, decide, farm_step, filter_cards};
+use super::decide::{FarmStep, Waiting, World, decide, farm_step, filter_cards, idle_allowed};
 use super::inventory::{SellReport, sell_duplicates};
+use super::library::LibraryGame;
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::Session;
 use super::settings::{Activity, ActivityEntry, Settings};
@@ -20,9 +21,14 @@ const CHECK_MIN_SECS: u64 = 20 * 60;
 const CHECK_SPREAD_SECS: u64 = 10 * 60;
 const INVENTORY_SECS: u64 = 6 * 3600;
 const RETRY_SECS: u64 = 3600;
+const FARM_RETRY_SECS: u64 = 300;
+/// How long a game is left alone after its helper ended without MYLE asking. Doubles each time.
+const HANDS_OFF_SECS: u64 = 300;
+const HANDS_OFF_MAX_SECS: u64 = 3600;
 const SESSION_RETRY_SECS: u64 = 30 * 60;
 /// Achievement lists read in one tick, so a long list of games cannot hold everything up.
 const LISTS_PER_TICK: usize = 3;
+pub(crate) type KeepGoing = Arc<dyn Fn() -> bool + Send + Sync>;
 /// What is running for now. Starts from the automatic switches when MYLE opens and is never saved.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +48,9 @@ pub(crate) struct TickInput {
     pub settings: Settings,
     pub started: Started,
     pub manual: Vec<u32>,
+    pub library: Vec<LibraryGame>,
+    /// Asked before each listing, so a long run can be stopped.
+    pub keep_going: KeepGoing,
     pub user_paused: bool,
     pub is_owner: bool,
 }
@@ -87,6 +96,8 @@ pub struct Status {
     pub purchase_dates_unknown: bool,
     pub started: Started,
     pub manual: Vec<u32>,
+    pub idle_skipped: u32,
+    pub store_stale: bool,
     pub running: Vec<u32>,
     pub farm: FarmView,
     pub achievements: AchievementsView,
@@ -98,9 +109,11 @@ struct Seen<'a> {
     world: &'a World,
     farm: &'a FarmStep,
     candidates: &'a [BadgeGame],
+    refunds: &'a RefundCheck,
     waiting: Option<Waiting>,
     settings: &'a Settings,
     started: Started,
+    idle_skipped: u32,
     session_exists: bool,
     now: u64,
 }
@@ -113,8 +126,14 @@ pub(crate) struct Engine<C, A> {
     community_ok: bool,
     farm_games: Vec<BadgeGame>,
     licences: Option<Vec<(String, u64)>>,
+    purchases_read: bool,
+    next_purchases_at: u64,
+    store_stale: bool,
     farm_read: bool,
     next_badges_at: u64,
+    last_wanted: BTreeSet<u32>,
+    strikes: HashMap<u32, u32>,
+    hands_off: HashMap<u32, u64>,
     queue: UnlockQueue,
     lists: HashMap<u32, AchievementList>,
     next_unlock_at: u64,
@@ -133,8 +152,14 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             community_ok: true,
             farm_games: Vec::new(),
             licences: None,
+            purchases_read: false,
+            next_purchases_at: 0,
+            store_stale: false,
             farm_read: false,
             next_badges_at: 0,
+            last_wanted: BTreeSet::new(),
+            strikes: HashMap::new(),
+            hands_off: HashMap::new(),
             queue: UnlockQueue::default(),
             lists: HashMap::new(),
             next_unlock_at: 0,
@@ -144,13 +169,23 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         }
     }
     /// A new session has arrived, so Steam gets another chance to accept it.
+    #[cfg(test)]
+    pub(crate) fn community_lost_for_test(&mut self) {
+        self.community_ok = false;
+    }
     pub(crate) fn session_changed(&mut self) {
         self.community_ok = true;
+        self.store_stale = false;
         self.next_badges_at = 0;
+        self.next_purchases_at = 0;
         self.next_inventory_at = 0;
+    }
+    pub(crate) fn activity_to_save(&mut self) -> bool {
+        self.activity.take_changed()
     }
     pub(crate) fn mark_session_refreshed(&mut self) {
         self.community_ok = true;
+        self.store_stale = false;
     }
     fn note_community_error(&mut self, error: &CommunityError, now: u64) {
         match error {
@@ -159,16 +194,19 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             CommunityError::Other(reason) => self.activity.push(now, reason.clone()),
         }
     }
+    fn next_look(&mut self, now: u64) -> u64 {
+        now + CHECK_MIN_SECS + (self.random)() % (CHECK_SPREAD_SECS + 1)
+    }
     async fn read_farm(&mut self, steam_id: u64, now: u64) {
-        let random = (self.random)();
-        self.next_badges_at = now + CHECK_MIN_SECS + random % (CHECK_SPREAD_SECS + 1);
         let games = match read_badges(&self.community, steam_id).await {
             Ok(games) => games,
             Err(error) => {
+                self.next_badges_at = now + FARM_RETRY_SECS;
                 self.note_community_error(&error, now);
                 return;
             }
         };
+        self.next_badges_at = self.next_look(now);
         for before in &self.farm_games {
             let left = games.iter().find(|game| game.appid == before.appid).map_or(0, |game| game.drops);
             if left < before.drops {
@@ -178,15 +216,43 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         }
         self.farm_games = games;
         self.farm_read = true;
-        self.licences = match read_licences(&self.community).await {
-            Ok(licences) => Some(licences),
-            Err(error) => {
-                if error == CommunityError::SignedOut {
-                    self.community_ok = false;
-                }
-                None
+    }
+    /// Licences live on the store, whose sign-in is separate, so losing it only means the dates
+    /// are unknown for now. It says nothing about Steam Community.
+    async fn read_purchases(&mut self, now: u64) {
+        self.next_purchases_at = self.next_look(now);
+        self.purchases_read = true;
+        match read_licences(&self.community).await {
+            Ok(licences) => {
+                self.licences = Some(licences);
+                self.store_stale = false;
             }
-        };
+            Err(error) => {
+                self.licences = None;
+                self.store_stale = error == CommunityError::SignedOut;
+            }
+        }
+    }
+    /// The games that should really run. A helper that ended without MYLE asking means the owner
+    /// pressed Stop in Steam, or Steam would not run it, so that game is left alone for a while.
+    fn supervise(&mut self, games: &BTreeSet<u32>, now: u64) -> BTreeSet<u32> {
+        let alive = self.runner.running();
+        let expected: Vec<u32> = self.last_wanted.intersection(games).copied().collect();
+        for appid in expected {
+            if alive.contains(&appid) {
+                self.strikes.remove(&appid);
+                continue;
+            }
+            let strikes = self.strikes.entry(appid).or_insert(0);
+            *strikes += 1;
+            let wait = HANDS_OFF_SECS.saturating_mul(1 << (*strikes - 1).min(8)).min(HANDS_OFF_MAX_SECS);
+            self.hands_off.insert(appid, now + wait);
+            self.activity.push(now, format!("Game {appid} stopped without MYLE asking, trying again in {} min", wait / 60));
+        }
+        self.hands_off.retain(|_, until| *until > now);
+        let wanted: BTreeSet<u32> = games.iter().copied().filter(|appid| !self.hands_off.contains_key(appid)).collect();
+        self.last_wanted = wanted.clone();
+        wanted
     }
     async fn run_achievements(&mut self, picked: &[u32], now: u64) {
         let missing: Vec<u32> = picked.iter().copied().filter(|appid| !self.lists.contains_key(appid)).take(LISTS_PER_TICK).collect();
@@ -218,34 +284,27 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             }
         }
     }
-    async fn run_inventory(&mut self, session: &Session, settings: &Settings, now: u64) {
+    async fn run_inventory(&mut self, session: &Session, settings: &Settings, keep_going: KeepGoing, now: u64) {
         let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
-        match sell_duplicates(&self.community, session, settings.minimum_cents, &locked, &mut self.listed).await {
-            Ok(report) => {
-                self.next_inventory_at = now + INVENTORY_SECS;
-                if report.listed > 0 {
-                    self.activity.push(now, format!("Listed {} duplicate cards", report.listed));
-                }
-                self.report = report;
-            }
-            Err(error) => {
-                self.next_inventory_at = now + RETRY_SECS;
-                self.note_community_error(&error, now);
-            }
+        let (report, error) = sell_duplicates(&self.community, session, settings.minimum_cents, &locked, &mut self.listed, &*keep_going).await;
+        if report.listed > 0 {
+            let cards = if report.listed == 1 { "card" } else { "cards" };
+            self.activity.push(now, format!("Listed {} duplicate {cards}", report.listed));
+        }
+        self.report = SellReport { waiting_confirmation: self.report.waiting_confirmation + report.waiting_confirmation, ..report };
+        self.next_inventory_at = now + if error.is_some() { RETRY_SECS } else { INVENTORY_SECS };
+        if let Some(error) = error {
+            self.note_community_error(&error, now);
         }
     }
     fn view(&self, seen: Seen<'_>) -> Status {
-        let Seen { world, farm, candidates, waiting, settings, started, session_exists, now } = seen;
-        let skipped = candidates
-            .iter()
-            .filter(|game| {
-                let recent = self.licences.as_deref().map(|list| bought_recently(&game.name, list, now));
-                is_refundable(recent, game.minutes_played)
-            })
-            .count() as u32;
+        let Seen { world, farm, candidates, refunds, waiting, settings, started, idle_skipped, session_exists, now } = seen;
+        let skipped = candidates.iter().filter(|game| refunds.protects(&game.name, game.minutes_played)).count() as u32;
         let phase = match farm {
+            _ if started.farm && !world.session_ok => "signedOut",
             FarmStep::Accumulate(_) => "building",
             FarmStep::Solo(_) => "solo",
+            FarmStep::Reading => "reading",
             FarmStep::Done => "done",
         };
         Status {
@@ -259,9 +318,11 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
                 Waiting::RealGame(appid) => WaitingView { kind: "realGame", appid: Some(appid) },
                 Waiting::Paused => WaitingView { kind: "paused", appid: None },
             }),
-            purchase_dates_unknown: self.farm_read && self.licences.is_none(),
+            purchase_dates_unknown: self.purchases_read && self.licences.is_none(),
             started,
             manual: world.manual.clone(),
+            idle_skipped,
+            store_stale: self.store_stale,
             running: self.runner.running().into_iter().collect(),
             farm: FarmView {
                 phase,
@@ -274,7 +335,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
                 total: self.lists.values().map(|list| list.names.len() as u32).sum(),
                 locked: self.lists.values().map(|list| list.locked.len() as u32).sum(),
                 next_at: (started.achievements && self.next_unlock_at > now).then_some(self.next_unlock_at),
-                waiting_for_farming: started.achievements && started.farm && *farm != FarmStep::Done,
+                waiting_for_farming: started.achievements && started.farm && world.session_ok && *farm != FarmStep::Done,
             },
             inventory: InventoryView {
                 listed: self.report.listed,
@@ -288,9 +349,10 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
     pub(crate) async fn tick(&mut self, input: TickInput, now: u64) -> Status {
         if !input.is_owner {
             self.runner.stop_all();
+            self.last_wanted.clear();
             return Status::default();
         }
-        let TickInput { steam, session, settings, started, manual, user_paused, .. } = input;
+        let TickInput { steam, session, settings, started, manual, library, keep_going, user_paused, .. } = input;
         let account_ok = match (&steam, &session) {
             (Some(steam), Some(session)) => same_account(steam.active_user, session.steam_id),
             _ => true,
@@ -303,12 +365,19 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         {
             self.read_farm(session.steam_id, now).await;
         }
+        if (started.farm || started.idle) && clear_to_run && self.community_ok && session.is_some() && now >= self.next_purchases_at {
+            self.read_purchases(now).await;
+        }
         let candidates = filter_cards(&self.farm_games, &settings.card_whitelist, &settings.card_blacklist);
-        let farm = if started.farm {
-            farm_step(&candidates, self.licences.as_deref(), now)
-        } else {
-            FarmStep::Done
+        let names: Vec<String> = library.iter().map(|game| game.name.clone()).collect();
+        let refunds = RefundCheck::new(self.licences.as_deref(), &names, now);
+        let farm = match (started.farm, self.farm_read) {
+            (false, _) => FarmStep::Done,
+            (true, false) => FarmStep::Reading,
+            (true, true) => farm_step(&candidates, &refunds),
         };
+        let idle_games = idle_allowed(&settings.idle_games, &library, &refunds);
+        let idle_skipped = if started.idle { (settings.idle_games.len() - idle_games.len()) as u32 } else { 0 };
         let world = World {
             steam_running: steam.is_some(),
             account_ok,
@@ -317,12 +386,13 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             farm_on: started.farm,
             farm: farm.clone(),
             idle_on: started.idle,
-            idle_games: settings.idle_games.clone(),
+            idle_games,
             manual,
             session_ok: session.is_some() && self.community_ok,
         };
         let decision = decide(&world);
-        if let Err(reason) = self.runner.apply(&decision.games) {
+        let wanted = self.supervise(&decision.games, now);
+        if let Err(reason) = self.runner.apply(&wanted) {
             self.activity.push(now, reason);
         }
         if decision.achievements_may_run && started.achievements {
@@ -331,10 +401,14 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         if decision.inventory_may_run && settings.inventory_on && now >= self.next_inventory_at
             && let Some(session) = &session
         {
-            self.run_inventory(session, &settings, now).await;
+            self.run_inventory(session, &settings, keep_going, now).await;
         }
-        self.view(Seen { world: &world, farm: &farm, candidates: &candidates, waiting: decision.waiting, settings: &settings, started, session_exists: session.is_some(), now })
+        self.view(Seen { world: &world, farm: &farm, candidates: &candidates, refunds: &refunds, waiting: decision.waiting, settings: &settings, started, idle_skipped, session_exists: session.is_some(), now })
     }
+}
+/// Whether the hidden page should renew the session.
+pub(crate) fn needs_refresh(status: &Status, signed_in: bool) -> bool {
+    status.ready && signed_in && (!status.community_ok || status.store_stale)
 }
 /// Starts the loop that runs for as long as MYLE does.
 pub(crate) fn start(app: AppHandle) {
@@ -343,37 +417,53 @@ pub(crate) fn start(app: AppHandle) {
         let (Ok(spawner), Ok(community), Ok(folder)) = (HelperSpawner::new(), state.community(), folder()) else {
             return;
         };
+        let spawner_job = spawner.job();
         let runner = Arc::new(ProcessRunner::new(spawner));
         state.set_runner(runner.clone());
         let random = || uuid::Uuid::new_v4().as_u128() as u64;
-        let mut engine = Engine::new(runner, community, HelperTool, Box::new(random));
+        let job = spawner_job.clone();
+        let mut engine = Engine::new(runner.clone(), community, HelperTool { job }, Box::new(random));
         let activity_file = folder.join("activity.json");
         engine.activity = Activity::load(&activity_file);
-        let mut last_session = None;
+        let mut last_generation = 0;
         let mut next_refresh = 0;
         tokio::time::sleep(FIRST_TICK).await;
         loop {
             let session = state.session();
-            if session != last_session {
+            let generation = state.session_generation();
+            if generation != last_generation {
                 engine.session_changed();
-                last_session = session.clone();
+                last_generation = generation;
             }
             engine.community.set_session(session.clone());
             let settings = state.settings();
+            let keep_going: KeepGoing = {
+                let app = app.clone();
+                let runner = runner.clone();
+                Arc::new(move || {
+                    let ours = runner.running();
+                    let real = steam_state::read().and_then(|steam| real_game(&steam.running, &ours));
+                    !app.state::<SteamAutomationState>().paused() && real.is_none() && app.state::<crate::account::AccountState>().is_owner(&app)
+                })
+            };
             let input = TickInput {
                 steam: steam_state::read(),
                 session: session.clone(),
                 started: state.started(&settings),
                 manual: state.manual(),
+                library: state.library_games(),
+                keep_going,
                 settings,
                 user_paused: state.paused(),
                 is_owner: app.state::<crate::account::AccountState>().is_owner(&app),
             };
             let status = engine.tick(input, now()).await;
-            engine.activity.save(&activity_file);
-            let needs_refresh = session.is_some() && !status.community_ok && now() >= next_refresh;
+            if status.ready && engine.activity_to_save() {
+                engine.activity.save(&activity_file);
+            }
+            let refresh_now = needs_refresh(&status, session.is_some()) && now() >= next_refresh;
             state.set_status(status);
-            if needs_refresh {
+            if refresh_now {
                 next_refresh = now() + SESSION_RETRY_SECS;
                 if refresh_session(&app).await {
                     engine.mark_session_refreshed();
@@ -456,7 +546,11 @@ mod tests {
     /// Everything the switches ask for has been started.
     fn input(settings: Settings) -> TickInput {
         let started = Started { farm: settings.farm_on, idle: settings.idle_on, achievements: settings.achievements_on };
-        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, started, manual: Vec::new(), user_paused: false, is_owner: true }
+        let library = [(7, "Seven", 500), (8, "Eight", 500), (GAME, "Portal 2", 540)].map(|(appid, name, minutes)| owned(appid, name, minutes)).to_vec();
+        TickInput { steam: Some(steam(&[])), session: Some(session(MY_ID)), settings, started, manual: Vec::new(), library, keep_going: Arc::new(|| true), user_paused: false, is_owner: true }
+    }
+    fn owned(appid: u32, name: &str, minutes: u32) -> LibraryGame {
+        LibraryGame { appid, name: name.to_string(), cover_url: None, header_url: None, minutes, achievements_unlocked: 0, achievements_total: 0, achievements_ok: true, shared: false }
     }
     fn farming() -> Settings {
         Settings { farm_on: true, ..Settings::default() }
@@ -620,6 +714,133 @@ mod tests {
         rig.tool.lists.lock().unwrap().insert(GAME, AchievementList { names: vec!["A".into()], locked: vec!["A".into()] });
         rig.engine.tick(TickInput { started: Started::default(), ..input(achievements()) }, T0).await;
         assert!(rig.tool.unlocked.lock().unwrap().is_empty());
+    }
+    fn idling(games: Vec<u32>) -> Settings {
+        Settings { idle_on: true, idle_games: games, ..Settings::default() }
+    }
+    const BOUGHT_YESTERDAY: &str = r#"<td  class="license_date_col">14 Jan, 2027</td> <td>Portal 2</td>"#;
+    #[tokio::test]
+    async fn a_game_that_can_still_be_refunded_is_not_idled() {
+        let mut rig = rig_with(|_| FakeCommunity::answering(|url| Ok(if url.contains("licenses") { BOUGHT_YESTERDAY.to_string() } else { String::new() })));
+        let library = vec![owned(GAME, "Portal 2", 30), owned(7, "Seven", 500)];
+        let status = rig.engine.tick(TickInput { library, ..input(idling(vec![GAME, 7])) }, T0).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+        assert_eq!(status.idle_skipped, 1);
+    }
+    #[tokio::test]
+    async fn purchases_are_read_for_the_idler_alone() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        assert_eq!(rig.engine.community.gets().iter().filter(|url| url.contains("licenses")).count(), 1);
+    }
+    #[tokio::test]
+    async fn a_failed_first_read_does_not_say_there_are_no_cards() {
+        let mut rig = rig_with(|_| FakeCommunity::answering(|_| Err(CommunityError::Other("no".to_string()))));
+        let settings = Settings { idle_on: true, idle_games: vec![7], ..farming() };
+        let status = rig.engine.tick(input(settings), T0).await;
+        assert_eq!(status.farm.phase, "reading");
+        assert!(running(&rig).is_empty(), "the idler waits until the cards are known");
+    }
+    #[tokio::test]
+    async fn a_failed_read_is_tried_again_soon() {
+        let mut rig = rig_with(|_| FakeCommunity::answering(|_| Err(CommunityError::Other("no".to_string()))));
+        rig.engine.tick(input(farming()), T0).await;
+        rig.engine.tick(input(farming()), T0 + 299).await;
+        assert_eq!(badge_reads(&rig), 1);
+        rig.engine.tick(input(farming()), T0 + 301).await;
+        assert_eq!(badge_reads(&rig), 2);
+    }
+    #[tokio::test]
+    async fn a_lost_session_stops_the_game_being_farmed_and_says_so() {
+        let mut rig = rig();
+        rig.engine.tick(input(farming()), T0).await;
+        assert_eq!(running(&rig), BTreeSet::from([GAME]));
+        rig.engine.community_lost_for_test();
+        let status = rig.engine.tick(input(farming()), T0 + 60).await;
+        assert!(running(&rig).is_empty());
+        assert_eq!(status.farm.phase, "signedOut");
+    }
+    #[tokio::test]
+    async fn a_helper_that_stops_by_itself_is_left_alone_for_a_while() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        rig.runner.current.lock().unwrap().remove(&7);
+        let status = rig.engine.tick(input(idling(vec![7])), T0 + 60).await;
+        assert!(running(&rig).is_empty(), "it may be the owner pressing Stop in Steam");
+        assert!(status.activity.iter().any(|entry| entry.text.contains("stopped without MYLE asking")), "{:?}", status.activity);
+        rig.engine.tick(input(idling(vec![7])), T0 + 120).await;
+        assert!(running(&rig).is_empty());
+        rig.engine.tick(input(idling(vec![7])), T0 + 361).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn a_helper_that_keeps_stopping_is_left_longer_each_time() {
+        let mut rig = rig();
+        let settings = idling(vec![7]);
+        rig.engine.tick(input(settings.clone()), T0).await;
+        rig.runner.current.lock().unwrap().remove(&7);
+        rig.engine.tick(input(settings.clone()), T0 + 60).await;
+        rig.engine.tick(input(settings.clone()), T0 + 361).await;
+        rig.runner.current.lock().unwrap().remove(&7);
+        rig.engine.tick(input(settings.clone()), T0 + 421).await;
+        rig.engine.tick(input(settings.clone()), T0 + 421 + 599).await;
+        assert!(running(&rig).is_empty(), "ten minutes the second time");
+        rig.engine.tick(input(settings), T0 + 421 + 601).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn stopping_a_game_on_purpose_is_not_mistaken_for_it_stopping_by_itself() {
+        let mut rig = rig();
+        rig.engine.tick(input(idling(vec![7])), T0).await;
+        rig.runner.stop_all();
+        let status = rig.engine.tick(input(Settings::default()), T0 + 60).await;
+        assert!(status.activity.is_empty(), "{:?}", status.activity);
+        rig.engine.tick(input(idling(vec![7])), T0 + 120).await;
+        assert_eq!(running(&rig), BTreeSet::from([7]));
+    }
+    #[tokio::test]
+    async fn a_licence_page_that_says_signed_out_only_affects_the_store() {
+        let mut rig = rig_with(|drops| {
+            FakeCommunity::answering(move |url| {
+                if url.contains("licenses") {
+                    return Err(CommunityError::SignedOut);
+                }
+                Ok(badges(drops.load(Ordering::SeqCst)))
+            })
+        });
+        let status = rig.engine.tick(input(farming()), T0).await;
+        assert!(status.community_ok);
+        assert!(status.purchase_dates_unknown);
+        assert!(status.store_stale);
+    }
+    #[tokio::test]
+    async fn listings_from_a_run_that_ended_early_are_still_recorded() {
+        let inventory = r#"{"assets":[{"assetid":"1","classid":"1","instanceid":"0"},{"assetid":"2","classid":"1","instanceid":"0"},{"assetid":"3","classid":"1","instanceid":"0"}],"descriptions":[{"classid":"1","instanceid":"0","marketable":1,"market_hash_name":"A","tags":[{"category":"item_class","internal_name":"item_class_2"}]}],"success":1}"#;
+        let posted = Arc::new(AtomicU32::new(0));
+        let mut rig = rig_with(|_| {
+            let posted = posted.clone();
+            FakeCommunity::answering(move |url| Ok(if url.contains("priceoverview") { r#"{"lowest_price":"0,31€"}"#.to_string() } else { inventory.to_string() }))
+                .answering_posts(move |_| {
+                    if posted.fetch_add(1, Ordering::SeqCst) == 0 { Ok(r#"{"success":true,"needs_mobile_confirmation":true}"#.to_string()) } else { Err(CommunityError::SignedOut) }
+                })
+        });
+        let status = rig.engine.tick(input(Settings { inventory_on: true, ..Settings::default() }), T0).await;
+        assert_eq!((status.inventory.listed, status.inventory.waiting_confirmation), (1, 1));
+        assert!(status.activity.iter().any(|entry| entry.text == "Listed 1 duplicate card"), "{:?}", status.activity);
+    }
+    #[test]
+    fn someone_who_is_not_the_owner_never_opens_the_hidden_page() {
+        assert!(!needs_refresh(&Status::default(), true));
+    }
+    #[test]
+    fn a_rejected_session_or_store_cookie_asks_for_a_refresh() {
+        let rejected = Status { ready: true, community_ok: false, ..Status::default() };
+        let stale = Status { ready: true, community_ok: true, store_stale: true, ..Status::default() };
+        let fine = Status { ready: true, community_ok: true, ..Status::default() };
+        assert!(needs_refresh(&rejected, true));
+        assert!(needs_refresh(&stale, true));
+        assert!(!needs_refresh(&fine, true));
+        assert!(!needs_refresh(&rejected, false), "nothing to renew");
     }
     #[tokio::test]
     async fn the_idler_runs_the_picked_games() {

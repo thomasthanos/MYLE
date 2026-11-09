@@ -5,7 +5,9 @@ use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
 use super::achievements::AchievementList;
 use super::client::SteamClient;
+use super::steam_state;
 const PUMP_EVERY: Duration = Duration::from_secs(1);
+const CHECK_STEAM_SECS: u32 = 20;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HelperMode {
     Run(u32),
@@ -36,12 +38,26 @@ pub(super) fn steam_path() -> Result<PathBuf, String> {
     let path: String = key.get_value("SteamPath").map_err(|_| "Steam is not installed.".to_string())?;
     Ok(PathBuf::from(path))
 }
-/// Stays connected as this game until the process is killed.
+/// Whether the Steam this helper connected to has ended. `current` is 0 once Steam has closed.
+fn steam_went_away(at_start: u32, current: u32, still_alive: bool) -> bool {
+    at_start != 0 && (current != at_start || !still_alive)
+}
+/// Stays connected as this game until the process is killed or that Steam ends, so a helper is
+/// never left running but connected to nothing.
 fn run_game(appid: u32) -> Result<(), String> {
+    let steam = steam_state::steam_pid();
     let client = SteamClient::open(&steam_path()?, appid)?;
+    let mut seconds = 0_u32;
     loop {
         client.pump();
         std::thread::sleep(PUMP_EVERY);
+        seconds = seconds.wrapping_add(1);
+        if seconds.is_multiple_of(CHECK_STEAM_SECS) {
+            let current = steam_state::steam_pid();
+            if steam_went_away(steam, current, steam_state::process_alive(current)) {
+                return Err("Steam has closed.".to_string());
+            }
+        }
     }
 }
 /// Prints this game's achievements as JSON, for the app to read.
@@ -84,6 +100,26 @@ mod tests {
     use super::*;
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+    #[test]
+    fn the_same_steam_still_running_is_fine() {
+        assert!(!steam_went_away(100, 100, true));
+    }
+    #[test]
+    fn a_closed_steam_is_gone() {
+        assert!(steam_went_away(100, 0, false));
+    }
+    #[test]
+    fn a_restarted_steam_is_gone() {
+        assert!(steam_went_away(100, 200, true));
+    }
+    #[test]
+    fn a_crashed_steam_is_gone_though_the_registry_still_names_it() {
+        assert!(steam_went_away(100, 100, false));
+    }
+    #[test]
+    fn with_no_steam_known_at_the_start_nothing_can_be_said() {
+        assert!(!steam_went_away(0, 200, true));
     }
     #[test]
     fn a_normal_launch_is_not_a_helper() {

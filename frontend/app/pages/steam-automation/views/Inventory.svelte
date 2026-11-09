@@ -8,7 +8,7 @@
   import Select from "../../../../lib/components/Select.svelte";
   import { confirm } from "../../../../lib/confirm.svelte";
   import type { InventoryItem, Listing } from "../api";
-  import { duplicateIds, euros, filterItems, ITEM_SORTS, kindLabel, listable, parseEuros, plural, requestedPrice, sortItems, validMinimum, type ItemFilter, type ItemMarks } from "../model";
+  import { duplicateIds, euros, filterItems, ITEM_SORTS, kindLabel, listable, parseEuros, plural, requestedPrice, sortItems, untilText, validMinimum, type ItemFilter, type ItemMarks } from "../model";
   import { steamAutomationState as page } from "../state.svelte";
 
   const FILTERS: { value: ItemFilter; label: string }[] = [
@@ -86,6 +86,7 @@
     <ProgressBar value={page.job.progress.done / page.job.total} label={page.job.label} />
   </div>
 {/if}
+{#if page.settings?.inventoryOn && page.status?.inventory.nextAt}<p class="note">Next automatic run {untilText(page.status.inventory.nextAt, Date.now() / 1000)}. It sells duplicates only and always keeps one of each.</p>{/if}
 {#if waiting > 0}<p class="note warn">{plural(waiting, "listing")} waiting for your confirmation in Steam Guard. MYLE never approves these for you.</p>{/if}
 
 <div class="layout">

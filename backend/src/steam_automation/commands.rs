@@ -1,7 +1,7 @@
 //! What the page asks for. Every command here is refused for anyone but the owner (`account::owner`).
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
@@ -10,7 +10,7 @@ use super::badges::{BadgeGame, read_badges};
 use super::community::{CommunityError, HttpCommunity};
 use super::engine::{Started, Status};
 use super::inventory::{self, InventoryItem, ListOutcome, ListRequest, Listing};
-use super::library::{self, LibraryAnswer, Saved};
+use super::library::{self, LibraryAnswer, LibraryGame, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
 use super::settings::{self, Settings};
@@ -42,7 +42,8 @@ pub struct SteamAutomationState {
     listed: tokio::sync::Mutex<HashSet<String>>,
     /// One line to Steam for the engine and the page, so together they stay within its limits.
     community: OnceLock<Arc<HttpCommunity>>,
-    paused: AtomicBool,
+    generation: AtomicU64,
+    library: Mutex<Option<Vec<LibraryGame>>>,
     poke: Notify,
     runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
 }
@@ -59,6 +60,7 @@ impl SteamAutomationState {
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         new.save(&folder.join("session.bin"))?;
         *self.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(new);
+        self.note_new_session();
         self.poke.notify_one();
         Ok(())
     }
@@ -76,6 +78,27 @@ impl SteamAutomationState {
         community.set_session(Some(session.clone()));
         Ok((community, session))
     }
+    /// Goes up whenever a new session is saved, even one with the same cookies.
+    pub(crate) fn session_generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+    fn note_new_session(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+    /// The saved library, for checking refunds without asking Steam.
+    pub(crate) fn library_games(&self) -> Vec<LibraryGame> {
+        let mut games = self.library.lock().unwrap_or_else(|p| p.into_inner());
+        games
+            .get_or_insert_with(|| {
+                folder()
+                    .ok()
+                    .and_then(|folder| std::fs::read(folder.join("library.json")).ok())
+                    .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
+                    .map(|saved| saved.games)
+                    .unwrap_or_default()
+            })
+            .clone()
+    }
     pub(crate) fn settings(&self) -> Settings {
         let mut settings = self.settings.lock().unwrap_or_else(|p| p.into_inner());
         settings.get_or_insert_with(|| folder().map(|folder| settings::load(&folder.join("settings.json"))).unwrap_or_default()).clone()
@@ -87,7 +110,7 @@ impl SteamAutomationState {
         self.manual.lock().unwrap_or_else(|p| p.into_inner()).iter().copied().collect()
     }
     pub(crate) fn paused(&self) -> bool {
-        self.paused.load(Ordering::SeqCst)
+        self.settings().paused
     }
     pub(crate) fn set_status(&self, status: Status) {
         *self.status.lock().unwrap_or_else(|p| p.into_inner()) = status;
@@ -134,9 +157,12 @@ pub fn steam_automation_set_settings(state: State<'_, SteamAutomationState>, set
     Ok(())
 }
 #[tauri::command]
-pub fn steam_automation_pause(state: State<'_, SteamAutomationState>, paused: bool) {
-    state.paused.store(paused, Ordering::SeqCst);
+pub fn steam_automation_pause(state: State<'_, SteamAutomationState>, paused: bool) -> Result<(), String> {
+    let settings = Settings { paused, ..state.settings() };
+    settings::save(&folder()?.join("settings.json"), &settings)?;
+    *state.settings.lock().unwrap_or_else(|p| p.into_inner()) = Some(settings);
     state.poke.notify_one();
+    Ok(())
 }
 /// Starts or stops one feature for now. The automatic switches only decide what happens when MYLE opens.
 #[tauri::command]
@@ -240,11 +266,20 @@ pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAuto
     };
     let answer = library::settle(saved, fetched, now())?;
     if answer.problem.is_none() {
+        *state.library.lock().unwrap_or_else(|p| p.into_inner()) = Some(answer.games.clone());
         let bytes = serde_json::to_vec(&Saved { saved_at: answer.saved_at, games: answer.games.clone() }).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let _ = crate::game_saves::atomic::write(&file, &bytes);
     }
     Ok(answer)
+}
+/// Whether the sign-in window can close. Cookies from before do not count until Steam has
+/// shown it accepts them by moving off its login page.
+fn sign_in_done(found: &Session, before: Option<&Session>, left_login_page: bool) -> bool {
+    left_login_page || before.is_none_or(|before| before.steam_login_secure != found.steam_login_secure)
+}
+fn left_login_page(url: &Url) -> bool {
+    is_steam_site(url) && !url.path().starts_with("/login")
 }
 fn is_steam_site(url: &Url) -> bool {
     url.host_str().is_some_and(|host| {
@@ -272,6 +307,7 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
     let page: Url = LOGIN_PAGE.parse().map_err(|_| "Bad sign-in address.".to_string())?;
     let community: Url = COMMUNITY.parse().map_err(|_| "Bad address.".to_string())?;
     let store: Url = STORE.parse().map_err(|_| "Bad address.".to_string())?;
+    let before = state.session();
     let window = WebviewWindowBuilder::new(&app, LOGIN_LABEL, WebviewUrl::External(page))
         .title("Sign in to Steam")
         .inner_size(520.0, 760.0)
@@ -285,7 +321,8 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
         if app.get_webview_window(LOGIN_LABEL).is_none() {
             return Err("The sign-in window was closed.".to_string());
         }
-        let Some(signed_in) = session::from_cookies(&cookies(&window, &community)) else {
+        let left = window.url().is_ok_and(|url| left_login_page(&url));
+        let Some(signed_in) = session::from_cookies(&cookies(&window, &community)).filter(|found| sign_in_done(found, before.as_ref(), left)) else {
             continue;
         };
         let _ = window.navigate(store.clone());
@@ -297,7 +334,7 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
                 break;
             }
         }
-        state.set_session(with_store)?;
+        state.set_session(with_store.keeping_store_cookie_of(before.as_ref()))?;
         let _ = window.close();
         return Ok(());
     }
@@ -323,18 +360,73 @@ pub(crate) async fn refresh_session(app: &AppHandle) -> bool {
     else {
         return false;
     };
-    let mut refreshed = false;
+    let mut found = None;
     for _ in 0..REFRESH_SECONDS {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let Some(found) = session::from_cookies(&cookies(&window, &community)) else {
+        let Some(cookies) = session::from_cookies(&cookies(&window, &community)) else {
             continue;
         };
-        let found = found.with_store_cookies(&cookies(&window, &store));
-        if Some(&found) != before.as_ref() {
-            refreshed = state.set_session(found).is_ok();
+        let renewed = before.as_ref().is_none_or(|before| before.steam_login_secure != cookies.steam_login_secure);
+        found = Some(cookies);
+        if renewed {
             break;
         }
     }
+    let Some(found) = found else {
+        let _ = window.close();
+        return false;
+    };
+    // The store keeps its own sign-in, which only renews when the store itself is visited.
+    let _ = window.navigate(store.clone());
+    let mut renewed = found.clone();
+    for _ in 0..STORE_SECONDS {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let candidate = found.clone().with_store_cookies(&cookies(&window, &store));
+        if candidate.store_cookie_header().is_some() {
+            let changed = before.as_ref().is_none_or(|before| before.store_cookie_header() != candidate.store_cookie_header());
+            renewed = candidate;
+            if changed {
+                break;
+            }
+        }
+    }
     let _ = window.close();
-    refreshed
+    let renewed = renewed.keeping_store_cookie_of(before.as_ref());
+    Some(&renewed) != before.as_ref() && state.set_session(renewed).is_ok()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::steam_automation::session::from_cookies;
+    fn session(token: &str) -> Session {
+        from_cookies(&[("steamLoginSecure".to_string(), format!("76561198000000001%7C%7C{token}")), ("sessionid".to_string(), "s".to_string())]).unwrap()
+    }
+    #[test]
+    fn the_cookies_that_were_already_there_do_not_finish_signing_in() {
+        assert!(!sign_in_done(&session("old"), Some(&session("old")), false));
+    }
+    #[test]
+    fn new_cookies_finish_signing_in() {
+        assert!(sign_in_done(&session("new"), Some(&session("old")), false));
+        assert!(sign_in_done(&session("new"), None, false));
+    }
+    #[test]
+    fn steam_moving_off_its_login_page_accepts_the_same_cookies() {
+        assert!(sign_in_done(&session("old"), Some(&session("old")), true));
+    }
+    #[test]
+    fn only_a_steam_page_past_the_login_counts_as_having_left_it() {
+        let page = |address: &str| left_login_page(&address.parse().unwrap());
+        assert!(!page("about:blank"), "the window has not loaded anything yet");
+        assert!(!page("https://steamcommunity.com/login/home/?goto="));
+        assert!(page("https://steamcommunity.com/id/someone"));
+        assert!(page("https://store.steampowered.com/"));
+    }
+    #[test]
+    fn every_saved_session_counts_as_new() {
+        let state = SteamAutomationState::default();
+        state.note_new_session();
+        state.note_new_session();
+        assert_eq!(state.session_generation(), 2);
+    }
 }

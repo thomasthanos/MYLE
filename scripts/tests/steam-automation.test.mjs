@@ -181,4 +181,6 @@ test("card farming says what it is doing", () => {
   assert.equal(farmLine({ phase: "building", gamesLeft: 3, dropsLeft: 9 }), "9 cards left to drop, across 3 games");
   assert.equal(farmLine({ phase: "solo", gamesLeft: 1, dropsLeft: 1 }), "1 card left to drop, in 1 game");
   assert.equal(farmLine({ phase: "done", gamesLeft: 0, dropsLeft: 0 }), "No cards left to drop");
+  assert.equal(farmLine({ phase: "reading", gamesLeft: 0, dropsLeft: 0 }), "Reading your card drops from Steam");
+  assert.equal(farmLine({ phase: "signedOut", gamesLeft: 2, dropsLeft: 3 }), "Waiting for you to sign in to Steam again");
 });

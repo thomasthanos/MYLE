@@ -5,7 +5,7 @@ use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use crate::apps::process::JobObject;
 const MAX_GAMES: usize = 32;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -84,13 +84,16 @@ impl Child for std::process::Child {
 /// Starts this same program as a helper for one game.
 pub(crate) struct HelperSpawner {
     exe: PathBuf,
-    job: JobObject,
+    job: Arc<JobObject>,
 }
 impl HelperSpawner {
     pub(crate) fn new() -> Result<Self, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let job = JobObject::new().ok_or("Could not set up the process group for Steam games.")?;
+        let job = Arc::new(JobObject::new().ok_or("Could not set up the process group for Steam games.")?);
         Ok(Self { exe, job })
+    }
+    pub(crate) fn job(&self) -> Arc<JobObject> {
+        self.job.clone()
     }
 }
 impl Spawner for HelperSpawner {

@@ -299,16 +299,21 @@ pub(crate) async fn remove_listing<C: Community>(api: &C, session: &Session, lis
     api.post(&format!("{COMMUNITY}/market/removelisting/{listing_id}"), &form, MARKET_PAGE).await?;
     Ok(())
 }
-/// Lists up to twenty duplicates. An asset goes into `already_listed` before it is posted, so a
-/// failure partway can never list the same one twice.
+/// Lists up to twenty duplicates, and says what it managed even when it ended early. An asset goes
+/// into `already_listed` before it is posted, so a failure partway can never list it twice. One
+/// card Steam answers badly about is skipped; only being signed out or limited ends the run.
 pub(crate) async fn sell_duplicates<C: Community>(
     api: &C,
     session: &Session,
     minimum: u32,
     locked: &HashSet<String>,
     already_listed: &mut HashSet<String>,
-) -> Result<SellReport, CommunityError> {
-    let cards = read_pages(api, session.steam_id, parse_inventory).await?;
+    keep_going: &(dyn Fn() -> bool + Send + Sync),
+) -> (SellReport, Option<CommunityError>) {
+    let cards = match read_pages(api, session.steam_id, parse_inventory).await {
+        Ok(cards) => cards,
+        Err(error) => return (SellReport::default(), Some(error)),
+    };
     let to_sell: Vec<Card> = duplicates(&cards)
         .into_iter()
         .filter(|card| !already_listed.contains(&card.asset_id) && !locked.contains(&card.asset_id))
@@ -317,13 +322,19 @@ pub(crate) async fn sell_duplicates<C: Community>(
     let mut prices: HashMap<String, Option<u32>> = HashMap::new();
     let mut report = SellReport::default();
     for card in to_sell {
+        if !keep_going() {
+            break;
+        }
         let price = match prices.get(&card.hash_name) {
             Some(known) => *known,
-            None => {
-                let found = lowest_price(api, &card.hash_name).await?;
-                prices.insert(card.hash_name.clone(), found);
-                found
-            }
+            None => match lowest_price(api, &card.hash_name).await {
+                Ok(found) => {
+                    prices.insert(card.hash_name.clone(), found);
+                    found
+                }
+                Err(CommunityError::Other(_)) => continue,
+                Err(error) => return (report, Some(error)),
+            },
         };
         let Some(lowest) = price else {
             continue;
@@ -333,7 +344,11 @@ pub(crate) async fn sell_duplicates<C: Community>(
             continue;
         }
         already_listed.insert(card.asset_id.clone());
-        let answer = post_listing(api, session, &card.asset_id, seller).await?;
+        let answer = match post_listing(api, session, &card.asset_id, seller).await {
+            Ok(answer) => answer,
+            Err(CommunityError::Other(_)) => continue,
+            Err(error) => return (report, Some(error)),
+        };
         if !was_listed(&answer) {
             continue;
         }
@@ -343,7 +358,7 @@ pub(crate) async fn sell_duplicates<C: Community>(
             report.waiting_confirmation += 1;
         }
     }
-    Ok(report)
+    (report, None)
 }
 #[cfg(test)]
 mod tests {
@@ -355,6 +370,11 @@ mod tests {
     const INVENTORY: &str = include_str!("fixtures/inventory.json");
     fn nothing_locked() -> HashSet<String> {
         HashSet::new()
+    }
+    async fn sold(api: &FakeCommunity, listed: &mut HashSet<String>) -> SellReport {
+        let (report, error) = sell_duplicates(api, &session(), 5, &nothing_locked(), listed, &|| true).await;
+        assert_eq!(error, None);
+        report
     }
     fn described(tags: serde_json::Value) -> String {
         json!({
@@ -411,7 +431,7 @@ mod tests {
     async fn a_locked_card_is_never_sold_automatically() {
         let api = market(3);
         let locked = HashSet::from(["2".to_string()]);
-        sell_duplicates(&api, &session(), 5, &locked, &mut HashSet::new()).await.unwrap();
+        sell_duplicates(&api, &session(), 5, &locked, &mut HashSet::new(), &|| true).await;
         let sold: Vec<String> = api.posts().iter().map(|(_, form, _)| form.iter().find(|(k, _)| k == "assetid").unwrap().1.clone()).collect();
         assert_eq!(sold, vec!["3".to_string()]);
     }
@@ -621,13 +641,13 @@ mod tests {
     #[tokio::test]
     async fn a_run_stops_at_twenty_listings() {
         let api = market(30);
-        let report = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        let report = sold(&api, &mut HashSet::new()).await;
         assert_eq!((api.posts().len(), report.listed), (20, 20));
     }
     #[tokio::test]
     async fn one_price_lookup_serves_every_copy_of_a_card() {
         let api = market(4);
-        sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        sold(&api, &mut HashSet::new()).await;
         assert_eq!(api.gets().iter().filter(|u| u.contains("priceoverview")).count(), 1);
     }
     #[tokio::test]
@@ -638,7 +658,7 @@ mod tests {
             }
             Ok(INVENTORY.to_string())
         });
-        let report = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        let report = sold(&api, &mut HashSet::new()).await;
         assert!(api.posts().is_empty());
         assert_eq!(report.listed, 0);
     }
@@ -646,9 +666,9 @@ mod tests {
     async fn an_asset_is_never_listed_twice() {
         let api = market(3);
         let mut listed = HashSet::new();
-        sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut listed).await.unwrap();
+        sold(&api, &mut listed).await;
         assert_eq!(api.posts().len(), 2);
-        sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut listed).await.unwrap();
+        sold(&api, &mut listed).await;
         assert_eq!(api.posts().len(), 2);
     }
     #[tokio::test]
@@ -662,19 +682,70 @@ mod tests {
                 Err(CommunityError::SignedOut)
             }
         });
-        assert_eq!(sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await, Err(CommunityError::SignedOut));
+        let (report, error) = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new(), &|| true).await;
+        assert_eq!(error, Some(CommunityError::SignedOut));
+        assert_eq!(report.listed, 1, "what was already listed is not forgotten");
         assert_eq!(api.posts().len(), 2);
+    }
+    /// One duplicate each of cards A and B.
+    fn two_cards() -> String {
+        json!({
+            "assets": [{ "assetid": "1", "classid": "1", "instanceid": "0" }, { "assetid": "2", "classid": "1", "instanceid": "0" }, { "assetid": "3", "classid": "2", "instanceid": "0" }, { "assetid": "4", "classid": "2", "instanceid": "0" }],
+            "descriptions": [
+                { "classid": "1", "instanceid": "0", "marketable": 1, "market_hash_name": "A", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] },
+                { "classid": "2", "instanceid": "0", "marketable": 1, "market_hash_name": "B", "tags": [{ "category": "item_class", "internal_name": "item_class_2" }] }
+            ],
+            "success": 1
+        }).to_string()
+    }
+    #[tokio::test]
+    async fn a_card_whose_price_cannot_be_read_does_not_end_the_run() {
+        let inventory = two_cards();
+        let api = FakeCommunity::answering(move |url| {
+            if url.ends_with("market_hash_name=A") {
+                return Err(CommunityError::Other("Steam answered 500.".to_string()));
+            }
+            if url.contains("priceoverview") {
+                return Ok(r#"{"success":true,"lowest_price":"0,31€"}"#.to_string());
+            }
+            Ok(inventory.clone())
+        })
+        .answering_posts(|_| Ok(r#"{"success":true}"#.to_string()));
+        let (report, error) = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new(), &|| true).await;
+        assert_eq!((report.listed, error), (1, None));
+    }
+    #[tokio::test]
+    async fn steam_limiting_requests_ends_the_run() {
+        let inventory = two_cards();
+        let api = FakeCommunity::answering(move |url| if url.contains("priceoverview") { Err(CommunityError::Limited) } else { Ok(inventory.clone()) });
+        let (_, error) = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new(), &|| true).await;
+        assert_eq!(error, Some(CommunityError::Limited));
+        assert_eq!(api.gets().iter().filter(|url| url.contains("priceoverview")).count(), 1);
+    }
+    #[tokio::test]
+    async fn a_listing_steam_answered_badly_does_not_end_the_run() {
+        let api = market(3).answering_posts(|_| Err(CommunityError::Other("Steam answered 500.".to_string())));
+        let (_, error) = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new(), &|| true).await;
+        assert_eq!((api.posts().len(), error), (2, None));
+    }
+    #[tokio::test]
+    async fn a_run_stops_before_the_next_listing_when_asked_to() {
+        let api = market(4);
+        let asked = std::sync::atomic::AtomicU32::new(0);
+        let keep_going = || asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1;
+        let (report, error) = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new(), &keep_going).await;
+        assert_eq!((report.listed, error, api.posts().len()), (1, None, 1));
     }
     #[tokio::test]
     async fn a_refused_listing_is_not_counted_and_the_run_goes_on() {
         let api = market(3).answering_posts(|_| Ok(r#"{"success":false,"message":"no"}"#.to_string()));
-        let report = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        let report = sold(&api, &mut HashSet::new()).await;
         assert_eq!((api.posts().len(), report.listed), (2, 0));
     }
     #[tokio::test]
     async fn the_form_sends_what_the_seller_gets() {
         let api = market(2);
-        sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        sold(&api, &mut HashSet::new()).await;
         let (url, form, referer) = api.posts()[0].clone();
         assert_eq!(url, "https://steamcommunity.com/market/sellitem/");
         let value = |key: &str| form.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap();
@@ -684,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn waiting_listings_are_counted() {
         let api = market(2);
-        let report = sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        let report = sold(&api, &mut HashSet::new()).await;
         assert_eq!((report.waiting_confirmation, report.cents), (1, 27));
     }
     #[tokio::test]
@@ -695,7 +766,7 @@ mod tests {
             }
             Ok(r#"{"assets":[],"descriptions":[],"more_items":1,"last_assetid":"55","success":1}"#.to_string())
         });
-        sell_duplicates(&api, &session(), 5, &nothing_locked(), &mut HashSet::new()).await.unwrap();
+        sold(&api, &mut HashSet::new()).await;
         assert_eq!(api.gets().len(), 2);
     }
 }

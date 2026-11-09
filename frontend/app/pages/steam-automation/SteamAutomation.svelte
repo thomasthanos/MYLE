@@ -65,7 +65,7 @@
       {#if ready && !connected}
         <button class="btn small primary" type="button" disabled={page.signingIn} onclick={() => void page.signIn()}>{page.signingIn ? "Finish in the Steam window" : status?.communitySignedIn ? "Sign in again" : "Sign in to Steam"}</button>
       {/if}
-      <button class="btn small" type="button" onclick={() => void page.setPaused(!page.paused)}>{page.paused ? "Resume" : "Pause everything"}</button>
+      <button class="btn small" type="button" onclick={() => void page.setPaused(!page.settings?.paused)}>{page.settings?.paused ? "Resume" : "Pause everything"}</button>
     </div>
   </nav>
 

@@ -5,12 +5,13 @@
 
   const status = $derived(page.status);
   const settings = $derived(page.settings);
-  const farming = $derived(!!status?.started.farm && status.farm.phase !== "done");
+  const farming = $derived(status?.farm.phase === "building" || status?.farm.phase === "solo" || status?.farm.phase === "reading");
+  const adding = $derived(settings?.idleGames.filter((appid) => status?.running.includes(appid)).length ?? 0);
 </script>
 
 {#snippet note()}
   {#if status?.started.idle && settings}
-    <p class="note">{farming ? "Waiting for card farming to finish." : `${plural(settings.idleGames.length, "game")} adding playtime.`}</p>
+    <p class="note">{farming ? "Waiting for card farming to finish." : `${plural(adding, "game")} adding playtime.`}{status.idleSkipped > 0 ? ` Skipping ${plural(status.idleSkipped, "game")} that can still be refunded.` : ""}</p>
   {/if}
 {/snippet}
 

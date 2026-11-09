@@ -12,8 +12,10 @@ export interface Status {
   purchaseDatesUnknown: boolean;
   started: Record<Feature, boolean>;
   manual: number[];
+  idleSkipped: number;
+  storeStale: boolean;
   running: number[];
-  farm: { phase: "building" | "solo" | "done" | ""; gamesLeft: number; dropsLeft: number; skippedRefundable: number; nextCheckAt: number | null };
+  farm: { phase: "building" | "solo" | "reading" | "signedOut" | "done" | ""; gamesLeft: number; dropsLeft: number; skippedRefundable: number; nextCheckAt: number | null };
   achievements: { total: number; locked: number; nextAt: number | null; waitingForFarming: boolean };
   inventory: { listed: number; cents: number; waitingConfirmation: number; nextAt: number | null };
   activity: { at: number; text: string }[];
@@ -31,6 +33,7 @@ export interface Settings {
   cardWhitelist: number[];
   cardBlacklist: number[];
   lockedAssets: string[];
+  paused: boolean;
 }
 
 export interface LibraryGame {

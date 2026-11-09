@@ -1,9 +1,12 @@
 //! Unlocking the achievements of the games the owner picked, one at a time.
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use crate::apps::process::JobObject;
 const MIN_DELAY_SECS: u64 = 5 * 60;
 const MAX_DELAY_SECS: u64 = 30 * 60;
 const CATEGORY_VAC: u32 = 8;
@@ -49,12 +52,38 @@ pub(crate) fn next_delay_secs(random: u64) -> u64 {
 pub(crate) fn eligible(feature_categories: &[u32]) -> bool {
     feature_categories.contains(&CATEGORY_ACHIEVEMENTS) && !feature_categories.contains(&CATEGORY_VAC)
 }
+/// Something that keeps a process from outliving MYLE.
+pub(crate) trait Adopt: Send + Sync {
+    fn adopt(&self, process: windows_sys::Win32::Foundation::HANDLE) -> bool;
+}
+impl Adopt for JobObject {
+    fn adopt(&self, process: windows_sys::Win32::Foundation::HANDLE) -> bool {
+        self.assign(process)
+    }
+}
 /// Runs this same program as a short-lived helper, connected as the game.
-pub(crate) struct HelperTool;
-async fn run_helper(args: Vec<String>) -> Result<String, String> {
+pub(crate) struct HelperTool {
+    pub job: Arc<JobObject>,
+}
+async fn run_helper(job: &impl Adopt, args: Vec<String>) -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let run = Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).kill_on_drop(true).output();
-    let output = tokio::time::timeout(HELPER_LIMIT, run)
+    run_in_job(job, &exe, &args).await
+}
+/// A helper outside the job could outlive MYLE, so one that cannot join does not run on.
+async fn run_in_job(job: &impl Adopt, program: &std::path::Path, args: &[String]) -> Result<String, String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if !child.raw_handle().is_some_and(|process| job.adopt(process)) {
+        let _ = child.kill().await;
+        return Err("Could not keep a Steam helper under MYLE's control.".to_string());
+    }
+    let output = tokio::time::timeout(HELPER_LIMIT, child.wait_with_output())
         .await
         .map_err(|_| "Steam took too long to answer.".to_string())?
         .map_err(|e| e.to_string())?;
@@ -65,11 +94,11 @@ async fn run_helper(args: Vec<String>) -> Result<String, String> {
 }
 impl AchievementTool for HelperTool {
     async fn list(&self, appid: u32) -> Result<AchievementList, String> {
-        let output = run_helper(vec![format!("--steam-achievements={appid}")]).await?;
+        let output = run_helper(&*self.job, vec![format!("--steam-achievements={appid}")]).await?;
         serde_json::from_str(output.trim()).map_err(|_| "Could not read the achievements.".to_string())
     }
     async fn unlock(&self, appid: u32, name: &str) -> Result<(), String> {
-        run_helper(vec![format!("--steam-unlock={appid}"), format!("--steam-achievement={name}")]).await.map(|_| ())
+        run_helper(&*self.job, vec![format!("--steam-unlock={appid}"), format!("--steam-achievement={name}")]).await.map(|_| ())
     }
 }
 #[cfg(test)]
@@ -78,6 +107,37 @@ mod tests {
     use super::*;
     fn list(locked: &[&str]) -> AchievementList {
         AchievementList { names: locked.iter().map(|s| s.to_string()).collect(), locked: locked.iter().map(|s| s.to_string()).collect() }
+    }
+    #[derive(Default)]
+    struct FakeJob {
+        adopted: std::sync::atomic::AtomicU32,
+        refuses: bool,
+    }
+    impl Adopt for FakeJob {
+        fn adopt(&self, _process: windows_sys::Win32::Foundation::HANDLE) -> bool {
+            self.adopted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            !self.refuses
+        }
+    }
+    fn cmd() -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_string()))
+    }
+    fn strings(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+    #[tokio::test]
+    async fn a_helper_joins_the_job_and_gives_its_answer() {
+        let job = FakeJob::default();
+        let output = run_in_job(&job, &cmd(), &strings(&["/c", "echo hello"])).await.unwrap();
+        assert_eq!(output.trim(), "hello");
+        assert_eq!(job.adopted.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn a_helper_that_cannot_join_the_job_does_not_run_on() {
+        let job = FakeJob { refuses: true, ..FakeJob::default() };
+        let started = std::time::Instant::now();
+        assert!(run_in_job(&job, &cmd(), &strings(&["/c", "ping -n 20 127.0.0.1"])).await.is_err());
+        assert!(started.elapsed() < Duration::from_secs(10), "it was stopped, not waited for");
     }
     #[test]
     fn the_delay_stays_between_five_and_thirty_minutes() {

@@ -23,6 +23,10 @@ The owner saw the four-panel page and asked for a full section instead, reviewed
 
 **Library data needs no API key.** `store.steampowered.com/pointssummary/ajaxgetasyncconfig` returns a `webapi_token` for the signed-in session, accepted as `access_token` by `IPlayerService/GetOwnedGames` and `GetTopAchievementsForGames` (checked on the owner's account: playtime, totals and unlocked achievements all came back). Art and features come from `GetItems`. A portrait capsule comes from `assets.library_capsule`, falling back to the header image.
 
+**Refunds cover the idler too,** and any doubt counts as a game that can still be refunded: unreadable dates, or a recent licence that matches no game the owner has. Names are compared by their letters and digits alone. Games idled by hand are the owner's choice and are not checked.
+
+**Steam Family games are in the library,** marked as shared, because Steam's own client counts them. They drop no cards.
+
 **Left out for now:** the Has badge filter, because it cannot be confirmed without a badge page showing a crafted badge; Claim for free games, which is not in the owner's list.
 
 ## Where this fits

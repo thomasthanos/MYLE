@@ -126,6 +126,8 @@ export function untilText(at: number | null, now: number): string {
 
 export function farmLine(farm: { phase: string; gamesLeft: number; dropsLeft: number }): string {
   if (farm.phase === "done") return "No cards left to drop";
+  if (farm.phase === "reading") return "Reading your card drops from Steam";
+  if (farm.phase === "signedOut") return "Waiting for you to sign in to Steam again";
   const cards = `${farm.dropsLeft} card${farm.dropsLeft === 1 ? "" : "s"}`;
   const games = farm.gamesLeft === 1 ? "in 1 game" : `across ${farm.gamesLeft} games`;
   return `${cards} left to drop, ${games}`;

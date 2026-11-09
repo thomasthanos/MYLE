@@ -2,6 +2,8 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use winreg::RegKey;
+use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use winreg::enums::HKEY_CURRENT_USER;
 /// A SteamID64's low 32 bits are the account number the registry keeps.
 const ACCOUNT_BITS: u64 = 0xFFFF_FFFF;
@@ -31,6 +33,22 @@ pub(crate) fn read() -> Option<SteamState> {
         }
     }
     Some(SteamState { path: PathBuf::from(path), active_user, running })
+}
+/// The Steam client's process id, 0 when it has closed.
+pub(crate) fn steam_pid() -> u32 {
+    RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam\ActiveProcess").ok().and_then(|key| key.get_value("pid").ok()).unwrap_or(0)
+}
+pub(crate) fn process_alive(pid: u32) -> bool {
+    // Steam leaves its id behind if it crashes, so the process itself has to be looked at.
+    unsafe {
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+        CloseHandle(process);
+        alive
+    }
 }
 /// A game Steam is running that MYLE did not start.
 pub(crate) fn real_game(running: &[u32], ours: &BTreeSet<u32>) -> Option<u32> {

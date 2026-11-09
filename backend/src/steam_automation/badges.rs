@@ -4,7 +4,8 @@ use std::sync::LazyLock;
 use regex_lite::Regex;
 use super::community::{Community, CommunityError};
 const ROW: &str = r#"class="badge_row is_link""#;
-const REFUND_SECONDS: u64 = 14 * 86_400;
+/// Fourteen days, plus one because a licence is dated at midnight of the day it was bought.
+const REFUND_SECONDS: u64 = 15 * 86_400;
 const REFUND_MINUTES: u32 = 120;
 const COMMUNITY: &str = "https://steamcommunity.com";
 const LICENCES_URL: &str = "https://store.steampowered.com/account/licenses/?l=english";
@@ -87,12 +88,38 @@ pub(crate) fn parse_licences(html: &str) -> Vec<(String, u64)> {
         })
         .collect()
 }
-/// Whether a licence bought in the refund window names this game. Editions count for their game.
-pub(crate) fn bought_recently(game: &str, licences: &[(String, u64)], now: u64) -> bool {
-    let game = game.to_lowercase();
-    licences
-        .iter()
-        .any(|(name, date)| now.saturating_sub(*date) <= REFUND_SECONDS && name.to_lowercase().contains(&game))
+/// A name reduced to its letters and digits, so `&amp;` and ® cannot get in the way of a match.
+fn plain(name: &str) -> String {
+    name.replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", "\"").chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+/// Whether a game must be left alone so it can still be refunded. Any doubt counts as yes: a
+/// refund cannot be got back, while a game skipped today can run later.
+pub(crate) struct RefundCheck {
+    dates_known: bool,
+    recent: Vec<String>,
+    /// A recent licence matches no game the owner has, so it may be any of them under another name.
+    unmatched: bool,
+}
+impl RefundCheck {
+    pub(crate) fn new(licences: Option<&[(String, u64)]>, library: &[String], now: u64) -> Self {
+        let games: Vec<String> = library.iter().map(|name| plain(name)).filter(|name| !name.is_empty()).collect();
+        let recent: Vec<String> = licences.unwrap_or_default().iter().filter(|(_, date)| now.saturating_sub(*date) <= REFUND_SECONDS).map(|(name, _)| plain(name)).collect();
+        let unmatched = recent.iter().any(|licence| !games.iter().any(|game| licence.contains(game)));
+        Self { dates_known: licences.is_some(), recent, unmatched }
+    }
+    fn bought_recently(&self, game: &str) -> Option<bool> {
+        if !self.dates_known {
+            return None;
+        }
+        let game = plain(game);
+        if self.recent.iter().any(|licence| licence.contains(&game)) {
+            return Some(true);
+        }
+        (!self.unmatched).then_some(false)
+    }
+    pub(crate) fn protects(&self, game: &str, minutes_played: u32) -> bool {
+        is_refundable(self.bought_recently(game), minutes_played)
+    }
 }
 /// `recent` is `None` when purchase dates could not be read, which counts against idling.
 pub(crate) fn is_refundable(recent: Option<bool>, minutes_played: u32) -> bool {
@@ -166,17 +193,45 @@ mod tests {
             vec![("Portal 2".to_string(), NOV_8_2026), ("Dying Light Deluxe Edition".to_string(), 1_577_836_800)]
         );
     }
+    const DAY: u64 = 86_400;
+    fn check(licences: &[(&str, u64)], library: &[&str], now: u64) -> RefundCheck {
+        let licences: Vec<(String, u64)> = licences.iter().map(|(name, date)| (name.to_string(), *date)).collect();
+        let library: Vec<String> = library.iter().map(|name| name.to_string()).collect();
+        RefundCheck::new(Some(&licences), &library, now)
+    }
     #[test]
-    fn a_recent_licence_counts_by_its_name() {
-        let licences = parse_licences(LICENCES);
-        assert!(bought_recently("Portal 2", &licences, NOV_8_2026 + 86400));
-        assert!(!bought_recently("Dying Light", &licences, NOV_8_2026 + 86400), "that licence is years old");
-        assert!(!bought_recently("Portal 2", &licences, NOV_8_2026 + 15 * 86400));
+    fn a_recent_licence_protects_its_game_only() {
+        let refunds = check(&[("Portal 2", NOV_8_2026)], &["Portal 2", "Dying Light"], NOV_8_2026 + DAY);
+        assert!(refunds.protects("Portal 2", 10));
+        assert!(!refunds.protects("Dying Light", 10));
+    }
+    #[test]
+    fn an_old_licence_protects_nothing() {
+        assert!(!check(&[("Portal 2", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + 16 * DAY).protects("Portal 2", 10));
+    }
+    #[test]
+    fn the_last_day_of_the_fourteen_is_still_inside() {
+        assert!(check(&[("Portal 2", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + 14 * DAY + 23 * 3600).protects("Portal 2", 10));
     }
     #[test]
     fn an_edition_counts_for_its_game() {
-        let licences = vec![("Dying Light Deluxe Edition".to_string(), NOV_8_2026)];
-        assert!(bought_recently("Dying Light", &licences, NOV_8_2026));
+        assert!(check(&[("Dying Light Deluxe Edition", NOV_8_2026)], &["Dying Light"], NOV_8_2026).protects("Dying Light", 10));
+    }
+    #[test]
+    fn names_match_despite_marks_and_entities() {
+        let now = NOV_8_2026 + DAY;
+        assert!(check(&[("Dungeons & Dragons", NOV_8_2026)], &["Dungeons &amp; Dragons"], now).protects("Dungeons &amp; Dragons", 10));
+        assert!(check(&[("Rainbow Six: Siege", NOV_8_2026)], &["Rainbow Six® Siege™"], now).protects("Rainbow Six® Siege™", 10));
+    }
+    #[test]
+    fn a_recent_licence_matching_no_game_leaves_short_games_unknown() {
+        let refunds = check(&[("Mystery Bundle", NOV_8_2026)], &["Portal 2"], NOV_8_2026 + DAY);
+        assert!(refunds.protects("Portal 2", 10), "it may be this game under another name");
+        assert!(!refunds.protects("Portal 2", 130), "past two hours there is no refund to lose");
+    }
+    #[test]
+    fn unreadable_dates_protect_short_games() {
+        assert!(RefundCheck::new(None, &[], NOV_8_2026).protects("Portal 2", 10));
     }
     #[test]
     fn under_two_hours_and_bought_recently_is_refundable() {

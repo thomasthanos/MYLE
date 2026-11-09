@@ -21,7 +21,6 @@ class SteamAutomationState {
   status = $state<Status | null>(null);
   settings = $state<Settings | null>(null);
   signingIn = $state(false);
-  paused = $state(false);
   /** Reading the status failed. Cleared by the next answer. */
   error = $state<string | null>(null);
   /** Something the owner asked for failed. Cleared by their next action. */
@@ -129,7 +128,7 @@ class SteamAutomationState {
   }
 
   async setPaused(paused: boolean) {
-    this.paused = paused;
+    if (this.settings) this.settings = { ...this.settings, paused };
     await this.#attempt(() => api.pause(paused));
     this.#settle();
   }
