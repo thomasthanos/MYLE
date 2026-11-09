@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Notify;
-use super::community::{Community, HttpCommunity};
+use super::community::HttpCommunity;
 use super::engine::Status;
-use super::library::{self, LibraryGame, Saved};
+use super::library::{self, LibraryAnswer, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
 use super::settings::{self, Settings};
@@ -17,7 +17,6 @@ const REFRESH_LABEL: &str = "steam-refresh";
 const LOGIN_PAGE: &str = "https://steamcommunity.com/login/home/?goto=";
 const COMMUNITY: &str = "https://steamcommunity.com";
 const STORE: &str = "https://store.steampowered.com";
-const USERDATA: &str = "https://store.steampowered.com/dynamicstore/userdata/";
 /// How long the sign-in window waits: the owner may need their phone.
 const SIGN_IN_SECONDS: u32 = 600;
 /// How long the store is given to hand over its own cookie after signing in.
@@ -98,24 +97,32 @@ pub fn steam_automation_pause(state: State<'_, SteamAutomationState>, paused: bo
     state.paused.store(paused, Ordering::SeqCst);
     state.poke.notify_one();
 }
-/// The owner's games, from a saved copy while it is a day old or less.
+/// The owner's games, from a saved copy while it is a day old or less unless `force` asks again.
 #[tauri::command]
-pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAutomationState>) -> Result<Vec<LibraryGame>, String> {
-    let file = folder()?.join("library.json");
+pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAutomationState>, force: bool) -> Result<LibraryAnswer, String> {
+    let folder = folder()?;
+    let file = folder.join("library.json");
     let saved: Option<Saved> = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    if let Some(saved) = saved.filter(|saved| saved.is_fresh(now())) {
-        return Ok(saved.games);
+    if !force && let Some(saved) = saved.as_ref().filter(|saved| saved.is_fresh(now())) {
+        return Ok(LibraryAnswer { games: saved.games.clone(), saved_at: saved.saved_at, problem: None });
     }
-    let session = state.session().ok_or("Sign in to Steam first.")?;
-    let community = HttpCommunity::new()?;
-    community.set_session(Some(session));
-    let answer = community.get(USERDATA).await.map_err(|_| "Steam did not send your library.".to_string())?;
-    let owned = library::parse_owned(&answer)?;
-    let store = app.state::<SteamHelperState>().store()?;
-    let games = library::from_owned(&*store, &owned).await?;
-    let bytes = serde_json::to_vec(&Saved { saved_at: now(), games: games.clone() }).map_err(|e| e.to_string())?;
-    let _ = crate::game_saves::atomic::write(&file, &bytes);
-    Ok(games)
+    let fetched = match state.session() {
+        Some(session) => {
+            let community = HttpCommunity::new()?;
+            let steam_id = session.steam_id;
+            community.set_session(Some(session));
+            let store = app.state::<SteamHelperState>().store()?;
+            library::fetch(&community, &*store, steam_id).await
+        }
+        None => Err("Sign in to Steam first.".to_string()),
+    };
+    let answer = library::settle(saved, fetched, now())?;
+    if answer.problem.is_none() {
+        let bytes = serde_json::to_vec(&Saved { saved_at: answer.saved_at, games: answer.games.clone() }).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let _ = crate::game_saves::atomic::write(&file, &bytes);
+    }
+    Ok(answer)
 }
 fn is_steam_site(url: &Url) -> bool {
     url.host_str().is_some_and(|host| {

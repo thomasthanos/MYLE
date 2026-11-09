@@ -27,6 +27,8 @@ pub(crate) struct Item {
     pub free_weekend: Option<FreeWeekend>,
     /// Steam's item type: 0 is a game.
     pub item_type: Option<u64>,
+    /// The tall library art, which not every game has.
+    pub portrait_url: Option<String>,
     pub features: Vec<u64>,
 }
 /// A `GetItems` or `Query` answer.
@@ -69,7 +71,8 @@ fn item(value: &Value) -> Option<Item> {
     let descriptors = ids(value.get("content_descriptorids"), None);
     let reviews = value.get("reviews").and_then(|r| r.get("summary_filtered"));
     let purchase = value.get("best_purchase_option");
-    let header = value.get("assets").and_then(|a| a.get("header")).and_then(Value::as_str);
+    let asset = |key: &str| value.get("assets").and_then(|a| a.get(key)).and_then(Value::as_str);
+    let header = asset("header");
     let game = Game {
         appid,
         name,
@@ -95,6 +98,7 @@ fn item(value: &Value) -> Option<Item> {
             || descriptors.iter().any(|d| ADULT_DESCRIPTORS.contains(d)),
         free_weekend: value.get("free_weekend").and_then(free_weekend),
         item_type: number(value, "type"),
+        portrait_url: asset("library_capsule").map(|path| format!("{IMAGES}/{appid}/{path}")),
         features: ids(value.get("categories").and_then(|c| c.get("feature_categoryids")), None),
     })
 }
@@ -127,6 +131,13 @@ fn text(value: Option<&Value>, key: &str) -> Option<String> {
 mod tests {
     use super::*;
     const ITEMS: &str = include_str!("fixtures/items.json");
+    #[test]
+    fn library_art_is_read() {
+        let json = r#"{"response":{"store_items":[{"appid":220,"name":"Half-Life 2","assets":{"library_capsule":"ac2f/library_600x900.jpg"}},{"appid":320,"name":"HL2: DM","assets":{"header":"header.jpg"}}]}}"#;
+        let answer = items(json).unwrap();
+        assert_eq!(answer.items[0].portrait_url.as_deref(), Some("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/220/ac2f/library_600x900.jpg"));
+        assert_eq!(answer.items[1].portrait_url, None);
+    }
     fn by_id(appid: u32) -> Item {
         items(ITEMS).unwrap().items.into_iter().find(|i| i.game.appid == appid).unwrap()
     }
