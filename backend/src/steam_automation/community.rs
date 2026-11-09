@@ -50,6 +50,14 @@ pub(super) fn encode(text: &str) -> String {
 fn form_body(form: &[(&str, String)]) -> String {
     form.iter().map(|(key, value)| format!("{}={}", encode(key), encode(value))).collect::<Vec<_>>().join("&")
 }
+impl<T: Community> Community for std::sync::Arc<T> {
+    fn get(&self, url: &str) -> impl Future<Output = Result<String, CommunityError>> + Send {
+        (**self).get(url)
+    }
+    fn post(&self, url: &str, form: &[(&str, String)], referer: &str) -> impl Future<Output = Result<String, CommunityError>> + Send {
+        (**self).post(url, form, referer)
+    }
+}
 pub(crate) struct HttpCommunity {
     client: reqwest::Client,
     session: std::sync::Mutex<Option<Session>>,

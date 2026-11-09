@@ -1,5 +1,5 @@
 //! What the page asks for. Every command here is refused for anyone but the owner (`account::owner`).
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -9,11 +9,13 @@ use tokio::sync::Notify;
 use super::badges::{BadgeGame, read_badges};
 use super::community::{CommunityError, HttpCommunity};
 use super::engine::{Started, Status};
+use super::inventory::{self, InventoryItem, ListOutcome, ListRequest, Listing};
 use super::library::{self, LibraryAnswer, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
 use super::settings::{self, Settings};
 use crate::steam_helper::commands::SteamHelperState;
+/// How long the card and inventory lists are kept before Steam is asked again.
 const DROPS_FRESH_SECS: u64 = 600;
 const LOGIN_LABEL: &str = "steam-login";
 const REFRESH_LABEL: &str = "steam-refresh";
@@ -35,6 +37,11 @@ pub struct SteamAutomationState {
     started: Mutex<Option<Started>>,
     manual: Mutex<BTreeSet<u32>>,
     drops: Mutex<Option<(u64, Vec<BadgeGame>)>>,
+    inventory: Mutex<Option<(u64, Vec<InventoryItem>)>>,
+    /// Assets listed by hand this session, so the same one is never sent twice.
+    listed: tokio::sync::Mutex<HashSet<String>>,
+    /// One line to Steam for the engine and the page, so together they stay within its limits.
+    community: OnceLock<Arc<HttpCommunity>>,
     paused: AtomicBool,
     poke: Notify,
     runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
@@ -54,6 +61,20 @@ impl SteamAutomationState {
         *self.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(new);
         self.poke.notify_one();
         Ok(())
+    }
+    pub(crate) fn community(&self) -> Result<Arc<HttpCommunity>, String> {
+        if let Some(community) = self.community.get() {
+            return Ok(community.clone());
+        }
+        let community = Arc::new(HttpCommunity::new()?);
+        Ok(self.community.get_or_init(|| community).clone())
+    }
+    /// The line to Steam, signed in as the owner.
+    fn signed_in(&self) -> Result<(Arc<HttpCommunity>, Session), String> {
+        let session = self.session().ok_or("Sign in to Steam first.")?;
+        let community = self.community()?;
+        community.set_session(Some(session.clone()));
+        Ok((community, session))
     }
     pub(crate) fn settings(&self) -> Settings {
         let mut settings = self.settings.lock().unwrap_or_else(|p| p.into_inner());
@@ -82,6 +103,13 @@ impl SteamAutomationState {
         if let Some(runner) = self.runner.get() {
             runner.stop_all();
         }
+    }
+}
+fn say(error: CommunityError) -> String {
+    match error {
+        CommunityError::SignedOut => "Your Steam sign-in has expired. Sign in again.".to_string(),
+        CommunityError::Limited => "Steam is limiting requests right now. Try again in a minute.".to_string(),
+        CommunityError::Other(reason) => reason,
     }
 }
 pub(crate) fn folder() -> Result<PathBuf, String> {
@@ -149,21 +177,50 @@ pub fn steam_automation_stop_all(state: State<'_, SteamAutomationState>) {
 #[tauri::command]
 pub async fn steam_automation_drops(state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<BadgeGame>, String> {
     let kept = state.drops.lock().unwrap_or_else(|p| p.into_inner()).clone();
-    if !force && let Some((read_at, games)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
-        let _ = read_at;
+    if !force && let Some((_, games)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
         return Ok(games);
     }
-    let session = state.session().ok_or("Sign in to Steam first.")?;
-    let steam_id = session.steam_id;
-    let community = HttpCommunity::new()?;
-    community.set_session(Some(session));
-    let games = read_badges(&community, steam_id).await.map_err(|error| match error {
-        CommunityError::SignedOut => "Your Steam sign-in has expired. Sign in again.".to_string(),
-        CommunityError::Limited => "Steam is limiting requests right now. Try again in a minute.".to_string(),
-        CommunityError::Other(reason) => reason,
-    })?;
+    let (community, session) = state.signed_in()?;
+    let games = read_badges(&community, session.steam_id).await.map_err(say)?;
     *state.drops.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), games.clone()));
     Ok(games)
+}
+/// Everything in the Steam inventory, kept for a few minutes.
+#[tauri::command]
+pub async fn steam_automation_inventory(state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<InventoryItem>, String> {
+    let kept = state.inventory.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    if !force && let Some((_, items)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
+        return Ok(items);
+    }
+    let (community, session) = state.signed_in()?;
+    let items = inventory::read_items(&community, session.steam_id).await.map_err(say)?;
+    *state.inventory.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), items.clone()));
+    Ok(items)
+}
+/// The cheapest price on the Market right now, in cents.
+#[tauri::command]
+pub async fn steam_automation_price(state: State<'_, SteamAutomationState>, hash_name: String) -> Result<Option<u32>, String> {
+    let (community, _) = state.signed_in()?;
+    inventory::lowest_price(&community, &hash_name).await.map_err(say)
+}
+/// Lists one item. The page sends them one at a time so it can show how far it has got.
+#[tauri::command]
+pub async fn steam_automation_list_item(state: State<'_, SteamAutomationState>, item: ListRequest) -> Result<ListOutcome, String> {
+    let (community, session) = state.signed_in()?;
+    let settings = state.settings();
+    let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
+    let mut listed = state.listed.lock().await;
+    inventory::list_item(&community, &session, &item, settings.minimum_cents, &locked, &mut listed).await.map_err(say)
+}
+#[tauri::command]
+pub async fn steam_automation_listings(state: State<'_, SteamAutomationState>) -> Result<Vec<Listing>, String> {
+    let (community, _) = state.signed_in()?;
+    inventory::read_listings(&community).await.map_err(say)
+}
+#[tauri::command]
+pub async fn steam_automation_remove_listing(state: State<'_, SteamAutomationState>, listing_id: String) -> Result<(), String> {
+    let (community, session) = state.signed_in()?;
+    inventory::remove_listing(&community, &session, &listing_id).await.map_err(say)
 }
 /// The owner's games, from a saved copy while it is a day old or less unless `force` asks again.
 #[tauri::command]
@@ -174,15 +231,12 @@ pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAuto
     if !force && let Some(saved) = saved.as_ref().filter(|saved| saved.is_fresh(now())) {
         return Ok(LibraryAnswer { games: saved.games.clone(), saved_at: saved.saved_at, problem: None });
     }
-    let fetched = match state.session() {
-        Some(session) => {
-            let community = HttpCommunity::new()?;
-            let steam_id = session.steam_id;
-            community.set_session(Some(session));
+    let fetched = match state.signed_in() {
+        Ok((community, session)) => {
             let store = app.state::<SteamHelperState>().store()?;
-            library::fetch(&community, &*store, steam_id).await
+            library::fetch(&community, &*store, session.steam_id).await
         }
-        None => Err("Sign in to Steam first.".to_string()),
+        Err(reason) => Err(reason),
     };
     let answer = library::settle(saved, fetched, now())?;
     if answer.problem.is_none() {

@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager};
 use super::achievements::{AchievementList, AchievementTool, HelperTool, UnlockQueue, next_delay_secs};
 use super::badges::{BadgeGame, bought_recently, is_refundable, read_badges, read_licences};
 use super::commands::{SteamAutomationState, folder, now, refresh_session};
-use super::community::{Community, CommunityError, HttpCommunity};
+use super::community::{Community, CommunityError};
 use super::decide::{FarmStep, Waiting, World, decide, farm_step, filter_cards};
 use super::inventory::{SellReport, sell_duplicates};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
@@ -218,8 +218,9 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             }
         }
     }
-    async fn run_inventory(&mut self, session: &Session, minimum: u32, now: u64) {
-        match sell_duplicates(&self.community, session, minimum, &mut self.listed).await {
+    async fn run_inventory(&mut self, session: &Session, settings: &Settings, now: u64) {
+        let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
+        match sell_duplicates(&self.community, session, settings.minimum_cents, &locked, &mut self.listed).await {
             Ok(report) => {
                 self.next_inventory_at = now + INVENTORY_SECS;
                 if report.listed > 0 {
@@ -330,7 +331,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         if decision.inventory_may_run && settings.inventory_on && now >= self.next_inventory_at
             && let Some(session) = &session
         {
-            self.run_inventory(session, settings.minimum_cents, now).await;
+            self.run_inventory(session, &settings, now).await;
         }
         self.view(Seen { world: &world, farm: &farm, candidates: &candidates, waiting: decision.waiting, settings: &settings, started, session_exists: session.is_some(), now })
     }
@@ -339,7 +340,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
 pub(crate) fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<SteamAutomationState>();
-        let (Ok(spawner), Ok(community), Ok(folder)) = (HelperSpawner::new(), HttpCommunity::new(), folder()) else {
+        let (Ok(spawner), Ok(community), Ok(folder)) = (HelperSpawner::new(), state.community(), folder()) else {
             return;
         };
         let runner = Arc::new(ProcessRunner::new(spawner));
