@@ -95,6 +95,31 @@ export interface Listing {
   waitingConfirmation: boolean;
 }
 
+/** One achievement: unlocked or not, from Steam on this PC; the rest from Steam's public list. */
+export interface Achievement {
+  name: string;
+  title: string;
+  description: string;
+  icon: string | null;
+  iconGray: string | null;
+  hidden: boolean;
+  /** The share of players who have it, 0 to 100. */
+  percent: number | null;
+  unlocked: boolean;
+}
+
+export interface GameAchievements {
+  appid: number;
+  achievements: Achievement[];
+  /** False when Steam's descriptions could not be read: names only. */
+  described: boolean;
+}
+
+export interface SetOutcome {
+  changed: string[];
+  refused: string[];
+}
+
 export const steamAutomationApi = {
   status: () => invoke<Status>("steam_automation_status"),
   signIn: () => invoke<void>("steam_automation_sign_in"),
@@ -111,4 +136,6 @@ export const steamAutomationApi = {
   listItem: (item: ListRequest) => invoke<ListOutcome>("steam_automation_list_item", { item }),
   listings: () => invoke<Listing[]>("steam_automation_listings"),
   removeListing: (listingId: string, assetId: string) => invoke<void>("steam_automation_remove_listing", { listingId, assetId }),
+  achievements: (appid: number) => invoke<GameAchievements>("steam_automation_achievements", { appid }),
+  setAchievements: (appid: number, names: string[], unlock: boolean) => invoke<SetOutcome>("steam_automation_set_achievements", { appid, names, unlock }),
 };

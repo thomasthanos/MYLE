@@ -20,6 +20,7 @@ const STATS_VERSION: &str = "STEAMUSERSTATS_INTERFACE_VERSION012";
 const REQUEST_CURRENT_STATS: usize = 0;
 const GET_ACHIEVEMENT: usize = 6;
 const SET_ACHIEVEMENT: usize = 7;
+const CLEAR_ACHIEVEMENT: usize = 8;
 const STORE_STATS: usize = 10;
 const GET_NUM_ACHIEVEMENTS: usize = 14;
 const GET_ACHIEVEMENT_NAME: usize = 15;
@@ -186,6 +187,36 @@ impl UserStats<'_> {
                 })
                 .collect()
         }
+    }
+    /// Unlocks or locks each of `names`, then has Steam store them all at once and waits for it to
+    /// confirm. Steam refuses a name it does not know, or one only the game's servers may set.
+    pub(crate) fn set_many(&self, names: &[String], unlock: bool) -> Result<super::achievements::SetOutcome, String> {
+        let mut outcome = super::achievements::SetOutcome::default();
+        // SAFETY: `stats` is the live interface asked for by version, the methods have these
+        // signatures, and each name lives for its call.
+        unsafe {
+            let change: unsafe extern "C" fn(This, *const c_char) -> bool = method(self.stats, if unlock { SET_ACHIEVEMENT } else { CLEAR_ACHIEVEMENT });
+            for name in names {
+                let done = match CString::new(name.as_str()) {
+                    Ok(text) => change(self.stats, text.as_ptr()),
+                    Err(_) => false,
+                };
+                if done { outcome.changed.push(name.clone()) } else { outcome.refused.push(name.clone()) }
+            }
+        }
+        if outcome.changed.is_empty() {
+            return Ok(outcome);
+        }
+        // SAFETY: as above.
+        let stored = unsafe {
+            let store: unsafe extern "C" fn(This) -> bool = method(self.stats, STORE_STATS);
+            store(self.stats)
+        };
+        if !stored {
+            return Err("Steam refused.".to_string());
+        }
+        self.wait_for(USER_STATS_STORED)?;
+        Ok(outcome)
     }
     /// Unlocks one achievement and waits for Steam to confirm it was stored.
     pub(crate) fn unlock(&self, name: &str) -> Result<(), String> {

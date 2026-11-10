@@ -13,10 +13,54 @@ const CATEGORY_VAC: u32 = 8;
 const CATEGORY_ACHIEVEMENTS: u32 = 22;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const HELPER_LIMIT: Duration = Duration::from_secs(45);
+/// The most characters of names one helper is given. Quoting can double them on the command line,
+/// which still stays well within what Windows takes.
+pub(crate) const PART_CHARS: usize = 12_000;
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct AchievementList {
     pub names: Vec<String>,
     pub locked: Vec<String>,
+}
+/// What a change did: the achievements Steam changed, and those it would not (one only the game's
+/// servers may set, say).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct SetOutcome {
+    pub changed: Vec<String>,
+    pub refused: Vec<String>,
+}
+impl SetOutcome {
+    pub(crate) fn add(&mut self, other: SetOutcome) {
+        self.changed.extend(other.changed);
+        self.refused.extend(other.refused);
+    }
+}
+/// The helper's arguments to unlock or lock `names`.
+pub(crate) fn set_args(appid: u32, names: &[String], unlock: bool) -> Vec<String> {
+    vec![
+        format!("--steam-set={appid}"),
+        format!("--steam-names={}", serde_json::to_string(names).unwrap_or_else(|_| "[]".to_string())),
+        format!("--steam-to={}", if unlock { "unlocked" } else { "locked" }),
+    ]
+}
+/// `names` in order, in parts that each fit one helper's command line.
+pub(crate) fn parts(names: &[String]) -> Vec<Vec<String>> {
+    let mut parts: Vec<Vec<String>> = Vec::new();
+    let mut size = 0;
+    for name in names {
+        // Quoted, and a comma.
+        let cost = serde_json::to_string(name).map_or(name.len() + 2, |quoted| quoted.len()) + 1;
+        match parts.last_mut() {
+            Some(part) if size + cost <= PART_CHARS => {
+                part.push(name.clone());
+                size += cost;
+            }
+            _ => {
+                parts.push(vec![name.clone()]);
+                size = 2 + cost;
+            }
+        }
+    }
+    parts
 }
 pub(crate) trait AchievementTool: Send + Sync {
     fn list(&self, appid: u32) -> impl Future<Output = Result<AchievementList, String>> + Send;
@@ -91,6 +135,29 @@ async fn run_in_job(job: &impl Adopt, program: &std::path::Path, args: &[String]
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+impl HelperTool {
+    /// Unlocks or locks `names`, one command line's worth at a time, each part stored by Steam
+    /// before the next goes. When a later part fails, what the earlier ones did still counts.
+    pub(crate) async fn set(&self, appid: u32, names: &[String], unlock: bool) -> Result<SetOutcome, String> {
+        let mut total = SetOutcome::default();
+        let mut parts = parts(names).into_iter();
+        while let Some(part) = parts.next() {
+            let answer = run_helper(&*self.job, set_args(appid, &part, unlock))
+                .await
+                .and_then(|output| serde_json::from_str::<SetOutcome>(output.trim()).map_err(|_| "Could not read Steam's answer.".to_string()));
+            match answer {
+                Ok(outcome) => total.add(outcome),
+                Err(reason) if total.changed.is_empty() => return Err(reason),
+                Err(_) => {
+                    total.refused.extend(part);
+                    total.refused.extend(parts.flatten());
+                    break;
+                }
+            }
+        }
+        Ok(total)
+    }
 }
 impl AchievementTool for HelperTool {
     async fn list(&self, appid: u32) -> Result<AchievementList, String> {
@@ -184,6 +251,26 @@ mod tests {
         let mut queue = UnlockQueue::default();
         assert_eq!(queue.next(&[1, 2], &lists, 0).unwrap().0, 1);
         assert_eq!(queue.next(&[1, 2], &lists, 1).unwrap().0, 2);
+    }
+    #[test]
+    fn a_long_list_is_sent_in_parts_and_none_is_lost() {
+        let names: Vec<String> = (0..2000).map(|index| format!("ACHIEVEMENT_WITH_A_LONG_NAME_{index:04}")).collect();
+        let parts = parts(&names);
+        assert!(parts.len() > 1);
+        assert!(parts.iter().all(|part| serde_json::to_string(part).unwrap().len() <= PART_CHARS));
+        assert_eq!(parts.concat(), names);
+    }
+    #[test]
+    fn a_short_list_goes_in_one_part() {
+        let names = vec!["A".to_string(), "B".to_string()];
+        assert_eq!(parts(&names), vec![names.clone()]);
+    }
+    #[test]
+    fn outcomes_of_several_parts_add_up() {
+        let mut total = SetOutcome::default();
+        total.add(SetOutcome { changed: vec!["A".into()], refused: vec![] });
+        total.add(SetOutcome { changed: vec!["B".into()], refused: vec!["C".into()] });
+        assert_eq!(total, SetOutcome { changed: vec!["A".into(), "B".into()], refused: vec!["C".into()] });
     }
     #[test]
     fn vac_games_are_not_eligible() {

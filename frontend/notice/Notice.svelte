@@ -6,6 +6,7 @@
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import Gift from "@lucide/svelte/icons/gift";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import X from "@lucide/svelte/icons/x";
   import { timeLeft } from "../app/pages/steam-helper/model";
 
@@ -144,7 +145,6 @@
     class:leaving
     role="button"
     tabindex="-1"
-    title={isSteam ? "Open Steam Game Helper" : "Open Game Saves"}
     onclick={() => close(true)}
     onkeydown={(event) => event.key === "Enter" && close(true)}
     onpointerenter={() => (paused = true)}
@@ -155,6 +155,8 @@
       <div class="head">
         <span class="app">{isSteam ? "MYLE · Steam Game Helper" : "MYLE · Game Saves"}</span>
         <span class="time">{time}</span>
+        <!-- The card fills its small window, so what a click does shows in it, not in a tooltip over it. -->
+        <span class="open" aria-hidden="true">Open <ChevronRight size={11} strokeWidth={2.4} /></span>
       </div>
       <strong>{view.title}</strong>
       <p>{view.text}</p>
@@ -267,6 +269,23 @@
     margin-left: auto;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+  }
+
+  .open {
+    display: none;
+    align-items: center;
+    gap: 1px;
+    margin-left: auto;
+    color: rgb(var(--tone));
+    font-weight: 700;
+  }
+
+  .card:hover .time {
+    display: none;
+  }
+
+  .card:hover .open {
+    display: inline-flex;
   }
 
   strong {

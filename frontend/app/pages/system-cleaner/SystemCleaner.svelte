@@ -91,11 +91,11 @@
     </p>
     <div class="actions">
       <button class="btn" disabled={locked} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
-      <button class="btn" disabled={locked || !cleanerState.categories.length} onclick={() => cleanerState.toggleAll()}>
+      <button class="btn" disabled={locked || !cleanerState.scanned || !cleanerState.categories.length} title={cleanerState.scanned ? "Tick or untick every category" : "Scan first: it measures every category and ticks them for you"} onclick={() => cleanerState.toggleAll()}>
         <CheckCheck size={15} />
         {cleanerState.allSelected ? "Deselect all" : "Select all"}
       </button>
-      <button class="btn primary" disabled={locked || !cleanerState.selected.size} onclick={() => cleanerState.clean()}>
+      <button class="btn primary" disabled={locked || !cleanerState.scanned || !cleanerState.selected.size} title={cleanerState.scanned ? "Empty the ticked categories" : "Scan first, so you see what will be removed"} onclick={() => cleanerState.clean()}>
         <Sparkles size={15} />
         {cleanLabel}
       </button>

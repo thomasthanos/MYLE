@@ -17,7 +17,8 @@
   } = $props();
 </script>
 
-<button class="wb {kind}" aria-label={label} {title} {disabled} {onclick}>
+<!-- `data-tip`, not `title`: a tip that comes and goes with a state (Setup busy) must go with it. -->
+<button class="wb {kind}" aria-label={label} data-tip={title} {disabled} {onclick}>
   <span class="orb" aria-hidden="true">
     <svg viewBox="0 0 20 20">
       {#if kind === "close"}

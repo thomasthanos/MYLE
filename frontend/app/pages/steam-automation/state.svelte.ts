@@ -184,6 +184,12 @@ class SteamAutomationState {
     if (this.settings) void this.change({ favorites: toggleInList(this.settings.favorites, appid) });
   }
 
+  /** What the achievements window found or changed, so the game's tile shows it at once. */
+  noteAchievements(appid: number, progress: { unlocked: number; total: number }) {
+    if (!this.library?.some((game) => game.appid === appid)) return;
+    this.library = this.library.map((game) => (game.appid === appid ? { ...game, achievementsUnlocked: progress.unlocked, achievementsTotal: progress.total } : game));
+  }
+
   toggleAchievementGame(appid: number) {
     if (this.settings) void this.change({ achievementGames: toggleInList(this.settings.achievementGames, appid) });
   }

@@ -6,16 +6,20 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Notify;
+use super::achievements::{AchievementList, AchievementTool, HelperTool, SetOutcome};
 use super::badges::{BadgeGame, read_badges};
 use super::community::{CommunityError, HttpCommunity};
 use super::claim::{self, Claimed};
 use super::engine::{Pressed, Started, Status};
+use super::game_achievements::{self, GameAchievements};
 use super::inventory::{self, InventoryItem, ListOutcome, ListRequest, Listing};
 use super::library::{self, LibraryAnswer, LibraryGame, Saved};
 use super::runner::{GameRunner, HelperSpawner, ProcessRunner};
 use super::session::{self, Session};
 use super::settings::{self, Settings};
+use crate::apps::process::JobObject;
 use crate::steam_helper::commands::SteamHelperState;
+use crate::steam_helper::store::StoreApi;
 /// How long the card and inventory lists are kept before Steam is asked again.
 const DROPS_FRESH_SECS: u64 = 600;
 const LOGIN_LABEL: &str = "steam-login";
@@ -29,6 +33,10 @@ const SIGN_IN_SECONDS: u32 = 600;
 const STORE_SECONDS: u32 = 15;
 /// How long a hidden page is given to renew an expired session.
 const REFRESH_SECONDS: u32 = 20;
+/// More achievements than any game has.
+const MOST_ACHIEVEMENTS: usize = 10_000;
+/// Steam's longest achievement name.
+const LONGEST_NAME: usize = 128;
 #[derive(Default)]
 pub struct SteamAutomationState {
     session: Mutex<Option<Session>>,
@@ -49,6 +57,10 @@ pub struct SteamAutomationState {
     library: Mutex<Option<Vec<LibraryGame>>>,
     poke: Notify,
     runner: OnceLock<Arc<ProcessRunner<HelperSpawner>>>,
+    /// The engine's job for helpers, so the page's own helpers end with MYLE too.
+    job: OnceLock<Arc<JobObject>>,
+    /// Achievement lists the page read (or made old), for the engine's next tick.
+    fresh_lists: Mutex<Vec<(u32, Option<AchievementList>)>>,
 }
 impl SteamAutomationState {
     pub(crate) fn session(&self) -> Option<Session> {
@@ -152,6 +164,19 @@ impl SteamAutomationState {
     }
     pub(crate) fn set_runner(&self, runner: Arc<ProcessRunner<HelperSpawner>>) {
         let _ = self.runner.set(runner);
+    }
+    pub(crate) fn set_job(&self, job: Arc<JobObject>) {
+        let _ = self.job.set(job);
+    }
+    fn helper_tool(&self) -> Result<HelperTool, String> {
+        let job = self.job.get().cloned().ok_or("Steam Automation is still starting. Try again in a moment.")?;
+        Ok(HelperTool { job })
+    }
+    fn note_list(&self, appid: u32, list: Option<AchievementList>) {
+        self.fresh_lists.lock().unwrap_or_else(|p| p.into_inner()).push((appid, list));
+    }
+    pub(crate) fn take_fresh_lists(&self) -> Vec<(u32, Option<AchievementList>)> {
+        std::mem::take(&mut *self.fresh_lists.lock().unwrap_or_else(|p| p.into_inner()))
     }
     pub(crate) async fn poked(&self) {
         self.poke.notified().await;
@@ -300,6 +325,35 @@ pub async fn steam_automation_claim(app: AppHandle, state: State<'_, SteamAutoma
         Err(_) => {}
     }
     claimed
+}
+/// One game's achievements: which are unlocked, from the Steam client on this PC, with Steam's
+/// public descriptions, icons and how many players have each.
+#[tauri::command]
+pub async fn steam_automation_achievements(app: AppHandle, state: State<'_, SteamAutomationState>, appid: u32) -> Result<GameAchievements, String> {
+    if appid == 0 {
+        return Err("Choose a game first.".to_string());
+    }
+    let tool = state.helper_tool()?;
+    let store = app.state::<SteamHelperState>().store()?;
+    let url = game_achievements::details_url(appid);
+    let (list, details) = tokio::join!(tool.list(appid), store.get(&url));
+    let list = list?;
+    let details = details.map(|body| game_achievements::parse_details(&body)).unwrap_or_default();
+    state.note_list(appid, Some(list.clone()));
+    Ok(GameAchievements { appid, described: !details.is_empty(), achievements: game_achievements::merge(appid, &list, &details) })
+}
+/// Unlocks or locks some of one game's achievements, stored by Steam at once.
+#[tauri::command]
+pub async fn steam_automation_set_achievements(state: State<'_, SteamAutomationState>, appid: u32, names: Vec<String>, unlock: bool) -> Result<SetOutcome, String> {
+    let fine = |name: &String| !name.is_empty() && name.len() <= LONGEST_NAME && !name.contains('\0');
+    if appid == 0 || names.is_empty() || names.len() > MOST_ACHIEVEMENTS || !names.iter().all(fine) {
+        return Err("Those achievements cannot be changed.".to_string());
+    }
+    let tool = state.helper_tool()?;
+    let outcome = tool.set(appid, &names, unlock).await;
+    // Whatever happened, the engine's copy of this game's list may be wrong now.
+    state.note_list(appid, None);
+    outcome
 }
 /// The owner's games, from a saved copy while it is a day old or less unless `force` asks again.
 #[tauri::command]

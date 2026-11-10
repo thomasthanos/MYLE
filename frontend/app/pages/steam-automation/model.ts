@@ -285,3 +285,76 @@ export async function listEach<T>(
   }
   return result;
 }
+
+// One game's achievements, in the window that opens from its tile.
+export type AchievementFilter = "all" | "locked" | "unlocked";
+export type AchievementSort = "game" | "percent" | "rarest" | "name";
+export const ACHIEVEMENT_SORTS: { value: AchievementSort; label: string }[] = [
+  { value: "game", label: "Game order" },
+  { value: "percent", label: "Most common first" },
+  { value: "rarest", label: "Rarest first" },
+  { value: "name", label: "Name (A to Z)" },
+];
+
+interface AchievementLike {
+  name: string;
+  title: string;
+  description: string;
+  percent: number | null;
+  unlocked: boolean;
+}
+
+/** How rare an achievement is, by the share of players who have it. */
+export function rarity(percent: number | null): string {
+  if (percent === null) return "";
+  if (percent >= 50) return "Common";
+  if (percent >= 20) return "Uncommon";
+  if (percent >= 5) return "Rare";
+  return "Very rare";
+}
+
+export function percentText(percent: number | null): string {
+  if (percent === null) return "";
+  if (percent > 0 && percent < 0.1) return "<0.1%";
+  return `${percent.toFixed(1).replace(/\.0$/, "")}%`;
+}
+
+export function filterAchievements<T extends AchievementLike>(list: T[], filter: AchievementFilter, query: string): T[] {
+  const wanted = query.trim().toLowerCase();
+  return list.filter(
+    (achievement) =>
+      (filter === "all" || achievement.unlocked === (filter === "unlocked")) &&
+      (!wanted || [achievement.title, achievement.description, achievement.name].some((text) => text.toLowerCase().includes(wanted))),
+  );
+}
+
+/** A new list; "game" keeps the game's own order. A rate Steam did not give goes last. */
+export function sortAchievements<T extends AchievementLike>(list: T[], sort: AchievementSort): T[] {
+  const unknownLast = (a: T, b: T) => Number(a.percent === null) - Number(b.percent === null);
+  const compare: Record<AchievementSort, ((a: T, b: T) => number) | null> = {
+    game: null,
+    percent: (a, b) => unknownLast(a, b) || (b.percent ?? 0) - (a.percent ?? 0),
+    rarest: (a, b) => unknownLast(a, b) || (a.percent ?? 0) - (b.percent ?? 0),
+    name: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+  };
+  const order = compare[sort];
+  return order ? [...list].sort(order) : [...list];
+}
+
+/** Rounded down, so 100% means every one. */
+export function achievementProgress(list: { unlocked: boolean }[]): { unlocked: number; total: number; percent: number } {
+  const unlocked = list.filter((achievement) => achievement.unlocked).length;
+  return { unlocked, total: list.length, percent: list.length ? Math.floor((unlocked / list.length) * 100) : 0 };
+}
+
+/** The names to send: those not yet in the wanted state, out of `only` when given. */
+export function namesToChange(list: { name: string; unlocked: boolean }[], unlock: boolean, only?: Set<string>): string[] {
+  return list.filter((achievement) => achievement.unlocked !== unlock && (!only || only.has(achievement.name))).map((achievement) => achievement.name);
+}
+
+export function changeText(outcome: { changed: string[]; refused: string[] }, unlock: boolean): string {
+  const done = outcome.changed.length ? `${unlock ? "Unlocked" : "Locked"} ${plural(outcome.changed.length, "achievement")}.` : "";
+  const count = outcome.refused.length;
+  const refused = count ? `Steam would not change ${done ? count : plural(count, "achievement")}.` : "";
+  return [done, refused].filter(Boolean).join(" ");
+}

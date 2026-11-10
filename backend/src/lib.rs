@@ -588,6 +588,8 @@ pub fn run() {
             steam_automation::commands::steam_automation_listings,
             steam_automation::commands::steam_automation_remove_listing,
             steam_automation::commands::steam_automation_claim,
+            steam_automation::commands::steam_automation_achievements,
+            steam_automation::commands::steam_automation_set_achievements,
             steam_helper::commands::steam_helper_free,
             steam_helper::commands::steam_helper_picks,
             steam_helper::commands::steam_helper_row,

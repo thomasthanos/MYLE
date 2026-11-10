@@ -38,17 +38,24 @@
   /** Only when the leftovers are the system folders the user did not approve. */
   const needsAdmin = $derived(partly && category.mayNeedAdmin && cleanerState.adminGranted !== true);
   const skippedFiles = $derived(outcome?.skipped ? ` (${outcome.skipped.toLocaleString()} ${outcome.skipped === 1 ? "file" : "files"})` : "");
+  /** Part of it is system folders that only an administrator can empty, and that approval has not been given (yet): drawn fainter. */
+  const adminOnly = $derived(category.mayNeedAdmin && cleanerState.adminGranted !== true);
+  const adminTip = $derived(
+    cleanerState.adminGranted === false
+      ? "Needs administrator approval, which was declined. Only your own files here are cleaned."
+      : "Needs administrator approval. Windows asks for it when you scan.",
+  );
 </script>
 
-<article class="card" class:on={checked} class:done class:partly class:working={cleanerState.phase === "cleaning" && checked}>
+<article class="card" class:on={checked} class:done class:partly class:admin={adminOnly} class:working={cleanerState.phase === "cleaning" && checked}>
   <div class="head">
     <span class="icon"><Icon size={18} strokeWidth={1.7} /></span>
     <div class="titles">
-      <h3 title={category.description}>{category.title}</h3>
+      <h3 title={category.description}>{category.title}{#if category.mayNeedAdmin}<span class="admin-tag" title={adminOnly ? adminTip : "Administrator approval was given for this scan."}><ShieldCheck size={10} /> Admin</span>{/if}</h3>
       <p title={category.description}>{category.description}</p>
     </div>
     <strong class="size" class:shimmer={pending}>{measured ? formatSize(measured.bytes) : "0 B"}</strong>
-    <input type="checkbox" aria-label="Include {category.title}" {checked} disabled={cleanerState.busy || health.busy || health.scanning || done} onchange={() => cleanerState.toggle(category.id)} />
+    <input type="checkbox" aria-label="Include {category.title}" data-tip={cleanerState.scanned ? undefined : "Scan first"} {checked} disabled={!cleanerState.scanned || cleanerState.busy || health.busy || health.scanning || done} onchange={() => cleanerState.toggle(category.id)} />
   </div>
   <div class="foot">
     <span class="hint" title={category.hint}>
@@ -85,6 +92,10 @@
   .card.done .head { opacity: 0.6; }
   .card.done .hint { color: var(--ok); }
   .card.partly .hint { color: rgb(245 188 95 / 0.9); }
+  /* System folders without administrator approval: fainter until hovered, so the cards that clean fully lead. */
+  .card.admin { opacity: 0.58; transition: border-color var(--dur-fast), opacity var(--dur-med) var(--ease-out); }
+  .card.admin:hover, .card.admin:focus-within { opacity: 0.92; }
+  .admin-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 7px; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 13%, transparent); color: var(--warn); font-size: 10px; font-weight: 600; line-height: 1.4; vertical-align: 1px; white-space: nowrap; }
   .head { display: flex; align-items: flex-start; gap: 10px; }
   .icon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 9px; background: rgb(125 211 252 / .09); color: #7dd3fc; box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
   .card:nth-child(2) .icon { color: #f5c26b; background: rgb(245 194 107 / .08); }

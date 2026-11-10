@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
-use super::achievements::AchievementList;
+use super::achievements::{AchievementList, SetOutcome};
 use super::client::SteamClient;
 use super::steam_state;
 const PUMP_EVERY: Duration = Duration::from_secs(1);
@@ -13,6 +13,8 @@ pub(crate) enum HelperMode {
     Run(u32),
     Achievements(u32),
     Unlock { appid: u32, name: String },
+    /// Unlocks (or locks) every one of `names`, stored at once.
+    Set { appid: u32, names: Vec<String>, unlock: bool },
 }
 fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter().find_map(|arg| arg.strip_prefix(flag))
@@ -26,6 +28,15 @@ pub(crate) fn mode_from_args(args: &[String]) -> Option<HelperMode> {
     }
     if let Some(appid) = app_id(args, "--steam-achievements=") {
         return Some(HelperMode::Achievements(appid));
+    }
+    if let Some(appid) = app_id(args, "--steam-set=") {
+        let names: Vec<String> = serde_json::from_str(value_of(args, "--steam-names=")?).ok()?;
+        let unlock = match value_of(args, "--steam-to=")? {
+            "unlocked" => true,
+            "locked" => false,
+            _ => return None,
+        };
+        return (!names.is_empty()).then_some(HelperMode::Set { appid, names, unlock });
     }
     let appid = app_id(args, "--steam-unlock=")?;
     let name = value_of(args, "--steam-achievement=")?.to_string();
@@ -73,6 +84,15 @@ fn list_achievements(appid: u32) -> Result<(), String> {
     println!("{}", serde_json::to_string(&list).map_err(|e| e.to_string())?);
     Ok(())
 }
+/// Prints what changed as JSON, for the app to read.
+fn set_achievements(appid: u32, names: &[String], unlock: bool) -> Result<(), String> {
+    let client = SteamClient::open(&steam_path()?, appid)?;
+    let stats = client.user_stats()?;
+    stats.load()?;
+    let outcome: SetOutcome = stats.set_many(names, unlock)?;
+    println!("{}", serde_json::to_string(&outcome).map_err(|e| e.to_string())?);
+    Ok(())
+}
 fn unlock_achievement(appid: u32, name: &str) -> Result<(), String> {
     let client = SteamClient::open(&steam_path()?, appid)?;
     let stats = client.user_stats()?;
@@ -86,6 +106,7 @@ pub fn run_helper_from_args() -> Option<i32> {
         HelperMode::Run(appid) => run_game(appid),
         HelperMode::Achievements(appid) => list_achievements(appid),
         HelperMode::Unlock { appid, name } => unlock_achievement(appid, &name),
+        HelperMode::Set { appid, names, unlock } => set_achievements(appid, &names, unlock),
     };
     Some(match result {
         Ok(()) => 0,
@@ -148,5 +169,30 @@ mod tests {
     #[test]
     fn unlock_without_a_name_is_not_a_helper() {
         assert_eq!(mode_from_args(&args(&["x", "--steam-unlock=620"])), None);
+    }
+    #[test]
+    fn set_takes_names_and_where_they_go() {
+        assert_eq!(
+            mode_from_args(&args(&["x", "--steam-set=620", r#"--steam-names=["A","B C"]"#, "--steam-to=locked"])),
+            Some(HelperMode::Set { appid: 620, names: vec!["A".into(), "B C".into()], unlock: false })
+        );
+        assert_eq!(
+            mode_from_args(&args(&["x", "--steam-set=620", r#"--steam-names=["A"]"#, "--steam-to=unlocked"])),
+            Some(HelperMode::Set { appid: 620, names: vec!["A".into()], unlock: true })
+        );
+    }
+    #[test]
+    fn set_needs_names_and_a_known_state() {
+        assert_eq!(mode_from_args(&args(&["x", "--steam-set=620", "--steam-to=locked"])), None);
+        assert_eq!(mode_from_args(&args(&["x", "--steam-set=620", "--steam-names=[]", "--steam-to=locked"])), None);
+        assert_eq!(mode_from_args(&args(&["x", "--steam-set=620", r#"--steam-names=["A"]"#, "--steam-to=maybe"])), None);
+        assert_eq!(mode_from_args(&args(&["x", "--steam-set=620", r#"--steam-names=["A"]"#])), None);
+    }
+    #[test]
+    fn what_the_app_sends_is_what_the_helper_reads() {
+        let names = vec!["ACH_1".to_string(), "with \"quotes\" and spaces".to_string()];
+        let mut sent = vec!["MYLE.exe".to_string()];
+        sent.extend(crate::steam_automation::achievements::set_args(620, &names, false));
+        assert_eq!(mode_from_args(&sent), Some(HelperMode::Set { appid: 620, names, unlock: false }));
     }
 }

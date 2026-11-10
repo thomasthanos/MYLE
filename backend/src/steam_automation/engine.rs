@@ -188,6 +188,20 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         self.runner.stop_all();
         self.last_wanted.clear();
     }
+    /// Lists the page has just read, or (`None`) one it made old by changing that game's
+    /// achievements, which is then read again on the next tick.
+    pub(crate) fn take_lists(&mut self, fresh: Vec<(u32, Option<AchievementList>)>) {
+        for (appid, list) in fresh {
+            match list {
+                Some(list) => {
+                    self.lists.insert(appid, list);
+                }
+                None => {
+                    self.lists.remove(&appid);
+                }
+            }
+        }
+    }
     /// A page action found the session refused, and with nothing started the engine would not have.
     pub(crate) fn session_rejected(&mut self) {
         self.community_ok = false;
@@ -471,6 +485,7 @@ pub(crate) fn start(app: AppHandle) {
         let spawner_job = spawner.job();
         let runner = Arc::new(ProcessRunner::new(spawner));
         state.set_runner(runner.clone());
+        state.set_job(spawner_job.clone());
         let random = || uuid::Uuid::new_v4().as_u128() as u64;
         let job = spawner_job.clone();
         let mut engine = Engine::new(runner.clone(), community, HelperTool { job }, state.listed(), Box::new(random));
@@ -490,6 +505,7 @@ pub(crate) fn start(app: AppHandle) {
                 }
                 continue;
             }
+            engine.take_lists(state.take_fresh_lists());
             let session = state.session();
             if state.take_rejected() {
                 engine.session_rejected();
@@ -783,6 +799,24 @@ mod tests {
         assert_eq!(running(&rig), BTreeSet::from([7, GAME]));
         assert_eq!(status.manual, vec![7]);
         assert_eq!(status.started, started);
+    }
+    #[tokio::test]
+    async fn a_list_read_on_the_page_is_used_from_the_next_tick() {
+        let mut rig = rig();
+        rig.tool.lists.lock().unwrap().insert(GAME, AchievementList { names: vec!["A".into(), "B".into()], locked: vec!["A".into()] });
+        rig.engine.take_lists(vec![(GAME, Some(AchievementList { names: vec!["A".into(), "B".into()], locked: vec!["B".into()] }))]);
+        rig.engine.tick(input(achievements()), T0).await;
+        assert_eq!(*rig.tool.unlocked.lock().unwrap(), [(GAME, "B".to_string())]);
+    }
+    #[tokio::test]
+    async fn a_list_changed_on_the_page_is_read_again() {
+        let mut rig = rig();
+        rig.tool.lists.lock().unwrap().insert(GAME, AchievementList { names: vec!["A".into()], locked: vec!["A".into()] });
+        rig.engine.tick(input(achievements()), T0).await;
+        // The page locked A again: the engine's copy says nothing is left.
+        rig.engine.take_lists(vec![(GAME, None)]);
+        rig.engine.tick(input(achievements()), T0 + 1801).await;
+        assert_eq!(rig.tool.unlocked.lock().unwrap().len(), 2);
     }
     #[tokio::test]
     async fn stopping_achievements_stops_unlocking() {

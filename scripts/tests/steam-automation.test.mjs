@@ -193,3 +193,61 @@ test("while running, card farming says what it is doing now", () => {
   assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").detail, "5 cards left to collect.");
   assert.equal(farmPanel(true, farm("done", 0, 0), 0, 0, null).title, "All your cards have dropped");
 });
+
+import { rarity, percentText, filterAchievements, sortAchievements, achievementProgress, namesToChange, changeText } from "../../frontend/app/pages/steam-automation/model.ts";
+const ACHIEVEMENTS = [
+  { name: "ACH00", title: "Welcome to Los Santos", description: "You repo'd a car.", percent: 81.9, unlocked: true },
+  { name: "ACH01", title: "A Friendship Resurrected", description: "Complete the mission.", percent: 43.7, unlocked: false },
+  { name: "SECRET", title: "SECRET", description: "", percent: null, unlocked: false },
+  { name: "ACH02", title: "Career Criminal", description: "Reach 100% completion.", percent: 2.1, unlocked: false },
+];
+const names = (list) => list.map((achievement) => achievement.name);
+test("rarity follows how many players have an achievement", () => {
+  assert.equal(rarity(81.9), "Common");
+  assert.equal(rarity(50), "Common");
+  assert.equal(rarity(43.7), "Uncommon");
+  assert.equal(rarity(20), "Uncommon");
+  assert.equal(rarity(12), "Rare");
+  assert.equal(rarity(5), "Rare");
+  assert.equal(rarity(4.9), "Very rare");
+  assert.equal(rarity(null), "");
+});
+test("unlock rates read short", () => {
+  assert.equal(percentText(81.9), "81.9%");
+  assert.equal(percentText(43.71), "43.7%");
+  assert.equal(percentText(100), "100%");
+  assert.equal(percentText(0), "0%");
+  assert.equal(percentText(0.04), "<0.1%");
+  assert.equal(percentText(null), "");
+});
+test("achievements filter by state and by words in their name or description", () => {
+  assert.deepEqual(names(filterAchievements(ACHIEVEMENTS, "locked", "")), ["ACH01", "SECRET", "ACH02"]);
+  assert.deepEqual(names(filterAchievements(ACHIEVEMENTS, "unlocked", "")), ["ACH00"]);
+  assert.deepEqual(names(filterAchievements(ACHIEVEMENTS, "all", "mission")), ["ACH01"]);
+  assert.deepEqual(names(filterAchievements(ACHIEVEMENTS, "all", "  los SANTOS ")), ["ACH00"]);
+  assert.deepEqual(names(filterAchievements(ACHIEVEMENTS, "locked", "secret")), ["SECRET"]);
+});
+test("achievements sort by the game's order, by how common or rare, or by name", () => {
+  assert.deepEqual(names(sortAchievements(ACHIEVEMENTS, "game")), ["ACH00", "ACH01", "SECRET", "ACH02"]);
+  assert.deepEqual(names(sortAchievements(ACHIEVEMENTS, "percent")), ["ACH00", "ACH01", "ACH02", "SECRET"], "unknown rates last");
+  assert.deepEqual(names(sortAchievements(ACHIEVEMENTS, "rarest")), ["ACH02", "ACH01", "ACH00", "SECRET"], "unknown rates last");
+  assert.deepEqual(names(sortAchievements(ACHIEVEMENTS, "name")), ["ACH01", "ACH02", "SECRET", "ACH00"]);
+  assert.deepEqual(names(ACHIEVEMENTS), ["ACH00", "ACH01", "SECRET", "ACH02"], "the list itself is left as it was");
+});
+test("progress counts what is unlocked, and shows 100% only when all are", () => {
+  assert.deepEqual(achievementProgress(ACHIEVEMENTS), { unlocked: 1, total: 4, percent: 25 });
+  assert.deepEqual(achievementProgress([]), { unlocked: 0, total: 0, percent: 0 });
+  assert.equal(achievementProgress(Array.from({ length: 200 }, (_, index) => ({ unlocked: index > 0 }))).percent, 99);
+});
+test("only achievements in the other state are sent to Steam", () => {
+  assert.deepEqual(namesToChange(ACHIEVEMENTS, true), ["ACH01", "SECRET", "ACH02"]);
+  assert.deepEqual(namesToChange(ACHIEVEMENTS, false), ["ACH00"]);
+  assert.deepEqual(namesToChange(ACHIEVEMENTS, true, new Set(["ACH00", "SECRET"])), ["SECRET"]);
+  assert.deepEqual(namesToChange(ACHIEVEMENTS, false, new Set(["SECRET"])), []);
+});
+test("a change says what Steam did", () => {
+  assert.equal(changeText({ changed: ["A", "B"], refused: [] }, true), "Unlocked 2 achievements.");
+  assert.equal(changeText({ changed: ["A"], refused: [] }, false), "Locked 1 achievement.");
+  assert.equal(changeText({ changed: ["A"], refused: ["B"] }, true), "Unlocked 1 achievement. Steam would not change 1.");
+  assert.equal(changeText({ changed: [], refused: ["B", "C"] }, true), "Steam would not change 2 achievements.");
+});
