@@ -22,7 +22,7 @@
   };
   const Icon = $derived(icons[category.icon] ?? HardDrive);
   const measured = $derived(cleanerState.sizes[category.id]);
-  const checked = $derived(cleanerState.selected.has(category.id));
+  const checked = $derived(cleanerState.isTicked(category.id));
   /** Nothing measured yet and a scan is under way: show the sheen, not a number. */
   const pending = $derived(cleanerState.phase === "scanning" && !measured);
   const locked = $derived(measured?.locked ?? false);
@@ -37,6 +37,8 @@
   const inUse = $derived(Math.max(0, remaining - adminBytes));
   /** Only when the leftovers are the system folders the user did not approve. */
   const needsAdmin = $derived(partly && category.mayNeedAdmin && cleanerState.adminGranted !== true);
+  /** Whether the tick can change now: never before the first scan, while anything runs, or once cleaned. */
+  const canTick = $derived(cleanerState.scanned && !cleanerState.busy && !health.busy && !health.scanning && !done);
   const skippedFiles = $derived(outcome?.skipped ? ` (${outcome.skipped.toLocaleString()} ${outcome.skipped === 1 ? "file" : "files"})` : "");
   /** Part of it is system folders that only an administrator can empty, and that approval has not been given (yet): drawn fainter. */
   const adminOnly = $derived(category.mayNeedAdmin && cleanerState.adminGranted !== true);
@@ -48,15 +50,16 @@
 </script>
 
 <article class="card" class:on={checked} class:done class:partly class:admin={adminOnly} class:working={cleanerState.phase === "cleaning" && checked}>
-  <div class="head">
+  <!-- The whole head ticks the box: a big target, and the cursor shows when it cannot. -->
+  <label class="head" class:blocked={!canTick} data-tip={cleanerState.scanned ? undefined : "Scan first: it measures every category and ticks them for you"}>
     <span class="icon"><Icon size={18} strokeWidth={1.7} /></span>
-    <div class="titles">
-      <h3 title={category.description}>{category.title}{#if category.mayNeedAdmin}<span class="admin-tag" title={adminOnly ? adminTip : "Administrator approval was given for this scan."}><ShieldCheck size={10} /> Admin</span>{/if}</h3>
-      <p title={category.description}>{category.description}</p>
-    </div>
+    <span class="titles">
+      <span class="name">{category.title}{#if category.mayNeedAdmin}<span class="admin-tag" title={adminOnly ? adminTip : "Administrator approval was given for this scan."}><ShieldCheck size={10} /> Admin</span>{/if}</span>
+      <span class="desc">{category.description}</span>
+    </span>
     <strong class="size" class:shimmer={pending}>{measured ? formatSize(measured.bytes) : "0 B"}</strong>
-    <input type="checkbox" aria-label="Include {category.title}" data-tip={cleanerState.scanned ? undefined : "Scan first"} {checked} disabled={!cleanerState.scanned || cleanerState.busy || health.busy || health.scanning || done} onchange={() => cleanerState.toggle(category.id)} />
-  </div>
+    <input class="check" type="checkbox" aria-label="Include {category.title}" {checked} disabled={!canTick} onchange={() => cleanerState.toggle(category.id)} />
+  </label>
   <div class="foot">
     <span class="hint" title={category.hint}>
       {#if partly}
@@ -96,15 +99,16 @@
   .card.admin { opacity: 0.58; transition: border-color var(--dur-fast), opacity var(--dur-med) var(--ease-out); }
   .card.admin:hover, .card.admin:focus-within { opacity: 0.92; }
   .admin-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 7px; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 13%, transparent); color: var(--warn); font-size: 10px; font-weight: 600; line-height: 1.4; vertical-align: 1px; white-space: nowrap; }
-  .head { display: flex; align-items: flex-start; gap: 10px; }
+  .head { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+  .head.blocked { cursor: not-allowed; }
+  .head .check { margin-top: 1px; }
   .icon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 9px; background: rgb(125 211 252 / .09); color: #7dd3fc; box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
   .card:nth-child(2) .icon { color: #f5c26b; background: rgb(245 194 107 / .08); }
   .card:nth-child(3) .icon { color: #98dfbd; background: rgb(152 223 189 / .08); }
   .card:nth-child(5) .icon { color: #c4b5fd; background: rgb(196 181 253 / .08); }
   .titles { flex: 1; min-width: 0; }
-  h3 { overflow-wrap: anywhere; }
-  h3 { font-size: var(--fluid-sm); font-weight: 600; line-height: 1.25; }
-  .titles p { margin-top: 2px; color: var(--text-2); line-height: 1.4; font-size: var(--fluid-xs); line-height: 1.3; }
+  .name { display: block; overflow-wrap: anywhere; font-size: var(--fluid-sm); font-weight: 600; line-height: 1.25; }
+  .desc { display: block; margin-top: 2px; color: var(--text-2); font-size: var(--fluid-xs); line-height: 1.3; }
   .size { flex: none; font-size: var(--fluid-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
   .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; padding-top: var(--fluid-gap-2); border-top: 1px solid rgb(255 255 255 / 0.05); }
   .hint { display: flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fluid-xs); flex-wrap: wrap; }

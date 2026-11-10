@@ -63,6 +63,8 @@ class CleanerState {
   /** Everything can be ticked: after a clean a category is offered again. */
   readonly selectable = $derived(this.categories);
   readonly allSelected = $derived(this.selectable.length > 0 && this.selectable.every((c) => this.selected.has(c.id)));
+  /** What the ticks show: nothing before the first scan, which ticks everything it measures. */
+  readonly allTicked = $derived(this.scanned && this.allSelected);
   readonly status = $derived.by(() => {
     if (this.phase === "scanning") return "Scanning…";
     if (this.phase === "cleaning") {
@@ -92,6 +94,7 @@ class CleanerState {
     for (const id of saved) if (!this.cleaned.has(id)) this.selected.add(id);
   }
   isCleaned = (id: string) => this.cleaned.has(id);
+  isTicked = (id: string) => this.scanned && this.selected.has(id);
   toggle(id: string) {
     if (this.busy || this.cleaned.has(id)) return;
     if (this.selected.has(id)) this.selected.delete(id); else this.selected.add(id);

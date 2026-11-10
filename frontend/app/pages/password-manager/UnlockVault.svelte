@@ -59,14 +59,29 @@
       input?.focus();
       return;
     }
-    const go = () => {
-      if (document.visibilityState !== "visible" || !p.helloForSite) return;
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const ask = () => {
+      clearTimeout(later);
+      window.removeEventListener("focus", ask);
+      if (!p.helloForSite || p.busy) return;
       p.helloForSite = false;
       void p.unlockWithHello(true);
     };
+    // Windows shows its prompt in front of the program in front: on screen behind the browser, MYLE first gets a moment to come forward.
+    const go = () => {
+      if (document.visibilityState !== "visible" || !p.helloForSite) return;
+      if (document.hasFocus()) return ask();
+      window.addEventListener("focus", ask);
+      clearTimeout(later);
+      later = setTimeout(ask, 1500);
+    };
     go();
     document.addEventListener("visibilitychange", go);
-    return () => document.removeEventListener("visibilitychange", go);
+    return () => {
+      document.removeEventListener("visibilitychange", go);
+      window.removeEventListener("focus", ask);
+      clearTimeout(later);
+    };
   });
 
   async function unlockWithHello() {

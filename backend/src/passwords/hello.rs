@@ -41,15 +41,96 @@ pub fn available() -> bool {
 pub fn enabled(vault_id: &str) -> bool {
     load().is_some_and(|stored| stored.vault_id == vault_id)
 }
-/// The Windows Hello prompt can open behind the app: bring it forward.
+/// The Windows Hello prompt's window class on the Windows versions seen so far.
+const PROMPT_CLASS: &str = "Credential Dialog Xaml Host";
+/// The program Windows draws the prompt in, whatever its window is called.
+const PROMPT_PROGRAM: &str = "credentialuibroker.exe";
+/// Whether `path` is the program Windows draws its Hello prompt in.
+fn is_prompt_program(path: &str) -> bool {
+    path.rsplit(['\\', '/']).next().is_some_and(|file| file.eq_ignore_ascii_case(PROMPT_PROGRAM))
+}
+/// The full path of process `pid`'s program.
+fn program_of(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+    // SAFETY: the handle is closed before returning, and the buffer outlives the call.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut buffer = [0u16; 1024];
+        let mut length = buffer.len() as u32;
+        let found = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length) != 0;
+        CloseHandle(process);
+        found.then(|| String::from_utf16_lossy(&buffer[..length as usize]))
+    }
+}
+/// The Windows Hello prompt on screen, if there is one: by its class, or else by the program
+/// that draws it (a newer Windows may name its window otherwise).
+fn prompt_window() -> Option<windows_sys::Win32::Foundation::HWND> {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowThreadProcessId, IsWindowVisible};
+    let class: Vec<u16> = PROMPT_CLASS.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `class` is NUL-terminated and lives for the call.
+    let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    if !window.is_null() && unsafe { IsWindowVisible(window) } != 0 {
+        return Some(window);
+    }
+    unsafe extern "system" fn each(window: HWND, found: LPARAM) -> i32 {
+        // SAFETY: `found` is the `HWND` slot below, alive for the whole enumeration.
+        unsafe {
+            if IsWindowVisible(window) == 0 {
+                return 1;
+            }
+            let mut pid = 0;
+            GetWindowThreadProcessId(window, &mut pid);
+            if pid != 0 && program_of(pid).is_some_and(|path| is_prompt_program(&path)) {
+                *(found as *mut HWND) = window;
+                return 0;
+            }
+            1
+        }
+    }
+    let mut found: HWND = std::ptr::null_mut();
+    // SAFETY: the callback only writes the slot passed to it, which outlives the call.
+    unsafe { EnumWindows(Some(each), &mut found as *mut HWND as LPARAM) };
+    (!found.is_null()).then_some(found)
+}
+/// Puts `window` in front with the keyboard. Windows lets only the program in front do that, so
+/// this thread shares that program's input for the moment it asks.
+fn raise(window: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow};
+    // SAFETY: plain window-manager calls on window handles; the input is detached again before returning.
+    unsafe {
+        let front = GetForegroundWindow();
+        if front == window {
+            return;
+        }
+        let ours = GetCurrentThreadId();
+        let theirs = if front.is_null() { 0 } else { GetWindowThreadProcessId(front, std::ptr::null_mut()) };
+        let joined = theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, 1) != 0;
+        BringWindowToTop(window);
+        SetForegroundWindow(window);
+        if joined {
+            AttachThreadInput(ours, theirs, 0);
+        }
+    }
+}
+/// The Windows Hello prompt can open behind the browser or behind MYLE: bring it forward as soon
+/// as it shows, and once more if the program in front takes the front back as it opens.
 fn focus_prompt() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow};
     std::thread::spawn(|| {
-        let class: Vec<u16> = "Credential Dialog Xaml Host".encode_utf16().chain(Some(0)).collect();
-        for _ in 0..40 {
-            let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
-            if !window.is_null() {
-                unsafe { SetForegroundWindow(window) };
+        for _ in 0..60 {
+            if let Some(window) = prompt_window() {
+                raise(window);
+                std::thread::sleep(Duration::from_millis(350));
+                // SAFETY: only asks about the window handle.
+                if unsafe { IsWindow(window) } != 0 && unsafe { GetForegroundWindow() } != window {
+                    raise(window);
+                }
                 return;
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -258,6 +339,18 @@ mod tests {
         prompt.answered();
         drop(prompt);
         assert!(!cancelled.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn the_prompt_is_known_by_the_program_windows_draws_it_in() {
+        assert!(is_prompt_program(r"C:\Windows\System32\CredentialUIBroker.exe"));
+        assert!(is_prompt_program("credentialuibroker.EXE"));
+        assert!(!is_prompt_program(r"C:\Windows\System32\notepad.exe"));
+        assert!(!is_prompt_program(r"C:\Tools\CredentialUIBroker.exe.bak"));
+    }
+    #[test]
+    fn a_running_programs_file_is_found() {
+        let path = program_of(std::process::id()).expect("this test's own program");
+        assert!(path.to_ascii_lowercase().ends_with(".exe"), "{path}");
     }
     #[test]
     fn only_windows_hello_saying_it_is_not_set_up_counts_as_unavailable() {

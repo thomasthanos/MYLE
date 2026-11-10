@@ -71,13 +71,25 @@
 
 .chip.active .count { color: rgb(var(--accent-soft-rgb)); }
 
-.check { appearance: none; flex: none; position: relative; width: 18px; height: 18px; margin: 0; border: 1.5px solid rgb(255 255 255 / 0.28); border-radius: 5px; background: rgb(0 0 0 / 0.15); transition: background var(--dur-fast), border-color var(--dur-fast); }
+/* Tick box, shared by every list: a soft inset when empty, the primary blue with a white tick when ticked. */
+.check { appearance: none; flex: none; position: relative; width: 18px; height: 18px; margin: 0; border: 1.5px solid rgb(255 255 255 / 0.24); border-radius: 6px; background: rgb(0 0 0 / 0.2); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35); cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast); }
 
-.check:hover { border-color: rgb(255 255 255 / 0.45); }
+.check:hover:not(:disabled) { border-color: rgb(var(--accent-rgb) / 0.75); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35), 0 0 0 3px rgb(var(--accent-rgb) / 0.12); }
 
-.check:checked { border-color: transparent; background: var(--btn-primary); }
+.check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.check:checked::after { content: ""; position: absolute; left: 5px; top: 1.5px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.check:checked { border-color: rgb(255 255 255 / 0.14); background: var(--control-face), var(--btn-primary); box-shadow: var(--btn-sheen); }
+
+.check:checked:hover:not(:disabled) { background: var(--control-face), var(--btn-primary-hover); }
+
+.check:checked::after { content: ""; position: absolute; left: 5px; top: 1.5px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); animation: check-tick var(--dur-med) var(--ease-out); }
+
+.check:disabled { cursor: not-allowed; opacity: 0.45; box-shadow: none; }
+
+/* A control that cannot be used says so under the pointer, the native ones too. */
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allowed; }
+
+@keyframes check-tick { from { opacity: 0; transform: rotate(45deg) scale(0.5); } }
 
 /* On/off switch, shared by Settings and the System Cleaner. */
 .switch { appearance: none; flex: none; position: relative; width: 40px; height: 22px; margin: 0; border-radius: 999px; background: rgb(255 255 255 / 0.1); box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35); transition: background var(--dur-med) var(--ease-out); }
@@ -88,7 +100,7 @@
 
 .switch:checked::before { transform: translateX(18px); }
 
-.switch:disabled { opacity: 0.4; }
+.switch:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Placeholder sheen for numbers that are still being worked out. */
 .shimmer { position: relative; overflow: hidden; border-radius: 6px; color: transparent !important; background: rgb(255 255 255 / 0.07); }
@@ -109,6 +121,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   :where(button, [role="button"], .btn, .chip, .icon-btn):active { scale: 1 !important; translate: none !important; }
+  .check:checked::after { animation: none; }
 }
 
 /* Floating menus (popovers). Solid fill: no blur stacked on blur. */

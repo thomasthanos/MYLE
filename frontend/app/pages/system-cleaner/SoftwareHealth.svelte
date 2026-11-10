@@ -272,6 +272,7 @@
               <div class="card-top">
                 <label class="checkbox-wrap">
                   <input
+                    class="check"
                     type="checkbox"
                     aria-label="Select {f.title}{f.module === 'permissions' && f.flags[0] ? `: ${f.flags[0]}` : ''}"
                     disabled={disabled || !f.actions.length}
@@ -492,7 +493,7 @@
   /* Card Head */
   .card-top { display: flex; align-items: flex-start; gap: 10px; }
   .checkbox-wrap { display: flex; align-items: center; justify-content: center; height: 30px; width: 18px; cursor: pointer; flex: none; }
-  .checkbox-wrap input { cursor: pointer; width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+  .checkbox-wrap { cursor: pointer; }
 
   /* Icon Bubble */
   .icon-bubble { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }

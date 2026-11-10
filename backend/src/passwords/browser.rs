@@ -684,12 +684,28 @@ fn reply_wait(message: &Value) -> Duration {
         _ => REPLY_WAIT,
     }
 }
+/// Whether this request may bring MYLE to the front: opening it, a sign-in waiting on a passkey,
+/// or a page asking to wake it. `message` is the host's envelope around the browser's request.
+fn may_come_forward(message: &Value) -> bool {
+    match message.pointer("/request/type").and_then(Value::as_str) {
+        Some("open" | "passkeyGet" | "passkeyCreate") => true,
+        Some("passkeyList") => message.pointer("/request/wake").and_then(Value::as_bool) == Some(true),
+        _ => false,
+    }
+}
 fn ask_app_on(name: &str, message: &Value) -> Result<Value, AppError> {
     let pipe = open_app_pipe(name, PIPE_BUSY_WAIT).map_err(|error| open_error(&error))?;
     let mut server = 0u32;
     let ok = unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut server) };
     if ok == 0 || !is_this_program(server) {
         return Err(AppError::Failed);
+    }
+    if may_come_forward(message) {
+        // The browser started this host at the user's click, so it may hand MYLE the right to come
+        // to the front, and its Windows Hello prompt with it. Without it, Windows keeps both behind
+        // the browser. Refused quietly when this host has no such right itself.
+        // SAFETY: a plain call with a process id.
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(server) };
     }
     let mut writer = pipe.try_clone().map_err(|_| AppError::Failed)?;
     let mut line = Zeroizing::new(serde_json::to_string(message).map_err(|_| AppError::Failed)?);
@@ -1720,6 +1736,17 @@ pub fn open_vault(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_what_brings_myle_forward_may_take_the_front() {
+        let envelope = |request: Value| json!({ "browser": "Edge", "copy": "store", "version": "10.2.0", "request": request });
+        assert!(may_come_forward(&envelope(json!({ "type": "open" }))));
+        assert!(may_come_forward(&envelope(json!({ "type": "passkeyGet", "url": "https://a.example/" }))));
+        assert!(may_come_forward(&envelope(json!({ "type": "passkeyCreate", "url": "https://a.example/" }))));
+        assert!(may_come_forward(&envelope(json!({ "type": "passkeyList", "url": "https://a.example/", "wake": true }))));
+        assert!(!may_come_forward(&envelope(json!({ "type": "passkeyList", "url": "https://a.example/" }))));
+        assert!(!may_come_forward(&envelope(json!({ "type": "logins", "url": "https://a.example/" }))));
+        assert!(!may_come_forward(&json!({ "type": "open" })), "only a request the host wrapped");
+    }
     #[test]
     fn a_login_says_whether_it_has_a_password() {
         let login = Login {
