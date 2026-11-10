@@ -118,7 +118,7 @@ export class AccountState {
     }
   }
   cancelSignIn() {
-    void accountApi.cancelSignIn();
+    void accountApi.cancelSignIn().catch(() => {});
   }
   async signOut() {
     if (!this.profile || this.#signingOut) return;

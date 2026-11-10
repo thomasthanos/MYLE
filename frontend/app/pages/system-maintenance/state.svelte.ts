@@ -200,7 +200,7 @@ class MaintenanceState {
     }
     this.stopping = true;
     this.#setStatus(card, action, "running", `Stopping ${this.#actionName(action)}…`);
-    void maintenanceApi.cancel(action.id);
+    void maintenanceApi.cancel(action.id).catch(() => {});
   }
   #report(card: MaintenanceCard, action: MaintenanceAction, outcome: TaskOutcome, elevated: boolean) {
     switch (outcome.result) {

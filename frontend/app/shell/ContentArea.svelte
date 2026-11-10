@@ -5,6 +5,7 @@
   import { canOpen, pages } from "../pages/registry";
   import { whenShown } from "../../lib/startup";
   import { PageModules } from "./page-modules.svelte";
+  import PageBoundary from "../../lib/components/PageBoundary.svelte";
 
   // An owner-only page someone else lands on (a link, a sign-out while it is open) gives way to the first page. Before the first answer about the account is in, the first page shows without forgetting where to go.
   const asked = $derived(pages.find((p) => p.id === nav.current));
@@ -62,7 +63,7 @@
     {#key nav.current}
       <div class="page" class:fill={def.fill}>
         {#if Page}
-          <Page />
+          <PageBoundary><Page /></PageBoundary>
         {:else if loadError}
           <div class="page-state" role="alert">
             <p>This page could not be loaded: {loadError}</p>

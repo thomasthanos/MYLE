@@ -183,6 +183,11 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
         }
     }
     /// A new session has arrived, so Steam gets another chance to accept it.
+    /// Not the owner: nothing runs.
+    pub(crate) fn rest(&mut self) {
+        self.runner.stop_all();
+        self.last_wanted.clear();
+    }
     /// A page action found the session refused, and with nothing started the engine would not have.
     pub(crate) fn session_rejected(&mut self) {
         self.community_ok = false;
@@ -392,8 +397,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
     }
     pub(crate) async fn tick(&mut self, input: TickInput, now: u64) -> Status {
         if !input.is_owner {
-            self.runner.stop_all();
-            self.last_wanted.clear();
+            self.rest();
             return Status::default();
         }
         let TickInput { steam, session, settings, started, manual, library, keep_going, user_paused, pressed, .. } = input;
@@ -476,6 +480,16 @@ pub(crate) fn start(app: AppHandle) {
         let mut next_refresh = 0;
         tokio::time::sleep(FIRST_TICK).await;
         loop {
+            // Anyone but the owner: Steam's state, the session and the library are not even read.
+            if !app.state::<crate::account::AccountState>().is_owner(&app) {
+                engine.rest();
+                state.set_status(Status::default());
+                tokio::select! {
+                    _ = tokio::time::sleep(TICK) => {}
+                    _ = state.poked() => {}
+                }
+                continue;
+            }
             let session = state.session();
             if state.take_rejected() {
                 engine.session_rejected();
@@ -628,6 +642,13 @@ mod tests {
         let mut rig = rig();
         rig.engine.tick(input(Settings::default()), T0).await;
         assert!(running(&rig).is_empty());
+        assert!(rig.engine.community.gets().is_empty());
+    }
+    #[test]
+    fn resting_stops_every_game_and_asks_steam_nothing() {
+        let mut rig = rig();
+        rig.engine.rest();
+        assert_eq!(*rig.runner.stops.lock().unwrap(), 1);
         assert!(rig.engine.community.gets().is_empty());
     }
     #[tokio::test]

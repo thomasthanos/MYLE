@@ -166,7 +166,7 @@ mod tests {
         assert!(seen.offers.is_empty());
     }
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("myle-watcher-{}", uuid::Uuid::new_v4()));
+        let dir = crate::test_dirs::temp_dir("watcher");
         dir.join(name)
     }
     fn cache_for(seen_file: &std::path::Path) -> DiskCache {

@@ -50,6 +50,7 @@ pub fn prepare() -> Result<(), String> {
     let roaming = settle(&roaming_target()?, &legacy_in(&base("APPDATA")?))?;
     let local = settle(&local_target()?, &legacy_in(&base("LOCALAPPDATA")?))?;
     tidy(&local);
+    clear_web_caches(&local);
     let _ = DIRS.set(Dirs { roaming, local });
     Ok(())
 }
@@ -117,6 +118,21 @@ fn hide(folder: &Path) {
     // SAFETY: `wide` is a NUL-terminated path that outlives the call.
     unsafe { SetFileAttributesW(wide.as_ptr(), metadata.file_attributes() | FILE_ATTRIBUTE_HIDDEN) };
 }
+/// Before any web view starts: their caches are moved aside when due, and emptied in the background.
+fn clear_web_caches(root: &Path) {
+    let profiles = vec![
+        root.join("EBWebView"),
+        item_in(root, "webview-notice").join("EBWebView"),
+        item_in(root, "steam-automation").join("webview-steam").join("EBWebView"),
+    ];
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|at| at.as_secs()).unwrap_or(0);
+    crate::webview_cache::clear_when_due(&profiles, &root.join(INTERNAL).join("webview-caches.json"), env!("CARGO_PKG_VERSION"), now);
+    std::thread::spawn(move || {
+        for profile in profiles {
+            crate::webview_cache::empty(&profile);
+        }
+    });
+}
 /// Where one item of the data folder is: its tidier place, unless it is still in the old one
 /// (it was in use at the last start, or nothing has tidied this folder yet).
 fn item_in(root: &Path, name: &str) -> PathBuf {
@@ -148,13 +164,7 @@ fn base(variable: &str) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     fn temp() -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "myle-storage-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        root
+        crate::test_dirs::temp_dir("storage")
     }
     fn is_hidden(path: &Path) -> bool {
         use std::os::windows::fs::MetadataExt;

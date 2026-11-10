@@ -32,9 +32,12 @@
 
   $effect(() => {
     const value = newMaster;
-    void api.strength(value).then((s) => {
-      if (value === newMaster) strength = s;
-    });
+    void api
+      .strength(value)
+      .then((s) => {
+        if (value === newMaster) strength = s;
+      })
+      .catch(() => {});
   });
   let input = $state<HTMLInputElement>();
   let recoveryInput = $state<HTMLInputElement>();

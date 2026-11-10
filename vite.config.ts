@@ -48,6 +48,10 @@ export default defineConfig(({ mode }): UserConfig => {
       // evergreen) and iOS 15's Safari at least.
       target: mobile ? ["chrome120", "safari15"] : "chrome120",
       sourcemap: !!process.env.TAURI_ENV_DEBUG,
+      // WebView2 and the phones' web views preload modules themselves: no polyfill in the entry.
+      modulePreload: { polyfill: false },
+      // Gzip sizes are only printed, never shipped: skipping them keeps builds quicker.
+      reportCompressedSize: false,
       outDir: resolve(target, setup ? "web-setup" : mobile ? "web-mobile" : "web"),
       emptyOutDir: true,
       // The setup window and the phone need none of the app's icons.

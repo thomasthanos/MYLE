@@ -108,9 +108,12 @@
 
   $effect(() => {
     const value = password ?? "";
-    void api.strength(value).then((s) => {
-      if (value === (password ?? "")) strength = s;
-    });
+    void api
+      .strength(value)
+      .then((s) => {
+        if (value === (password ?? "")) strength = s;
+      })
+      .catch(() => {});
   });
 
   function addApp() {

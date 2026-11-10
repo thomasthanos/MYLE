@@ -186,8 +186,7 @@ mod tests {
         assert_eq!(choose(NEXT_WEEK, &ids(1..6), &[], &ids(1..6), true).len(), 5);
     }
     fn temp_file() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("myle-picks-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dirs::temp_dir("picks");
         dir.join("picks.json")
     }
     fn html_of(ids: &[u32]) -> String {

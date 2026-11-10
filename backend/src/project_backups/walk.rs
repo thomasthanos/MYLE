@@ -404,10 +404,7 @@ mod tests {
         .unwrap()
     }
     fn temp(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("myle-walk-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::test_dirs::temp_dir(&format!("walk-{name}"))
     }
     fn put(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);

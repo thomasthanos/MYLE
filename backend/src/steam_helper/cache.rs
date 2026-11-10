@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use crate::steam_helper::model::{Game, OfferKind};
     fn cache() -> DiskCache {
-        DiskCache::new(std::env::temp_dir().join(format!("myle-cache-{}", uuid::Uuid::new_v4())))
+        DiskCache::new(crate::test_dirs::temp_dir("cache"))
     }
     /// Saves `[1]` at second 1000.
     async fn seeded() -> DiskCache {

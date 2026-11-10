@@ -28,9 +28,12 @@
 
   $effect(() => {
     const value = master;
-    void api.strength(value).then((s) => {
-      if (value === master) strength = s;
-    });
+    void api
+      .strength(value)
+      .then((s) => {
+        if (value === master) strength = s;
+      })
+      .catch(() => {});
   });
 
   async function create(event: SubmitEvent) {

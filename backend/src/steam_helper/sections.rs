@@ -334,7 +334,7 @@ mod tests {
     async fn live_quick_filter_changes_are_not_refused() {
         use crate::steam_helper::picks::weekly_picks;
         let api = crate::steam_helper::store::HttpStore::new().unwrap();
-        let file = std::env::temp_dir().join(format!("myle-live-{}", uuid::Uuid::new_v4())).join("picks.json");
+        let file = crate::test_dirs::temp_dir("live").join("picks.json");
         let on = |online_coop, single_player, story_only| Filters { online_coop, single_player, story_only };
         let (api, file) = (&api, &file);
         let mut asked = Vec::new();

@@ -215,14 +215,17 @@
     const missing = pb.projects.filter((p) => pb.health(p) === "missing");
     prefixFrom = detectCommonPrefix(missing);
 
-    void api.getDrives().then((foundDrives) => {
-      drives = foundDrives;
-      const targetDrive = foundDrives.find((d) => d.root.toUpperCase() === "A:\\") ?? foundDrives[0];
-      const initialRoot = targetDrive ? targetDrive.root : "A:\\";
-      selectedRoot = initialRoot;
-      prefixTo = initialRoot;
-      void scanRoot(initialRoot);
-    });
+    void api
+      .getDrives()
+      .then((foundDrives) => {
+        drives = foundDrives;
+        const targetDrive = foundDrives.find((d) => d.root.toUpperCase() === "A:\\") ?? foundDrives[0];
+        const initialRoot = targetDrive ? targetDrive.root : "A:\\";
+        selectedRoot = initialRoot;
+        prefixTo = initialRoot;
+        void scanRoot(initialRoot);
+      })
+      .catch(() => {});
   });
 </script>
 

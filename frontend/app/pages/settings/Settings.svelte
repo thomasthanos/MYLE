@@ -50,9 +50,9 @@
 
   onMount(() => {
     if (!isTauri()) return;
-    void getVersion().then((v) => (version = v));
-    void invoke<typeof startup>("startup_get").then((value) => (startup = value));
-    void invoke<boolean>("tray_get").then((value) => (keepInTray = value));
+    void getVersion().then((v) => (version = v)).catch(() => {});
+    void invoke<typeof startup>("startup_get").then((value) => (startup = value)).catch(() => {});
+    void invoke<boolean>("tray_get").then((value) => (keepInTray = value)).catch(() => {});
     void passwordsApi.browserGet().then(
       (setup) => (browser = setup),
       (error) => (browserError = message(error)),

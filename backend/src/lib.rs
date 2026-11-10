@@ -22,8 +22,11 @@ mod steam_helper;
 mod startup;
 mod taskbar;
 mod storage;
+#[cfg(test)]
+mod test_dirs;
 mod tray;
 mod updater;
+mod webview_cache;
 mod webview_memory;
 mod webview_policy;
 mod whats_new;

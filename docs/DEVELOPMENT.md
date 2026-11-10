@@ -206,6 +206,7 @@ Icons come from <a href="https://lucide.dev/icons"><img alt="Lucide" src="https:
 - **Long lists** are virtualised (`DiskAnalyzer`'s folder list) or drawn to a canvas (`Treemap`).
 - **Motion** is a token (`--dur-fast`, `--dur-med`, `--ease-out`), and every animation respects `prefers-reduced-motion`.
 - **Text** is sentence case, buttons say what they do, and a destructive action always asks first (`.danger` in the confirm dialog).
+- **Failures stay on their page.** `ContentArea` wraps each page in `lib/components/PageBoundary.svelte`: an error while a page draws shows "This page ran into a problem" with Try again, and the sidebar and other pages carry on. A promise nothing awaits ends in `.catch`, so a failed call never surfaces as an unhandled rejection.
 
 ---
 
@@ -542,6 +543,8 @@ GitHub Releases, Project Backups and Steam Automation are for the app's owner on
 | Uninstall entry | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MakeYourLifeEasier` |
 | Game Saves scheduled task | `MakeYourLifeEasier Game Saves Backup` (legacy name, kept for existing schedules) |
 
+The web views' caches (pictures, compiled scripts, GPU shaders) are cleared at start after every update and every 14 days (`src/webview_cache.rs`, recorded in `internal\webview-caches.json`), for the main window, the notice window and the Steam sign-in window. Local storage, cookies and settings are never touched. A profile in use (its `lockfile` open) is left for the next start; the cache folders are moved aside in one rename and emptied in the background, so the start does not wait for them.
+
 Install is all-or-nothing: each file is written next to the old one, and if something fails partway through the previous version is restored. `install.json` in the folder records which files the setup put there, so update and uninstall only remove those.
 
 Versions up to 7.0.x kept their data in `com.thomasthanos.makeyourlifeeasier` folders. The app moves them once, whole, with a single rename (`src/storage.rs`). If a folder is in use (during a live update the old version is still running) it uses the old one that time and retries on the next launch — a half-finished move never happens, since that would corrupt the WebView2 profile.
@@ -642,6 +645,8 @@ Some suites only make sense on real Windows and are `#[ignore]`d or gated:
 
 - the debloater's `sandbox_tests.rs` (Windows Sandbox or a VM, see <a href="#windows-optimization"><img alt="Windows Optimization" src="https://img.shields.io/static/v1?label=&message=Windows%20Optimization&color=8b83ff&labelColor=151c31&style=flat-square" /></a>)
 - `cargo test measure_a_whole_drive -- --ignored` and `cargo test mft_matches_the_walk -- --ignored` (a real drive, see <a href="#disk-analyzer"><img alt="Disk Analyzer" src="https://img.shields.io/static/v1?label=&message=Disk%20Analyzer&color=8b83ff&labelColor=151c31&style=flat-square" /></a>)
+
+A Rust test that needs a folder takes it from `crate::test_dirs::temp_dir(name)`: every run gets its own folder under `%TEMP%\myle-tests`, and the next run removes those of runs over an hour old, so tests leave nothing behind in `%TEMP%`.
 
 `npm run check` catches what the tests do not: svelte-check for every component, `tsc` for the Vite config and the scripts, and the site check.
 

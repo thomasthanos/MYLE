@@ -67,6 +67,10 @@ class SteamAutomationState {
 
   #timer: ReturnType<typeof setInterval> | undefined;
   #stopJob = false;
+  /** Catches up at once when the window comes back from the tray. */
+  #onVisible = () => {
+    if (document.visibilityState === "visible") void this.refresh();
+  };
 
   start() {
     void this.refresh();
@@ -74,11 +78,16 @@ class SteamAutomationState {
     void this.loadLibrary(false);
     void this.#readListings();
     clearInterval(this.#timer);
-    this.#timer = setInterval(() => void this.refresh(), POLL_MS);
+    // Hidden in the tray, nobody is looking: no point asking every few seconds.
+    this.#timer = setInterval(() => {
+      if (document.visibilityState === "visible") void this.refresh();
+    }, POLL_MS);
+    document.addEventListener("visibilitychange", this.#onVisible);
   }
 
   stop() {
     clearInterval(this.#timer);
+    document.removeEventListener("visibilitychange", this.#onVisible);
   }
 
   async refresh() {

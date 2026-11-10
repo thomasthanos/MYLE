@@ -121,8 +121,7 @@ mod tests {
     }
     #[test]
     fn a_session_is_not_stored_in_plain_text() {
-        let dir = std::env::temp_dir().join(format!("myle-session-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dirs::temp_dir("session");
         let path = dir.join("session.bin");
         let session = from_cookies(&signed_in()).unwrap();
         session.save(&path).unwrap();

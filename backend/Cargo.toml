@@ -108,6 +108,20 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
+# Except the inner loops of compression and checksums, which Project Backups runs over whole
+# folders: built for speed, at a small cost in size.
+[profile.release.package.zlib-rs]
+opt-level = 3
+
+[profile.release.package.adler2]
+opt-level = 3
+
+[profile.release.package.crc32fast]
+opt-level = 3
+
+[profile.release.package.miniz_oxide]
+opt-level = 3
+
 [dev-dependencies]
 png = "0.18"
 qrcode = { version = "0.14.1", default-features = false }
