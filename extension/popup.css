@@ -278,6 +278,23 @@ main {
   scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
 
+main::-webkit-scrollbar {
+  width: 5px;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.14);
+  border-radius: 999px;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.25);
+}
+
 .list {
   display: grid;
   gap: 6px;
@@ -289,20 +306,22 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 54px;
-  padding: 9px 9px 9px 10px;
+  min-height: 52px;
+  padding: 8px 10px;
   border: 1px solid var(--rim);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 3px 8px -6px rgb(0 0 0 / 0.6);
-  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease), transform var(--med) var(--ease);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease), transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
   animation: rise var(--med) var(--ease) both;
 }
 
 .login:hover,
 .login:focus-within {
-  border-color: rgb(var(--accent-rgb) / 0.32);
-  background: linear-gradient(180deg, rgb(52 61 82 / 0.8), rgb(41 48 64 / 0.7));
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: linear-gradient(180deg, rgb(52 62 84 / 0.82), rgb(40 47 64 / 0.72));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 4px 12px -2px rgb(0 0 0 / 0.5);
+  transform: translateY(-1px);
 }
 
 .login[hidden] {
@@ -381,16 +400,17 @@ main {
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: rgb(255 255 255 / 0.035);
+  background: rgb(255 255 255 / 0.04);
   color: var(--text-2);
   cursor: pointer;
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
 .copy:hover {
-  border-color: var(--btn-border);
-  background: var(--btn-fill-hover);
-  color: var(--text-1);
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: #fff;
+  transform: translateY(-1px);
 }
 
 .copy svg,
@@ -618,7 +638,7 @@ main {
 .toast {
   position: fixed;
   right: 12px;
-  bottom: 84px;
+  bottom: 96px;
   left: 12px;
   margin: 0;
   padding: 9px 12px;
@@ -629,6 +649,7 @@ main {
   color: #c9f2df;
   font-size: 12px;
   animation: rise var(--med) var(--ease) both;
+  z-index: 100;
 }
 
 .toast.bad {
@@ -636,43 +657,323 @@ main {
   color: #f6c3c5;
 }
 
+footer.dock,
 footer {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-top: 1px solid var(--rim);
-  background: rgb(14 17 25 / 0.55);
+  padding: 10px 12px 9px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: linear-gradient(180deg, rgb(18 22 32 / 0.88), rgb(12 15 22 / 0.96));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 -4px 18px rgb(0 0 0 / 0.32);
 }
 
-footer .btn.ghost {
-  padding: 0 8px;
+.dock-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
 }
 
-.about {
+.dock-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.1px;
+  transition: all var(--fast) var(--ease);
+}
+
+.dock-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dock-btn-scan {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.045);
+  color: var(--text-2);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+.dock-btn-scan:hover {
+  border-color: rgb(var(--accent-rgb) / 0.38);
+  background: rgb(255 255 255 / 0.085);
+  color: var(--text-1);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.09);
+  transform: translateY(-1px);
+}
+
+.dock-btn-scan:active {
+  transform: translateY(1px);
+}
+
+.dock-btn-open {
+  border: 1px solid rgb(var(--accent-rgb) / 0.32);
+  background: linear-gradient(135deg, rgb(var(--accent-rgb) / 0.14), rgb(101 115 195 / 0.09));
+  color: var(--text-1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.dock-btn-open:hover {
+  border-color: rgb(var(--accent-rgb) / 0.6);
+  background: linear-gradient(135deg, rgb(var(--accent-rgb) / 0.26), rgb(101 115 195 / 0.2));
+  color: #fff;
+  box-shadow: 0 3px 12px rgb(101 115 195 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.14);
+  transform: translateY(-1px);
+}
+
+.dock-btn-open:active {
+  transform: translateY(1px);
+}
+
+.dock-arrow {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.2;
+  transition: transform var(--fast) var(--ease);
+}
+
+.dock-btn-open:hover .dock-arrow {
+  transform: translate(1px, -1px);
+}
+
+/* --- Dock Meta / About & Toggle --------------------------------------------- */
+
+.about,
+.dock-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px 10px;
-  background: rgb(14 17 25 / 0.55);
+  padding: 1px 2px 0;
+  background: transparent;
   color: var(--text-3);
   font-size: 11px;
+}
+
+.dock-versions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1px;
+}
+
+.version-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb) / 0.45);
+  box-shadow: 0 0 6px rgb(var(--accent-rgb) / 0.3);
 }
 
 #app-version::before {
   content: " · ";
 }
 
-.about label {
+/* Custom sleek toggle switch for debug log */
+.dock-debug {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   cursor: pointer;
+  user-select: none;
+  position: relative;
 }
 
-.about input {
+.dock-debug input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
   margin: 0;
-  accent-color: var(--accent);
+}
+
+.switch-track {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.3);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8e9bb0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+  transition: transform var(--fast) var(--ease), background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+.dock-debug:hover .switch-track {
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.14);
+}
+
+.dock-debug input[type="checkbox"]:focus-visible + .switch-track {
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent);
+}
+
+.dock-debug input[type="checkbox"]:checked + .switch-track {
+  background: rgb(62 207 142 / 0.28);
+  border-color: rgb(62 207 142 / 0.6);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2), 0 0 8px rgb(62 207 142 / 0.25);
+}
+
+.dock-debug input[type="checkbox"]:checked + .switch-track .switch-thumb {
+  transform: translateX(12px);
+  background: #3ecf8e;
+  box-shadow: 0 0 8px rgb(62 207 142 / 0.65), 0 1px 2px rgb(0 0 0 / 0.4);
+}
+
+.debug-text {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-3);
+  letter-spacing: 0.1px;
+  transition: color var(--fast) var(--ease);
+}
+
+.dock-debug:hover .debug-text {
+  color: var(--text-2);
+}
+
+/* --- Custom Floating Tooltip ------------------------------------------------- */
+
+.custom-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  max-width: 290px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(18 23 33 / 0.95);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgb(255 255 255 / 0.13);
+  box-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.65), 0 2px 6px rgb(0 0 0 / 0.35);
+  color: var(--text-1);
+  font: 11.5px/1.4 var(--font);
+  opacity: 0;
+  transform: scale(0.96) translateY(2px);
+  transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
+  will-change: opacity, transform;
+}
+
+.custom-tooltip[data-placement="top"] {
+  transform: scale(0.96) translateY(3px);
+}
+
+.custom-tooltip[data-placement="bottom"] {
+  transform: scale(0.96) translateY(-3px);
+}
+
+.custom-tooltip.visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.custom-tooltip::before {
+  content: "";
+  position: absolute;
+  left: var(--arrow-left, 50%);
+  width: 7px;
+  height: 7px;
+  background: inherit;
+  border: 1px solid rgb(255 255 255 / 0.13);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.custom-tooltip[data-placement="top"]::before {
+  bottom: -4.5px;
+  border-top: none;
+  border-left: none;
+}
+
+.custom-tooltip[data-placement="bottom"]::before {
+  top: -4.5px;
+  border-bottom: none;
+  border-right: none;
+}
+
+.tooltip-single {
+  color: var(--text-1);
+  font-weight: 500;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.tooltip-card {
+  display: grid;
+  gap: 3.5px;
+  min-width: 140px;
+}
+
+.tooltip-title {
+  font-weight: 650;
+  font-size: 12px;
+  color: #fff;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tooltip-user,
+.tooltip-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.tooltip-user {
+  color: var(--accent-soft);
+  font-weight: 500;
+}
+
+.tooltip-meta {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+
+.tooltip-user svg,
+.tooltip-meta svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
 }
 
 [hidden] {

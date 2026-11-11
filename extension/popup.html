@@ -38,22 +38,35 @@
     </main>
     <p class="sr-only" id="live" role="status">Loading logins…</p>
     <p class="toast" id="toast" role="status" hidden></p>
-    <footer>
-      <button class="btn ghost" id="scan" type="button" title="Read the site's 2FA QR code on this page, and keep its key in MYLE">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect width="5" height="5" x="3" y="3" rx="1" /><rect width="5" height="5" x="16" y="3" rx="1" /><rect width="5" height="5" x="3" y="16" rx="1" />
-          <path d="M21 16h-3a2 2 0 0 0-2 2v3" /><path d="M21 21v.01" /><path d="M12 7v3a2 2 0 0 1-2 2H7" /><path d="M3 12h.01" /><path d="M12 3h.01" /><path d="M12 16v.01" /><path d="M16 12h1" /><path d="M21 12v.01" /><path d="M12 21v-1" />
-        </svg>
-        2FA from a QR code
-      </button>
-      <button class="btn secondary" id="open" type="button">Open MYLE</button>
+    <footer class="dock">
+      <div class="dock-actions">
+        <button class="btn dock-btn dock-btn-scan" id="scan" type="button" data-tooltip="Read the site's 2FA QR code on this page, and keep its key in MYLE">
+          <svg class="dock-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="5" height="5" x="3" y="3" rx="1.5" /><rect width="5" height="5" x="16" y="3" rx="1.5" /><rect width="5" height="5" x="3" y="16" rx="1.5" />
+            <path d="M21 16h-3a2 2 0 0 0-2 2v3" /><path d="M21 21v.01" /><path d="M12 7v3a2 2 0 0 1-2 2H7" /><path d="M3 12h.01" /><path d="M12 3h.01" /><path d="M12 16v.01" /><path d="M16 12h1" /><path d="M21 12v.01" /><path d="M12 21v-1" />
+          </svg>
+          <span class="dock-label">2FA from QR code</span>
+        </button>
+        <button class="btn dock-btn dock-btn-open" id="open" type="button" data-tooltip="Open the MYLE desktop app">
+          <span class="dock-label">Open MYLE</span>
+          <svg class="dock-icon dock-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 17L17 7" /><path d="M7 7h10v10" />
+          </svg>
+        </button>
+      </div>
+      <div class="about dock-meta">
+        <div class="dock-versions">
+          <span class="version-dot" aria-hidden="true"></span>
+          <span class="version-text"><span id="version">MYLE Passwords</span><span id="app-version" hidden></span></span>
+        </div>
+        <label class="dock-debug" data-tooltip="Writes each passkey step to the page console (F12 → Console). Never passwords or keys.">
+          <input id="debug" type="checkbox" />
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="debug-text">Debug log</span>
+        </label>
+      </div>
     </footer>
-    <div class="about">
-      <span><span id="version">MYLE Passwords</span><span id="app-version" hidden></span></span>
-      <label title="Writes each passkey step to the page's console (F12 → Console), to send when something goes wrong. Never passwords or keys.">
-        <input id="debug" type="checkbox" /> Debug log
-      </label>
-    </div>
+    <div id="tooltip" class="custom-tooltip" role="tooltip" aria-hidden="true" hidden></div>
     <script src="popup.js"></script>
   </body>
 </html>

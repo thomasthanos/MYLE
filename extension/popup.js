@@ -16,6 +16,7 @@ const ui = {
   version: byId("version"),
   appVersion: byId("app-version"),
   debug: byId("debug"),
+  tooltip: byId("tooltip"),
 };
 
 let view = 0;
@@ -235,11 +236,142 @@ function announce(text) {
   ui.live.textContent = text;
 }
 
+function setTooltip(node, text) {
+  if (!node) return;
+  if (text) {
+    if (typeof node.dataset === "object" && node.dataset !== null) node.dataset.tooltip = text;
+    else if (typeof node.setAttribute === "function") node.setAttribute("data-tooltip", text);
+  } else {
+    if (typeof node.dataset === "object" && node.dataset !== null) delete node.dataset.tooltip;
+    if (typeof node.removeAttribute === "function") node.removeAttribute("data-tooltip");
+  }
+  if (typeof node.removeAttribute === "function") node.removeAttribute("title");
+}
+
+let tooltipTarget = null;
+let tooltipTimer = null;
+let lastTooltipHide = 0;
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTooltipHtml(text) {
+  const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (lines.length <= 1) {
+    return `<div class="tooltip-single">${escapeHtml(lines[0] || "")}</div>`;
+  }
+  let html = `<div class="tooltip-card">`;
+  html += `<div class="tooltip-title">${escapeHtml(lines[0])}</div>`;
+  if (lines[1]) {
+    html += `<div class="tooltip-user"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>${escapeHtml(lines[1])}</span></div>`;
+  }
+  if (lines[2]) {
+    html += `<div class="tooltip-meta"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><span>${escapeHtml(lines[2])}</span></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function hideCustomTooltip() {
+  clearTimeout(tooltipTimer);
+  tooltipTimer = null;
+  if (!ui.tooltip || ui.tooltip.hidden) {
+    tooltipTarget = null;
+    return;
+  }
+  ui.tooltip.classList.remove("visible");
+  lastTooltipHide = Date.now();
+  tooltipTimer = setTimeout(() => {
+    if (ui.tooltip && !ui.tooltip.classList.contains("visible")) {
+      ui.tooltip.hidden = true;
+      tooltipTarget = null;
+    }
+  }, 120);
+}
+
+function showCustomTooltip(target) {
+  if (!ui.tooltip || !target || typeof target.getBoundingClientRect !== "function") return;
+  const text = target.dataset?.tooltip;
+  if (!text) {
+    hideCustomTooltip();
+    return;
+  }
+  tooltipTarget = target;
+  ui.tooltip.innerHTML = formatTooltipHtml(text);
+  ui.tooltip.hidden = false;
+  ui.tooltip.classList.remove("visible");
+
+  const targetRect = target.getBoundingClientRect();
+  const tipRect = ui.tooltip.getBoundingClientRect();
+  const padding = 8;
+  const docWidth = document.documentElement?.clientWidth || 376;
+
+  let left = targetRect.left + (targetRect.width - tipRect.width) / 2;
+  left = Math.max(padding, Math.min(left, docWidth - tipRect.width - padding));
+
+  let top = targetRect.top - tipRect.height - 7;
+  let placement = "top";
+  if (top < padding) {
+    top = targetRect.bottom + 7;
+    placement = "bottom";
+  }
+
+  ui.tooltip.style.left = `${Math.round(left)}px`;
+  ui.tooltip.style.top = `${Math.round(top)}px`;
+  ui.tooltip.dataset.placement = placement;
+
+  const arrowLeft = Math.max(12, Math.min(tipRect.width - 12, targetRect.left + targetRect.width / 2 - left));
+  ui.tooltip.style.setProperty("--arrow-left", `${Math.round(arrowLeft)}px`);
+
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      if (tooltipTarget === target && ui.tooltip) {
+        ui.tooltip.classList.add("visible");
+      }
+    });
+  } else {
+    ui.tooltip.classList.add("visible");
+  }
+}
+
+function onPointerOver(event) {
+  if (!ui.tooltip) return;
+  const target = event.target?.closest?.("[data-tooltip], [title]");
+  if (!target) {
+    hideCustomTooltip();
+    return;
+  }
+  if (typeof target.hasAttribute === "function" && target.hasAttribute("title")) {
+    const val = target.getAttribute("title");
+    if (val) target.dataset.tooltip = val;
+    target.removeAttribute("title");
+  }
+  if (target === tooltipTarget && !ui.tooltip.hidden) return;
+
+  clearTimeout(tooltipTimer);
+  const isQuickSwitch = Date.now() - lastTooltipHide < 300;
+  const delay = isQuickSwitch ? 20 : 180;
+  tooltipTimer = setTimeout(() => showCustomTooltip(target), delay);
+}
+
+function onPointerOut(event) {
+  if (!ui.tooltip || !tooltipTarget) return;
+  const related = event.relatedTarget;
+  if (related && typeof tooltipTarget.contains === "function" && tooltipTarget.contains(related)) return;
+  hideCustomTooltip();
+}
+
 function renderChip() {
   const chip = chipFor(status, oldApp);
   ui.chip.className = `chip ${chip.tone}${chip.action ? " action" : ""}`;
   ui.chipText.textContent = chip.text;
-  ui.chip.title = chip.title;
+  setTooltip(ui.chip, chip.title);
   ui.chip.setAttribute("aria-label", `${chip.text}. ${chip.title}`);
   ui.chip.setAttribute("aria-disabled", chip.action ? "false" : "true");
   ui.chip.hidden = false;
@@ -271,7 +403,7 @@ function hideSearch() {
 
 function setCount(shown, total) {
   ui.count.textContent = shown === total ? String(total) : `${shown}/${total}`;
-  ui.count.title = `${total} saved ${total === 1 ? "login" : "logins"} for this page${shown === total ? "" : `, ${shown} shown`}`;
+  setTooltip(ui.count, `${total} saved ${total === 1 ? "login" : "logins"} for this page${shown === total ? "" : `, ${shown} shown`}`);
   ui.count.hidden = false;
 }
 
@@ -365,7 +497,7 @@ function copyButton(login, tabId, field) {
   const node = document.createElement("button");
   node.type = "button";
   node.className = "copy";
-  node.title = label;
+  setTooltip(node, label);
   node.setAttribute("aria-label", `${label}: ${login.title || login.site || "login"}`);
   node.append(icon(shape));
   let restore = null;
@@ -414,7 +546,7 @@ function rowFor(login, tabId) {
     other.textContent = ` · ${where}`;
     user.append(other);
   }
-  text.title = [name, login.username || "No user name", where].filter(Boolean).join("\n");
+  setTooltip(text, [name, login.username || "No user name", where].filter(Boolean).join("\n"));
   text.append(title, user);
 
   const actions = document.createElement("span");
@@ -427,7 +559,7 @@ function rowFor(login, tabId) {
   let fill = null;
   if (hasPassword || login.username) {
     fill = button("Fill", "primary fill");
-    fill.title = hasPassword ? "Fill this login in the page (Enter)" : "Fill the user name in the page";
+    setTooltip(fill, hasPassword ? "Fill this login in the page (Enter)" : "Fill the user name in the page");
     fill.setAttribute("aria-label", `${hasPassword ? "Fill" : "Fill the user name of"} ${name}`);
     fill.addEventListener("click", async () => {
       if (isBusy(fill)) return;
@@ -723,6 +855,12 @@ function start() {
   ui.chip.addEventListener("click", () => {
     if (chipFor(status, oldApp).action) void openApp(ui.chip);
   });
+  if (typeof document?.addEventListener === "function") {
+    document.addEventListener("pointerover", onPointerOver);
+    document.addEventListener("pointerout", onPointerOut);
+    document.addEventListener("pointerdown", hideCustomTooltip);
+    document.addEventListener("scroll", hideCustomTooltip, true);
+  }
   renderChip();
   // MYLE's state and the tab's logins are asked for side by side.
   void refreshStatus();
