@@ -449,48 +449,25 @@ pub fn can_delete(path: &Path) -> bool {
     }
     true
 }
-/// What a failed move to the Recycle Bin means (SHFileOperation's codes).
-fn recycle_error(code: i32) -> String {
-    match code {
-        // DE_ACCESSDENIEDSRC, ERROR_ACCESS_DENIED
-        0x78 | 5 => "Only an administrator can move it: run MYLE as administrator for this one.".into(),
-        // ERROR_SHARING_VIOLATION: open in another program
-        0x20 => "It is open in another program. Close it and try again.".into(),
-        // DE_INVALIDFILES, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
-        0x7C | 2 | 3 => "It is no longer there, or its path is too long for the Recycle Bin. Scan again.".into(),
-        _ => format!("Some files are in use or could not be moved to the Recycle Bin (code {code})."),
-    }
-}
-/// Moves files or folders to the Recycle Bin (no prompt, no progress).
-pub fn recycle(paths: &[PathBuf]) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::{
-        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW,
-        SHFileOperationW,
-    };
-    let mut from: Vec<u16> = Vec::new();
+/// Moves files or folders to the Recycle Bin, one at a time (no prompt, no
+/// progress). It goes through the Disk Analyzer's guarded shell operation:
+/// an item the bin cannot take (too big for it, a drive without one, a path
+/// too long) is refused and stays where it is, never deleted for good.
+/// Blocking, and needs its own thread for COM: call it from `spawn_blocking`.
+/// Returns the paths that went to the bin, and the first failure.
+pub fn recycle(paths: &[PathBuf]) -> (Vec<PathBuf>, Result<(), String>) {
+    let _com = crate::disk_analyzer::delete::Com::init();
+    let mut moved = Vec::new();
     for path in paths {
         if !path.is_absolute() || path.parent().is_none() {
-            return Err(format!("Refused: {}", path.display()));
+            return (moved, Err(format!("Refused: {}", path.display())));
         }
-        from.extend(path.as_os_str().encode_wide_compat());
-        from.push(0);
+        if let Err(error) = crate::disk_analyzer::delete::recycle(path, None) {
+            return (moved, Err(format!("{}: {error}", path.display())));
+        }
+        moved.push(path.clone());
     }
-    from.push(0);
-    let mut op = SHFILEOPSTRUCTW {
-        hwnd: std::ptr::null_mut(),
-        wFunc: FO_DELETE,
-        pFrom: from.as_ptr(),
-        pTo: std::ptr::null(),
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as _,
-        fAnyOperationsAborted: 0,
-        hNameMappings: std::ptr::null_mut(),
-        lpszProgressTitle: std::ptr::null(),
-    };
-    let code = unsafe { SHFileOperationW(&mut op) };
-    if code != 0 || op.fAnyOperationsAborted != 0 {
-        return Err(recycle_error(code));
-    }
-    Ok(())
+    (moved, Ok(()))
 }
 trait WideCompat {
     fn encode_wide_compat(&self) -> Vec<u16>;

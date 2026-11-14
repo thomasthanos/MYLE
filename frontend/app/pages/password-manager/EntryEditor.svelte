@@ -20,6 +20,9 @@
   import { iconHost, passwords as p } from "./state.svelte";
   import StrengthMeter from "./StrengthMeter.svelte";
 
+  /** The website fields as saved: trimmed, empty ones dropped, each address once. */
+  const cleanUrls = (list: string[]) => [...new Set(list.map((u) => u.trim()).filter(Boolean))];
+
   let { id }: { id: string | null } = $props();
 
   // Keyed by entry in the parent: a new editor opens for another entry.
@@ -57,7 +60,7 @@
 
   /** What the form says, to tell whether anything was changed. */
   const snapshot = () =>
-    JSON.stringify({ title: title.trim(), username, urls: urls.map((u) => u.trim()).filter(Boolean), apps, notes, folder, favorite });
+    JSON.stringify({ title: title.trim(), username, urls: cleanUrls(urls), apps, notes, folder, favorite });
   const initial = untrack(snapshot);
   const dirty = $derived(
     snapshot() !== initial || (password ?? "") !== (loadedPassword ?? "") || !!totpText.trim() || totpRemoved,
@@ -181,7 +184,7 @@
       title,
       username,
       password: password ?? undefined,
-      urls: urls.map((u) => u.trim()).filter(Boolean),
+      urls: cleanUrls(urls),
       apps,
       notes,
       folder,

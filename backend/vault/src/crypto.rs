@@ -92,11 +92,33 @@ impl KdfParams {
     }
 }
 
-/// The master key for `password`.
-pub fn derive(password: &str, params: &KdfParams) -> Result<Key, String> {
+/// The most memory (KiB), passes and lanes a vault's key settings may ask
+/// for: far above what MYLE makes (`KdfParams::new`), far below a hang.
+const MAX_MEMORY_KIB: u32 = 1024 * 1024;
+const MAX_ITERATIONS: u32 = 10;
+const MAX_PARALLELISM: u32 = 16;
+
+/// Refuses key settings MYLE would never make. They come from the vault file,
+/// a backup being imported or the account's copy of the vault header, none of
+/// which can be trusted: four billion passes or gigabytes would freeze the
+/// unlock while it holds the vault (browser filling and sync with it) or end
+/// the app on a failed allocation.
+pub fn check_kdf(params: &KdfParams) -> Result<(), String> {
     if params.algorithm != "argon2id" {
         return Err("This vault uses a key derivation this version does not know.".into());
     }
+    if params.memory > MAX_MEMORY_KIB
+        || !(1..=MAX_ITERATIONS).contains(&params.iterations)
+        || !(1..=MAX_PARALLELISM).contains(&params.parallelism)
+    {
+        return Err("This vault's key settings are out of range, so it was not opened.".into());
+    }
+    Ok(())
+}
+
+/// The master key for `password`.
+pub fn derive(password: &str, params: &KdfParams) -> Result<Key, String> {
+    check_kdf(params)?;
     let salt = B64
         .decode(&params.salt)
         .map_err(|_| "The vault's salt is damaged.".to_string())?;
@@ -289,6 +311,24 @@ mod tests {
         assert_eq!(unwrap(&again, "vault", &wrapped).unwrap().0, vault.0);
         let wrong = derive("correct horse!", &params).unwrap();
         assert!(unwrap(&wrong, "vault", &wrapped).is_err());
+    }
+
+    #[test]
+    fn key_settings_no_unlock_could_finish_are_refused_before_deriving() {
+        assert!(check_kdf(&KdfParams::new()).is_ok());
+        assert!(check_kdf(&KdfParams::cheap_for_tests()).is_ok());
+        for bad in [
+            KdfParams { iterations: u32::MAX, ..KdfParams::new() },
+            KdfParams { iterations: 0, ..KdfParams::new() },
+            KdfParams { memory: u32::MAX, ..KdfParams::new() },
+            KdfParams { parallelism: 0, ..KdfParams::new() },
+            KdfParams { parallelism: 4096, ..KdfParams::new() },
+            KdfParams { algorithm: "scrypt".into(), ..KdfParams::new() },
+        ] {
+            assert!(check_kdf(&bad).is_err(), "{bad:?}");
+            // derive refuses at once instead of running Argon2 for hours.
+            assert!(derive("x", &bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

@@ -393,7 +393,8 @@ fn moved_documents(normalized: &str, raw: &str, here: &Here) -> Option<String> {
     // `c:\users\<name>\[onedrive…\]documents\rest` Empty parts dropped on both sides, so the two line up.
     let parts: Vec<&str> = normalized.split('\\').filter(|part| !part.is_empty()).collect();
     let users = parts.iter().position(|part| *part == "users")?;
-    let after = &parts[users + 2..];
+    // `get`: a path that ends at `users` (or one part after it) has no rest.
+    let after = parts.get(users + 2..)?;
     let rest_at = match after {
         ["documents", ..] => users + 3,
         [cloud, "documents", ..] if cloud.starts_with("onedrive") => users + 4,
@@ -579,6 +580,13 @@ mod tests {
         assert_eq!(back.suggested_target.as_deref(), Some(r"C:\Users\P\Documents\My Games\X"));
         // Where this PC keeps Documents: nothing to choose.
         assert!(!unknown_for(&["C:/Users/P/Documents/My Games/X"], &[], r"C:\Users\P\Documents").needs_location);
+    }
+    #[test]
+    fn a_path_that_ends_at_users_is_not_a_moved_documents_folder() {
+        let here = here(r"C:\Users\P\OneDrive\Documents");
+        assert_eq!(moved_documents(r"d:\games\foo\users", r"D:\Games\Foo\Users", &here), None);
+        assert_eq!(moved_documents(r"c:\users", r"C:\Users", &here), None);
+        assert_eq!(moved_documents(r"c:\users\old", r"C:\Users\Old", &here), None);
     }
     #[test]
     fn another_users_documents_are_offered_this_users() {

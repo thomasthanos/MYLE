@@ -123,7 +123,7 @@
       {#if entry.hasTotp}
         <TotpCode {id} />
       {/if}
-      {#each entry.urls as url (url)}
+      {#each entry.urls as url, i (i)}
         <div class="row">
           <dt>Website</dt>
           <dd class="selectable link">{url}</dd>

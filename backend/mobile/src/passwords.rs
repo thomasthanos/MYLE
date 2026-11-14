@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use myle_vault::VaultCell;
 use myle_vault::crypto::KdfParams;
@@ -34,8 +34,9 @@ pub(crate) static SYNCING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_ne
 #[derive(Clone)]
 pub struct PasswordsState {
     pub(crate) cell: VaultCell,
-    /// Since when the app has been out of sight.
-    hidden_at: Arc<Mutex<Option<Instant>>>,
+    /// Since when the app has been out of sight, by the monotonic clock and by
+    /// the wall clock: the monotonic one stops while the phone sleeps.
+    hidden_at: Arc<Mutex<Option<(Instant, SystemTime)>>>,
 }
 
 impl PasswordsState {
@@ -71,7 +72,7 @@ impl PasswordsState {
             .map_err(|e| e.to_string())?
     }
 
-    fn hidden_since(&self) -> std::sync::MutexGuard<'_, Option<Instant>> {
+    fn hidden_since(&self) -> std::sync::MutexGuard<'_, Option<(Instant, SystemTime)>> {
         self.hidden_at.lock().unwrap_or_else(|p| p.into_inner())
     }
 
@@ -84,8 +85,12 @@ impl PasswordsState {
     /// Back in sight: locks the vault if the app was away a while (and the
     /// user did not choose never to lock it). Whether it locked it.
     fn lock_now_if_away(&self) -> bool {
-        let Some(left) = self.hidden_since().take() else { return false };
-        if left.elapsed() < AWAY_LOCK {
+        let Some((left, left_wall)) = self.hidden_since().take() else { return false };
+        // `Instant` counts only the time the phone was awake: a night in a
+        // pocket can read as seconds. The wall clock does not stop; a wall
+        // clock that went back reads as a long time away (locked).
+        let away = left.elapsed().max(SystemTime::now().duration_since(left_wall).unwrap_or(AWAY_LOCK));
+        if away < AWAY_LOCK {
             return false;
         }
         let mut slot = self.cell.lock();
@@ -128,8 +133,7 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
                     continue;
                 }
                 let minutes = vault.prefs().auto_lock_minutes;
-                let idle = minutes > 0
-                    && vault.last_used.elapsed() >= Duration::from_secs(u64::from(minutes) * 60);
+                let idle = minutes > 0 && vault.idle_for() >= Duration::from_secs(u64::from(minutes) * 60);
                 if idle {
                     vault.lock();
                 }
@@ -155,7 +159,7 @@ pub fn passwords_status(state: State<'_, PasswordsState>) -> Result<StatusInfo, 
 #[tauri::command(async)]
 pub fn passwords_app_hidden(state: State<'_, PasswordsState>, hidden: bool) -> bool {
     if hidden {
-        state.hidden_since().get_or_insert_with(Instant::now);
+        state.hidden_since().get_or_insert_with(|| (Instant::now(), SystemTime::now()));
         return false;
     }
     state.lock_now_if_away()
@@ -438,12 +442,19 @@ mod tests {
         assert!(unlocked());
 
         // A quick look at another app keeps it open.
-        *state.hidden_since() = Some(Instant::now());
+        *state.hidden_since() = Some((Instant::now(), SystemTime::now()));
         assert!(!state.lock_now_if_away());
         assert!(unlocked());
 
         // A while away locks it.
-        *state.hidden_since() = Some(Instant::now() - AWAY_LOCK);
+        *state.hidden_since() = Some((Instant::now() - AWAY_LOCK, SystemTime::now() - AWAY_LOCK));
+        assert!(state.lock_now_if_away());
+        assert!(!unlocked());
+
+        // A night asleep in a pocket: the monotonic clock barely moved.
+        state.with(|vault| vault.unlock("correct horse battery staple 9")).unwrap();
+        assert!(unlocked());
+        *state.hidden_since() = Some((Instant::now(), SystemTime::now() - Duration::from_secs(8 * 3600)));
         assert!(state.lock_now_if_away());
         assert!(!unlocked());
         let _ = std::fs::remove_dir_all(&dir);

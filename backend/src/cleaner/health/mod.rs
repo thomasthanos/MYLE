@@ -905,6 +905,24 @@ fn closed(exe: &str) -> Result<(), String> {
         Ok(())
     }
 }
+/// Moves `paths` to the Recycle Bin on a thread of its own (the shell wants
+/// COM there), then records only what actually went, so the restore list
+/// never offers an item that was refused and is still in place.
+async fn recycle_and_remember(module: &str, title: &str, paths: Vec<PathBuf>) -> Result<(), String> {
+    let (moved, result) = tauri::async_runtime::spawn_blocking(move || sys::recycle(&paths))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !moved.is_empty() {
+        remember(
+            module,
+            title,
+            Undo::Recycled {
+                paths: moved.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+            },
+        )?;
+    }
+    result
+}
 async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(), String> {
     let module = finding.module;
     let title = &finding.title;
@@ -914,17 +932,7 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
             if present.is_empty() {
                 return Ok(());
             }
-            remember(
-                module,
-                title,
-                Undo::Recycled {
-                    paths: present
-                        .iter()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .collect(),
-                },
-            )?;
-            sys::recycle(&present)
+            recycle_and_remember(module, title, present).await
         }
         (Target::UninstallKey { hive, path, dirs }, "deleteKey" | "forceClean") => {
             let file = health_dir()?.join("backups").join(format!(
@@ -944,17 +952,7 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
             if action == "forceClean" {
                 let present: Vec<PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();
                 if !present.is_empty() {
-                    remember(
-                        module,
-                        &format!("{title}: folders"),
-                        Undo::Recycled {
-                            paths: present
-                                .iter()
-                                .map(|p| p.to_string_lossy().into_owned())
-                                .collect(),
-                        },
-                    )?;
-                    sys::recycle(&present)?;
+                    recycle_and_remember(module, &format!("{title}: folders"), present).await?;
                 }
             }
             sys::root(hive)

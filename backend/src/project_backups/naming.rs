@@ -93,10 +93,11 @@ pub(crate) fn parse_backup_name(name: &str) -> (String, u32, u32) {
     }
 }
 pub(crate) fn strip_zip(name: &str) -> &str {
-    if name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(".zip") {
-        &name[..name.len() - 4]
-    } else {
-        name
+    // Byte offsets only cut where a character starts: a name such as
+    // `App_αρχείο.7z` must not split the `ο` in two.
+    match name.len().checked_sub(4).filter(|&at| at > 0 && name.is_char_boundary(at)) {
+        Some(at) if name[at..].eq_ignore_ascii_case(".zip") => &name[..at],
+        _ => name,
     }
 }
 /// `<App>_D<day>_V<version>`.
@@ -265,6 +266,16 @@ pub(crate) fn greek_display(c: Civil) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn names_ending_in_a_multibyte_character_are_not_cut_inside_it() {
+        assert_eq!(strip_zip("App_αρχείο.7z"), "App_αρχείο.7z");
+        assert_eq!(strip_zip("App_σημειώσεις.md"), "App_σημειώσεις.md");
+        assert_eq!(strip_zip("App_παλιό_V3"), "App_παλιό_V3");
+        assert_eq!(strip_zip("App_αρχείο.zip"), "App_αρχείο");
+        assert_eq!(strip_zip(".zip"), ".zip");
+        assert_eq!(parse_backup_name("App_αρχείο.7z").2, 0);
+        assert_eq!(parse_backup_name("App_παλιό_D3_V7.ZIP"), ("App_παλιό_D3_V7".into(), 3, 7));
+    }
     #[test]
     fn month_folders_are_greek_and_any_language_is_read() {
         assert_eq!(month_folder(2026, 10), "2026-10 Οκτώβριος");

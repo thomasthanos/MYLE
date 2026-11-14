@@ -435,6 +435,27 @@ mod tests {
         }
     }
     #[test]
+    fn every_elevated_command_line_fits_in_a_windows_command_line() {
+        // A long profile path, as %TEMP% can be. CreateProcessW takes at most
+        // 32,767 characters; Check Disk's once came to about 36,500.
+        let dir = format!(r"C:\Users\{}\AppData\Local\Temp\myle-maint-x-0123456789abcdef", "u".repeat(60));
+        let (log, stop) = (PathBuf::from(format!(r"{dir}\output.log")), PathBuf::from(format!(r"{dir}\stop")));
+        for card in tasks::CARDS {
+            for action in card.actions {
+                let script = match &action.run {
+                    tasks::Run::Batch(steps) => batch_script(steps, &log),
+                    tasks::Run::Stream(step) => stream_script(step, &log, &stop),
+                    tasks::Run::DiskScan => disk_script(&log, &stop),
+                    tasks::Run::WingetUpgradeAll => continue,
+                };
+                // What the UAC prompt starts: powershell.exe plus its arguments.
+                let program = crate::apps::process::powershell().to_string_lossy().into_owned();
+                let line = std::iter::once(program).chain(powershell_args(&script)).collect::<Vec<_>>().join(" ");
+                assert!(line.len() < 32_000, "{}: elevated command line is {} characters", action.id, line.len());
+            }
+        }
+    }
+    #[test]
     fn quotes_are_escaped() {
         assert_eq!(ps_quote(r"C:\Users\it's\t.log"), r"'C:\Users\it''s\t.log'");
     }

@@ -164,6 +164,11 @@ async fn push_item(cloud: &Cloud, record: &Record) -> Result<bool, String> {
     };
     match status {
         StatusCode::CONFLICT => Ok(false),
+        // The database refused this one row (Postgres check violation: an
+        // entry over the size limit, saved before the app checked it). It
+        // stays unsent; the rows after it still go.
+        StatusCode::BAD_REQUEST if body.contains("23514") => Ok(false),
+        StatusCode::PAYLOAD_TOO_LARGE => Ok(false),
         s if s.is_success() => Ok(record.base_revision.is_none() || body.trim() != "[]"),
         s => Err(explain(s, &body)),
     }

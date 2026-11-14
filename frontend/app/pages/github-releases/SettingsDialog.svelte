@@ -306,7 +306,7 @@
           <dl class="facts">
             <div><dt>Signed in with</dt><dd>{account.source === "gh" ? "The GitHub CLI" : "A personal access token"}</dd></div>
             {#if account.scopes.length}
-              <div><dt>Scopes</dt><dd class="scopes">{#each account.scopes as scope (scope)}<code class:need={scope === "workflow" || scope === "repo"}>{scope}</code>{/each}</dd></div>
+              <div><dt>Scopes</dt><dd class="scopes">{#each account.scopes as scope, i (i)}<code class:need={scope === "workflow" || scope === "repo"}>{scope}</code>{/each}</dd></div>
             {/if}
             <div><dt>Token</dt><dd>Encrypted for your Windows account; git gets it only for a push or pull.</dd></div>
           </dl>
@@ -431,7 +431,7 @@
                       </div>
                       {#if ollamaModels}
                         <div class="models">
-                          {#each ollamaModels as m (m)}
+                          {#each ollamaModels as m, i (i)}
                             <button class="chip" class:active={(models.ollama || p.defaultModel) === m} onclick={() => ((models.ollama = m), void saveModel(p))}>{m}</button>
                           {:else}
                             <span class="hint">No models yet: run <code>ollama pull llama3.2</code>.</span>

@@ -18,6 +18,16 @@ const MASTER_AAD: &str = "myle-vault|master";
 const RECOVERY_AAD: &str = "myle-vault|recovery";
 /// Old passwords kept per entry.
 const HISTORY: usize = 10;
+/// The longest sealed entry the account takes: `password_items.ciphertext`
+/// is checked `<= 262144` (docs/supabase/password-manager.sql).
+const MAX_SYNCED_CIPHERTEXT: usize = 262_144;
+
+/// How long `entry` is once sealed (`crypto::seal`: version, base64 nonce,
+/// base64 of the text and its 16-byte tag), with a few characters to spare.
+fn sealed_length(entry: &Entry) -> Result<usize, String> {
+    let plain = Zeroizing::new(serde_json::to_vec(entry).map_err(|e| e.to_string())?);
+    Ok(40 + (plain.len() + 16).div_ceil(3) * 4)
+}
 
 fn entry_aad(id: &str, revision: u64) -> String {
     format!("myle-entry|{id}|{revision}")
@@ -278,6 +288,10 @@ pub struct Vault {
     /// The last time the user did something with the vault (not the browser
     /// or the sync), for locking it after a while.
     pub last_used: Instant,
+    /// The same moment by the wall clock. `Instant` stops while a phone (or
+    /// a PC) sleeps, so a vault left open overnight would count only the
+    /// minutes the device was awake. See `idle_for`.
+    last_used_wall: SystemTime,
     failed_tries: u32,
     retry_at: Option<Instant>,
 }
@@ -329,6 +343,7 @@ impl Vault {
             file,
             unlocked: None,
             last_used: Instant::now(),
+            last_used_wall: SystemTime::now(),
             failed_tries: 0,
             retry_at: None,
         };
@@ -493,7 +508,7 @@ impl Vault {
             damaged,
             icons: None,
         });
-        self.last_used = Instant::now();
+        self.touch();
         Ok(())
     }
 
@@ -505,6 +520,15 @@ impl Vault {
     /// The user did something with the vault: it stays open longer.
     pub fn touch(&mut self) {
         self.last_used = Instant::now();
+        self.last_used_wall = SystemTime::now();
+    }
+
+    /// How long since the user last did something with the vault: the longer
+    /// of the monotonic and the wall-clock measure, so time asleep counts.
+    /// A wall clock set back counts as no time (the monotonic one still runs).
+    pub fn idle_for(&self) -> Duration {
+        let wall = SystemTime::now().duration_since(self.last_used_wall).unwrap_or(Duration::ZERO);
+        self.last_used.elapsed().max(wall)
     }
 
     /// Which vault this is, once there is one.
@@ -861,6 +885,9 @@ impl Vault {
         entry.favorite = input.favorite;
         entry.folder = input.folder.trim().to_string();
         entry.updated_at = now;
+        if sealed_length(&entry)? > MAX_SYNCED_CIPHERTEXT {
+            return Err("This entry is too large to sync: shorten its notes.".into());
+        }
         self.put(&id, entry)?;
         Ok(id)
     }
@@ -1098,6 +1125,9 @@ impl Vault {
     /// replaces this one. The vault key itself is the same, so an unlocked
     /// vault stays unlocked.
     pub fn take_header(&mut self, header: RemoteHeader) -> Result<(), String> {
+        // Checked before anything is replaced: out-of-range settings from the
+        // account would otherwise leave this PC's vault impossible to open.
+        crypto::check_kdf(&header.kdf)?;
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
         file.kdf = header.kdf;
         file.wrapped_key = header.wrapped_key;
@@ -1117,6 +1147,8 @@ impl Vault {
     /// user chose the account's vault over this one). Locked afterwards:
     /// it opens with the master password set where it was made.
     pub fn adopt(&mut self, header: RemoteHeader, items: Vec<RemoteItem>) -> Result<(), String> {
+        // Settings no unlock could use would leave a vault that never opens.
+        crypto::check_kdf(&header.kdf)?;
         let prefs = self.prefs();
         self.unlocked = None;
         self.file = Some(VaultFile {
@@ -1410,11 +1442,14 @@ fn matches_name(title: &str, name: &str) -> bool {
             .any(|w| squashed_name.contains(w.as_str()))
 }
 
+/// Trimmed, without empty values, each value once (first one kept). The same
+/// website twice crashed the page that lists them, which keys rows by value.
 fn clean_list(values: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
     values
         .iter()
         .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+        .filter(|v| !v.is_empty() && seen.insert(v.clone()))
         .collect()
 }
 
@@ -1485,6 +1520,50 @@ mod tests {
             folder: String::new(),
             totp: None,
         }
+    }
+
+    #[test]
+    fn an_account_header_with_out_of_range_key_settings_changes_nothing() {
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        let (mut header, _) = vault.sync_header().unwrap();
+        let before = header.clone();
+        header.kdf.iterations = u32::MAX;
+        header.wrapped_key = "garbage".into();
+        assert!(vault.take_header(header.clone()).is_err());
+        assert!(vault.adopt(header, Vec::new()).is_err());
+        assert_eq!(vault.sync_header().unwrap().0, before);
+        vault.lock();
+        assert!(vault.unlock("master one").is_ok());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_entry_too_large_for_the_account_is_refused_with_a_reason() {
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        let mut big = input("Notes", "p1");
+        big.notes = "x".repeat(200 * 1024);
+        assert!(vault.save(&big).unwrap_err().contains("too large to sync"));
+        big.notes = "x".repeat(150 * 1024);
+        vault.save(&big).unwrap();
+        // The estimate never undercounts what the account is sent.
+        let sealed = vault.file.as_ref().unwrap().records.iter().map(|r| r.ciphertext.len()).max().unwrap();
+        let entry = vault.all_entries().unwrap().into_iter().find(|e| e.title == "Notes").unwrap();
+        assert!(sealed_length(&entry).unwrap() >= sealed);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_website_typed_twice_is_saved_once() {
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        let mut twice = input("GitHub", "p1");
+        twice.urls = vec![" github.com ".into(), "".into(), "github.com".into(), "gist.github.com".into()];
+        vault.save(&twice).unwrap();
+        let saved = vault.all_entries().unwrap().into_iter().find(|e| e.title == "GitHub").unwrap();
+        assert_eq!(saved.urls, ["github.com", "gist.github.com"]);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -2039,6 +2118,22 @@ mod tests {
         assert_eq!(vault.last_used, before);
         vault.touch();
         assert!(vault.last_used > before);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn time_asleep_counts_toward_the_idle_lock() {
+        let (path, mut vault) = temp_vault();
+        vault.create("m", KdfParams::cheap_for_tests()).unwrap();
+        vault.touch();
+        assert!(vault.idle_for() < Duration::from_secs(5));
+        // Asleep all night: the monotonic clock barely moved, the wall clock did.
+        vault.last_used_wall = SystemTime::now() - Duration::from_secs(8 * 3600);
+        assert!(vault.idle_for() >= Duration::from_secs(8 * 3600 - 5));
+        // A wall clock set back does not reset the monotonic measure.
+        vault.last_used = Instant::now() - Duration::from_secs(600);
+        vault.last_used_wall = SystemTime::now() + Duration::from_secs(3600);
+        assert!(vault.idle_for() >= Duration::from_secs(600));
         let _ = std::fs::remove_file(path);
     }
 

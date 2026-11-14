@@ -279,8 +279,9 @@ pub fn account_cancel_sign_in(state: State<'_, AccountState>) {
 #[tauri::command]
 pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>) -> Result<(), String> {
     if let Some(session) = state.session(&app) {
-        // Revokes the refresh token; the local sign-out happens regardless.
-        myle_vault::account::logout(&client()?, &session).await;
+        // Revokes this PC's session only (`global` signed the phone out too);
+        // the local sign-out happens regardless.
+        myle_vault::account::logout_local(&client()?, &session).await;
     }
     state.store(&app, None)
 }

@@ -205,7 +205,9 @@ async fn run(
     let _ = on_event.send(JobEvent::Stage {
         stage: Stage::Downloading,
     });
-    let file = work_dir.join(&resolved.file_name);
+    // Never a file the user already has there: the download truncates its
+    // target, and the package is deleted again on failure and at exit.
+    let file = unused_name(work_dir, &resolved.file_name)?;
     let _ = on_event.send(JobEvent::File {
         name: resolved.file_name.clone(),
         total: resolved.size.or(entry.size_hint),
@@ -427,6 +429,21 @@ fn unpack_progress(events: Channel<JobEvent>) -> impl FnMut(u64, u64) {
         }
     }
 }
+/// `dir\name`, or `dir\stem (n).ext` when that is taken (by the user's own
+/// file, or a package left from an earlier run).
+fn unused_name(dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let first = dir.join(name);
+    if std::fs::symlink_metadata(&first).is_err() {
+        return Ok(first);
+    }
+    let path = Path::new(name);
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (1..1000)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|candidate| std::fs::symlink_metadata(candidate).is_err())
+        .ok_or_else(|| format!("Downloads already holds too many files named {name}."))
+}
 /// The user's Downloads folder.
 fn downloads_dir() -> PathBuf {
     PathBuf::from(super::custom::expand_env(r"%USERPROFILE%\Downloads"))
@@ -583,6 +600,20 @@ pub async fn creative_wand_enhancer_launch() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_download_never_takes_the_name_of_a_file_already_in_downloads() {
+        let dir = std::env::temp_dir().join(format!("myle-creative-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(unused_name(&dir, "package.zip").unwrap(), dir.join("package.zip"));
+        std::fs::write(dir.join("package.zip"), b"the user's own").unwrap();
+        std::fs::write(dir.join("package (1).zip"), b"another").unwrap();
+        assert_eq!(unused_name(&dir, "package.zip").unwrap(), dir.join("package (2).zip"));
+        std::fs::write(dir.join("setup"), b"no extension").unwrap();
+        assert_eq!(unused_name(&dir, "setup").unwrap(), dir.join("setup (1)"));
+        assert_eq!(std::fs::read(dir.join("package.zip")).unwrap(), b"the user's own");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test]
     fn bundled_catalog_parses() {
         // Empty in the public repository; whatever a build carries must parse.

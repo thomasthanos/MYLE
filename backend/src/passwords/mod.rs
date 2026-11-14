@@ -118,8 +118,7 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
                     continue;
                 }
                 let minutes = vault.prefs().auto_lock_minutes;
-                let idle = minutes > 0
-                    && vault.last_used.elapsed() >= Duration::from_secs(u64::from(minutes) * 60);
+                let idle = minutes > 0 && vault.idle_for() >= Duration::from_secs(u64::from(minutes) * 60);
                 if idle || woke || session::windows_is_locked() {
                     vault.lock();
                     true

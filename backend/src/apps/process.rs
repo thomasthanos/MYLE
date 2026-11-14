@@ -48,19 +48,7 @@ pub async fn run_elevated(
         script.push_str(" -WindowStyle Hidden");
     }
     let script = format!("try {{ {script}; exit $p.ExitCode }} catch {{ exit {ERROR_CANCELLED} }}");
-    let status = hidden(powershell())
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-        ])
-        .arg(encode_command(&script))
-        .status()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(status.code().unwrap_or(-1))
+    powershell_via_stdin(&script).await
 }
 /// Starts `program args` through a UAC prompt and returns once it is running
 /// (0), or `ERROR_CANCELLED` if the user declined the prompt. Does not wait
@@ -75,18 +63,34 @@ pub async fn start_elevated(program: &str, args: &[String]) -> Result<i32, Strin
         script.push_str(&format!(" -ArgumentList {}", list.join(",")));
     }
     let script = format!("try {{ {script}; exit 0 }} catch {{ exit {ERROR_CANCELLED} }}");
-    let status = hidden(powershell())
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-        ])
-        .arg(encode_command(&script))
-        .status()
-        .await
+    powershell_via_stdin(&script).await
+}
+/// The line `powershell_via_stdin` sends: ASCII only (base64 of the UTF-16
+/// script), so no console code page can mangle a non-English path.
+fn stdin_line(script: &str) -> String {
+    format!(
+        "iex ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{}')))\n",
+        encode_command(script)
+    )
+}
+/// Runs a PowerShell script given on standard input rather than on the
+/// command line. A command line holds at most 32,767 characters, and an
+/// elevated command nested inside an encoded script outgrew that (Check Disk's
+/// came to about 36,500, so it never started). Standard input has no such limit.
+async fn powershell_via_stdin(script: &str) -> Result<i32, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut child = hidden(powershell())
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .map_err(|e| e.to_string())?;
+    let mut input = child.stdin.take().ok_or("PowerShell has no input.")?;
+    let written = input.write_all(stdin_line(script).as_bytes()).await;
+    drop(input); // end of input: PowerShell runs the line and exits
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    written.map_err(|e| format!("Could not hand the script to PowerShell: {e}"))?;
     Ok(status.code().unwrap_or(-1))
 }
 /// PowerShell `-EncodedCommand` payload: base64 of the UTF-16LE script.
@@ -164,6 +168,21 @@ mod tests {
     #[test]
     fn quotes_are_escaped_for_powershell() {
         assert_eq!(ps_quote("it's"), "'it''s'");
+    }
+    #[test]
+    fn the_script_on_standard_input_is_one_ascii_line() {
+        let line = stdin_line("try { $p = 'C:\\Users\\Θωμάς\\x.exe'; exit 0 } catch { exit 1223 }\nexit 1");
+        assert!(line.is_ascii());
+        assert_eq!(line.matches('\n').count(), 1);
+        assert!(line.ends_with("')))\n"));
+    }
+    #[tokio::test]
+    async fn a_script_on_standard_input_keeps_its_exit_code_and_non_english_text() {
+        let script = "try { if ('Θωμάς'.Length -eq 5) { exit 9 } else { exit 3 } } catch { exit 1223 }";
+        assert_eq!(powershell_via_stdin(script).await, Ok(9));
+        // Far past the 32,767-character command-line limit.
+        let long = format!("try {{ $s = '{}'; exit ($s.Length % 241) }} catch {{ exit 1223 }}", "y".repeat(40_000));
+        assert_eq!(powershell_via_stdin(&long).await, Ok(40_000 % 241));
     }
     #[test]
     fn encoded_command_is_utf16le_base64() {

@@ -507,7 +507,7 @@
               {#if shortcutWarnings.length}
                 <div class="launch-error" role="status">
                   <strong>Installed, but some shortcuts are missing.</strong>
-                  {#each shortcutWarnings as warning (warning)}<span>{warning}</span>{/each}
+                  {#each shortcutWarnings as warning, i (i)}<span>{warning}</span>{/each}
                   <span>Run the setup again to retry them.</span>
                 </div>
               {/if}

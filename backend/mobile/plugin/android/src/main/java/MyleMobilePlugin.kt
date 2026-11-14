@@ -3,12 +3,15 @@ package uk.thomast.myle.mobile
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebView
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
@@ -46,6 +49,63 @@ class MyleMobilePlugin(private val activity: Activity) : Plugin(activity) {
         super.load(webView)
         fitScreen(webView)
         keepOutOfAutofill(webView)
+        keepOutOfRecents()
+    }
+
+    /**
+     * The app switcher's picture of the app shows no revealed password or
+     * code: Android takes it before the page could cover itself. From Android
+     * 13 only that picture is left out (the user's own screenshots still
+     * work); before, the window is marked secure.
+     */
+    private fun keepOutOfRecents() {
+        activity.runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                activity.setRecentsScreenshotEnabled(false)
+            } else {
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+    }
+
+    /** The signing certificates of a package, current and earlier ones. */
+    @Suppress("DEPRECATION")
+    private fun signers(info: PackageInfo?, history: Boolean): Set<String> {
+        if (info == null) return emptySet()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signing = info.signingInfo ?: return emptySet()
+            val current = signing.apkContentsSigners?.toList() ?: emptyList()
+            val earlier = if (history && !signing.hasMultipleSigners()) {
+                signing.signingCertificateHistory?.toList() ?: emptyList()
+            } else {
+                emptyList()
+            }
+            return (current + earlier).map { it.toCharsString() }.toSet()
+        }
+        return info.signatures?.map { it.toCharsString() }?.toSet() ?: emptySet()
+    }
+
+    /**
+     * Null when the APK is this app, signed with this app's key (or a key
+     * that rotated from it); otherwise why not. The update's checksum only
+     * proves it came intact from the feed's server: a look-alike app under
+     * another package name would install beside MYLE Passwords, not over it.
+     */
+    @Suppress("DEPRECATION")
+    private fun notThisApp(file: File): String? {
+        val pm = activity.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+        val apk = pm.getPackageArchiveInfo(file.path, flags)
+            ?: return "The download is not an Android app. Download it again."
+        if (apk.packageName != activity.packageName) return "The download is not MYLE Passwords."
+        val mine = signers(pm.getPackageInfo(activity.packageName, flags), false)
+        val theirs = signers(apk, true)
+        if (mine.isEmpty() || !theirs.containsAll(mine)) return "The download is not signed by MYLE."
+        return null
     }
 
     /**
@@ -135,6 +195,16 @@ class MyleMobilePlugin(private val activity: Activity) : Plugin(activity) {
         val file = File(args.path)
         if (!file.isFile) {
             invoke.reject("The update is not downloaded any more. Download it again.")
+            return
+        }
+        val refused = try {
+            notThisApp(file)
+        } catch (e: Exception) {
+            "The update could not be checked: ${e.message ?: "unknown error"}"
+        }
+        if (refused != null) {
+            file.delete()
+            invoke.reject(refused)
             return
         }
         activity.runOnUiThread {

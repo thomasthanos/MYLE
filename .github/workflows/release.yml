@@ -24,8 +24,12 @@ on:
 permissions:
   contents: write
 
+# One Windows release at a time, whatever the tag: two tags pushed close
+# together (or a re-run of an old one) must not race to write latest.json.
+# A newer tag waits for the one in progress; the publish step also refuses
+# to put an older version over a newer one.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-windows
   cancel-in-progress: false
 
 env:
@@ -38,7 +42,11 @@ jobs:
     env:
       HAS_CERT: ${{ secrets.WIN_CSC_LINK != '' }}
     steps:
+      # No token left in .git/config for the build's tools to read: the one
+      # step that needs it (gh release) is handed it explicitly.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -81,36 +89,52 @@ jobs:
       - run: npm run check
         if: env.SKIP_CHECKS != 'true'
 
-      - name: Prepare code signing
+      # Installed copies only take an update signed with the release
+      # certificate (backend/src/updater.rs, RELEASE_SIGNERS): an unsigned
+      # one would be refused by every PC, so it is never published.
+      - name: Refuse an unsigned release
+        if: github.ref_type == 'tag' && env.HAS_CERT != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::WIN_CSC_LINK is not set: a release must be signed."
+          exit 1
+
+      # The build runs with no certificate in its environment: npm packages,
+      # build scripts and the compiler never see it. Signing happens in steps
+      # of their own, which hold the secret only while they run
+      # (scripts/sign.ps1 writes it to a temporary file and deletes it).
+      #
+      # 1. The app and its uninstaller. Also downloads and verifies the pinned
+      # Ludusavi runtime for Game Saves (scripts/bootstrap-game-saves.ps1).
+      - name: Build the app and the uninstaller
+        shell: pwsh
+        run: |
+          if ($env:HAS_CERT -ne 'true') {
+            Write-Host "::warning::WIN_CSC_LINK is not set: building an unsigned setup (dry run only)."
+          }
+          # Windows PowerShell, as `npm run build` runs it.
+          powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-setup.ps1 -Phase binaries
+
+      - name: Sign the app and the uninstaller
         if: env.HAS_CERT == 'true'
         shell: pwsh
         env:
           CERT_B64: ${{ secrets.WIN_CSC_LINK }}
           CERT_PASS: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          $pass = "$env:CERT_PASS".Trim().Trim('"').Trim("'")
-          Write-Host "::add-mask::$pass"
-          $pfx = Join-Path $env:RUNNER_TEMP "myle-sign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64.Trim()))
-          $cert = (Get-PfxData -FilePath $pfx -Password (ConvertTo-SecureString $pass -AsPlainText -Force)).EndEntityCertificates[0]
-          Write-Host "Signing certificate: $($cert.Subject), expires $($cert.NotAfter)"
+        run: ./scripts/sign.ps1 -Path backend/target/release/MYLE.exe, backend/target/release/uninstall.exe
 
-          # scripts/build-setup.ps1 signs the app, the uninstaller and the
-          # setup with it (scripts/sign.ps1).
-          "MYLE_SIGN_PFX=$pfx"          | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "MYLE_SIGN_PASSWORD=$pass"    | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-      # The app, its uninstaller and the setup that carries both
-      # (backend/installer). Also downloads and verifies the pinned Ludusavi
-      # runtime for Game Saves (scripts/bootstrap-game-saves.ps1).
-      - name: Build
+      # 2. The setup that carries both (backend/installer).
+      - name: Build the setup
         shell: pwsh
-        run: |
-          if (-not $env:MYLE_SIGN_PFX) {
-            Write-Host "::warning::WIN_CSC_LINK is not set: building an unsigned setup."
-          }
-          npm run build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-setup.ps1 -Phase setup
+
+      - name: Sign the setup
+        if: env.HAS_CERT == 'true'
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WIN_CSC_LINK }}
+          CERT_PASS: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: ./scripts/sign.ps1 -Path backend/target/release/bundle/setup/MYLE.exe
 
       - name: Collect the installer
         shell: pwsh
@@ -126,10 +150,26 @@ jobs:
             $extension = Get-Item "extension/myle-passwords-$browser.zip" -ErrorAction Stop
             Copy-Item $extension.FullName "out/$($extension.Name)"
           }
-          $signature = Get-AuthenticodeSignature "out/$name"
-          Write-Host "Signature: $($signature.Status) $($signature.SignerCertificate.Subject)"
-          if ($env:HAS_CERT -eq 'true' -and -not $signature.SignerCertificate) {
-            throw "The installer is not signed."
+          if ($env:HAS_CERT -eq 'true') {
+            # The certificates installed copies accept (updater.rs, RELEASE_SIGNERS).
+            $pinned = [regex]::Matches((Get-Content backend/src/updater.rs -Raw), 'RELEASE_SIGNERS: &\[&str\] = &\[([^\]]*)\]')[0].Groups[1].Value
+            $accepted = [regex]::Matches($pinned, '"([0-9A-Fa-f]{40})"') | ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() }
+            if (-not $accepted) { throw "RELEASE_SIGNERS was not found in backend/src/updater.rs" }
+            # The app and uninstaller inside the payload were signed before
+            # packing; the setup itself is checked here. MYLE's certificate is
+            # its own, so Windows reports UnknownError (an untrusted root) for
+            # an intact signature: what matters is the hash and the signer.
+            $signature = Get-AuthenticodeSignature "out/$name"
+            Write-Host "Signature: $($signature.Status) $($signature.SignerCertificate.Subject) $($signature.SignerCertificate.Thumbprint)"
+            if ($signature.Status -notin @('Valid', 'UnknownError')) {
+              throw "The installer's signature is $($signature.Status)."
+            }
+            if ($signature.SignerCertificate.Thumbprint -notin $accepted) {
+              throw "The installer is signed with $($signature.SignerCertificate.Thumbprint), which installed copies do not accept (updater.rs RELEASE_SIGNERS)."
+            }
+            if (-not $signature.TimeStamperCertificate) {
+              throw "The installer's signature has no timestamp."
+            }
           }
           "SETUP_NAME=$name" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -170,7 +210,21 @@ jobs:
             Write-Host "Verified $env:FEED_BASE/$Key"
           }
 
+          # Never an older version over a newer one (a re-run of an old tag,
+          # or two tags close together).
+          $live = try { Invoke-RestMethod -Uri $env:FEED_URL -Headers @{ 'Cache-Control' = 'no-cache' } } catch { $null }
+          if ($live -and $live.version) {
+            try { $newer = [semver]"$($live.version)" -gt [semver]$env:VERSION } catch { $newer = $false; Write-Host "::warning::Could not compare the live version $($live.version)" }
+            if ($newer) { throw "$env:FEED_BASE already serves $($live.version), newer than $env:VERSION: nothing was published." }
+          }
+
           $exe = @('--content-type', 'application/vnd.microsoft.portable-executable', '--cache-control', 'no-cache')
+          # The feed names this version's own file: no cache, and no upload
+          # in progress, can hand a client an exe that does not match the
+          # feed's hash.
+          $versioned = "MYLE-$env:VERSION.exe"
+          Publish $setup.FullName $versioned $exe
+          Assert-Served $versioned $sha256
           Publish $setup.FullName "MYLE.exe" $exe
           Assert-Served "MYLE.exe" $sha256
           # The site and README link to MYLE.exe; the old name stays for links
@@ -184,7 +238,7 @@ jobs:
             pubDate   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             installer = [ordered]@{
               name   = $setup.Name
-              url    = "$env:FEED_BASE/$($setup.Name)"
+              url    = "$env:FEED_BASE/$versioned"
               size   = $setup.Length
               sha256 = $sha256
             }

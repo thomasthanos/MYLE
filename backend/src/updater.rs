@@ -42,8 +42,19 @@ impl Drop for CheckingGuard {
 pub const UPDATE_FEED: &str = "https://downloads.thomast.uk/latest.json";
 /// Release asset to install. Its version comes from the tag or update feed.
 const ASSET_NAME: &str = "MYLE.exe";
-/// Installers are only ever downloaded from these two places.
-const DOWNLOAD_PREFIXES: [&str; 2] = ["https://downloads.thomast.uk/", "https://github.com/"];
+/// Installers are only ever downloaded from these two places: the update
+/// bucket and this repository's own releases (not any GitHub repository).
+const DOWNLOAD_PREFIXES: [&str; 2] = [
+    "https://downloads.thomast.uk/",
+    "https://github.com/thomasthanos/MYLE/releases/download/",
+];
+/// SHA-1 thumbprints of the certificates MYLE releases are signed with
+/// (scripts/sign.ps1, from the WIN_CSC_LINK secret). The SHA-256 an update is
+/// checked against comes from the same place as the file, so it only proves
+/// the download arrived whole; the signature proves who made it. A new
+/// certificate must be added here, in a release signed with the old one,
+/// before any release is signed with the new one.
+const RELEASE_SIGNERS: &[&str] = &["C997612EEBB8AA08ADAD30BF64F208344B264D50"];
 const CHECK_TIMEOUT: Duration = Duration::from_secs(8);
 const USER_AGENT: &str = "MYLE-Updater";
 /// Where downloaded installers wait to run. The installer relaunches the app,
@@ -296,6 +307,10 @@ pub async fn install_update(
         let _ = tokio::fs::remove_file(&path).await;
         return Err("the downloaded update failed SHA-256 verification".into());
     }
+    if let Err(error) = signed_by_myle(&path).await {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(error);
+    }
     let _ = on_event.send(DownloadEvent::Installing);
     // The seamless way, as the old app's updater did it: everything slow happens while we are still on screen. The setup swaps the files in place while we run (Windows lets a running program be renamed), the new version starts, and we close once its window is up.
     if let Some(exe) = installed_exe() {
@@ -546,6 +561,88 @@ impl Drop for ResetUpdating {
 }
 fn allowed_download(url: &str) -> bool {
     DOWNLOAD_PREFIXES.iter().any(|prefix| url.starts_with(prefix))
+}
+/// The SHA-1 thumbprint (upper-case hex) of the certificate whose embedded
+/// Authenticode signature covers `path` unaltered; `Err` with Windows' code
+/// otherwise. Windows checks the signature and the file's hash first: an
+/// altered file is `TRUST_E_BAD_DIGEST`, an unsigned one `TRUST_E_NOSIGNATURE`.
+/// MYLE's certificate is its own (no public authority issued it), so a chain
+/// that ends at a root Windows does not trust is accepted here, and the
+/// signer is pinned instead (`RELEASE_SIGNERS`).
+fn authenticode_signer(path: &std::path::Path) -> Result<String, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Security::Cryptography::{CERT_SHA1_HASH_PROP_ID, CertGetCertificateContextProperty};
+    use windows_sys::Win32::Security::WinTrust::{
+        WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
+        WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE,
+        WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
+    };
+    const CERT_E_UNTRUSTEDROOT: i32 = 0x800B_0109_u32 as i32;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut file = WINTRUST_FILE_INFO {
+        cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: wide.as_ptr(),
+        ..Default::default()
+    };
+    let mut data = WINTRUST_DATA {
+        cbStruct: size_of::<WINTRUST_DATA>() as u32,
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_NONE,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 { pFile: &mut file },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+        ..Default::default()
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    // SAFETY: `data`, `file` and `wide` outlive both calls; the state the
+    // first call opens is read only in between and closed by the second.
+    let status = unsafe { WinVerifyTrust(std::ptr::null_mut(), &mut action, (&raw mut data).cast()) };
+    let signer = if status != 0 && status != CERT_E_UNTRUSTEDROOT {
+        Err(format!("0x{:08X}", status as u32))
+    } else {
+        // SAFETY: provider data of the verification just made, still open.
+        unsafe {
+            let provider = WTHelperProvDataFromStateData(data.hWVTStateData);
+            let signer = if provider.is_null() { std::ptr::null_mut() } else { WTHelperGetProvSignerFromChain(provider, 0, 0, 0) };
+            if signer.is_null() || (*signer).csCertChain == 0 || (*signer).pasCertChain.is_null() || (*(*signer).pasCertChain).pCert.is_null() {
+                Err("no signer certificate".to_string())
+            } else {
+                let mut hash = [0u8; 20];
+                let mut length = hash.len() as u32;
+                let ok = CertGetCertificateContextProperty(
+                    (*(*signer).pasCertChain).pCert,
+                    CERT_SHA1_HASH_PROP_ID,
+                    hash.as_mut_ptr().cast(),
+                    &mut length,
+                );
+                if ok == 0 || length != 20 {
+                    Err("no certificate thumbprint".to_string())
+                } else {
+                    Ok(hash.iter().map(|b| format!("{b:02X}")).collect())
+                }
+            }
+        }
+    };
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    // SAFETY: closes the state the first call opened.
+    unsafe { WinVerifyTrust(std::ptr::null_mut(), &mut action, (&raw mut data).cast()) };
+    signer
+}
+/// Whether the signer `authenticode_signer` found is one of MYLE's release certificates.
+fn release_signature(signer: Result<String, String>) -> Result<(), String> {
+    let thumbprint = signer.map_err(|code| format!("the downloaded update is not properly signed ({code}); it was not installed"))?;
+    if !RELEASE_SIGNERS.iter().any(|known| known.eq_ignore_ascii_case(&thumbprint)) {
+        return Err("the downloaded update is not signed by MYLE; it was not installed".into());
+    }
+    Ok(())
+}
+async fn signed_by_myle(path: &std::path::Path) -> Result<(), String> {
+    let path = path.to_path_buf();
+    let signer = tauri::async_runtime::spawn_blocking(move || authenticode_signer(&path))
+        .await
+        .map_err(|e| e.to_string())?;
+    release_signature(signer)
 }
 fn evaluate_feed(current: &Version, feed: Feed) -> Result<UpdateCheck, String> {
     let latest = parse_tag(&feed.version)?;
@@ -875,6 +972,45 @@ mod tests {
             latest: "9.10.0".into(),
         });
         assert!(!was_offered(&asset));
+    }
+    #[test]
+    fn only_this_repository_and_the_update_bucket_are_download_places() {
+        assert_eq!(DOWNLOAD_PREFIXES[1], format!("https://github.com/{GITHUB_REPO}/releases/download/"));
+        assert!(allowed_download("https://downloads.thomast.uk/MYLE-11.0.2.exe"));
+        assert!(allowed_download("https://github.com/thomasthanos/MYLE/releases/download/v11.0.2/MYLE.exe"));
+        assert!(!allowed_download("https://github.com/someone/else/releases/download/v1/MYLE.exe"));
+        assert!(!allowed_download("https://github.com/thomasthanos/MYLE.evil/releases/download/v1/MYLE.exe"));
+    }
+    #[test]
+    fn an_update_must_be_signed_by_a_release_certificate() {
+        let mine = RELEASE_SIGNERS[0];
+        assert!(release_signature(Ok(mine.to_string())).is_ok());
+        assert!(release_signature(Ok(mine.to_lowercase())).is_ok());
+        assert!(release_signature(Ok("0123456789ABCDEF0123456789ABCDEF01234567".into())).is_err());
+        assert!(release_signature(Err("0x80096010".into())).is_err());
+    }
+    #[test]
+    fn an_unsigned_or_altered_file_has_no_signer() {
+        let scratch = std::env::temp_dir().join(format!("myle-authenticode-{}", std::process::id()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        // This test program itself: unsigned.
+        let unsigned = scratch.join("unsigned.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &unsigned).unwrap();
+        assert!(authenticode_signer(&unsigned).is_err());
+        // An installed MYLE (on a developer's PC): its own signer, and an
+        // altered copy of it refused. Not present on CI runners.
+        let installed = std::env::var_os("LOCALAPPDATA")
+            .map(|local| std::path::PathBuf::from(local).join(r"ThomasThanos\MakeYourLifeEasier\uninstall.exe"))
+            .filter(|path| path.is_file());
+        if let Some(installed) = installed {
+            assert_eq!(authenticode_signer(&installed).as_deref(), Ok(RELEASE_SIGNERS[0]));
+            let mut bytes = std::fs::read(&installed).unwrap();
+            bytes[600] ^= 0xFF;
+            let altered = scratch.join("altered.exe");
+            std::fs::write(&altered, bytes).unwrap();
+            assert!(authenticode_signer(&altered).is_err());
+        }
+        let _ = std::fs::remove_dir_all(scratch);
     }
     #[test]
     fn missing_setup_asset_is_an_error() {

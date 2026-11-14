@@ -14,10 +14,20 @@
   release.yml gives the published copy its versioned name.
 
   The app, the uninstaller and the setup are signed when MYLE_SIGN_PFX is set
-  (release.yml sets it from the certificate secrets); see scripts/sign.ps1.
+  (a local build); see scripts/sign.ps1.
+
+.PARAMETER Phase
+  all       everything, in order (the default)
+  binaries  steps 1 and 2: the app and the uninstaller
+  setup     steps 3 and 4: the payload and the setup around it
+  release.yml runs the two halves with no certificate in the environment and
+  signs in steps of its own in between, so no build tool can read it.
 #>
 [CmdletBinding()]
-param()
+param(
+  [ValidateSet("all", "binaries", "setup")]
+  [string]$Phase = "all"
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -47,18 +57,27 @@ $binary = $config.mainBinaryName
 
 Push-Location $root
 try {
-  # 1. The app. Tauri's build hook prepares and verifies the bundled resources.
-  Invoke-Step "App $version" { npx tauri build --no-bundle }
   $appExe = Join-Path $release "$binary.exe"
-  Set-Signature $appExe
-
-  # 2. The uninstaller, which the setup carries inside it.
-  Invoke-Step "Setup window" { npx vite build --mode setup }
-  Invoke-Step "Uninstaller" {
-    cargo build --release --locked --manifest-path $manifest -p myle-setup --bin uninstall --bin myle-pack
-  }
   $uninstaller = Join-Path $release "uninstall.exe"
-  Set-Signature $uninstaller
+  if ($Phase -ne "setup") {
+    # 1. The app. Tauri's build hook prepares and verifies the bundled resources.
+    Invoke-Step "App $version" { npx tauri build --no-bundle }
+    Set-Signature $appExe
+
+    # 2. The uninstaller, which the setup carries inside it.
+    Invoke-Step "Setup window" { npx vite build --mode setup }
+    Invoke-Step "Uninstaller" {
+      cargo build --release --locked --manifest-path $manifest -p myle-setup --bin uninstall --bin myle-pack
+    }
+    Set-Signature $uninstaller
+  }
+  if ($Phase -eq "binaries") {
+    Write-Host "==> Built: $appExe, $uninstaller"
+    return
+  }
+  foreach ($built in @($appExe, $uninstaller)) {
+    if (-not (Test-Path -LiteralPath $built)) { throw "Missing ${built}: run the binaries phase first." }
+  }
 
   # 3. The install folder, as it will look on the user's PC.
   $work = Join-Path $tauriDir "target\setup"

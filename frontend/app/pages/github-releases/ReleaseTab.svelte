@@ -654,7 +654,7 @@
                 <strong>{f.job}</strong>{#if f.step}<span>failed at <b>{f.step}</b></span>{/if}
                 {#if f.url}<button class="link" onclick={() => void openUrl(f.url!)}>Open the job <ExternalLink size={11} /></button>{/if}
               </p>
-              {#each f.errors.slice(0, 5) as e (e)}<p class="f-error selectable">{e}</p>{/each}
+              {#each f.errors.slice(0, 5) as e, i (i)}<p class="f-error selectable">{e}</p>{/each}
               {#if f.logTail}<pre class="f-log selectable">{f.logTail}</pre>{/if}
             </div>
           {/each}

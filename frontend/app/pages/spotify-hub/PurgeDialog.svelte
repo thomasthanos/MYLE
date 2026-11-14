@@ -93,7 +93,7 @@
             <h3><HardDrive size={14} /> Detected installations</h3>
             {#if preview.detectedVariants.length}
               <ul>
-                {#each preview.detectedVariants as variant (variant)}<li>{variant}</li>{/each}
+                {#each preview.detectedVariants as variant, i (i)}<li>{variant}</li>{/each}
               </ul>
             {:else}
               <p class="muted">No supported Spotify installation was detected.</p>
@@ -102,14 +102,14 @@
           <section class="surface">
             <h3><Database size={14} /> Data to remove</h3>
             <ul>
-              {#each preview.categories as category (category)}<li>{category}</li>{/each}
+              {#each preview.categories as category, i (i)}<li>{category}</li>{/each}
             </ul>
           </section>
         </div>
 
         {#if preview.warnings.length}
           <div class="warnings">
-            {#each preview.warnings as warning (warning)}<p><TriangleAlert size={13} /> {warning}</p>{/each}
+            {#each preview.warnings as warning, i (i)}<p><TriangleAlert size={13} /> {warning}</p>{/each}
           </div>
         {/if}
 

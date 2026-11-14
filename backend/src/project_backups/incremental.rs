@@ -176,6 +176,8 @@ fn increment_cached(path: &Path, cache: &Mutex<InfoCache>) -> Option<Increment> 
 }
 /// The increments on the full backup `base`, oldest first. The chain stops
 /// at the first one that is missing, can't be read or does not follow.
+/// Tests only: anything that acts on data uses [`checked_chain`].
+#[cfg(test)]
 pub(crate) fn chain(app_dir: &Path, base: &BackupEntry) -> Vec<Increment> {
     let folder = app_dir.join(FOLDER);
     let mut chain: Vec<Increment> = Vec::new();
@@ -280,7 +282,8 @@ pub(crate) struct Plan {
 /// Plans an increment of `found` (the project as a backup would take it) on
 /// the newest full backup. `Err`: why a full backup is made instead.
 fn plan(app_dir: &Path, app_name: &str, found: &walk::Walk, now: SystemTime, sink: &dyn Sink) -> Result<Plan, String> {
-    let base = engine::list_backups(app_dir, app_name)
+    let base = engine::list_backups_checked(app_dir, app_name)
+        .map_err(|error| format!("the backups can't all be listed ({error})"))?
         .into_iter()
         .find(|entry| !entry.broken)
         .ok_or("there is no full backup yet")?;
@@ -300,7 +303,9 @@ fn plan(app_dir: &Path, app_name: &str, found: &walk::Walk, now: SystemTime, sin
     if base_started <= 0 || age > MAX_BASE_AGE.as_millis() as i64 {
         return Err("the newest full backup is more than 30 days old".into());
     }
-    let chain = chain(app_dir, &base);
+    // An increment that exists but can't be read would make the next one start
+    // from an older state: make a full backup instead.
+    let chain = checked_chain(app_dir, &base).map_err(|error| format!("the increments can't all be read ({error})"))?;
     if chain.len() as u32 >= MAX_CHAIN {
         return Err(format!("{MAX_CHAIN} increments were made on the newest full backup"));
     }
@@ -480,7 +485,10 @@ pub struct Restored {
 /// the size and CRC-32 the backup recorded; on any difference nothing is
 /// left behind. Nothing is ever replaced.
 pub(crate) fn restore(app_dir: &Path, app_name: &str, target: &Path, cancelled: &dyn Fn() -> bool) -> Result<Restored, String> {
-    let base = engine::list_backups(app_dir, app_name)
+    // Checked listings only: a month folder or an increment that can't be read
+    // right now (an online-only cloud file, a lock) must stop the restore, not
+    // quietly put back an older state of the project.
+    let base = engine::list_backups_checked(app_dir, app_name)?
         .into_iter()
         .find(|entry| !entry.broken)
         .ok_or("This project has no backup yet.")?;
@@ -488,7 +496,7 @@ pub(crate) fn restore(app_dir: &Path, app_name: &str, target: &Path, cancelled: 
         return Err("The newest backup is a folder: copy it from the backups folder instead.".into());
     }
     let base_path = engine::resolve_backup(app_dir, app_name, &base.id)?;
-    let chain = chain(app_dir, &base);
+    let chain = checked_chain(app_dir, &base).map_err(|error| format!("{error} Nothing was restored."))?;
     let base_files = compare::list_files(&Side::Zip(base_path.clone()), cancelled)?;
     let wanted: BTreeMap<String, (u64, u32)> = match chain.last() {
         Some(last) => last.info.state.iter().map(|(key, stamp)| (key.clone(), (stamp.0, stamp.1))).collect(),

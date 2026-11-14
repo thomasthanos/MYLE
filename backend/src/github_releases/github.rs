@@ -682,6 +682,8 @@ struct Annotation {
 pub(crate) async fn job_annotations(token: &str, owner: &str, repo: &str, job_id: u64) -> Result<Vec<String>, String> {
     let url = format!("{API}/repos/{owner}/{repo}/check-runs/{job_id}/annotations?per_page=20");
     let list: Vec<Annotation> = get_json(token, &url).await?;
+    // The same error often comes from several files (a lint rule, a type error): once is enough.
+    let mut seen = std::collections::HashSet::new();
     Ok(list
         .into_iter()
         .filter(|a| a.annotation_level == "failure")
@@ -689,6 +691,7 @@ pub(crate) async fn job_annotations(token: &str, owner: &str, repo: &str, job_id
             Some(title) => format!("{title}: {}", a.message),
             None => a.message,
         })
+        .filter(|text| seen.insert(text.clone()))
         .collect())
 }
 pub(crate) async fn run(token: &str, owner: &str, repo: &str, run_id: u64) -> Result<Run, String> {

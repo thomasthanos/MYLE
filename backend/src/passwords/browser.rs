@@ -1073,6 +1073,13 @@ fn page_host(url: &str) -> Option<String> {
 /// The part of a host that one owner controls (`accounts.google.com` →
 /// `google.com`, `a.b.co.uk` → `b.co.uk`), from the Public Suffix List.
 fn site(host: &str) -> String {
+    // An address is its own site. The list would read `192.168.1.1` with the
+    // catch-all rule (suffix `1`, site `1.1`) and put it with `10.20.1.1`.
+    // The extension reckons it the same way (`siteOf` in background.js).
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare.parse::<std::net::IpAddr>().is_ok() || !host.contains('.') {
+        return host.to_string();
+    }
     psl::domain_str(host).unwrap_or(host).to_string()
 }
 /// How well an entry's saved address fits the page: `Some(true)` the same
@@ -1852,6 +1859,15 @@ mod tests {
         assert_eq!(fits("https://google.com", "google.com.evil.io"), None);
         assert_eq!(fits("https://bank.co.uk", "evil.co.uk"), None);
         assert_eq!(fits("https://mybank.co.uk", "login.mybank.co.uk"), Some(false));
+    }
+    #[test]
+    fn an_ip_address_is_its_own_site() {
+        assert_eq!(site("192.168.1.1"), "192.168.1.1");
+        assert_ne!(site("192.168.1.1"), site("10.20.1.1"));
+        assert_eq!(fits("https://192.168.1.1", "203.0.1.1"), None);
+        assert_eq!(fits("https://192.168.1.1/admin", "192.168.1.1"), Some(true));
+        assert_eq!(fits("https://[2001:db8::1]", "[2001:db9::1]"), None);
+        assert_eq!(fits("http://localhost:8080", "localhost"), Some(true));
     }
     #[test]
     fn native_messages_round_trip() {

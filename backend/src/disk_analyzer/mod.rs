@@ -1,5 +1,5 @@
 // ! Disk Analyzer: what is filling a drive or a folder. ! ! The page sends one root path to scan, then only node ids this backend ! gave it. The finished scan stays here; the page asks for slices of it ! (a folder's children, a treemap, the largest files) and never gets the ! whole tree. Every id belongs to one scan: an id from an earlier scan is ! refused. Moving items to the Recycle Bin goes by id, and the real path is ! worked out and checked here, again, just before anything moves.
-mod delete;
+pub(crate) mod delete;
 mod elevated;
 mod mft;
 mod probes;

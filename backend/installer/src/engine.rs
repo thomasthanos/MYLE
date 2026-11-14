@@ -212,6 +212,12 @@ pub fn install(
         stage: Stage::Copying,
     });
     let placed = copy_files(dir, &header, &mut reader, report)?;
+    // Only the end of the stream proves the files are intact: put the old
+    // version back rather than keep a damaged one.
+    if let Err(error) = finish_payload(&mut reader) {
+        roll_back(placed);
+        return Err(error);
+    }
     // An older updater restarts the executable path it was launched from.
     // Give that path the new binary on the first upgrade, including /LIVE.
     let bridged = if product::BINARY != product::LEGACY_BINARY
@@ -293,6 +299,19 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".{suffix}"));
     path.with_file_name(name)
+}
+
+/// Reads the payload to its end. The XZ reader checks the block's CRC64, the
+/// index and the footer only on the read that finds no more data, and
+/// `copy_files` stops at the last file's last byte: without this a setup with
+/// a damaged byte (a bad disk, a broken download) installed damaged files.
+fn finish_payload(reader: &mut impl Read) -> Result<(), String> {
+    let mut tail = [0u8; 1];
+    match reader.read(&mut tail) {
+        Ok(0) => Ok(()),
+        Ok(_) => Err("The setup file is damaged: it has more data than it lists.".into()),
+        Err(e) => Err(format!("The setup file is damaged: {e}")),
+    }
 }
 
 fn copy_files(
@@ -893,6 +912,30 @@ mod tests {
                 ..
             })
         ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_payload_whose_checksum_does_not_match_is_caught_at_its_end() {
+        let bytes = packed(&[("App.exe", b"new app"), ("ludusavi/l.exe", b"engine")], "2.0.0");
+        // Intact: the end of the stream checks out.
+        let (_, mut reader) = payload::open(&bytes).unwrap();
+        std::io::copy(&mut reader.by_ref().take(10_000), &mut std::io::sink()).unwrap();
+        assert!(finish_payload(&mut reader).is_ok());
+        // The block's CRC64 sits just before the index; the footer's backward
+        // size says how long the index is. The files still decode in full.
+        let mut damaged = bytes.clone();
+        let len = damaged.len();
+        let backward = u32::from_le_bytes(damaged[len - 8..len - 4].try_into().unwrap());
+        let index = (backward as usize + 1) * 4;
+        damaged[len - 12 - index - 1] ^= 0xFF;
+        let dir = temp("damaged");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (header, mut reader) = payload::open(&damaged).unwrap();
+        let placed = copy_files(&dir, &header, &mut reader, &mut |_| {}).unwrap();
+        assert!(finish_payload(&mut reader).unwrap_err().contains("damaged"));
+        roll_back(placed);
+        assert!(!dir.join("App.exe").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 

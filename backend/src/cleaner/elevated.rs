@@ -233,9 +233,11 @@ fn visit_directory(
         return Ok(());
     }
     let mut restart = true;
+    // usize gives the variable-length directory records their required alignment. The API marks the final record with NextEntryOffset = 0.
+    // On the heap, once per folder: 64 KB on the stack in every level of the recursion overflowed the helper's 1 MB main-thread stack about 15 folders deep.
+    let mut buffer = vec![0usize; 8192];
+    let bytes = buffer.len() * size_of::<usize>();
     loop {
-        // usize gives the variable-length directory records their required alignment. The API marks the final record with NextEntryOffset = 0.
-        let mut buffer = [0usize; 8192];
         let class = if restart {
             FileIdBothDirectoryRestartInfo
         } else {
@@ -247,7 +249,7 @@ fn visit_directory(
                 directory.0,
                 class,
                 buffer.as_mut_ptr().cast(),
-                size_of_val(&buffer) as u32,
+                bytes as u32,
             )
         };
         if ok == 0 {
@@ -257,7 +259,6 @@ fn visit_directory(
             }
             return Err(std::io::Error::from_raw_os_error(code as i32).to_string());
         }
-        let bytes = size_of_val(&buffer);
         let base = buffer.as_ptr().cast::<u8>();
         let mut offset = 0usize;
         loop {

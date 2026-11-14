@@ -108,7 +108,10 @@ jobs:
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
     steps:
+      # No token in .git/config for the build's tools (gradle, npm, cargo) to read.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -145,11 +148,12 @@ jobs:
           root=backend/mobile/gen/android/build.gradle.kts
           sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9]*/kotlin-gradle-plugin:2.1.21/' "$root"
           grep -q 'kotlin-gradle-plugin:2.1.21' "$root" || { echo "::error::Kotlin was not raised in $root"; cat "$root"; exit 1; }
-          # The native plugin also declares allowBackup=false, including when
-          # the app template omits it. Older templates explicitly enable it.
+          # No backup and no device-to-device transfer of the app's data (the
+          # vault, the session tokens): allowBackup=false alone does not stop
+          # a transfer from Android 12. On the app's manifest, which wins.
           manifest=backend/mobile/gen/android/app/src/main/AndroidManifest.xml
-          sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$manifest"
-          grep -n 'allowBackup\|android:scheme' "$manifest" || true
+          node scripts/android-backup.mjs "$manifest"
+          grep -n 'allowBackup\|dataExtractionRules\|fullBackupContent\|android:scheme' "$manifest" || true
 
       - name: Build the APK
         run: npx tauri android build --apk --ci --target aarch64 --target armv7
@@ -192,6 +196,10 @@ jobs:
             echo "::error::The merged APK must explicitly disable Android backup"
             exit 1
           fi
+          if ! echo "$manifest" | grep -q ':dataExtractionRules('; then
+            echo "::error::The merged APK must keep its data out of device-to-device transfers"
+            exit 1
+          fi
           if echo "$manifest" | grep -Eq 'BIND_AUTOFILL_SERVICE|BIND_CREDENTIAL_PROVIDER_SERVICE|MyleCredential|MyleAutofill'; then
             echo "::error::The APK must not register autofill or passkey providers"
             exit 1
@@ -215,7 +223,10 @@ jobs:
     if: needs.version.outputs.build == 'true'
     runs-on: macos-26
     steps:
+      # No token in .git/config for the build's tools (brew, npm, cargo) to read.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Xcode 27 does not build Tauri's iOS apps yet.
       - name: Use Xcode 26
