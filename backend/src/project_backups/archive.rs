@@ -110,9 +110,14 @@ fn write_entries(
         if sink.cancelled() {
             return Err(Failure::Cancelled);
         }
-        let mut input = File::open(&source.abs).map_err(|error| {
-            io_failure(format!("Can't read \"{}\"", source.rel), error, &source.abs)
-        })?;
+        let mut input = match File::open(&source.abs) {
+            Ok(input) => input,
+            // Gone since the walk: left out of the zip and of its manifest
+            // (the completeness audit allows for files that come and go; an
+            // increment still refuses a planned file that is missing).
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(io_failure(format!("Can't read \"{}\"", source.rel), error, &source.abs)),
+        };
         let options = options
             .last_modified_time(dos_time(source.modified))
             .large_file(source.size >= 0xFFF0_0000);

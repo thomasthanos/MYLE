@@ -1225,31 +1225,27 @@ pub async fn project_backups_relocate_projects(
 ) -> Result<PageState, String> {
     let state_clone = state.inner().clone();
     blocking(move || {
+        // A backup running now reads the project's folder.
+        if state_clone.is_running() {
+            return Err("Wait for the backup to finish, then choose the new folders.".into());
+        }
         let clouds = clouds();
         let _edit = store::edit_lock();
         let mut settings = store::load()?;
         for item in &replacements {
-            let mut path_str = item
-                .new_source_path
-                .trim()
-                .trim_end_matches(['\\', '/'])
-                .to_string();
-            if path_str.ends_with(':') {
-                path_str.push('\\');
+            let Some(index) = settings.projects.iter().position(|p| p.id == item.project_id) else {
+                continue;
+            };
+            // The editor's own checks: a full path, an existing folder, and
+            // not the backups folder or a folder inside it (whose backups
+            // would then hold every earlier backup).
+            let mut candidate = settings.projects[index].clone();
+            candidate.source_path = item.new_source_path.clone();
+            let mut project = store::check_project(&settings, candidate, true)?;
+            if project.last_result.as_ref().is_some_and(|result| result.code.as_deref() == Some("SOURCE_MISSING")) {
+                project.last_result = None;
             }
-            let path = PathBuf::from(&path_str);
-            if !path.is_dir() {
-                return Err(format!(
-                    "The folder '{}' does not exist or is not a directory.",
-                    path_str
-                ));
-            }
-            if let Some(project) = settings.projects.iter_mut().find(|p| p.id == item.project_id) {
-                project.source_path = path.display().to_string();
-                if project.last_result.as_ref().is_some_and(|result| result.code.as_deref() == Some("SOURCE_MISSING")) {
-                    project.last_result = None;
-                }
-            }
+            settings.projects[index] = project;
         }
         store::save(&settings)?;
         let missing = missing_sources(&settings);

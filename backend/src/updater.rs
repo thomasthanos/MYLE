@@ -314,7 +314,8 @@ pub async fn install_update(
     let _ = on_event.send(DownloadEvent::Installing);
     // The seamless way, as the old app's updater did it: everything slow happens while we are still on screen. The setup swaps the files in place while we run (Windows lets a running program be renamed), the new version starts, and we close once its window is up.
     if let Some(exe) = installed_exe() {
-        match live_install(&path).await? {
+        let dir = exe.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        match live_install(&path, &dir).await? {
             LiveInstall::Installed => {
                 let _ = on_event.send(DownloadEvent::Restarting {
                     version: asset.version.clone().unwrap_or_else(|| asset_version(&asset.name)),
@@ -342,10 +343,15 @@ pub async fn install_update(
         }
     }
     // Per-user install: no UAC prompt. `/P` shows the setup's progress window, which starts at once, waits for this app to quit, and opens the new version half a second before it closes itself. `/UPDATE` keeps shortcuts as the user left them; `/R` asks for the relaunch.
-    let mut setup = tokio::process::Command::new(&path)
-        .args(["/P", "/UPDATE", "/R"])
-        .spawn()
-        .map_err(err)?;
+    let mut setup = tokio::process::Command::new(&path);
+    setup.args(["/P", "/UPDATE", "/R"]);
+    // The folder this copy runs from (last, as the setup reads it), not
+    // whichever install the registry names: with two installs the one that
+    // was running would be restarted as "updated" without being touched.
+    if let Some(dir) = installed_exe().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)) {
+        setup.arg(format!("/D={}", dir.display()));
+    }
+    let mut setup = setup.spawn().map_err(err)?;
     // Stay on screen until the setup's window is up, so there is never a moment with neither; the setup waits for us to quit before it copies.
     wait_for_setup_window(&mut setup, Duration::from_secs(10)).await?;
     // The setup owns the remainder of the install once its window is shown.
@@ -376,9 +382,11 @@ pub(crate) fn installed_copy() -> Option<std::path::PathBuf> {
 }
 /// Runs the setup silently in live mode and waits for it: it only swaps
 /// files, so a minute is far more than it needs.
-async fn live_install(setup: &std::path::Path) -> Result<LiveInstall, String> {
+async fn live_install(setup: &std::path::Path, dir: &std::path::Path) -> Result<LiveInstall, String> {
     let mut child = tokio::process::Command::new(setup)
         .args(["/S", "/UPDATE", "/LIVE"])
+        // This copy's folder (see `install_update`).
+        .arg(format!("/D={}", dir.display()))
         .spawn()
         .map_err(err)?;
     let status = match wait_for_setup(&mut child, Duration::from_secs(60)).await {
@@ -406,7 +414,10 @@ async fn owned_setup_exit<Owner: Send>(
     owner: Owner,
 ) -> (std::process::ExitStatus, Owner) {
     let mut reported = false;
-    loop {
+    // Waiting can fail for good (a handle Windows will not wait on): this
+    // holds the update lane, so it gives up after a while instead of
+    // holding it forever, and reports the setup as failed.
+    for _ in 0..600 {
         match child.wait().await {
             Ok(status) => return (status, owner),
             Err(error) => {
@@ -414,10 +425,16 @@ async fn owned_setup_exit<Owner: Send>(
                     log(&format!("waiting for owned setup exit: {error}"));
                     reported = true;
                 }
+                if let Ok(Some(status)) = child.try_wait() {
+                    return (status, owner);
+                }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
     }
+    log("gave up waiting for the owned setup after ten minutes");
+    use std::os::windows::process::ExitStatusExt;
+    (std::process::ExitStatus::from_raw(1), owner)
 }
 async fn wait_for_setup(
     child: &mut tokio::process::Child,

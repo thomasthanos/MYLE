@@ -69,11 +69,39 @@ impl Drop for Process {
     }
 }
 
-/// Every process whose executable lives in `dir`, except this one and the
-/// spared one.
+/// The programs MYLE put in `dir`: the `.exe` files its install record
+/// lists (or, before there was one, the files older setups placed), and the
+/// app and uninstaller by name.
+fn our_programs(dir: &Path) -> Vec<PathBuf> {
+    let listed: Vec<String> = std::fs::read_to_string(dir.join(crate::product::INSTALL_MANIFEST))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|record| {
+            record["files"]
+                .as_array()
+                .map(|files| files.iter().filter_map(|file| file.as_str().map(String::from)).collect())
+        })
+        .unwrap_or_else(crate::product::legacy_files);
+    let mut programs: Vec<PathBuf> = listed
+        .iter()
+        .filter(|file| file.to_ascii_lowercase().ends_with(".exe"))
+        .filter_map(|file| crate::payload::relative_path(file).ok())
+        .map(|relative| dir.join(relative))
+        .collect();
+    for name in [crate::product::exe_name(), crate::product::legacy_exe_name(), crate::product::UNINSTALLER.to_string()] {
+        programs.push(dir.join(name));
+    }
+    programs
+}
+
+/// Every process that runs one of MYLE's own programs in `dir`, except this
+/// one and the spared one. Only MYLE's: a folder chosen for MYLE may hold
+/// other programs too (an older setup let it be any folder, D:\Games say),
+/// and those are never closed or killed.
 pub fn running_in(dir: &Path) -> Vec<Running> {
     // Windows reports long names; the folder may be spelled with short ones.
     let dir = shell::real_path(dir);
+    let ours = our_programs(&dir);
     let own = unsafe { GetCurrentProcessId() };
     let spared = SPARED.get().copied();
     // SAFETY: a snapshot handle, closed below.
@@ -92,6 +120,7 @@ pub fn running_in(dir: &Path) -> Vec<Running> {
             && Some(pid) != spared
             && let Some(path) = image_path(pid)
             && shell::is_within(&path, &dir)
+            && ours.iter().any(|program| shell::same_path(program, &path))
         {
             found.push(Running { pid, path });
         }
@@ -228,6 +257,32 @@ mod tests {
         let text = String::from_utf16(&name[..name.len() - 1]).unwrap();
         // backend/src/tray.rs waits on the same name.
         assert_eq!(text, r"Local\MakeYourLifeEasier-Quit");
+    }
+
+    #[test]
+    fn only_myles_own_programs_in_the_folder_count_as_running() {
+        let dir = std::env::temp_dir().join(format!("myle-running-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        // Another program someone keeps in the same folder (D:\Games, say).
+        let stranger = dir.join("game.exe");
+        std::fs::copy(shell::system32("cmd.exe"), &stranger).unwrap();
+        let mut child = std::process::Command::new(&stranger)
+            .args(["/c", "ping", "-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let pid = child.id();
+        assert!(!running_in(&dir).iter().any(|running| running.pid == pid), "not MYLE's: left alone");
+        // Listed by the install record: one of MYLE's.
+        std::fs::write(dir.join(crate::product::INSTALL_MANIFEST), r#"{"version":"1.0.0","files":["game.exe","tools/x.dll"]}"#).unwrap();
+        assert!(running_in(&dir).iter().any(|running| running.pid == pid));
+        let programs = our_programs(&shell::real_path(&dir));
+        assert!(programs.iter().any(|p| p.ends_with("game.exe")) && !programs.iter().any(|p| p.ends_with("x.dll")));
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

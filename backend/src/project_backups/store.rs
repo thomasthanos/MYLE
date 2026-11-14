@@ -143,8 +143,16 @@ pub(crate) fn load_from(path: &Path) -> Result<Settings, String> {
             migrate(&mut settings);
             Ok(settings)
         }
+        // Sound JSON this MYLE can't read (written by a newer one, say):
+        // left exactly as it is. Defaults here would be saved over it by the
+        // next change and every project would be gone.
+        Err(error) if serde_json::from_str::<serde_json::Value>(text).is_ok() => Err(format!(
+            "The Project Backups settings could not be read ({error}). They were left unchanged at {}.",
+            path.display()
+        )),
         Err(_) => {
-            // Keep a damaged file for a look rather than overwrite it.
+            // Not JSON at all (a damaged file): kept aside for a look, and
+            // the page starts over.
             let aside = path.with_extension(format!(
                 "corrupt-{}.json",
                 naming::unix_millis(std::time::SystemTime::now())
@@ -635,6 +643,12 @@ mod tests {
             1,
             "the damaged file is kept aside"
         );
+        // Settings from a newer MYLE (a value this one does not know) are
+        // refused and left as they are, never replaced by defaults.
+        let newer = r#"{"provider":"someNewCloud","projects":[{"id":"1","name":"A","appName":"A"}]}"#;
+        fs::write(&path, newer).unwrap();
+        assert!(load_from(&path).unwrap_err().contains("left unchanged"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), newer);
         let _ = fs::remove_dir_all(root);
     }
     #[test]

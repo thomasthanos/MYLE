@@ -253,8 +253,13 @@ fn walk_dir(
                     });
                     continue;
                 }
-                let meta = fs::metadata(&path)
-                    .map_err(|error| format!("Can't read \"{}\": {error}", path.display()))?;
+                let meta = match fs::metadata(&path) {
+                    Ok(meta) => meta,
+                    // Gone since the listing (an editor's or dev server's
+                    // temporary file): nothing to back up, not a failure.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(format!("Can't read \"{}\": {error}", path.display())),
+                };
                 if link {
                     out.links.push(child.clone());
                 }

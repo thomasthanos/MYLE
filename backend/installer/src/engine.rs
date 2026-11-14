@@ -430,11 +430,20 @@ fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// Puts the previous version back after a failed install.
+/// Puts the previous version back. Each step is retried while a virus
+/// scanner or the indexer holds a file: a single try left some files new and
+/// their old copies aside, and those were swept on the next start, leaving
+/// a mix of two versions. Renaming the old copy back replaces the new one.
 fn roll_back(placed: Vec<Placed>) {
     for file in placed.into_iter().rev() {
-        let _ = std::fs::remove_file(&file.target);
-        if let Some(backup) = file.backup {
-            let _ = std::fs::rename(&backup, &file.target);
+        match file.backup {
+            Some(backup) => {
+                if rename_patiently(&backup, &file.target).is_err() {
+                    remove_patiently(&file.target);
+                    let _ = rename_patiently(&backup, &file.target);
+                }
+            }
+            None => remove_patiently(&file.target),
         }
     }
 }
