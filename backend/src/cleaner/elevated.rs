@@ -38,6 +38,9 @@ const SHARE_WITHOUT_RENAME: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE;
 pub enum Action {
     Measure,
     Clean,
+    /// Clean, and links met on the way removed too (the link itself, never
+    /// what it points to): Spotify Hub's leftovers, whose folders go whole.
+    Remove,
 }
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Totals {
@@ -60,11 +63,26 @@ impl Totals {
     }
 }
 /// One request to the helper: an action over the admin-only folders of
-/// these category ids.
+/// these category ids, or Spotify Hub's protected leftovers.
 #[derive(Debug, Deserialize, Serialize)]
 struct Request {
     action: Action,
     ids: Vec<String>,
+    /// Spotify Hub: folders and files of the app's own user to remove. Each
+    /// must lie inside that user's profile folder; nothing is followed
+    /// through a link and every item is checked by handle (`remove_item`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    trees: Vec<PathBuf>,
+    /// Spotify Hub: also the machine-wide Spotify uninstall entries.
+    #[serde(default)]
+    spotify_registry: bool,
+}
+/// Removes Spotify Hub's leftovers that need administrator rights: the
+/// folders and files `paths` (inside the user's profile) and, with
+/// `machine_registry`, Spotify's machine-wide uninstall entries. Through the
+/// same helper and approval as the System Cleaner. Answers what was removed.
+pub async fn remove_spotify_leftovers(paths: Vec<PathBuf>, machine_registry: bool) -> Result<HashMap<String, Totals>, String> {
+    ask(Request { action: Action::Clean, ids: Vec::new(), trees: paths, spotify_registry: machine_registry }).await
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,7 +108,9 @@ pub async fn run(
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let request = Request { action, ids };
+    ask(Request { action, ids, trees: Vec::new(), spotify_registry: false }).await
+}
+async fn ask(request: Request) -> Result<HashMap<String, Totals>, String> {
     let mut session = SESSION.lock().await;
     if let Some(open) = session.as_mut() {
         match open.ask(&request).await {
@@ -136,14 +156,17 @@ fn serve(pipe: &str, app_pid: u32) -> Result<(), String> {
         &HELPER,
         pipe,
         app_pid,
-        |request: Request| match handle(&request) {
+        |request: Request| match handle(&request, app_pid) {
             Ok(totals) => Response::Ok(totals),
             Err(error) => Response::Error(error),
         },
         || Response::Error("Invalid cleaner request.".into()),
     )
 }
-fn handle(request: &Request) -> Result<HashMap<String, Totals>, String> {
+fn handle(request: &Request, app_pid: u32) -> Result<HashMap<String, Totals>, String> {
+    if !request.trees.is_empty() || request.spotify_registry {
+        return spotify_leftovers(&request.trees, request.spotify_registry, app_pid);
+    }
     let mut result = HashMap::new();
     for id in &request.ids {
         let Some(category) = targets::find(id) else {
@@ -155,10 +178,96 @@ fn handle(request: &Request) -> Result<HashMap<String, Totals>, String> {
             total.bytes += one.bytes;
             total.files += one.files;
             total.skipped += one.skipped;
+            total.skipped_bytes += one.skipped_bytes;
         }
         result.insert(category.id.to_string(), total);
     }
     Ok(result)
+}
+/// The Spotify uninstall entries Spotify's own installer leaves machine-wide.
+const SPOTIFY_MACHINE_KEYS: [&str; 2] = [
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Spotify",
+    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Spotify",
+];
+fn spotify_leftovers(paths: &[PathBuf], machine_registry: bool, app_pid: u32) -> Result<HashMap<String, Totals>, String> {
+    let mut result = HashMap::new();
+    if !paths.is_empty() {
+        // The app's user's profile, from Windows' own list (not this
+        // process's environment: an administrator approving over the
+        // shoulder runs this helper as another account).
+        let profile = elevated_pipe::process_account(app_pid)
+            .and_then(|sid| profile_folder(&sid))
+            .ok_or("The app's user profile could not be found.")?;
+        let profile = OwnedHandle::open_root(&profile).map_err(|e| e.to_string())?;
+        let profile = normalized_final_path(profile.0)?;
+        for path in paths {
+            result.insert(path.to_string_lossy().into_owned(), remove_item(path, &profile)?);
+        }
+    }
+    if machine_registry {
+        let machine = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        for key in SPOTIFY_MACHINE_KEYS {
+            match machine.delete_subkey_all(key) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("{key}: {error}")),
+            }
+        }
+    }
+    Ok(result)
+}
+/// `ProfileImagePath` of the account `sid` (`C:\Users\<name>`).
+fn profile_folder(sid: &str) -> Option<PathBuf> {
+    let list = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(format!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}"))
+        .ok()?;
+    let raw: String = list.get_value("ProfileImagePath").ok()?;
+    let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let path = PathBuf::from(raw.replace("%SystemDrive%", &system_drive).replace("%SYSTEMDRIVE%", &system_drive));
+    path.is_absolute().then_some(path)
+}
+/// Removes one folder (with everything in it) or file inside `profile` (a
+/// final path). The item is opened without following a link: a link is
+/// refused, and so is an item whose real path is not inside the profile.
+/// Below it, the same walk as the cleaner's: each entry opened by its id,
+/// its real path checked to stay inside, pinned and deleted by handle.
+fn remove_item(path: &Path, profile: &str) -> Result<Totals, String> {
+    let mut totals = Totals::default();
+    if !path.is_absolute() {
+        return Err("A Spotify leftover path is not absolute.".into());
+    }
+    let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | DELETE;
+    let item = match OwnedHandle::open_path(path, access) {
+        Ok(item) => item,
+        Err(error) if error.raw_os_error() == Some(2) || error.raw_os_error() == Some(3) => return Ok(totals),
+        Err(_) => {
+            totals.skip(0);
+            return Ok(totals);
+        }
+    };
+    let info = item.info()?;
+    let final_path = normalized_final_path(item.0)?;
+    if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || !is_below(profile, &final_path) {
+        totals.skip(0);
+        return Ok(totals);
+    }
+    if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        visit_directory(&item, &final_path, &[], Action::Remove, 0, &mut totals)?;
+        if item.delete().is_err() {
+            totals.skip(0); // something inside stayed (in use, or refused)
+        }
+    } else if info.nNumberOfLinks > 1 {
+        totals.skip(size_of_entry(&info));
+    } else {
+        match item.delete() {
+            Ok(()) => {
+                totals.bytes += size_of_entry(&info);
+                totals.files += 1;
+            }
+            Err(_) => totals.skip(size_of_entry(&info)),
+        }
+    }
+    Ok(totals)
 }
 fn visit_target(target: &Target, action: Action) -> Result<Totals, String> {
     let root_path = elevated_target_path(target)?;
@@ -292,6 +401,32 @@ fn visit_directory(
     }
     Ok(())
 }
+/// A link inside a folder that goes whole: the link itself is removed. It is
+/// opened by its id without following it (`FILE_FLAG_OPEN_REPARSE_POINT`),
+/// so its own path is checked and its own entry deleted; what it points to is
+/// never opened.
+fn remove_link(parent: &OwnedHandle, root_path: &str, entry: &FILE_ID_BOTH_DIR_INFO, totals: &mut Totals) {
+    // Found by its id; deleted through its own path (a handle opened by id
+    // cannot be deleted), opened again without following it and proven to
+    // be the same entry, as `visit_entry` does for files.
+    let removed = (|| {
+        let found = OwnedHandle::open_id(parent.0, entry.FileId, FILE_READ_ATTRIBUTES).ok()?;
+        let found_info = found.info().ok()?;
+        let path = normalized_final_path(found.0).ok()?;
+        if found_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 || !is_below(root_path, &path) {
+            return None;
+        }
+        let pinned = OwnedHandle::open_path(Path::new(&path), FILE_READ_ATTRIBUTES | DELETE).ok()?;
+        let pinned_info = pinned.info().ok()?;
+        if !same_file(&found_info, &pinned_info) || pinned_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+            return None;
+        }
+        pinned.delete().ok()
+    })();
+    if removed.is_none() {
+        totals.skip(0);
+    }
+}
 #[allow(clippy::too_many_arguments)]
 fn visit_entry(
     parent: &OwnedHandle,
@@ -304,6 +439,9 @@ fn visit_entry(
     totals: &mut Totals,
 ) {
     if entry.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        if action == Action::Remove {
+            remove_link(parent, root_path, entry, totals);
+        }
         return;
     }
     let listed_directory = entry.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
@@ -319,7 +457,7 @@ fn visit_entry(
         } else {
             0
         }
-        | if action == Action::Clean {
+        | if action != Action::Measure {
             DELETE | FILE_WRITE_ATTRIBUTES
         } else {
             0
@@ -373,7 +511,7 @@ fn visit_entry(
             if visit_directory(&child, root_path, patterns, action, depth + 1, totals).is_err() {
                 totals.skip(0);
             }
-            if action == Action::Clean {
+            if action != Action::Measure {
                 let _ = child.delete(); // only succeeds when now empty
             }
         }
@@ -392,11 +530,11 @@ fn visit_entry(
             totals.bytes += size;
             totals.files += 1;
         }
-        Action::Clean if info.nNumberOfLinks > 1 => {
+        Action::Clean | Action::Remove if info.nNumberOfLinks > 1 => {
             // OpenFileById does not identify which hard-link name will be removed. Never let an outside link make that choice ambiguous.
             totals.skip(size);
         }
-        Action::Clean => match child.delete() {
+        Action::Clean | Action::Remove => match child.delete() {
             Ok(()) => {
                 totals.bytes += size;
                 totals.files += 1;
@@ -541,6 +679,44 @@ mod tests {
     use crate::elevated_pipe::tests::{connect_to, runtime};
     use std::time::Duration;
     use tokio::net::windows::named_pipe::ServerOptions;
+    #[test]
+    fn a_spotify_leftover_goes_by_handle_and_never_through_a_link() {
+        let base = std::env::temp_dir().join(format!("myle-leftovers-{}", uuid::Uuid::new_v4().simple()));
+        let profile = base.join("profile");
+        let outside = base.join("outside");
+        let tree = profile.join(r"AppData\Roaming\Spotify");
+        std::fs::create_dir_all(tree.join("Users")).unwrap();
+        std::fs::write(tree.join(r"Users\prefs"), b"x").unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("system file"), b"keep me").unwrap();
+        let link = |at: &Path| {
+            std::process::Command::new(crate::apps::process::system32("cmd.exe"))
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(at)
+                .arg(&outside)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        // A junction inside the tree, as a program of the user's could slip in.
+        assert!(link(&tree.join(r"Users\swapped")));
+        let profile_final = normalized_final_path(OwnedHandle::open_root(&profile).unwrap().0).unwrap();
+
+        let totals = remove_item(&tree, &profile_final).unwrap();
+        assert!(!tree.exists(), "the tree is gone: {totals:?}");
+        assert_eq!(std::fs::read(outside.join("system file")).unwrap(), b"keep me");
+
+        // A link given as the item itself, and a path outside the profile, are refused.
+        let as_item = profile.join("linked");
+        assert!(link(&as_item));
+        assert_eq!(remove_item(&as_item, &profile_final).unwrap().skipped, 1);
+        assert_eq!(remove_item(&outside, &profile_final).unwrap().skipped, 1);
+        assert!(outside.join("system file").exists());
+        assert_eq!(remove_item(&profile.join("missing"), &profile_final).unwrap(), Totals::default());
+        let _ = std::fs::remove_dir(&as_item);
+        let _ = std::fs::remove_dir_all(&base);
+    }
     fn temp_target(label: &str) -> (PathBuf, Target) {
         let root = std::env::temp_dir().join(format!(
             "myle-elevated-{label}-{}-{}",
@@ -624,12 +800,16 @@ mod tests {
             let empty = Request {
                 action: Action::Measure,
                 ids: Vec::new(),
+                trees: Vec::new(),
+                spotify_registry: false,
             };
             let answer: Response = session.ask(&empty).await.unwrap();
             assert!(matches!(answer, Response::Ok(t) if t.is_empty()));
             let unknown = Request {
                 action: Action::Clean,
                 ids: vec!["../../etc".into()],
+                trees: Vec::new(),
+                spotify_registry: false,
             };
             let answer: Response = session.ask(&unknown).await.unwrap();
             assert!(matches!(answer, Response::Error(_)));

@@ -240,7 +240,7 @@ pub async fn run(cloud: Option<Cloud>, state: &VaultCell) -> Result<SyncResult, 
         }
         (Some((header, _)), None) => {
             put_header(&cloud, &header, false).await?;
-            state.with_quiet(|vault| vault.header_synced())?;
+            state.with_quiet(|vault| vault.header_synced(&header))?;
         }
         (Some((local, dirty)), Some(remote)) => {
             if local.vault_id != remote.vault_id {
@@ -254,7 +254,7 @@ pub async fn run(cloud: Option<Cloud>, state: &VaultCell) -> Result<SyncResult, 
             }
             if dirty {
                 put_header(&cloud, &local, true).await?;
-                state.with_quiet(|vault| vault.header_synced())?;
+                state.with_quiet(|vault| vault.header_synced(&local))?;
             } else if state.with_quiet(|vault| vault.take_header(remote))? == HeaderStep::SendSeal
                 && let Some((ours, _)) = state.with_quiet(|vault| Ok(vault.sync_header()))?
             {

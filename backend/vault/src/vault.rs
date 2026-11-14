@@ -1328,8 +1328,15 @@ impl Vault {
     }
 
     /// The account now holds this device's header.
-    pub fn header_synced(&mut self) -> Result<(), String> {
+    /// The account now holds `sent`. A master password changed (or the vault
+    /// recovered) while it was on its way is still to be sent: marking that
+    /// newer header as sent would let the next pass take the account's older
+    /// one back, and with it the password the user had just replaced.
+    pub fn header_synced(&mut self, sent: &RemoteHeader) -> Result<(), String> {
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
+        if file.header() != *sent {
+            return Ok(());
+        }
         file.header_dirty = false;
         file.pending_header = None;
         self.write()
@@ -1852,7 +1859,8 @@ mod tests {
         let code = a.create(master, KdfParams::cheap_for_tests()).unwrap();
         let id = a.save(&input("Mail", "p1")).unwrap();
         send_all(&mut a);
-        a.header_synced().unwrap();
+        let sent = a.sync_header().unwrap().0;
+        a.header_synced(&sent).unwrap();
         let (first, items) = account_copy(&a);
         let (path_b, mut b) = temp_vault();
         b.adopt(first.clone(), items).unwrap();
@@ -1911,6 +1919,24 @@ mod tests {
         assert_eq!(on_disk(&path_b).pending_header, None, "the new header replaces the held one");
         let _ = std::fs::remove_file(path_a);
         let _ = std::fs::remove_file(path_b);
+    }
+
+    #[test]
+    fn a_master_password_changed_while_the_old_header_was_sent_is_still_sent() {
+        let (path, mut vault) = temp_vault();
+        vault.create("first master", KdfParams::cheap_for_tests()).unwrap();
+        // The sync takes the header to send, and the user changes the master
+        // password while it is on its way.
+        let (sent, dirty) = vault.sync_header().unwrap();
+        assert!(dirty);
+        vault.change_master("first master", "second master", KdfParams::cheap_for_tests()).unwrap();
+        vault.header_synced(&sent).unwrap();
+        let (now, dirty) = vault.sync_header().unwrap();
+        assert!(dirty && now != sent, "the new header is still to be sent");
+        // Once that one has gone, it is clean.
+        vault.header_synced(&now).unwrap();
+        assert!(!vault.sync_header().unwrap().1);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -2051,7 +2077,8 @@ mod tests {
         let (path, mut vault) = temp_vault();
         vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
         vault.save(&input("Mail", "p1")).unwrap();
-        vault.header_synced().unwrap();
+        let sent = vault.sync_header().unwrap().0;
+        vault.header_synced(&sent).unwrap();
         drop(vault);
         // The file as an older build writes it.
         let mut text: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

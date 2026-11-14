@@ -1,7 +1,7 @@
 // ! System Cleaner: measures and removes the usual Windows leftovers. ! ! The page sends category ids only. Paths, patterns and the elevated script ! all come from the fixed table in `targets.rs`.
 pub mod downloads;
 pub mod health;
-mod elevated;
+pub(crate) mod elevated;
 mod recycle_bin;
 mod targets;
 pub use elevated::run_helper_from_args as run_elevated_helper_from_args;

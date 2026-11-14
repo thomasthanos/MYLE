@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
-use crate::apps::process::{self, ERROR_CANCELLED, encode_command};
+use crate::apps::process;
 use crate::apps::{Cleanup, JobHandle};
 use crate::download::{CANCELLED, err};
 use super::detection::{Detection, KnownPaths};
@@ -653,8 +653,11 @@ pub async fn purge(
     let machine_residue = machine_spotify_registration_exists();
     if !admin_paths.is_empty() || machine_residue {
         reporter.line("Administrator approval is required for protected Spotify remnants.");
-        match elevated_cleanup(&admin_paths, machine_residue).await {
-            Ok(ERROR_CANCELLED) => {
+        // Through the System Cleaner's administrator helper, which removes by
+        // handle and never follows a link (these folders are the user's own,
+        // so a program of theirs could swap one for a link mid-way).
+        match crate::cleaner::elevated::remove_spotify_leftovers(admin_paths, machine_residue).await {
+            Err(error) if error == crate::elevated_pipe::DECLINED => {
                 return Ok(SpotifyHubOutcome::new(
                     SpotifyHubResult::NeedsAdmin,
                     reporter.job_id,
@@ -662,11 +665,10 @@ pub async fn purge(
                     Some("Administrator approval was declined; protected remnants remain.".into()),
                 ));
             }
-            Ok(0) => {
+            Ok(_) => {
                 failures
                     .retain(|(path, _)| path.exists() || std::fs::symlink_metadata(path).is_ok());
             }
-            Ok(code) => reporter.line(format!("Elevated cleanup exited with code {code}.")),
             Err(error) => reporter.line(format!("Elevated cleanup failed: {error}")),
         }
     }
@@ -879,82 +881,9 @@ fn admin_retry_worthwhile(error: &str) -> bool {
             || lower.contains("permission denied")
             || lower.contains("os error 5"))
 }
-/// `Remove-Tree <path>`: see `elevated_cleanup`.
-const REMOVE_TREE: &str = "$ErrorActionPreference='SilentlyContinue'; $sys=[Environment]::SystemDirectory; \
-     function Remove-Tree([string]$p) { \
-       $i=Get-Item -LiteralPath $p -Force; if(-not $i) { return }; \
-       if($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { if($i.PSIsContainer) { [IO.Directory]::Delete($p, $false) } else { [IO.File]::Delete($p) }; return }; \
-       & \"$sys\\takeown.exe\" /F $p /D Y | Out-Null; & \"$sys\\icacls.exe\" $p /reset /C /Q /L | Out-Null; \
-       if($i.PSIsContainer) { foreach($c in [IO.Directory]::GetFileSystemEntries($p)) { Remove-Tree $c }; [IO.Directory]::Delete($p, $false) } \
-       else { [IO.File]::SetAttributes($p, [IO.FileAttributes]::Normal); [IO.File]::Delete($p) } \
-     };";
-async fn elevated_cleanup(paths: &[PathBuf], machine_registry: bool) -> Result<i32, String> {
-    // The paths originate solely from KnownPaths::purge_targets and have already passed exact allowlist validation. They are encoded as literal PowerShell strings; no frontend-provided command/path reaches this pass.
-    let literals = paths
-        .iter()
-        .map(|path| ps_quote(&path.as_os_str().to_string_lossy()))
-        .collect::<Vec<_>>()
-        .join(",");
-    // The folders are the user's own, so a program of theirs could swap a
-    // subfolder for a link to a system folder between a check and the
-    // action. Nothing here follows a link: the tree is walked item by item,
-    // ownership and permissions are reset on that one item only (`/L`: the
-    // link itself), a link met on the way is removed and never entered, and
-    // `[IO.Directory]::Delete` does not recurse through reparse points.
-    // (`takeown /R`, `icacls /T` and Windows PowerShell's `Remove-Item
-    // -Recurse` all followed a junction swapped in after the check.)
-    let mut script = format!(
-        "{REMOVE_TREE} \
-         foreach($p in @({literals})) {{ if(Test-Path -LiteralPath $p) {{ try {{ $root=Get-Item -LiteralPath $p -Force -ErrorAction Stop; $hasLink=$false; $cursor=$root; while($null -ne $cursor) {{ if($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) {{ $hasLink=$true; break }}; $cursor=$cursor.Parent }}; if(-not $hasLink) {{ Remove-Tree $p }} }} catch {{ }} }} }};"
-    );
-    if machine_registry {
-        script.push_str(
-            "Remove-Item -LiteralPath 'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Spotify' -Recurse -Force; Remove-Item -LiteralPath 'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Spotify' -Recurse -Force;",
-        );
-    }
-    script.push_str("exit 0");
-    let args = vec![
-        "-NoProfile".to_string(),
-        "-NonInteractive".to_string(),
-        "-ExecutionPolicy".to_string(),
-        "Bypass".to_string(),
-        "-EncodedCommand".to_string(),
-        encode_command(&script),
-    ];
-    process::run_elevated(&process::powershell_str(), &args, true).await
-}
-fn ps_quote(value: &str) -> String {
-    process::ps_quote(value)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn the_elevated_cleanup_removes_a_link_and_never_what_it_points_to() {
-        let root = std::env::temp_dir().join(format!("myle-remove-tree-{}", uuid::Uuid::new_v4().simple()));
-        let target = std::env::temp_dir().join(format!("myle-remove-tree-target-{}", uuid::Uuid::new_v4().simple()));
-        std::fs::create_dir_all(root.join(r"Users\Data")).unwrap();
-        std::fs::write(root.join(r"Users\Data\prefs"), b"x").unwrap();
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(target.join("system file"), b"keep me").unwrap();
-        // A junction to another folder inside the tree, as a program of the
-        // user's could slip in after the check.
-        let junction = root.join(r"Users\link");
-        let made = std::process::Command::new(crate::apps::process::system32("cmd.exe"))
-            .args(["/d", "/c", "mklink", "/J"])
-            .arg(&junction)
-            .arg(&target)
-            .output()
-            .unwrap();
-        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stdout));
-        let script = format!("{REMOVE_TREE} Remove-Tree {}", ps_quote(&root.to_string_lossy()));
-        let mut command = std::process::Command::new(process::powershell());
-        command.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encode_command(&script)]);
-        process::output_within(command, std::time::Duration::from_secs(120)).unwrap();
-        assert!(!root.exists(), "the tree and the link are gone");
-        assert_eq!(std::fs::read(target.join("system file")).unwrap(), b"keep me", "what the link pointed to is untouched");
-        let _ = std::fs::remove_dir_all(&target);
-    }
     #[test]
     fn completed_install_launches_the_same_spotify_installation() {
         let spotify = Path::new(r"C:\Custom Spotify\Spotify.exe");
@@ -1097,10 +1026,6 @@ mod tests {
         let config = b"[Setting]\ncurrent_theme = Dribbblish\ncolor_scheme = base\n";
         assert_eq!(current_theme(config).as_deref(), Some("Dribbblish"));
         assert_eq!(current_theme(b"[Setting]\ncolor_scheme=base"), None);
-    }
-    #[test]
-    fn powershell_literals_cannot_break_out() {
-        assert_eq!(ps_quote("C:\\it's\\Spotify"), "'C:\\it''s\\Spotify'");
     }
     #[test]
     fn only_acl_style_failures_request_elevation() {
