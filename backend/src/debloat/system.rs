@@ -133,6 +133,17 @@ pub fn write<'a>(at: impl Into<Root<'a>>, path: &str, name: &str, data: Data) ->
     }
     .map_err(|e| format!("{path}\\{name}: {e}"))
 }
+/// Writes a string value that is not one of the catalog's.
+pub fn write_text<'a>(at: impl Into<Root<'a>>, path: &str, name: &str, value: &str) -> Result<(), String> {
+    let (key, _) = root(at.into())
+        .and_then(|base| base.create_subkey_with_flags(path, KEY_ALL_ACCESS | KEY_WOW64_64KEY))
+        .map_err(|e| format!("{path}: {e}"))?;
+    key.set_value(name, &value.to_string()).map_err(|e| format!("{path}\\{name}: {e}"))
+}
+/// Why a value of a type undo cannot put back was left alone.
+pub fn unknown_type(path: &str, name: &str) -> String {
+    format!("{path}\\{name} holds a kind of value MYLE could not put back later, so it was left as it is.")
+}
 /// Puts a value back as it was: its old data, or no value at all. Keys that
 /// applying created are removed again if nothing else is in them.
 pub fn restore<'a>(at: impl Into<Root<'a>>, path: &str, name: &str, before: &Value, created: Option<&str>) -> Result<(), String> {

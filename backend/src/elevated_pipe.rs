@@ -39,11 +39,9 @@ impl Session {
     pub async fn start(helper: &Helper) -> Result<Self, String> {
         let name = format!("{}{}", helper.pipe_prefix, uuid::Uuid::new_v4().simple());
         // First instance: the name is ours before the helper even starts, so nothing else can pose as the app to it.
-        let server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .reject_remote_clients(true)
-            .create(&name)
-            .map_err(err)?;
+        let mut options = ServerOptions::new();
+        options.first_pipe_instance(true).reject_remote_clients(true);
+        let server = create_private(&options, &name).map_err(err)?;
         let executable = std::env::current_exe().map_err(err)?;
         let executable = executable
             .to_str()
@@ -108,13 +106,79 @@ impl Session {
 }
 /// The most bytes a helper may send after an answer.
 const MAX_PAYLOAD: u64 = 4 << 30;
-/// Whether the pipe's client runs this same program.
+/// Creates the pipe open only to this app's account, administrators (the
+/// helper may run as another administrator, approved over the shoulder) and
+/// SYSTEM. The default security lets everyone, anonymous included, open a
+/// pipe for reading: another account could take the connection first and
+/// keep the helper out.
+pub(crate) fn create_private(options: &ServerOptions, name: &str) -> std::io::Result<NamedPipeServer> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    let user = process_account(std::process::id())
+        .ok_or_else(|| std::io::Error::other("The app's own account could not be read."))?;
+    let sddl: Vec<u16> = format!("D:P(A;;GA;;;{user})(A;;GA;;;BA)(A;;GA;;;SY)")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut descriptor = std::ptr::null_mut();
+    // SAFETY: `sddl` is NUL-terminated; the descriptor is freed below.
+    let made = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, std::ptr::null_mut())
+    };
+    if made == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    // SAFETY: `attributes` and the descriptor it points at live across the call.
+    let server = unsafe { options.create_with_security_attributes_raw(name, (&raw mut attributes).cast()) };
+    // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW.
+    unsafe { LocalFree(descriptor) };
+    server
+}
+/// Whether the pipe's client runs this same program, elevated. A process of
+/// the user's own could start this program unelevated as the helper and win
+/// the connection: its requests would then quietly run without
+/// administrator rights.
 fn client_is_this_program(server: &NamedPipeServer) -> bool {
     use std::os::windows::io::AsRawHandle;
     let mut client = 0u32;
     // SAFETY: the handle is the live pipe; `client` receives the id.
     let ok = unsafe { GetNamedPipeClientProcessId(server.as_raw_handle() as HANDLE, &mut client) };
-    ok != 0 && is_this_program(client)
+    ok != 0 && is_this_program(client) && is_elevated(client)
+}
+/// Whether `pid` runs with an elevated (administrator) token.
+pub fn is_elevated(pid: u32) -> bool {
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+    use windows_sys::Win32::System::Threading::OpenProcessToken;
+    // SAFETY: both handles are closed below; `elevation` outlives the call.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let mut token = std::ptr::null_mut();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token) != 0;
+        CloseHandle(process);
+        if !opened {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut length = 0u32;
+        let read = GetTokenInformation(
+            token,
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut length,
+        ) != 0;
+        CloseHandle(token);
+        read && elevation.TokenIsElevated != 0
+    }
 }
 /// The program file `pid` runs, if it can be asked (it can for elevated
 /// processes too: only limited information is needed).
@@ -275,7 +339,6 @@ where
 {
     use std::io::{BufRead, BufReader};
     use std::os::windows::io::AsRawHandle;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
     validate_pipe_name(helper, pipe)?;
@@ -291,14 +354,18 @@ where
     if ok == 0 || server_pid != app_pid || !is_this_program(server_pid) {
         return Err(format!("The {} pipe does not belong to the app.", helper.what));
     }
-    let last = Arc::new(Mutex::new(Instant::now()));
-    let busy = Arc::new(AtomicBool::new(false));
+    // When the last request ended, and whether one is being handled. The
+    // idle check and the exit happen under the same lock that a request
+    // takes before it starts: a request that arrives at the half-hour mark
+    // is never cut off half-way (removing Edge, say).
+    let state = Arc::new(Mutex::new((Instant::now(), false)));
     {
-        let (last, busy) = (Arc::clone(&last), Arc::clone(&busy));
+        let state = Arc::clone(&state);
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(30));
-            let idle = last.lock().map(|at| at.elapsed()).unwrap_or_default();
-            if !busy.load(Ordering::SeqCst) && idle >= HELPER_IDLE {
+            let guard = state.lock().unwrap_or_else(|p| p.into_inner());
+            let (last, busy) = *guard;
+            if !busy && last.elapsed() >= HELPER_IDLE {
                 std::process::exit(0);
             }
         });
@@ -307,7 +374,7 @@ where
     for line in BufReader::new(file).lines() {
         // A broken pipe: the app has closed it or exited.
         let Ok(line) = line else { break };
-        busy.store(true, Ordering::SeqCst);
+        state.lock().unwrap_or_else(|p| p.into_inner()).1 = true;
         let (response, payload) = match serde_json::from_str::<Q>(&line) {
             Ok(request) => handle(request),
             Err(_) => invalid(),
@@ -321,10 +388,7 @@ where
                 None => Ok(()),
             })
             .and_then(|()| writer.flush());
-        if let Ok(mut at) = last.lock() {
-            *at = Instant::now();
-        }
-        busy.store(false, Ordering::SeqCst);
+        *state.lock().unwrap_or_else(|p| p.into_inner()) = (Instant::now(), false);
         if sent.is_err() {
             break;
         }
@@ -392,6 +456,77 @@ pub mod tests {
             let ended = tokio::task::spawn_blocking(move || helper.join().unwrap());
             assert!(tokio::time::timeout(Duration::from_secs(20), ended).await.unwrap().unwrap().is_ok());
         });
+    }
+    #[test]
+    fn the_private_pipe_lets_this_account_in() {
+        runtime().block_on(async {
+            let name = format!("{}{}", TEST_HELPER.pipe_prefix, uuid::Uuid::new_v4().simple());
+            let mut options = ServerOptions::new();
+            options.first_pipe_instance(true).reject_remote_clients(true);
+            let server = create_private(&options, &name).unwrap();
+            let client = tokio::net::windows::named_pipe::ClientOptions::new().open(&name);
+            assert!(client.is_ok(), "{client:?}");
+            server.connect().await.unwrap();
+            // Its security names this account, administrators and SYSTEM, and
+            // nobody else: not Everyone (WD) or Anonymous (AN) as by default.
+            let dacl = pipe_dacl(&server);
+            let user = process_account(std::process::id()).unwrap();
+            assert!(dacl.contains(&format!(";;;{user})")), "{dacl}");
+            assert!(dacl.contains(";;;BA)") && dacl.contains(";;;SY)"), "{dacl}");
+            assert!(!dacl.contains(";;;WD)") && !dacl.contains(";;;AN)"), "{dacl}");
+            assert!(dacl.starts_with("D:P"), "protected: nothing inherited: {dacl}");
+        });
+    }
+    /// The pipe's DACL as SDDL.
+    fn pipe_dacl(server: &NamedPipeServer) -> String {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT,
+        };
+        use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+        // SAFETY: the pipe handle is live; both allocations are freed below.
+        unsafe {
+            let mut descriptor = std::ptr::null_mut();
+            let status = GetSecurityInfo(
+                server.as_raw_handle() as HANDLE,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut descriptor,
+            );
+            assert_eq!(status, 0);
+            let mut text = std::ptr::null_mut();
+            let ok = ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                std::ptr::null_mut(),
+            );
+            assert_ne!(ok, 0);
+            let mut length = 0;
+            while *text.add(length) != 0 {
+                length += 1;
+            }
+            let sddl = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
+            LocalFree(text.cast());
+            LocalFree(descriptor);
+            sddl
+        }
+    }
+    #[test]
+    fn an_unelevated_process_is_not_taken_for_the_helper() {
+        // This test runs unelevated on a normal PC and on CI's runner it may
+        // be elevated: either way, the answer matches the token.
+        let elevated = is_elevated(std::process::id());
+        let output = std::process::Command::new(crate::apps::process::system32("whoami.exe")).arg("/groups").output().unwrap();
+        let high = String::from_utf8_lossy(&output.stdout).contains("S-1-16-12288");
+        assert_eq!(elevated, high);
+        assert!(!is_elevated(u32::MAX));
     }
     #[test]
     fn this_process_is_this_program() {

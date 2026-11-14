@@ -250,20 +250,50 @@ pub fn apply_user_hide_recommended(hide: bool) -> Result<(), String> {
 /// Runs inside the elevated administrator helper: the machine's policies,
 /// and the user's own in the hive of `account` (the app's user).
 pub fn apply_machine_hide_recommended(hide: bool, account: Option<&str>) -> Result<(), String> {
+    let paths = [RECOMMENDED_MARKS, MACHINE_EXPLORER_POLICY, POLICY_MANAGER_START, POLICY_MANAGER_EDU];
+    apply_hide_recommended_at(hide, account, Root::Hive(Hive::Machine), paths)
+}
+/// What hiding "Recommended" had found in each value, kept so that showing it
+/// again puts back only what MYLE changed: a policy a GPO, MDM or an
+/// Education edition set before stays.
+const RECOMMENDED_MARKS: &str = r"SOFTWARE\ThomasThanos\MakeYourLifeEasier\StartRecommended";
+/// `paths`: where the records go, then the machine's three policy keys.
+fn apply_hide_recommended_at(hide: bool, account: Option<&str>, machine: Root, paths: [&str; 4]) -> Result<(), String> {
+    let [marks, machine_explorer, policy_start, policy_edu] = paths;
+    let mut targets: Vec<(Root, &str, &str, String)> = vec![
+        (machine, machine_explorer, "HideRecommendedSection", "machine.explorer".into()),
+        (machine, policy_start, "HideRecommendedSection", "machine.start".into()),
+        (machine, policy_edu, "IsEducationEnvironment", "machine.education".into()),
+    ];
+    if let Some(sid) = account {
+        targets.push((Root::Account(sid), USER_EXPLORER_POLICY, "HideRecommendedSection", format!("user.{sid}")));
+    }
     if hide {
-        system::write(Hive::Machine, MACHINE_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
-        system::write(Hive::Machine, POLICY_MANAGER_START, "HideRecommendedSection", Data::Dword(1))?;
-        system::write(Hive::Machine, POLICY_MANAGER_EDU, "IsEducationEnvironment", Data::Dword(1))?;
-        if let Some(sid) = account {
-            system::write(Root::Account(sid), USER_EXPLORER_POLICY, "HideRecommendedSection", Data::Dword(1))?;
+        // The records' key exists from now on, even when nothing needed
+        // changing: showing it again then knows MYLE set nothing.
+        system::write(machine, marks, "hidden", Data::Dword(1))?;
+        for (at, path, name, mark) in &targets {
+            let before = system::read(*at, path, name);
+            if before.matches(Data::Dword(1)) || system::read(machine, marks, mark) != Value::Absent {
+                continue; // already so, or already recorded by an earlier hide
+            }
+            let saved = serde_json::to_string(&before).map_err(|e| e.to_string())?;
+            system::write_text(machine, marks, mark, &saved)?;
+            system::write(*at, path, name, Data::Dword(1))?;
+        }
+    } else if system::first_missing(machine, marks).is_some() {
+        // Hidden by a MYLE from before these records: as it did then.
+        for (at, path, name, _) in &targets {
+            system::restore(*at, path, name, &Value::Absent, None)?;
         }
     } else {
-        system::restore(Hive::Machine, MACHINE_EXPLORER_POLICY, "HideRecommendedSection", &Value::Absent, None)?;
-        system::restore(Hive::Machine, POLICY_MANAGER_START, "HideRecommendedSection", &Value::Absent, None)?;
-        system::restore(Hive::Machine, POLICY_MANAGER_EDU, "IsEducationEnvironment", &Value::Absent, None)?;
-        if let Some(sid) = account {
-            system::restore(Root::Account(sid), USER_EXPLORER_POLICY, "HideRecommendedSection", &Value::Absent, None)?;
+        for (at, path, name, mark) in &targets {
+            let Value::Sz { value } = system::read(machine, marks, mark) else { continue };
+            let before: Value = serde_json::from_str(&value).unwrap_or(Value::Absent);
+            system::restore(*at, path, name, &before, None)?;
+            system::restore(machine, marks, mark, &Value::Absent, None)?;
         }
+        system::restore(machine, marks, "hidden", &Value::Absent, None)?;
     }
     Ok(())
 }
@@ -303,6 +333,14 @@ pub fn valid_pins_json(json: &str) -> bool {
         rest = next;
     }
 }
+/// Whether MYLE's `ConfigureStartPins` policy is still in place (the clear
+/// after applying pins never ran: the app closed or the helper failed in
+/// between). It locks pinning and unpinning until it is removed. Readable
+/// without administrator rights.
+pub fn pins_policy_left() -> bool {
+    system::read(Hive::Machine, POLICY_MANAGER_START, "ConfigureStartPins_WinningProvider")
+        == Value::Sz { value: PROVIDER_GUID.into() }
+}
 /// Runs inside the elevated administrator helper. `Some(json)` sets the
 /// `ConfigureStartPins` policy; `None` removes the policy keys so the user can
 /// freely pin and unpin apps again.
@@ -324,11 +362,22 @@ pub fn apply_machine_start_pins(json: Option<&str>) -> Result<(), String> {
         prov_key.set_value("ConfigureStartPins", &json).map_err(|e| e.to_string())?;
         prov_key.set_value("ConfigureStartPins_LastWrite", &1u32).map_err(|e| e.to_string())?;
     } else {
-        for name in ["ConfigureStartPins", "ConfigureStartPins_ProviderSet", "ConfigureStartPins_WinningProvider"] {
-            let _ = system::restore(Hive::Machine, POLICY_MANAGER_START, name, &Value::Absent, None);
+        // Every value is tried; the first failure is reported (a policy left
+        // in place keeps pinning locked).
+        let mut first_error = None;
+        for (key, name) in [
+            (POLICY_MANAGER_START, "ConfigureStartPins_WinningProvider"),
+            (POLICY_MANAGER_START, "ConfigureStartPins"),
+            (POLICY_MANAGER_START, "ConfigureStartPins_ProviderSet"),
+            (POLICY_PROVIDER_START, "ConfigureStartPins"),
+            (POLICY_PROVIDER_START, "ConfigureStartPins_LastWrite"),
+        ] {
+            if let Err(error) = system::restore(Hive::Machine, key, name, &Value::Absent, None) {
+                first_error.get_or_insert(error);
+            }
         }
-        for name in ["ConfigureStartPins", "ConfigureStartPins_LastWrite"] {
-            let _ = system::restore(Hive::Machine, POLICY_PROVIDER_START, name, &Value::Absent, None);
+        if let Some(error) = first_error {
+            return Err(error);
         }
     }
     Ok(())
@@ -374,5 +423,29 @@ mod tests {
         assert!(valid_pins_json(&some));
         assert!(!valid_pins_json(r#"{"pinnedList":[{"desktopAppId":"evil.exe"}]}"#));
         assert!(build_pins_json(&["unknown".into()]).is_err());
+    }
+    #[test]
+    fn showing_recommended_again_puts_back_only_what_hiding_changed() {
+        // The machine's keys stand in under HKCU here (no administrator).
+        let base = format!(r"Software\MYLE-test-recommended-{}", uuid::Uuid::new_v4().simple());
+        let [marks, explorer, start, edu] = ["marks", "explorer", "start", "edu"].map(|key| format!(r"{base}\{key}"));
+        let paths = [marks.as_str(), explorer.as_str(), start.as_str(), edu.as_str()];
+        let at = Root::Hive(Hive::User);
+        // Set before MYLE: an Education value (as MDM would) and a 0 here.
+        system::write(at, &edu, "IsEducationEnvironment", Data::Dword(1)).unwrap();
+        system::write(at, &start, "HideRecommendedSection", Data::Dword(0)).unwrap();
+
+        apply_hide_recommended_at(true, None, at, paths).unwrap();
+        for (path, name) in [(&explorer, "HideRecommendedSection"), (&start, "HideRecommendedSection"), (&edu, "IsEducationEnvironment")] {
+            assert_eq!(system::read(at, path, name), Value::Dword { value: 1 }, "{path}");
+        }
+        // Hiding twice keeps the first record (the values as they were).
+        apply_hide_recommended_at(true, None, at, paths).unwrap();
+
+        apply_hide_recommended_at(false, None, at, paths).unwrap();
+        assert_eq!(system::read(at, &explorer, "HideRecommendedSection"), Value::Absent, "MYLE made it: gone");
+        assert_eq!(system::read(at, &start, "HideRecommendedSection"), Value::Dword { value: 0 }, "back as it was");
+        assert_eq!(system::read(at, &edu, "IsEducationEnvironment"), Value::Dword { value: 1 }, "not MYLE's: kept");
+        let _ = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER).delete_subkey_all(&base);
     }
 }

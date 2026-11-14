@@ -768,8 +768,12 @@ impl Backoff {
 }
 type PipeServer = tokio::net::windows::named_pipe::NamedPipeServer;
 /// A pipe instance: the first (only this copy may own the name) or another.
+/// Open to this account (and administrators, SYSTEM) only, not readable by
+/// everyone as the default security leaves a pipe.
 fn pipe_instance(name: &str, first: bool) -> std::io::Result<PipeServer> {
-    ServerOptions::new().first_pipe_instance(first).reject_remote_clients(true).create(name)
+    let mut options = ServerOptions::new();
+    options.first_pipe_instance(first).reject_remote_clients(true);
+    crate::elevated_pipe::create_private(&options, name)
 }
 /// The pipe's first instance, tried until it is this copy's. A previous copy
 /// holding it (a live update) is waited for; any other error is retried

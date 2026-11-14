@@ -138,6 +138,13 @@ fn apply_user(tweak: &'static Tweak) -> (Vec<Saved>, Vec<String>) {
                 if before.matches(data) {
                     continue;
                 }
+                // A type undo cannot put back: left as it is.
+                if before == system::Value::Other {
+                    if !best_effort {
+                        errors.push(system::unknown_type(path, name));
+                    }
+                    continue;
+                }
                 let created = system::first_missing(Hive::User, path);
                 match system::write(Hive::User, path, name, data) {
                     Ok(()) => saved.push(Saved { op: index, before: Before::Reg { value: before, created } }),
@@ -526,15 +533,39 @@ pub async fn debloat_start_menu_apply_pins(pins: Vec<String>) -> Result<start_me
     .await
     .map_err(download::err)?;
     tokio::time::sleep(std::time::Duration::from_millis(1400)).await;
-    let _ = ask(&Request::SetStartPins { json: None }).await;
+    // The policy only seeds the layout: left in place it locks pinning and
+    // unpinning. Its removal is tried twice and a failure is reported.
+    let mut cleared = clear_pins_policy().await;
+    if cleared.is_err() {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        cleared = clear_pins_policy().await;
+    }
+    if let Err(error) = cleared {
+        return Err(format!(
+            "The pins were set, but Start could not be unlocked for pinning ({error}). Choose Restore pins to unlock it."
+        ));
+    }
     tauri::async_runtime::spawn_blocking(start_menu::status)
         .await
         .map_err(download::err)
 }
+/// Removes MYLE's `ConfigureStartPins` policy through the helper.
+async fn clear_pins_policy() -> Result<(), String> {
+    let reply = ask(&Request::SetStartPins { json: None }).await?;
+    if reply.errors.is_empty() { Ok(()) } else { Err(reply.errors.join(" ")) }
+}
 #[tauri::command]
 pub async fn debloat_start_menu_restore_pins() -> Result<start_menu::StartMenuStatus, String> {
-    if SESSION.try_lock().map(|s| s.is_some()).unwrap_or(false) {
-        let _ = ask(&Request::SetStartPins { json: None }).await;
+    // Also after a restart: a policy left by an earlier run (the app closed
+    // between applying and clearing it) still locks pinning.
+    let left = tauri::async_runtime::spawn_blocking(start_menu::pins_policy_left)
+        .await
+        .map_err(download::err)?;
+    if left || SESSION.try_lock().map(|s| s.is_some()).unwrap_or(false) {
+        let cleared = clear_pins_policy().await;
+        if left {
+            cleared?;
+        }
     }
     tauri::async_runtime::spawn_blocking(|| {
         start_menu::restore_start_bin()?;

@@ -46,6 +46,7 @@ impl Drop for Workspace {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.log);
         let _ = std::fs::remove_file(&self.stop);
+        let _ = std::fs::remove_file(self.dir.join(PIN_FILE));
         let _ = std::fs::remove_dir(&self.dir);
     }
 }
@@ -256,17 +257,43 @@ fn start_process(tail: &str, extra: &str) -> String {
 /// The start of every script: runs nothing unless the run's folder is still
 /// the plain, empty folder `Workspace::new` made (a link swapped in for it
 /// would steer the elevated writes elsewhere).
+///
+/// The check alone left a moment before `cmd` opened the log by name, in
+/// which the folder could still be swapped for a link and the elevated
+/// output steered into any file. So the folder is then pinned: a file of the
+/// script's own is held open inside it (without delete sharing, which keeps
+/// the folder from being renamed or replaced while it is open), a random mark
+/// written through that handle is read back through the path (the path leads
+/// to this very folder), and the folder is checked once more.
 fn script_start(log: &Path) -> String {
     let dir = log.parent().unwrap_or(log);
+    let pin = dir.join(PIN_FILE);
     format!(
         "$ErrorActionPreference = 'SilentlyContinue'\n\
-         $d = Get-Item -LiteralPath {} -Force\n\
+         $d = Get-Item -LiteralPath {dir} -Force\n\
          if (-not $d -or -not $d.PSIsContainer -or ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) -or \
-         (Test-Path -LiteralPath {})) {{ exit 5 }}\n",
-        ps_quote(&dir.to_string_lossy()),
-        ps_quote(&log.to_string_lossy()),
+         (Test-Path -LiteralPath {log})) {{ exit 5 }}\n\
+         try {{\n  \
+           $mark = [guid]::NewGuid().ToString('N')\n  \
+           $pin = [IO.File]::Open({pin}, 'CreateNew', 'ReadWrite', 'Read')\n  \
+           $bytes = [Text.Encoding]::ASCII.GetBytes($mark)\n  \
+           $pin.Write($bytes, 0, $bytes.Length)\n  \
+           $pin.Flush()\n  \
+           $back = [IO.File]::Open({pin}, 'Open', 'Read', 'ReadWrite')\n  \
+           $read = New-Object byte[] 64\n  \
+           $count = $back.Read($read, 0, 64)\n  \
+           $back.Dispose()\n  \
+           if ([Text.Encoding]::ASCII.GetString($read, 0, $count) -ne $mark) {{ exit 5 }}\n\
+         }} catch {{ exit 5 }}\n\
+         $d = Get-Item -LiteralPath {dir} -Force\n\
+         if (-not $d -or ($d.Attributes -band [IO.FileAttributes]::ReparsePoint)) {{ exit 5 }}\n",
+        dir = ps_quote(&dir.to_string_lossy()),
+        log = ps_quote(&log.to_string_lossy()),
+        pin = ps_quote(&pin.to_string_lossy()),
     )
 }
+/// The file `script_start` holds open in the run's folder.
+const PIN_FILE: &str = ".pin";
 /// Every step in order; the first hard failure ends the script with its code.
 fn batch_script(steps: &[Step], log: &Path) -> String {
     let mut script = script_start(log);

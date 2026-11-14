@@ -167,8 +167,8 @@ fn describe(hr: HRESULT) -> String {
     }
 }
 /// Checks an item again right before it goes. `was_dir`: what the scan saw.
-pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result<(), String> {
-    let (item, root) = (protect::parts(path), protect::parts(root));
+pub fn recheck(path: &Path, was_dir: bool, root_path: &Path, guard: &Guard) -> Result<(), String> {
+    let (item, root) = (protect::parts(path), protect::parts(root_path));
     if item.len() <= root.len() || item[..root.len()] != root[..] {
         return Err(OUTSIDE.into());
     }
@@ -178,6 +178,22 @@ pub fn recheck(path: &Path, was_dir: bool, root: &Path, guard: &Guard) -> Result
         return Err(LINK.into());
     }
     if meta.is_dir() != was_dir {
+        return Err(CHANGED.into());
+    }
+    // A folder on the way turned into a link since the scan would steer the
+    // shell's delete somewhere else (another drive, MYLE's own data). Below
+    // the scanned folder, the real path must still be the one the scan saw;
+    // what lies above it (a subst drive, a junction the user scanned through)
+    // is allowed to resolve elsewhere.
+    let real = |p: &Path| std::fs::canonicalize(long_path(p)).map(|real| protect::parts(&real)).map_err(|_| GONE.to_string());
+    let real_root = real(root_path)?;
+    let parent = path.parent().ok_or_else(|| OUTSIDE.to_string())?;
+    let real_parent = real(parent)?;
+    let below = &item[root.len()..item.len() - 1];
+    if real_parent.len() != real_root.len() + below.len()
+        || real_parent[..real_root.len()] != real_root[..]
+        || real_parent[real_root.len()..] != below[..]
+    {
         return Err(CHANGED.into());
     }
     use std::os::windows::fs::MetadataExt;
@@ -395,6 +411,32 @@ mod tests {
         }
         assert_eq!(recheck(&link, true, &temp.0, &guard(&temp.0)).unwrap_err(), LINK);
         assert!(target.0.join("precious.txt").exists());
+    }
+    #[test]
+    fn a_folder_on_the_way_that_became_a_link_since_the_scan_is_refused() {
+        let temp = Temp::new("ancestor");
+        let elsewhere = Temp::new("ancestor-elsewhere");
+        std::fs::create_dir_all(temp.0.join(r"x\sub")).unwrap();
+        std::fs::write(temp.0.join(r"x\sub\file"), b"scanned").unwrap();
+        let item = temp.0.join(r"x\sub\file");
+        assert_eq!(recheck(&item, false, &temp.0, &guard(&temp.0)), Ok(()));
+        // After the scan, `x` is swapped for a link to somewhere else that has
+        // the same names: the shell would delete there.
+        std::fs::rename(temp.0.join("x"), temp.0.join("x-was")).unwrap();
+        std::fs::create_dir_all(elsewhere.0.join("sub")).unwrap();
+        std::fs::write(elsewhere.0.join(r"sub\file"), b"precious").unwrap();
+        let made = std::process::Command::new(crate::apps::process::system32("cmd.exe"))
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(temp.0.join("x"))
+            .arg(&elsewhere.0)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        if !made {
+            eprintln!("skipped: mklink /J is not available here");
+            return;
+        }
+        assert_eq!(recheck(&item, false, &temp.0, &guard(&temp.0)).unwrap_err(), CHANGED);
+        assert_eq!(std::fs::read(elsewhere.0.join(r"sub\file")).unwrap(), b"precious");
     }
     #[test]
     fn a_path_that_changed_since_the_scan_is_refused() {

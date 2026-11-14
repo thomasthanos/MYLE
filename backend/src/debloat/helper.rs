@@ -130,6 +130,11 @@ fn apply(tweak: &catalog::Tweak, account: Option<&str>) -> Reply {
                 if before.matches(data) {
                     return Ok(None);
                 }
+                // A value of a type undo cannot put back (binary, QWORD,
+                // multi-string): overwriting it could never be undone.
+                if before == Value::Other {
+                    return if best_effort { Ok(None) } else { Err(system::unknown_type(path, name)) };
+                }
                 let created = system::first_missing(at, path);
                 match system::write(at, path, name, data) {
                     Ok(()) => Ok(Some(Before::Reg { value: before, created })),
