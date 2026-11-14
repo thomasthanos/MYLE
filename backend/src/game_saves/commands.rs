@@ -1818,7 +1818,7 @@ fn check_scheduled_task_once(app: &AppHandle, value: &GameSavesSettings) {
     });
 }
 fn ps_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    crate::apps::process::ps_quote(value)
 }
 fn weekday_for_scheduled_tasks(day: ScheduleWeekday) -> &'static str {
     match day {

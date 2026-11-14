@@ -1,5 +1,6 @@
 <script lang="ts">
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
   import X from "@lucide/svelte/icons/x";
   import AppIcon from "./AppIcon.svelte";
   import JobProgress from "./JobProgress.svelte";
@@ -13,6 +14,12 @@
   const job = $derived(appsState.jobs[app.id.toLowerCase()]);
   const selected = $derived(appsState.isSelected(app));
   const showActivate = $derived(!!app.activateLabel && status !== "missing" && status !== "unknown" && !info?.activated && !job);
+  const ptbStatus = $derived(app.id === "Custom.BetterDiscord" && status === "installed"
+    ? info?.ptbPatched === undefined ? "PTB status unknown" : info.ptbPatched ? "PTB patched" : "PTB unpatched"
+    : undefined);
+  const patchTip = $derived(ptbStatus
+    ? [info?.version && `BetterDiscord ${info.version}`, info?.activated !== undefined && `Stable ${info.activated ? "patched" : "unpatched"}`, ptbStatus].filter(Boolean).join("\n")
+    : undefined);
   const statusText = $derived.by(() => {
     switch (status) {
       case "update": return `Update ${info?.version ?? ""} → ${info?.available ?? ""}`.replace("  ", " ");
@@ -33,9 +40,20 @@
     </span>
   </label>
   <div class="foot">
-    {#if job}<JobProgress {job} />{:else}<span class="status {status}">{statusText}</span>{/if}
+    {#if job}
+      <JobProgress {job} />
+    {:else}
+      {#if ptbStatus}
+        <span class="status {status} with-ptb" data-tip={patchTip}>
+          <span class="install-status">{statusText}</span><span aria-hidden="true">·</span><span>{ptbStatus}</span>
+        </span>
+      {:else}
+        <span class="status {status}">{statusText}</span>
+      {/if}
+    {/if}
   </div>
   <div class="actions">
+    {#if info?.ptbPatched && !job}<button class="icon-btn" data-tip="Unpatch Discord PTB" aria-label="Unpatch Discord PTB" disabled={appsState.externallyLocked} onclick={() => appsState.unpatchBetterDiscordPtb(app)}><Undo2 size={16} /></button>{/if}
     {#if showActivate}<button class="btn small" disabled={appsState.externallyLocked} onclick={() => appsState.activate(app)}>{app.activateLabel}</button>{/if}
     {#if job}
       <button class="icon-btn" title="Cancel" aria-label="Cancel {app.name}" onclick={() => appsState.cancel(app)}><X size={16} /></button>
@@ -62,6 +80,8 @@
   .id { color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
   .foot { grid-area: foot; align-self: center; min-width: 0; }
   .status { display: inline-block; max-width: 100%; height: 20px; padding: 0 7px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.035); border-radius: 999px; background: rgb(255 255 255 / 0.015); color: var(--text-3); font-size: 11.25px; font-weight: 500; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .status.with-ptb { display: inline-flex; align-items: center; gap: 4px; vertical-align: top; }
+  .with-ptb .install-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .status.installed { border-color: rgb(62 207 142 / 0.1); background: rgb(62 207 142 / 0.035); color: rgb(80 220 158 / 0.78); }
   .status.update { border-color: rgb(77 163 255 / 0.12); background: linear-gradient(180deg, rgb(77 163 255 / 0.07), rgb(77 163 255 / 0.03)); color: rgb(103 180 255 / 0.82); }
   .status.missing, .status.unknown { color: rgb(205 214 240 / 0.48); }

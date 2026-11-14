@@ -370,7 +370,7 @@ async fn finish(progress: &Progress<'_>, clock: bool, restart_explorer: bool) {
 }
 // --------------------------------------------------------------------------- Undo
 async fn reinstall_edge() -> Result<(), String> {
-    let status = crate::apps::process::hidden("winget")
+    let status = crate::apps::process::hidden(crate::apps::process::winget())
         .args([
             "install", "--id", "Microsoft.Edge", "--exact", "--silent",
             "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",

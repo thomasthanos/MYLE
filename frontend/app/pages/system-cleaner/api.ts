@@ -6,8 +6,9 @@ export interface CleanerCategory {
   description: string;
   hint: string;
   icon: string;
-  /** Some of its folders can only be read as administrator. */
+  /** Includes system folders handled by the administrator scan. */
   mayNeedAdmin: boolean;
+  adminOnly: boolean;
 }
 export type ScanEvent = {
   event: "category";
@@ -58,6 +59,7 @@ export const cleanerApi = {
   scan: (onEvent: (e: ScanEvent) => void) => invoke<ScanSummary>("cleaner_scan", { onEvent: channel(onEvent) }),
   /** The administrator helper approved during a scan is still running. */
   adminReady: () => invoke<boolean>("cleaner_admin_ready"),
+  /** Reports the system folders only, to be added to the user scan. */
   scanElevated: (onEvent: (e: ScanEvent) => void) =>
     invoke<ScanSummary>("cleaner_scan_elevated", { onEvent: channel(onEvent) }),
   clean: (ids: string[], onEvent: (e: CleanEvent) => void) =>

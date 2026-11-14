@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#123e48" />
+      <stop offset=".55" stop-color="#0e2631" />
+      <stop offset="1" stop-color="#080f1b" />
+    </linearGradient>
+    <radialGradient id="glow" cx="28%" cy="18%" r="79%">
+      <stop stop-color="#35d8ce" stop-opacity=".36" />
+      <stop offset="1" stop-color="#132c3a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#a0fff2" stop-opacity=".64" />
+      <stop offset=".35" stop-color="#3ab3bf" stop-opacity=".28" />
+      <stop offset="1" stop-color="#6ee7de" stop-opacity=".36" />
+    </linearGradient>
+    <linearGradient id="sheen" x1="128" y1="0" x2="128" y2="66" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".17" />
+      <stop offset="1" stop-color="#fff" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#a0fff0" />
+      <stop offset="1" stop-color="#45c8c8" />
+    </linearGradient>
+    <clipPath id="tile"><rect width="256" height="256" rx="58" /></clipPath>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#021117" flood-opacity=".8" />
+    </filter>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="256" height="256" fill="url(#background)" />
+    <rect width="256" height="256" fill="url(#glow)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#rim)" stroke-width="3" />
+  <g filter="url(#shadow)">
+    <svg x="50" y="50" width="156" height="156" viewBox="0 0 256 199" preserveAspectRatio="xMidYMid meet">
+      <path fill="url(#mark)" d="M216.856 16.597A208.5 208.5 0 0 0 164.042 0c-2.275 4.113-4.933 9.645-6.766 14.046q-29.538-4.442-58.533 0c-1.832-4.4-4.55-9.933-6.846-14.046a207.8 207.8 0 0 0-52.855 16.638C5.618 67.147-3.443 116.4 1.087 164.956c22.169 16.555 43.653 26.612 64.775 33.193A161 161 0 0 0 79.735 175.3a136.4 136.4 0 0 1-21.846-10.632a109 109 0 0 0 5.356-4.237c42.122 19.702 87.89 19.702 129.51 0a132 132 0 0 0 5.355 4.237a136 136 0 0 1-21.886 10.653c4.006 8.02 8.638 15.67 13.873 22.848c21.142-6.58 42.646-16.637 64.815-33.213c5.316-56.288-9.08-105.09-38.056-148.36M85.474 135.095c-12.645 0-23.015-11.805-23.015-26.18s10.149-26.2 23.015-26.2s23.236 11.804 23.015 26.2c.02 14.375-10.148 26.18-23.015 26.18m85.051 0c-12.645 0-23.014-11.805-23.014-26.18s10.148-26.2 23.014-26.2c12.867 0 23.236 11.804 23.015 26.2c0 14.375-10.148 26.18-23.015 26.18" />
+    </svg>
+  </g>
+</svg>

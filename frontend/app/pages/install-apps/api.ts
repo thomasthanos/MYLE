@@ -12,6 +12,7 @@ export interface CustomStatus {
   version: string | null;
   available: string | null;
   activated: boolean;
+  ptbPatched: boolean;
 }
 export interface InstalledReport {
   winget: InstalledPackage[];
@@ -68,6 +69,7 @@ export const api = {
     invoke<JobOutcome>("apps_install_custom", { id, onEvent: channel(onEvent) }),
   cancel: (id: string) => invoke<void>("apps_cancel", { id }),
   activate: (id: string) => invoke<void>("apps_activate", { id }),
+  unpatchBetterDiscordPtb: () => invoke<void>("apps_unpatch_betterdiscord_ptb"),
   exportList: (json: string) => invoke<boolean>("apps_export_list", { json }),
   importList: () => invoke<string | null>("apps_import_list"),
 };

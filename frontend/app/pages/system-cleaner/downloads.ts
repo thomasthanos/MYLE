@@ -12,4 +12,5 @@ export const DOWNLOADS_CATEGORY = {
   hint: "Deleted permanently, not to the Recycle Bin.",
   icon: "downloads",
   mayNeedAdmin: false,
+  adminOnly: false,
 };

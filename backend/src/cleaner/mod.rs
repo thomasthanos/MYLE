@@ -18,8 +18,10 @@ pub struct CategoryInfo {
     description: String,
     hint: String,
     icon: String,
-    /// At least one folder of this category is readable only as administrator.
+    /// At least one folder of this category is handled by the administrator pass.
     may_need_admin: bool,
+    /// The category has no user folders to scan before administrator approval.
+    admin_only: bool,
 }
 /// Static card data, so the page can draw before any scanning happens.
 #[tauri::command]
@@ -33,6 +35,7 @@ pub fn cleaner_categories() -> Vec<CategoryInfo> {
             hint: c.hint.into(),
             icon: c.icon.into(),
             may_need_admin: c.targets().iter().any(|t| t.admin),
+            admin_only: !c.targets().is_empty() && c.targets().iter().all(|t| t.admin),
         })
         .collect()
 }
@@ -73,7 +76,7 @@ pub enum CleanEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ScanSummary {
     bytes: u64,
-    /// Categories that need administrator rights to be measured fully.
+    /// Categories with folders excluded from the scan.
     locked: Vec<String>,
 }
 #[derive(Debug, Default, PartialEq, Serialize)]
@@ -90,7 +93,7 @@ pub struct CleanSummary {
     admin_skipped: u64,
     /// Of `skipped_bytes`, the part the administrator pass tries again.
     admin_skipped_bytes: u64,
-    /// Categories that still hold data only an administrator can remove.
+    /// Categories with folders excluded from the cleanup pass.
     locked: Vec<String>,
 }
 fn pick(ids: &[String]) -> Vec<&'static Category> {
@@ -124,8 +127,8 @@ pub async fn cleaner_scan(on_event: Channel<ScanEvent>) -> Result<ScanSummary, S
 pub async fn cleaner_admin_ready() -> bool {
     elevated::is_running().await
 }
-/// Second pass for the folders that needed administrator rights. The first
-/// one asks for approval; the helper then stays up for later scans and cleans.
+/// Measures only the system folders. The caller adds these figures to its
+/// existing user scan. The helper asks for approval the first time it starts.
 #[tauri::command]
 pub async fn cleaner_scan_elevated(on_event: Channel<ScanEvent>) -> Result<ScanSummary, String> {
     let locked: Vec<&'static Category> = targets::CATEGORIES
@@ -135,12 +138,7 @@ pub async fn cleaner_scan_elevated(on_event: Channel<ScanEvent>) -> Result<ScanS
     let totals = elevated::run(&locked, elevated::Action::Measure).await?;
     let mut summary = ScanSummary::default();
     for category in locked {
-        // Everything the user can read, plus what the elevated pass found.
-        let mut measured = measure_open(category);
-        if let Some(extra) = totals.get(category.id) {
-            measured.bytes += extra.bytes;
-            measured.files += extra.files;
-        }
+        let measured = totals.get(category.id).copied().unwrap_or_default();
         summary.bytes += measured.bytes;
         let _ = on_event.send(ScanEvent::Category {
             id: category.id.into(),
@@ -164,26 +162,17 @@ fn measure(category: &Category) -> targets::Measured {
         Kind::Folders(list) => list
             .iter()
             .fold(targets::Measured::default(), |mut acc, target| {
+                if target.admin {
+                    acc.locked = true;
+                    return acc;
+                }
                 let one = targets::measure(target);
                 acc.bytes += one.bytes;
                 acc.files += one.files;
-                // An admin-only folder that cannot be read is what "locked" means.
                 acc.locked |= one.locked;
                 acc
             }),
     }
-}
-/// Only the folders this user can already read.
-fn measure_open(category: &Category) -> targets::Measured {
-    category.targets().iter().filter(|t| !t.admin).fold(
-        targets::Measured::default(),
-        |mut acc, target| {
-            let one = targets::measure(target);
-            acc.bytes += one.bytes;
-            acc.files += one.files;
-            acc
-        },
-    )
 }
 // --------------------------------------------------------------------------- Clean
 #[tauri::command]
@@ -294,15 +283,15 @@ fn clean(category: &Category) -> targets::Cleaned {
         Kind::Folders(list) => list
             .iter()
             .fold(targets::Cleaned::default(), |mut acc, target| {
+                if target.admin {
+                    acc.locked = true;
+                    return acc;
+                }
                 let one = targets::clean(target);
                 acc.bytes += one.bytes;
                 acc.files += one.files;
                 acc.skipped += one.skipped;
                 acc.skipped_bytes += one.skipped_bytes;
-                if target.admin {
-                    acc.admin_skipped += one.skipped;
-                    acc.admin_skipped_bytes += one.skipped_bytes;
-                }
                 acc.locked |= one.locked;
                 acc
             }),
@@ -327,13 +316,37 @@ mod tests {
         let cards = cleaner_categories();
         assert_eq!(cards.len(), targets::CATEGORIES.len());
         let by_id = |id: &str| cards.iter().find(|c| c.id == id).unwrap();
-        assert!(by_id("prefetch").may_need_admin);
+        assert!(by_id("prefetch").admin_only);
+        assert!(by_id("windows-update").admin_only);
+        assert!(!by_id("temp").admin_only);
+        assert!(!by_id("errors").admin_only);
+        assert!(by_id("errors").may_need_admin);
+        assert!(!by_id("recycle-bin").admin_only);
         assert!(
             by_id("temp").may_need_admin,
             "C:\\Windows\\Temp needs rights"
         );
         assert!(!by_id("recycle-bin").may_need_admin);
         assert!(!by_id("thumbnails").may_need_admin);
+    }
+    #[test]
+    fn standard_pass_leaves_system_only_targets_to_the_admin_helper() {
+        let dir = crate::test_dirs::temp_dir("cleaner-admin-only");
+        let file = dir.join("test.tmp");
+        std::fs::write(&file, b"data").unwrap();
+        let path = Box::leak(dir.to_str().unwrap().to_owned().into_boxed_str());
+        let list = Box::leak(Box::new([targets::Target {
+            dir: path,
+            patterns: &[],
+            admin: true,
+        }]));
+        let category = Category {
+            kind: Kind::Folders(list),
+            ..*targets::find("windows-update").unwrap()
+        };
+        assert_eq!(measure(&category), targets::Measured { locked: true, ..Default::default() });
+        assert_eq!(clean(&category), targets::Cleaned { locked: true, ..Default::default() });
+        assert!(file.exists());
     }
     #[test]
     fn unknown_ids_are_dropped_rather_than_guessed() {

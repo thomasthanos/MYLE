@@ -19,6 +19,29 @@ pub fn system32(relative: &str) -> std::path::PathBuf {
 pub fn powershell() -> std::path::PathBuf {
     system32(r"WindowsPowerShell\v1.0\powershell.exe")
 }
+/// The same, as text, for the helpers that take a program name.
+pub fn system32_str(relative: &str) -> String {
+    system32(relative).to_string_lossy().into_owned()
+}
+/// Windows PowerShell 5.1's full path as text (see `system32`).
+pub fn powershell_str() -> String {
+    powershell().to_string_lossy().into_owned()
+}
+/// winget (App Installer): the per-user alias App Installer puts in
+/// WindowsApps, else one on PATH, never a `winget.exe` in the app's own
+/// folder (see `system32`). An alias is a reparse point that only opens when
+/// run, so it is looked for with `symlink_metadata`.
+pub fn winget() -> std::path::PathBuf {
+    let local = std::env::var_os("LOCALAPPDATA").map(|dir| std::path::PathBuf::from(dir).join(r"Microsoft\WindowsApps"));
+    let on_path = std::env::var_os("PATH").map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>()).unwrap_or_default();
+    local
+        .into_iter()
+        .chain(on_path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("winget.exe"))
+        .find(|path| std::fs::symlink_metadata(path).is_ok())
+        .unwrap_or_else(|| "winget.exe".into())
+}
 /// File Explorer, by its full path (see `system32`).
 pub fn explorer() -> std::path::PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
@@ -99,9 +122,80 @@ pub fn encode_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
-/// A PowerShell single-quoted string literal.
+/// A PowerShell single-quoted string literal. PowerShell also ends such a
+/// string at the typographic quotes ‘ ’ ‚ ‛ (U+2018 to U+201B), so those are
+/// doubled too: a path like `C:\Users\O’Brien\…` broke every script, and a
+/// path someone else chose could have been script.
 pub(crate) fn ps_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+/// Runs a blocking command to the end and returns its output. Both pipes are
+/// read on threads of their own, so a program that writes more than a pipe
+/// holds never stalls (reading one after the other, or only after it exits,
+/// left it waiting until the timeout). The program and anything it starts
+/// are in a Job Object and are killed together after `timeout`.
+pub fn output_within(
+    mut command: std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Stdio;
+    fn drain(pipe: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let program = command.get_program().to_string_lossy().into_owned();
+    let name = std::path::Path::new(&program)
+        .file_name()
+        .map_or(program.clone(), |name| name.to_string_lossy().into_owned());
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{name} could not start: {e}"))?;
+    let job = JobObject::new().filter(|job| job.assign(child.as_raw_handle() as _));
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        if started.elapsed() > timeout {
+            match &job {
+                Some(job) => job.kill(),
+                None => {
+                    let _ = child.kill();
+                }
+            }
+            let _ = child.wait();
+            return Err(format!("{name} took too long and was stopped."));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    // Whatever the program started has its copy of the pipes: end it too,
+    // so the readers finish.
+    drop(job);
+    Ok(std::process::Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
 }
 /// Kills a process and everything it started (e.g. winget and its installer).
 pub fn kill_tree(pid: u32) {
@@ -168,6 +262,40 @@ mod tests {
     #[test]
     fn quotes_are_escaped_for_powershell() {
         assert_eq!(ps_quote("it's"), "'it''s'");
+        // PowerShell ends a single-quoted string at these too.
+        assert_eq!(ps_quote("O\u{2019}Brien"), "'O\u{2019}\u{2019}Brien'");
+        assert_eq!(ps_quote("\u{2018}\u{201A}\u{201B}"), "'\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}'");
+    }
+    #[test]
+    fn a_path_with_a_typographic_quote_reaches_powershell_whole() {
+        let path = r"C:\Users\O’Brien\it's ‘odd’.txt";
+        let mut command = std::process::Command::new(powershell());
+        command.args(["-NoProfile", "-NonInteractive", "-Command", &format!("[Console]::Out.Write({})", ps_quote(path))]);
+        let output = output_within(command, std::time::Duration::from_secs(60)).unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), path);
+    }
+    #[test]
+    fn a_program_that_writes_more_than_a_pipe_holds_still_finishes() {
+        // Far more than the 4 KB a pipe buffers, on both streams.
+        let mut command = std::process::Command::new(powershell());
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "1..2000 | % { [Console]::Out.WriteLine('o' * 60); [Console]::Error.WriteLine('e' * 60) }; exit 3",
+        ]);
+        let output = output_within(command, std::time::Duration::from_secs(60)).unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.len() > 100_000 && output.stderr.len() > 100_000);
+    }
+    #[test]
+    fn a_program_past_its_time_is_stopped_with_what_it_started() {
+        let mut command = std::process::Command::new(powershell());
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 60"]);
+        let started = std::time::Instant::now();
+        let error = output_within(command, std::time::Duration::from_secs(2)).unwrap_err();
+        assert!(error.contains("took too long"), "{error}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
     }
     #[test]
     fn the_script_on_standard_input_is_one_ascii_line() {

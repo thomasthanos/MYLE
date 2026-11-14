@@ -134,6 +134,7 @@ pub struct CustomStatus {
     version: Option<String>,
     available: Option<String>,
     activated: bool,
+    ptb_patched: bool,
 }
 pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
     // Registry and file checks run once for the whole catalog, off the async workers: reading every Uninstall key again for each app added up.
@@ -143,7 +144,14 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
             .iter()
             .map(|entry| {
                 let (installed, version) = detect(entry, &registered);
-                (installed, version, installed && is_activated(entry))
+                let ptb_patched = entry.id == "Custom.BetterDiscord"
+                    && betterdiscord_ptb_patched(&expand_env("%LOCALAPPDATA%"));
+                (
+                    installed || ptb_patched,
+                    version,
+                    installed && is_activated(entry),
+                    ptb_patched,
+                )
             })
             .collect::<Vec<_>>()
     })
@@ -153,7 +161,7 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
     let lookups = CATALOG
         .iter()
         .zip(&local)
-        .map(|(entry, (installed, version, _))| async move {
+        .map(|(entry, (installed, version, _, _))| async move {
             match (version.as_deref(), *installed) {
                 (Some(current), true) if !entry.self_updating => {
                     resolver::resolve(app, &entry.id, &entry.resolver)
@@ -171,12 +179,13 @@ pub async fn statuses(app: &AppHandle) -> Vec<CustomStatus> {
         .zip(local)
         .zip(available)
         .map(
-            |((entry, (installed, version, activated)), available)| CustomStatus {
+            |((entry, (installed, version, activated, ptb_patched)), available)| CustomStatus {
                 id: entry.id.clone(),
                 installed,
                 version,
                 available,
                 activated,
+                ptb_patched,
             },
         )
         .collect()
@@ -219,6 +228,14 @@ fn activation_in_effect(entry: &CustomApp) -> bool {
         }
     }
     resolved_paths.iter().all(|p| patch_is_current(p))
+}
+
+fn betterdiscord_ptb_patched(local_app_data: &str) -> bool {
+    resolve_path(&format!(r"{local_app_data}\DiscordPTB\app-*\resources"))
+        .is_some_and(|resources| {
+            resources.join("app").join("index.js").is_file()
+                && resources.join("betterdiscord.app.asar").is_file()
+        })
 }
 
 /// A patch file (e.g. Discord's app/index.js or _app.asar) is current only if
@@ -674,7 +691,7 @@ async fn hash_open_file(file: &std::fs::File) -> Result<String, String> {
 /// simple name. `Valid` includes chain and revocation-policy evaluation by the
 /// local Windows trust provider.
 async fn verify_authenticode(path: &Path, publisher: &str) -> Result<(), String> {
-    let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
+    let quote = |value: &str| super::process::ps_quote(value);
     let script = format!(
         "$ErrorActionPreference = 'Stop'\n\
          $signature = Get-AuthenticodeSignature -LiteralPath {}\n\
@@ -725,7 +742,7 @@ pub(super) async fn run_installer(
             "/norestart".into(),
         ];
         all.extend(args.iter().cloned());
-        ("msiexec.exe".into(), all)
+        (super::process::system32_str("msiexec.exe"), all)
     } else {
         (file.display().to_string(), args.to_vec())
     };
@@ -899,6 +916,23 @@ pub async fn apps_activate(id: String) -> Result<(), String> {
         .ok_or("this app has no activation step")?;
     run_activation(entry, activate).await
 }
+
+#[tauri::command]
+pub async fn apps_unpatch_betterdiscord_ptb(jobs: State<'_, Jobs>) -> Result<(), String> {
+    let _job = jobs.start_exclusive("Custom.BetterDiscord")?;
+    let local_app_data = expand_env("%LOCALAPPDATA%");
+    if !betterdiscord_ptb_patched(&local_app_data) {
+        return Ok(());
+    }
+    let entry = find("Custom.BetterDiscord")?;
+    let cli = installed_exe(entry)
+        .ok_or("BetterDiscord CLI was not found in the MYLE install location.")?;
+    run_activation_tool(&cli, &["uninstall", "--channel", "ptb"]).await?;
+    if betterdiscord_ptb_patched(&local_app_data) {
+        return Err("BetterDiscord is still patched in Discord PTB.".into());
+    }
+    Ok(())
+}
 async fn run_activation(entry: &CustomApp, activate: &Activate) -> Result<(), String> {
     match &activate.action {
         ActivateAction::Shortcut => {
@@ -913,24 +947,27 @@ async fn run_activation(entry: &CustomApp, activate: &Activate) -> Result<(), St
                 .map_err(err)
         }
         ActivateAction::Run { exe, args } => {
-            let output = hidden(expand_env(exe))
-                .args(args)
-                .stdin(Stdio::null())
-                .output()
-                .await
-                .map_err(err)?;
-            if output.status.success() {
-                return Ok(());
-            }
-            // The tool's last message is usually the most useful error.
-            let text = String::from_utf8_lossy(&output.stdout).into_owned()
-                + &String::from_utf8_lossy(&output.stderr);
-            let last = text.lines().map(str::trim).rfind(|l| !l.is_empty());
-            Err(last
-                .map(String::from)
-                .unwrap_or_else(|| format!("exited with code {:?}", output.status.code())))
+            run_activation_tool(Path::new(&expand_env(exe)), args).await
         }
     }
+}
+
+async fn run_activation_tool(exe: &Path, args: &[impl AsRef<std::ffi::OsStr>]) -> Result<(), String> {
+    let output = hidden(exe)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(err)?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&output.stdout).into_owned()
+        + &String::from_utf8_lossy(&output.stderr);
+    let last = text.lines().map(str::trim).rfind(|line| !line.is_empty());
+    Err(last
+        .map(String::from)
+        .unwrap_or_else(|| format!("exited with code {:?}", output.status.code())))
 }
 fn installed_exe(entry: &CustomApp) -> Option<PathBuf> {
     let path = match &entry.install {
@@ -963,6 +1000,26 @@ pub(crate) fn expand_env(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn betterdiscord_ptb_patch_requires_both_markers_in_the_latest_ptb_build() {
+        let local = crate::test_dirs::temp_dir("betterdiscord-ptb");
+        let stable = local.join(r"Discord\app-1.0.9268\resources");
+        let old = local.join(r"DiscordPTB\app-1.0.9\resources");
+        let latest = local.join(r"DiscordPTB\app-1.0.10\resources");
+        for resources in [&stable, &old, &latest] {
+            std::fs::create_dir_all(resources.join("app")).unwrap();
+            std::fs::write(resources.join(r"app\index.js"), "loader").unwrap();
+        }
+        for resources in [&stable, &old] {
+            std::fs::write(resources.join("betterdiscord.app.asar"), "archive").unwrap();
+        }
+        let root = local.to_str().unwrap();
+        assert!(!betterdiscord_ptb_patched(root));
+        std::fs::write(latest.join("betterdiscord.app.asar"), "archive").unwrap();
+        assert!(betterdiscord_ptb_patched(root));
+        std::fs::remove_file(latest.join("betterdiscord.app.asar")).unwrap();
+        assert!(!betterdiscord_ptb_patched(root));
+    }
     fn resolved_with_digest(digest: Option<&str>) -> Resolved {
         Resolved {
             url: "https://example.invalid/setup.exe".into(),

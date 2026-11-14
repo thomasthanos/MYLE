@@ -10,7 +10,7 @@ pub struct Target {
     pub dir: &'static str,
     /// Empty means everything in the folder; otherwise `name_*.ext` patterns.
     pub patterns: &'static [&'static str],
-    /// Known to be readable only with administrator rights.
+    /// A system folder handled by the administrator helper.
     pub admin: bool,
 }
 #[derive(Debug, Clone, Copy)]

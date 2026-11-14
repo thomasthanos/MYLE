@@ -469,6 +469,7 @@ pub fn run() {
             apps::custom::apps_custom_catalog,
             apps::custom::apps_install_custom,
             apps::custom::apps_activate,
+            apps::custom::apps_unpatch_betterdiscord_ptb,
             apps::io::apps_export_list,
             apps::io::apps_import_list,
             apps::creative::creative_catalog,

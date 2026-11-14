@@ -4,6 +4,7 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RadarIcon from "@lucide/svelte/icons/radar";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
@@ -91,11 +92,14 @@
     </p>
     <div class="actions">
       <button class="btn" disabled={locked} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
-      <button class="btn" disabled={locked || !cleanerState.scanned || !cleanerState.categories.length} title={cleanerState.scanned ? "Tick or untick every category" : "Scan first: it measures every category and ticks them for you"} onclick={() => cleanerState.toggleAll()}>
+      {#if cleanerState.canScanSystemFolders}
+        <button class="btn" disabled={locked} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={15} /> Scan system folders</button>
+      {/if}
+      <button class="btn" disabled={locked || !cleanerState.bulkSelectable.length} title={cleanerState.scanned ? "Tick or untick available categories. Select Downloads from its card." : "Run a scan to see the available categories."} onclick={() => cleanerState.toggleAll()}>
         <CheckCheck size={15} />
         {cleanerState.allTicked ? "Deselect all" : "Select all"}
       </button>
-      <button class="btn primary" disabled={locked || !cleanerState.scanned || !cleanerState.selected.size} title={cleanerState.scanned ? "Empty the ticked categories" : "Scan first, so you see what will be removed"} onclick={() => cleanerState.clean()}>
+      <button class="btn primary" disabled={locked || !cleanerState.selection.length} title={cleanerState.scanned ? "Empty the ticked categories" : "Scan first, so you see what will be removed"} onclick={() => cleanerState.clean()}>
         <Sparkles size={15} />
         {cleanLabel}
       </button>
@@ -103,7 +107,7 @@
   </div>
 
   {#if cleanerState.autoSelected && !cleaningNow && cleanerState.phase === "idle"}
-    <p class="picked"><CheckCheck size={12} /> Every category was ticked after the scan. Untick what you want to keep, then clean.</p>
+    <p class="picked"><CheckCheck size={12} /> Available categories were selected. Untick what you want to keep, then clean.</p>
   {/if}
 
   {#if cleaningNow}
@@ -131,8 +135,8 @@
 {/if}
 
 <div class="grid">
-  {#each cleanerState.categories as category (category.id)}
-    <CleanerCard {category} />
+  {#each cleanerState.categories as category, index (category.id)}
+    <CleanerCard {category} {index} />
   {/each}
 </div>
 

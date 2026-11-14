@@ -72,6 +72,13 @@
       "icon": "/icons/installapps/Discord.svg"
     },
     {
+      "id": "Discord.Discord.PTB",
+      "name": "Discord PTB",
+      "site": "discord.com/download",
+      "selfUpdating": true,
+      "icon": "/icons/installapps/Discord-PTB.svg"
+    },
+    {
       "id": "Telegram.TelegramDesktop",
       "name": "Telegram",
       "site": "telegram.org",

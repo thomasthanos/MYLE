@@ -26,7 +26,7 @@
         <summary>{preview.items.length} to delete</summary>
         <ul class="list">
           {#each preview.items as item (item.path)}
-            <li><span class="row"><span class="name" title={item.path}>{item.name}{item.isDir ? "\\" : ""}</span><span class="date">{when(item.changed)} · {formatSize(item.size)}</span></span></li>
+            <li><span class="row"><span class="name" data-tip={item.path}>{item.name}{item.isDir ? "\\" : ""}</span><span class="date">{when(item.changed)} · {formatSize(item.size)}</span></span></li>
           {/each}
         </ul>
       </details>

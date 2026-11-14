@@ -62,8 +62,8 @@ fn download_and_run(target: &Path, quiet: bool) -> Result<(), String> {
                 "-NonInteractive",
                 "-Command",
                 &format!(
-                    "Invoke-WebRequest -UseBasicParsing -Uri '{BOOTSTRAPPER}' -OutFile '{}'",
-                    target_text.replace('\'', "''")
+                    "Invoke-WebRequest -UseBasicParsing -Uri '{BOOTSTRAPPER}' -OutFile {}",
+                    ps_quote(&target_text)
                 ),
             ],
         ) == Some(0);
@@ -92,15 +92,30 @@ fn hold(path: &Path) -> std::io::Result<File> {
     std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path)
 }
 
+/// A PowerShell single-quoted string literal. PowerShell also ends one at
+/// the typographic quotes ‘ ’ ‚ ‛, so those are doubled as well as `'`
+/// (a profile such as `C:\Users\O’Brien` broke the script).
+fn ps_quote(text: &str) -> String {
+    let mut out = String::from('\'');
+    for c in text.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
 /// Whether `path` carries a valid signature of Microsoft's.
 fn signed_by_microsoft(path: &Path) -> bool {
     // Use Windows PowerShell's own module. A parent running another PowerShell
     // version may pass a PSModulePath whose Security module cannot load here.
     let script = format!(
         "Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop; \
-         $s = Get-AuthenticodeSignature -LiteralPath '{}'; \
+         $s = Get-AuthenticodeSignature -LiteralPath {}; \
          if ($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -match '(^|, )O=Microsoft Corporation(,|$)') {{ exit 0 }}; exit 1",
-        path.to_string_lossy().replace('\'', "''")
+        ps_quote(&path.to_string_lossy())
     );
     shell::run_hidden(
         &shell::system32(r"WindowsPowerShell\v1.0\powershell.exe"),

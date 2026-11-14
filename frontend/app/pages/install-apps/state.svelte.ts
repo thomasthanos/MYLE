@@ -40,6 +40,7 @@ export interface AppStatus {
   version?: string;
   available?: string;
   activated?: boolean;
+  ptbPatched?: boolean;
 }
 export interface Job {
   mode: Mode;
@@ -281,6 +282,7 @@ class InstallAppsState {
           version: c.version ?? undefined,
           available: c.available ?? undefined,
           activated: c.activated,
+          ptbPatched: c.ptbPatched,
         };
       }
       this.statuses = next;
@@ -484,6 +486,25 @@ class InstallAppsState {
       toast.success(`${app.name}: ${label} done.`);
     } catch (err) {
       toast.error(`${app.name}: ${message(err)}`);
+    } finally {
+      delete this.jobs[k];
+      this.#activations--;
+      this.#releaseGate();
+    }
+  }
+  async unpatchBetterDiscordPtb(app: AppEntry) {
+    const k = key(app.id);
+    if (!this.statuses[k]?.ptbPatched || this.jobs[k] || !operationGate.begin("install-apps")) return;
+    this.jobs[k] = { mode: "install", phase: "installing", progress: null, note: "Unpatching Discord PTB…" };
+    this.#activations++;
+    try {
+      await api.unpatchBetterDiscordPtb();
+      const status = this.statuses[k];
+      if (status) status.ptbPatched = false;
+      toast.success("BetterDiscord removed from Discord PTB.");
+      await this.checkInstalled();
+    } catch (err) {
+      toast.error(`Could not unpatch Discord PTB: ${message(err)}`);
     } finally {
       delete this.jobs[k];
       this.#activations--;

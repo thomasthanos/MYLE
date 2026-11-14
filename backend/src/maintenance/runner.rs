@@ -317,7 +317,7 @@ fn watched_script(exe: &Path, args: &str, log: &Path, stop: &Path) -> String {
 }
 /// A PowerShell single-quoted string literal.
 fn ps_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
+    crate::apps::process::ps_quote(text)
 }
 #[cfg(test)]
 mod tests {

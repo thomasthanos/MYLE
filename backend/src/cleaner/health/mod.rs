@@ -1117,12 +1117,12 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 &format!("{title} (disabled)"),
                 Undo::Task { name: name.clone() },
             )?;
-            sys::run("schtasks.exe", &["/Change", "/TN", name, "/Disable"])
+            sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Disable"])
                 .map(|_| ())
                 .map_err(|e| task_error(&e))
         }
         (Target::Task { name }, "enable") => {
-            sys::run("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
+            sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Enable"])
                 .map(|_| ())
                 .map_err(|e| task_error(&e))
         }
@@ -1170,7 +1170,7 @@ async fn set_service_start(name: &str, kind: &str) -> Result<(), String> {
         "start=".to_string(),
         kind.to_string(),
     ];
-    let code = crate::apps::process::run_elevated("sc.exe", &args, true).await?;
+    let code = crate::apps::process::run_elevated(&crate::apps::process::system32_str("sc.exe"), &args, true).await?;
     match code {
         0 => Ok(()),
         1223 => Err("The administrator prompt was declined.".into()),
@@ -1181,11 +1181,11 @@ async fn undo(undo: &Undo) -> Result<(), String> {
     match undo {
         Undo::RegImport { file } => {
             // HKCU imports work as is; HKLM ones need the administrator prompt.
-            if sys::run("reg.exe", &["import", file, "/reg:64"]).is_ok() {
+            if sys::run(&crate::apps::process::system32_str("reg.exe"), &["import", file, "/reg:64"]).is_ok() {
                 return Ok(());
             }
             let args = ["import".to_string(), file.clone(), "/reg:64".to_string()];
-            match crate::apps::process::run_elevated("reg.exe", &args, true).await? {
+            match crate::apps::process::run_elevated(&crate::apps::process::system32_str("reg.exe"), &args, true).await? {
                 0 => Ok(()),
                 code => Err(format!("reg import ended with {code}.")),
             }
@@ -1274,7 +1274,7 @@ async fn undo(undo: &Undo) -> Result<(), String> {
             }
             .map_err(|e| e.to_string())
         }
-        Undo::Task { name } => sys::run("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
+        Undo::Task { name } => sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Enable"])
             .map(|_| ())
             .map_err(|e| task_error(&e)),
         Undo::Recycled { .. } => Err(

@@ -214,28 +214,16 @@ fn powershell() -> PathBuf {
     system::windows_dir().join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
 }
 /// Runs a script hidden and returns what it printed.
+/// The output is read while it runs (it was read only after it exited, so
+/// more than a pipe's 4 KB of warnings stalled it until the timeout).
 fn run_script(script: &str, timeout: Duration) -> Result<String, String> {
-    let mut child = Command::new(powershell())
+    let mut command = Command::new(powershell());
+    command
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
         .arg(crate::apps::process::encode_command(script))
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("PowerShell could not start: {e}"))?;
-    let started = Instant::now();
-    loop {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-            break;
-        }
-        if started.elapsed() > timeout {
-            let _ = child.kill();
-            return Err("PowerShell took too long.".into());
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+        .creation_flags(CREATE_NO_WINDOW);
+    let output = crate::apps::process::output_within(command, timeout)
+        .map_err(|e| if e.contains("took too long") { "PowerShell took too long.".to_string() } else { e })?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 /// Removes (or adds back) the parts of Windows whose capability name starts

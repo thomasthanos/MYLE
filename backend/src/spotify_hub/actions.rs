@@ -597,7 +597,7 @@ pub async fn purge(
         .map(OsString::from)
         .collect::<Vec<_>>();
         match run_program(
-            Path::new("powershell.exe"),
+            &process::powershell(),
             &args,
             job,
             cancellation,
@@ -903,10 +903,10 @@ async fn elevated_cleanup(paths: &[PathBuf], machine_registry: bool) -> Result<i
         "-EncodedCommand".to_string(),
         encode_command(&script),
     ];
-    process::run_elevated("powershell.exe", &args, true).await
+    process::run_elevated(&process::powershell_str(), &args, true).await
 }
 fn ps_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    process::ps_quote(value)
 }
 #[cfg(test)]
 mod tests {

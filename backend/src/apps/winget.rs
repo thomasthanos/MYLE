@@ -130,7 +130,8 @@ pub async fn apps_install_ignoring_hash(
     .map(String::from)
     .chain([super::process::encode_command(&script)])
     .collect();
-    let run = run_elevated("powershell.exe", &args, true);
+    let powershell = super::process::powershell_str();
+    let run = run_elevated(&powershell, &args, true);
     tokio::pin!(run);
     let code = loop {
         tokio::select! {
@@ -178,7 +179,7 @@ impl Drop for StopFile {
 /// Installs with the hash check off, watching `stop`; the setting is turned
 /// back off however winget ends, stopped or failed.
 fn hash_override_script(verb: &str, id: &str, stop: &std::path::Path) -> String {
-    let stop = format!("'{}'", stop.to_string_lossy().replace('\'', "''"));
+    let stop = super::process::ps_quote(&stop.to_string_lossy());
     format!(
         "$ErrorActionPreference = 'SilentlyContinue'\n\
          $code = 1\n\
@@ -211,7 +212,7 @@ pub async fn list_installed() -> Result<Vec<InstalledPackage>, String> {
 }
 /// Runs winget hidden and returns (exit code, stdout).
 async fn capture(args: &[&str]) -> Result<(i32, String), String> {
-    let output = hidden("winget")
+    let output = hidden(super::process::winget())
         .args(args)
         .args(COMMON_ARGS)
         .stdin(Stdio::null())
@@ -568,7 +569,7 @@ async fn run_streaming(
     args: &[String],
     on_line: &mut (dyn FnMut(&Line) + Send),
 ) -> Result<i32, String> {
-    let mut child = hidden("winget")
+    let mut child = hidden(super::process::winget())
         .args(args)
         .args(COMMON_ARGS)
         .stdin(Stdio::null())

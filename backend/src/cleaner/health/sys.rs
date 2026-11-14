@@ -30,13 +30,14 @@ pub fn string(key: &RegKey, name: &str) -> Option<String> {
 pub fn dword(key: &RegKey, name: &str) -> Option<u32> {
     key.get_value::<u32, _>(name).ok()
 }
+/// How long one tool or query may take before it is stopped: a hung WMI
+/// query otherwise held the scan lock (Software Health "busy") until restart.
+const TOOL_TIMEOUT: Duration = Duration::from_secs(120);
 /// A command with no window; its stdout as text (empty on failure).
 pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(program)
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("{program}: {e}"))?;
+    let mut command = Command::new(program);
+    command.args(args).creation_flags(CREATE_NO_WINDOW);
+    let out = crate::apps::process::output_within(command, TOOL_TIMEOUT).map_err(|e| format!("{program}: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
@@ -482,7 +483,7 @@ impl WideCompat for std::ffi::OsStr {
 pub fn export_key(hive: &str, path: &str, file: &Path) -> Result<(), String> {
     let full = format!("{hive}\\{path}");
     run(
-        "reg.exe",
+        &crate::apps::process::system32_str("reg.exe"),
         &["export", &full, &file.to_string_lossy(), "/y", "/reg:64"],
     )
     .map(|_| ())
@@ -490,7 +491,7 @@ pub fn export_key(hive: &str, path: &str, file: &Path) -> Result<(), String> {
 /// Whether a program of this name runs now (`chrome.exe`).
 pub fn running(image: &str) -> bool {
     run(
-        "tasklist.exe",
+        &crate::apps::process::system32_str("tasklist.exe"),
         &["/FI", &format!("IMAGENAME eq {image}"), "/NH", "/FO", "CSV"],
     )
     .map(|text| text.to_lowercase().contains(&image.to_lowercase()))

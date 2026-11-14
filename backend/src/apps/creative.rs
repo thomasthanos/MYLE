@@ -266,7 +266,7 @@ async fn run(
                 text: "Configuring Wand Enhancer...".into(),
             });
             // Close existing instances to prevent file lock when updating
-            let _ = super::process::hidden("taskkill")
+            let _ = super::process::hidden(super::process::system32("taskkill.exe"))
                 .args(["/IM", WAND_ENHANCER_EXE, "/F"])
                 .status()
                 .await;
@@ -545,9 +545,9 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     let target = paint_dir.join(CSP_LIVE_EXE);
     // Build a PowerShell snippet that copies the file with admin rights. Both paths are fixed — no user input ever reaches this script.
     let script = format!(
-        "Copy-Item -LiteralPath '{src}' -Destination '{dst}' -Force",
-        src = source.to_string_lossy().replace('\'', "''"),
-        dst = target.to_string_lossy().replace('\'', "''"),
+        "Copy-Item -LiteralPath {src} -Destination {dst} -Force",
+        src = super::process::ps_quote(&source.to_string_lossy()),
+        dst = super::process::ps_quote(&target.to_string_lossy()),
     );
     let script = format!(
         "try {{ {script}; exit 0 }} catch {{ Write-Error $_.Exception.Message; exit 1 }}"
@@ -563,7 +563,7 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
     .map(String::from)
     .chain([super::process::encode_command(&script)])
     .collect();
-    let code = super::process::run_elevated("powershell.exe", &args, true).await?;
+    let code = super::process::run_elevated(&super::process::powershell_str(), &args, true).await?;
     match code {
         0 => Ok(format!(
             "Done — {} replaced with the bundled version.",

@@ -261,7 +261,12 @@ impl VaultFile {
             return Some(true);
         }
         let mut sealed = self.records.iter().filter(|r| !r.ciphertext.is_empty()).peekable();
-        sealed.peek()?;
+        if sealed.peek().is_none() {
+            // No entries to tell by, but a seal that does not open with the
+            // key: not this vault's key. Otherwise a wrap held from the account
+            // could swap an empty vault's key for one of someone else's.
+            return self.header_seal.is_some().then_some(false);
+        }
         Some(sealed.any(|r| {
             let aad = if r.deleted { tombstone_aad(&r.id, r.revision) } else { entry_aad(&r.id, r.revision) };
             crypto::open(key, &aad, &r.ciphertext).is_ok()
@@ -1906,6 +1911,27 @@ mod tests {
         assert_eq!(on_disk(&path_b).pending_header, None, "the new header replaces the held one");
         let _ = std::fs::remove_file(path_a);
         let _ = std::fs::remove_file(path_b);
+    }
+
+    #[test]
+    fn a_held_wrap_of_another_key_never_takes_over_an_empty_sealed_vault() {
+        let (path, mut vault) = temp_vault();
+        vault.create("real master", KdfParams::cheap_for_tests()).unwrap();
+        let header = vault.sync_header().unwrap().0;
+        assert!(header.header_seal.is_some(), "a new vault is sealed");
+        // Someone with the account wraps a key of their own under a password
+        // the user might type. The vault has no entries to check a key by.
+        let kdf = KdfParams::cheap_for_tests();
+        let stranger = Key::random();
+        let their_wrap = crypto::wrap(&crypto::derive("guessable", &kdf).unwrap(), MASTER_AAD, &stranger).unwrap();
+        let forged = RemoteHeader { kdf, wrapped_key: their_wrap, header_seal: None, ..header.clone() };
+        assert_eq!(vault.take_header(forged).unwrap(), HeaderStep::Held);
+        vault.lock();
+        assert_eq!(vault.unlock("guessable").unwrap_err(), "Wrong master password.");
+        assert_eq!(vault.sync_header().unwrap().0, header, "the vault keeps its own key and header");
+        vault.unlock("real master").unwrap();
+        assert_eq!(vault.sync_header().unwrap().0, header);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -23,9 +23,11 @@
   let pointerX = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let hiddenAt = 0;
+  let overrideObserver: MutationObserver | undefined;
 
-  /** The element's tooltip text, taking its `title` over first. */
+  /** The element's tooltip text, taking its `title` over when it has one. */
   function tipOf(element: HTMLElement): string {
+    if (element.dataset.tipOverride) return element.dataset.tipOverride;
     const title = element.getAttribute("title");
     if (title !== null) {
       element.removeAttribute("title");
@@ -43,7 +45,8 @@
 
   function tipTarget(node: EventTarget | null): HTMLElement | null {
     if (!(node instanceof Element) || node.closest("[data-no-tooltip]")) return null;
-    return node.closest<HTMLElement>("[title], [data-tip]");
+    return node.closest<HTMLElement>('[data-tip-override]:not([data-tip-override=""])')
+      ?? node.closest<HTMLElement>("[title], [data-tip]");
   }
 
   /* Below the element, or above it without room; under the pointer, kept inside the window. */
@@ -61,6 +64,10 @@
   function show(element: HTMLElement) {
     const content = tipOf(element);
     if (!content) return;
+    overrideObserver?.disconnect();
+    // Watch the active tooltip's container so an operation can change its message while the pointer is still.
+    const override = element.closest("[data-tip-override]");
+    if (override) overrideObserver?.observe(override, { attributeFilter: ["data-tip-override"] });
     pending = null;
     target = element;
     text = content;
@@ -71,6 +78,7 @@
 
   function hide() {
     clearTimeout(timer);
+    overrideObserver?.disconnect();
     if (visible) hiddenAt = Date.now();
     visible = false;
     target = null;
@@ -86,7 +94,9 @@
     pointerX = event.clientX;
     const wait = Date.now() - hiddenAt < WARM_MS ? 0 : SHOW_AFTER_MS;
     timer = setTimeout(() => {
-      if (element.isConnected) show(element);
+      pending = null;
+      const hovered = tipTarget(event.target);
+      if (hovered?.isConnected) show(hovered);
     }, wait);
   }
 
@@ -127,6 +137,11 @@
   });
 
   onMount(() => {
+    overrideObserver = new MutationObserver(([record]) => {
+      const element = record.target as HTMLElement;
+      if (element.dataset.tipOverride) show(element);
+      else hide();
+    });
     const options = { capture: true, passive: true };
     const listeners: [EventTarget, string, EventListener][] = [
       [document, "pointerover", onOver as EventListener],
@@ -149,6 +164,7 @@
     });
     return () => {
       clearTimeout(timer);
+      overrideObserver?.disconnect();
       for (const remove of removeListeners) remove();
     };
   });
