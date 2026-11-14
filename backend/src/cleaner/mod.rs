@@ -63,8 +63,10 @@ pub enum CleanEvent {
         bytes: u64,
         files: u64,
         skipped: u64,
-        /// What the skipped files hold: the page says "still in use" in bytes.
+        /// Bytes belonging to skipped items.
         skipped_bytes: u64,
+        in_use: u64,
+        in_use_bytes: u64,
         /// Of `skipped`, those the administrator pass tries again.
         admin_skipped: u64,
         /// Of `skipped_bytes`, the part the administrator pass tries again.
@@ -85,8 +87,7 @@ pub struct CleanSummary {
     freed: u64,
     files: u64,
     skipped: u64,
-    /// What the skipped files hold; after the administrator pass this is only
-    /// what is truly in use.
+    /// Bytes belonging to skipped items.
     skipped_bytes: u64,
     /// Of `skipped`, those in administrator folders: the administrator pass
     /// tries them again and counts what it still leaves.
@@ -214,6 +215,8 @@ pub async fn cleaner_clean(
                 files: cleaned.files,
                 skipped: cleaned.skipped,
                 skipped_bytes: cleaned.skipped_bytes,
+                in_use: cleaned.in_use,
+                in_use_bytes: cleaned.in_use_bytes,
                 admin_skipped: cleaned.admin_skipped,
                 admin_skipped_bytes: cleaned.admin_skipped_bytes,
                 locked: cleaned.locked,
@@ -254,6 +257,8 @@ pub async fn cleaner_clean_elevated(
             files: entry.files,
             skipped: entry.skipped,
             skipped_bytes: entry.skipped_bytes,
+            in_use: entry.in_use,
+            in_use_bytes: entry.in_use_bytes,
             admin_skipped: 0,
             admin_skipped_bytes: 0,
             locked: false,
@@ -296,6 +301,8 @@ fn clean(category: &Category) -> targets::Cleaned {
                 acc.files += one.files;
                 acc.skipped += one.skipped;
                 acc.skipped_bytes += one.skipped_bytes;
+                acc.in_use += one.in_use;
+                acc.in_use_bytes += one.in_use_bytes;
                 acc.locked |= one.locked;
                 acc
             }),
@@ -376,6 +383,8 @@ mod tests {
             files: 2,
             skipped: 3,
             skipped_bytes: 2048,
+            in_use: 1,
+            in_use_bytes: 512,
             admin_skipped: 1,
             admin_skipped_bytes: 1024,
             locked: false,
@@ -383,6 +392,8 @@ mod tests {
         .unwrap();
         assert_eq!(cleaned["data"]["adminSkipped"], 1);
         assert_eq!(cleaned["data"]["skippedBytes"], 2048);
+        assert_eq!(cleaned["data"]["inUse"], 1);
+        assert_eq!(cleaned["data"]["inUseBytes"], 512);
         assert_eq!(cleaned["data"]["adminSkippedBytes"], 1024);
         let summary = serde_json::to_value(CleanSummary {
             admin_skipped: 4,

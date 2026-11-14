@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
@@ -8,10 +8,12 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Volume2 from "@lucide/svelte/icons/volume-2";
+  import VolumeX from "@lucide/svelte/icons/volume-x";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
-  import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import { formatSize } from "./api";
   import CleanerCard from "./CleanerCard.svelte";
+  import CleanOverlay from "./CleanOverlay.svelte";
   import SoftwareHealth from "./SoftwareHealth.svelte";
   import DiskAnalyzer from "../disk-analyzer/DiskAnalyzer.svelte";
   import { cleanerState } from "./state.svelte";
@@ -25,6 +27,8 @@
   type Tool = (typeof tools)[number]["id"];
   let tab = $state<Tool>("cleanup");
   let diskOpened = $state(false);
+  let scanButton: HTMLButtonElement;
+  let toolbar: HTMLElement;
 
   function selectTab(id: Tool) {
     tab = id;
@@ -41,93 +45,88 @@
     document.getElementById(`${tools[next].id}-tab`)?.focus();
   }
   const locked = $derived(cleanerState.busy || health.busy || health.scanning);
+  const showCleanup = $derived(cleanerState.phase === "cleaning" || cleanerState.celebration !== null);
 
   onMount(() => void cleanerState.load());
 
   const lastCleanedLabel = $derived.by(() => {
     const at = cleanerState.lastCleaned;
     if (!at) return "Never";
-    const minutes = Math.round((Date.now() - at) / 60000);
+    const minutes = Math.floor((Date.now() - at) / 60000);
     if (minutes < 1) return "Just now";
     if (minutes < 60) return `${minutes} min ago`;
-    const hours = Math.round(minutes / 60);
+    const hours = Math.floor(minutes / 60);
     if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-    const days = Math.round(hours / 24);
+    const days = Math.floor(hours / 24);
     return `${days} day${days === 1 ? "" : "s"} ago`;
   });
 
   const lastCleanedTitle = $derived(cleanerState.lastCleaned ? new Date(cleanerState.lastCleaned).toLocaleString() : "No cleanup yet");
-  const percent = $derived(Math.round(cleanerState.barPercent * 100));
-  const cleaningNow = $derived(cleanerState.phase === "cleaning");
-  const cleanLabel = $derived.by(() => {
-    const p = cleanerState.progress;
-    if (cleanerState.phase !== "cleaning") return "Clean selected";
-    if (cleanerState.settling) return "Checking what is left…";
-    if (!p) return "Cleaning…";
-    return p.current ? `Cleaning ${p.step}/${p.total} · ${p.current}` : `Cleaning ${p.step}/${p.total}`;
-  });
+  const selectedCount = $derived(cleanerState.selection.length);
+
+  async function closeCleanup(rescan = false) {
+    cleanerState.dismissCelebration();
+    await tick();
+    if (rescan) {
+      toolbar.focus({ preventScroll: true });
+      void cleanerState.scan();
+    } else if (document.activeElement === document.body) {
+      scanButton.focus({ preventScroll: true });
+    }
+  }
 </script>
 
 <PageHeader title="System Cleaner" subtitle="Clear temporary files, clean software leftovers and see what is filling your drives." />
 
-<div class="tabs" role="tablist" aria-label="Cleaner tools">
+<div class="tabs" role="tablist" aria-label="Cleaner tools" inert={showCleanup}>
   {#each tools as tool, index (tool.id)}
     <button type="button" id="{tool.id}-tab" role="tab" aria-selected={tab === tool.id} aria-controls="{tool.id}-panel" tabindex={tab === tool.id ? 0 : -1} class:active={tab === tool.id} style:--tool-color={tool.color} onclick={() => selectTab(tool.id)} onkeydown={(event) => onTabKey(event, index)}><tool.icon size={17} /> {tool.label}</button>
   {/each}
 </div>
 
-<div id="cleanup-panel" class="tool-panel" role="tabpanel" aria-labelledby="cleanup-tab" hidden={tab !== "cleanup"}>
+<div id="cleanup-panel" class="tool-panel" role="tabpanel" aria-labelledby="cleanup-tab" hidden={tab !== "cleanup"} inert={showCleanup}>
 
-<section class="hero surface">
+<section class="hero surface" aria-label="Cleanup controls" tabindex="-1" bind:this={toolbar}>
   <div class="stats">
+    <div class="stat">
+      <span class="label">Available to clean</span>
+      <strong class="value" class:shimmer={cleanerState.phase === "scanning" || cleanerState.phase === "scanning-all"}>{cleanerState.scanned || cleanerState.total > 0 ? formatSize(cleanerState.total) : "—"}</strong>
+    </div>
+    <div class="stat">
+      <span class="label">Selected{#if selectedCount} · {selectedCount}{/if}</span>
+      <strong class="value" class:accent={selectedCount > 0}>{formatSize(cleanerState.selectedBytes)}</strong>
+    </div>
     <div class="stat"><span class="label">Last cleaned</span><strong class="value small" title={lastCleanedTitle}>{lastCleanedLabel}</strong></div>
-    <div class="stat"><span class="label">Available to clean</span><strong class="value" class:shimmer={cleanerState.phase === "scanning" || cleanerState.phase === "scanning-all"}>{formatSize(cleanerState.total)}</strong></div>
-    <div class="stat"><span class="label">Selected</span><strong class="value accent">{formatSize(cleanerState.selectedBytes)}</strong></div>
   </div>
 
-  <div class="bar">
-    <p class="status">
-      {#if cleanerState.phase !== "idle"}<LoaderCircle size={13} class="spin" />{:else if cleanerState.scanned}<CheckCheck size={13} />{/if}
-      {cleanerState.status}
-    </p>
-    <div class="actions">
-      <button class="btn" disabled={locked || cleanerState.appElevated === null} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
+  <div class="actions">
+    <div class="action-group" role="group" aria-label="Scan">
+      <button class="btn" type="button" bind:this={scanButton} disabled={locked || cleanerState.appElevated === null} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
       {#if cleanerState.canScanSystemFolders}
-        <button class="btn" disabled={locked} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={15} /> Scan system folders</button>
+        <button class="btn" type="button" disabled={locked} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={15} /> Scan system folders</button>
       {/if}
-      <button class="btn" disabled={locked || !cleanerState.bulkSelectable.length} title={cleanerState.scanned ? "Tick or untick available categories. Select Downloads from its card." : "Run a scan to see the available categories."} onclick={() => cleanerState.toggleAll()}>
+    </div>
+    <div class="action-group" role="group" aria-label="Selection and cleanup">
+      <button class="btn select-all" type="button" disabled={locked || !cleanerState.bulkSelectable.length} title={cleanerState.scanned ? "Select Downloads from its card." : "Run a scan to see the available categories."} onclick={() => cleanerState.toggleAll()}>
         <CheckCheck size={15} />
         {cleanerState.allTicked ? "Deselect all" : "Select all"}
       </button>
-      <button class="btn primary" disabled={locked || !cleanerState.selection.length} title={cleanerState.scanned ? "Empty the ticked categories" : "Scan first, so you see what will be removed"} onclick={() => cleanerState.clean()}>
+      <button class="btn primary" type="button" disabled={locked || !selectedCount} onclick={() => cleanerState.clean()}>
         <Sparkles size={15} />
-        {cleanLabel}
+        Clean selected
       </button>
     </div>
   </div>
 
-  {#if cleanerState.autoSelected && !cleaningNow && cleanerState.phase === "idle"}
-    <p class="picked"><CheckCheck size={12} /> Available categories were selected. Untick what you want to keep, then clean.</p>
-  {/if}
-
-  {#if cleaningNow}
-    <div class="work" aria-live="polite">
-      <div class="work-head">
-        <span class="work-what">
-          {#if cleanerState.settling}Checking what is left{:else if cleanerState.progress?.pass === "administrator"}With administrator rights{:else}Removing files{/if}
-          {#if !cleanerState.settling && cleanerState.progress?.current}<em>· {cleanerState.progress.current}</em>{/if}
-        </span>
-        <span class="work-count">
-          {#if !cleanerState.settling && cleanerState.progress}{cleanerState.progress.step}/{cleanerState.progress.total}{/if}
-        </span>
-        <span class="work-pct" class:settled={cleanerState.barDone}>
-          {#if cleanerState.barDone}<CheckCheck size={13} /> Done{:else}{percent}%{/if}
-        </span>
-      </div>
-      <ProgressBar value={cleanerState.barPercent} done={cleanerState.barDone} label="Cleanup progress" />
-      <p class="work-note">Files another program is holding open cannot be removed. They are listed on the cards below when it is over.</p>
-    </div>
-  {/if}
+  <div class="hero-footer">
+    <p class="status" role="status">
+      {#if cleanerState.phase !== "idle"}<LoaderCircle size={13} class="spin" />{:else if cleanerState.scanned}<CheckCheck size={13} />{/if}
+      {cleanerState.status}
+    </p>
+    <button class="sound" type="button" aria-label="Cleanup sound" aria-pressed={cleanerState.soundEnabled} title={cleanerState.soundEnabled ? "Mute cleanup sound" : "Enable cleanup sound"} onclick={() => cleanerState.toggleSound()}>
+      {#if cleanerState.soundEnabled}<Volume2 size={15} />{:else}<VolumeX size={15} />{/if}
+    </button>
+  </div>
 </section>
 
 {#if cleanerState.error}
@@ -146,6 +145,14 @@
   {#if diskOpened}<DiskAnalyzer active={tab === "disk"} />{/if}
 </div>
 
+{#if showCleanup}
+  <CleanOverlay
+    summary={cleanerState.celebration}
+    onclose={() => void closeCleanup()}
+    onscan={() => void closeCleanup(true)}
+  />
+{/if}
+
 <style>
   .tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; margin: 0 0 20px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
   .tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; transition: background var(--dur-fast), box-shadow var(--dur-fast); }
@@ -156,29 +163,23 @@
   .tabs button :global(svg) { flex: none; color: var(--tool-color); }
   .tool-panel { flex: 0 0 auto; min-width: 0; }
   .disk-panel:not([hidden]) { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; }
-  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fluid-gap-3) var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4); }
-  .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 28px; }
+  .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4) 6px; }
+  .hero:focus { outline: none; }
+  .stats { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 9px clamp(12px, 3vw, 34px); }
   .stat { display: grid; gap: 3px; }
   .label { color: var(--text-2); font-size: var(--fluid-xs); font-weight: 500; }
   .value { font-size: var(--fluid-lg); font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   .value.small { font-size: var(--fluid-md); font-weight: 500; line-height: 1.35; }
-  .value.accent { color: var(--accent); }
-  .bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex: 1 1 380px; gap: 10px 16px; }
-  .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fluid-sm); }
-  .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .value.accent { color: rgb(var(--accent-soft-rgb)); }
+  .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-left: auto; }
+  .action-group { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+  .select-all:not(:hover) { background: transparent; box-shadow: none; }
+  .hero-footer { display: flex; align-items: center; justify-content: space-between; flex: 1 0 100%; gap: 8px; min-width: 0; padding-top: 4px; border-top: 1px solid var(--divider); }
+  .status { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fluid-xs); }
+  .status :global(svg) { flex: none; }
+  .sound { flex: none; display: grid; place-items: center; width: 32px; height: 30px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text-2); cursor: pointer; }
+  .sound:hover { border-color: var(--divider); background-color: var(--hover); color: var(--text-1); }
   .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px 12px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: var(--fluid-md); }
-  /* The scan just ticked everything: say so, so the ticks are not a surprise. */
-  .picked { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.06); color: var(--text-3); font-size: var(--fluid-xs); animation: fade-in 260ms var(--ease-out) both; }
-  .picked :global(svg) { flex: none; color: rgb(62 207 142 / 0.75); }
-  /* The running clean: what is being removed and how far along it is. */
-  .work { display: grid; flex-basis: 100%; gap: 7px; margin-top: 4px; padding-top: 13px; border-top: 1px solid rgb(255 255 255 / 0.06); animation: fade-in 220ms var(--ease-out) both; }
-  .work-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: var(--fluid-xs); }
-  .work-what { overflow: hidden; color: var(--text-2); white-space: nowrap; text-overflow: ellipsis; }
-  .work-what em { color: rgb(var(--accent-soft-rgb)); font-style: normal; }
-  .work-count { padding: 1px 7px; border-radius: 999px; background: rgb(255 255 255 / 0.05); color: var(--text-3); font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
-  .work-pct { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); font-size: var(--fluid-xs); font-variant-numeric: tabular-nums; }
-  .work-pct.settled { color: #98dfbd; }
-  .work-note { color: var(--text-3); font-size: var(--fluid-xs); }
   /* Columns follow the window: ~3 at 1080p, 4 at 1440p, 5 at 4K. */
   .grid { --cols: 3; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); align-items: stretch; gap: var(--fluid-gap-3); }
   @media (max-width: 760px) { .grid { --cols: 1; } }
@@ -186,6 +187,5 @@
   @media (min-width: 2200px) { .grid { --cols: 4; } }
   @media (min-width: 3200px) { .grid { --cols: 5; } }
 
-  @keyframes fade-in { from { opacity: 0; } }
-  @media (max-width: 860px) { .bar { flex-basis: 100%; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.06); } }
+  @media (max-width: 860px) { .actions { margin-left: 0; } }
 </style>

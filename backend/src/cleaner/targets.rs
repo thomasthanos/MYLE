@@ -1,6 +1,7 @@
 // ! What the System Cleaner is allowed to touch. ! ! Every path is fixed here in the code: the page sends a category id and ! nothing else, and each file is checked against these roots before it is ! deleted. Only the *contents* of a folder are removed, never the folder.
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 use crate::apps::custom::expand_env;
 /// One folder to clean, with an optional file-name filter.
@@ -244,9 +245,11 @@ pub struct Cleaned {
     pub files: u64,
     /// In use by another program, or not ours to delete.
     pub skipped: u64,
-    /// How much those hold, so the page can say "freed X, Y still in use"
-    /// instead of only counting files.
+    /// Bytes belonging to skipped items.
     pub skipped_bytes: u64,
+    /// Of the skipped files, those with a Windows sharing or lock violation.
+    pub in_use: u64,
+    pub in_use_bytes: u64,
     /// Of `skipped`, those in folders the administrator pass cleans again.
     pub admin_skipped: u64,
     /// Of `skipped_bytes`, the part the administrator pass cleans again.
@@ -294,9 +297,13 @@ pub fn clean(target: &Target) -> Cleaned {
                 out.bytes += size;
                 out.files += 1;
             }
-            Err(_) => {
+            Err(error) => {
                 out.skipped += 1;
                 out.skipped_bytes += size;
+                if is_in_use(&error) {
+                    out.in_use += 1;
+                    out.in_use_bytes += size;
+                }
             }
         }
     }
@@ -312,6 +319,12 @@ pub fn clean(target: &Target) -> Cleaned {
         }
     }
     out
+}
+pub(super) fn is_in_use(error: &std::io::Error) -> bool {
+    matches!(
+        error.raw_os_error().map(|code| code as u32),
+        Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
+    )
 }
 /// Visits every matching file under `dir`. Symlinks and junctions are reported
 /// as files (so they are unlinked, never followed).
@@ -493,6 +506,7 @@ mod tests {
         assert_eq!(cleaned.files, 2, "the open file is skipped");
         assert_eq!(cleaned.bytes, 502);
         assert_eq!(cleaned.skipped, 1);
+        assert_eq!((cleaned.in_use, cleaned.in_use_bytes), (1, 1000));
         assert_eq!(
             cleaned.skipped_bytes, 1000,
             "what is left in use is told in bytes too"

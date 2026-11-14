@@ -2,17 +2,15 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../lib/confirm.svelte";
-import { readJson, writeJson } from "../../../lib/storage";
+import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
-import { cleanerApi, formatSize, type CleanerCategory } from "./api";
+import { cleanerApi, formatSize, type CleanerCategory, type CleanEvent } from "./api";
+import { playCleanComplete, prepareCleanAudio, stopCleanAudio } from "./clean-sound";
 import { DOWNLOADS, DOWNLOADS_CATEGORY, type Preview } from "./downloads";
-const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned" };
+const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned", sound: "cleaner.sound" };
 /** The backend's answer when the UAC prompt is declined. */
 const DECLINED = "Administrator approval was declined.";
-/* The bar moves for the eye, not for the clock: one step is kept on screen about this long, while the fill eases towards it. A slow step is never made slower, and the full bar is held for a moment at the end. */
-const STEP_MS = 210;
-const HOLD_MS = 420;
-export interface Measured { bytes: number; files: number; locked: boolean }
+interface Measured { bytes: number; files: number; locked: boolean }
 function addSystemMeasurement(user: Measured | undefined, system: Measured): Measured {
   return {
     bytes: (user?.bytes ?? 0) + system.bytes,
@@ -21,27 +19,45 @@ function addSystemMeasurement(user: Measured | undefined, system: Measured): Mea
   };
 }
 /** What a clean pass removed from one category, and what it left. */
-export interface Outcome { freed: number; skipped: number; skippedBytes: number; adminSkipped: number; adminSkippedBytes: number }
+interface Outcome {
+  freed: number;
+  skipped: number;
+  skippedBytes: number;
+  inUse: number;
+  inUseBytes: number;
+  adminSkipped: number;
+  adminSkippedBytes: number;
+}
 /** The step the running clean is on. */
-export interface CleanProgress { pass: "user" | "administrator"; step: number; total: number; current: string }
+interface CleanProgress { step: number; total: number; current: string }
+type CategoryResult = Omit<Extract<CleanEvent, { event: "category" }>["data"], "locked">;
+interface CleanedCategorySummary {
+  id: string;
+  title: string;
+  freed: number;
+  remaining: number;
+  inUse: number;
+  inUseBytes: number;
+  otherSkipped: number;
+  systemFoldersSkipped: boolean;
+}
+/** Result of a completed cleanup. */
+export interface CelebrationSummary {
+  freed: number;
+  remaining: number;
+  skipped: number;
+  systemNote: string | null;
+  items: CleanedCategorySummary[];
+}
 type Phase = "idle" | "scanning" | "scanning-all" | "scanning-admin" | "cleaning";
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** "Freed 900 MB · 1.2 GB in use", or just the half that applies. */
-export function freedAndInUse(freed: number, inUse: number): string {
-  if (inUse <= 0) return `Freed ${formatSize(freed)}`;
-  if (freed <= 0) return `${formatSize(inUse)} in use`;
-  return `Freed ${formatSize(freed)} · ${formatSize(inUse)} in use`;
-}
 class CleanerState {
   categories = $state<CleanerCategory[]>([]);
   sizes = $state<Record<string, Measured>>({});
   readonly selected = new SvelteSet<string>(readJson<string[]>(KEY.selected, [], isStringArray).filter((id) => id !== DOWNLOADS));
   /** Emptied since the last scan: unchecked and switched off until then. */
   readonly cleaned = new SvelteSet<string>();
-  /** What the last clean removed and left, per category, until the next scan. */
-  outcome = $state<Record<string, Outcome>>({});
   phase = $state<Phase>("idle");
   /** False until the first scan finishes, so sizes stay blank instead of "0 B". */
   scanned = $state(false);
@@ -51,21 +67,36 @@ class CleanerState {
   progress = $state<CleanProgress | null>(null);
   /** Both passes are done and what is left is being measured again. */
   settling = $state(false);
-  /** 0…1, eased by the animation loop; held full at the end. */
+  /** Fraction of completed work, including the final recheck. */
   barPercent = $state(0);
-  barDone = $state(false);
   /** After a scan selected everything by itself, for the toolbar hint. */
   autoSelected = $state(false);
   lastCleaned = $state<number | null>(readJson<number | null>(KEY.lastCleaned, null, (v) => typeof v === "number"));
+  celebration = $state<CelebrationSummary | null>(null);
+  #presentedResult: CelebrationSummary | null = null;
+  soundEnabled = $state(readFlag(KEY.sound, true));
   error = $state<string | null>(null);
   /** The Downloads folder's last preview: what the scan found, and what stays. */
   downloads = $state<Preview | null>(null);
-  #raf = 0;
-  #barTarget = 0;
-  /** When the running visual step is free to move on; see `step` in `clean`. */
-  #paced: number | null = null;
   readonly canScanSystemFolders = $derived(this.appElevated === false && !this.adminGranted && this.categories.some((category) => category.mayNeedAdmin));
   readonly busy = $derived(this.phase !== "idle");
+
+  dismissCelebration() {
+    this.celebration = null;
+    this.#presentedResult = null;
+    stopCleanAudio();
+  }
+  presentResult(result: CelebrationSummary) {
+    if (this.#presentedResult === result) return;
+    this.#presentedResult = result;
+    if (result.freed && this.soundEnabled) playCleanComplete();
+  }
+  toggleSound() {
+    this.soundEnabled = !this.soundEnabled;
+    writeFlag(KEY.sound, this.soundEnabled);
+    if (!this.soundEnabled) stopCleanAudio();
+    else if (this.phase === "cleaning") prepareCleanAudio();
+  }
   readonly scanning = $derived(this.phase === "scanning" || this.phase === "scanning-all" || this.phase === "scanning-admin");
   readonly selectable = $derived(this.categories.filter((category) => this.canSelectCategory(category)));
   readonly bulkSelectable = $derived(this.selectable.filter(({ id }) => id !== DOWNLOADS));
@@ -141,7 +172,6 @@ class CleanerState {
     this.error = null;
     this.sizes = {};
     this.cleaned.clear();
-    this.outcome = {};
     this.autoSelected = false;
     const systemPass = includeSystem ? this.#measureSystemFolders() : undefined;
     const downloadsPass = this.#measureDownloads();
@@ -170,12 +200,19 @@ class CleanerState {
     }
   }
   /** Deletes the Downloads items the scan listed (each checked again). */
-  async #cleanDownloads(): Promise<{ freed: number; skipped: number }> {
+  async #cleanDownloads(): Promise<CategoryResult> {
     const items = this.downloads?.items ?? [];
     const outcome = await cleanerApi.downloadsDelete(items.map((item) => item.path));
     const skippedBytes = items.reduce((sum, item) => sum + item.size, 0) - outcome.freed;
-    this.#applyCleaned({ id: DOWNLOADS, bytes: outcome.freed, files: outcome.deleted, skipped: outcome.skipped.length, skippedBytes: Math.max(0, skippedBytes), adminSkipped: 0, adminSkippedBytes: 0 });
-    return { freed: outcome.freed, skipped: outcome.skipped.length };
+    return {
+      id: DOWNLOADS,
+      bytes: outcome.freed,
+      files: outcome.deleted,
+      skipped: outcome.skipped.length,
+      skippedBytes: Math.max(0, skippedBytes),
+      adminSkipped: 0,
+      adminSkippedBytes: 0,
+    };
   }
   /** Drop saved ticks from outside the measured scope and select the available categories. */
   #selectAllAfterScan() {
@@ -215,7 +252,7 @@ class CleanerState {
 
   #addSystemFolders(admin: Record<string, Measured>) {
     for (const [id, system] of Object.entries(admin)) {
-      if (this.sizes[id]?.locked && this.cleaned.delete(id)) delete this.outcome[id];
+      if (this.sizes[id]?.locked) this.cleaned.delete(id);
       this.sizes[id] = addSystemMeasurement(this.sizes[id], system);
     }
     this.adminGranted = true;
@@ -225,130 +262,150 @@ class CleanerState {
     const chosen = this.selection;
     if (!chosen.length) return;
     const withDownloads = chosen.some((c) => c.id === DOWNLOADS);
-    const ids = chosen.map((c) => c.id).filter((id) => id !== DOWNLOADS);
+    const userSteps = chosen.filter((c) => c.id !== DOWNLOADS);
+    const ids = userSteps.map(({ id }) => id);
     // What the scan measured for this selection: the number the user was shown.
     const selectedBefore = chosen.reduce((sum, c) => sum + (this.sizes[c.id]?.bytes ?? 0), 0);
     // Admin folders are included only when the scan's prompt was approved.
-    const adminIds = chosen.filter((c) => c.mayNeedAdmin).map((c) => c.id);
-    const withAdmin = this.adminGranted === true && adminIds.length > 0;
+    const systemSteps = chosen.filter((c) => c.mayNeedAdmin);
+    const withAdmin = this.adminGranted && systemSteps.length > 0;
     const adminReady = withAdmin && (await cleanerApi.adminReady().catch(() => false)); // the scan's helper still runs: no second prompt
     const adminLine = withAdmin
-      ? this.appElevated ? "\n\nSystem folders are included because MYLE is running as administrator."
-        : adminReady ? "\n\nThe system folders are emptied with the administrator approval from the scan."
-        : "\n\nWindows will ask for administrator approval again to empty the system folders."
-      : adminIds.length ? "\n\nSystem folders are skipped: administrator approval was not given during the scan." : "";
+      ? this.appElevated || adminReady ? "System folders are included." : "Windows will ask for administrator approval."
+      : systemSteps.length ? "System folders will be skipped." : "";
+    const downloadCount = withDownloads ? (this.downloads?.items.length ?? 0) : 0;
+    const downloadLine = downloadCount
+      ? `${downloadCount.toLocaleString()} Downloads ${downloadCount === 1 ? "item" : "items"} will be permanently deleted.`
+      : "";
     const ok = await confirm({
-      title: "Clean selected items?",
-      message:
-        `${chosen.map((c) => `• ${c.title}`).join("\n")}\n\nThis frees about ${formatSize(selectedBefore)} and cannot be undone.` + adminLine +
-        (withDownloads
-          ? `\n\nDownloads folder: ${this.downloads?.items.length ?? 0} item(s) are deleted PERMANENTLY. They do not go to the Recycle Bin and cannot be restored. Documents and anything modified in the last 7 days stay.`
-          : ""),
-      confirmLabel: withDownloads ? "Clean and delete permanently" : "Clean now",
+      title: withDownloads && !ids.length ? "Clean Downloads?" : "Clean selected items?",
+      message: [
+        `Free about ${formatSize(selectedBefore)}. This cannot be undone.`,
+        downloadLine,
+        adminLine,
+      ].filter(Boolean).join("\n"),
+      confirmLabel: "Clean now",
       danger: true,
     });
     if (!ok || this.busy) return;
-    // `passIds`, `passTitles` and `done` follow the pass that is running.
-    let passIds = ids;
-    let passTitles = chosen.filter((c) => c.id !== DOWNLOADS).map((c) => c.title);
-    let done = 0;
-    let pass: "user" | "administrator" = "user";
-    let freed = 0, skipped = 0, inUse = 0;
+    const outcomes = new Map<string, Outcome>();
+    const downloadSteps = Number(withDownloads);
+    const systemStart = downloadSteps + userSteps.length;
+    const total = systemStart + (withAdmin ? systemSteps.length : 0) + 1; // The last step checks what remains.
+    let freed = 0, skipped = 0, remaining = 0;
     let adminNote: string | null = null;
-    const step = async () => {
-      done++;
-      const nextId = passIds[done];
-      this.progress = { pass, step: Math.min(done + 1, passIds.length), total: passIds.length, current: nextId ? (passTitles[done] ?? nextId) : "" };
-      this.#setBarTarget(done / Math.max(1, passIds.length)); // one category done is one step of the bar
-      const wait = STEP_MS - (Date.now() - (this.#paced ?? Date.now())); // held for the eye
-      this.#paced = Date.now() + Math.max(0, wait);
-      await sleep(Math.max(0, wait));
+    const report = (completed: number, current = "") => {
+      this.progress = { step: Math.min(completed + 1, total), total, current };
+      this.barPercent = completed / total;
     };
+    this.dismissCelebration();
+    report(0, withDownloads ? "Downloads folder" : userSteps[0]?.title);
     this.phase = "cleaning";
-    this.#startBar();
-    this.progress = { pass, step: 1, total: passIds.length, current: passTitles[0] ?? "" };
+    if (this.soundEnabled) prepareCleanAudio();
     try {
       if (withDownloads) {
-        this.progress = { pass, step: 1, total: passIds.length + 1, current: "Downloads folder" };
         const result = await this.#cleanDownloads();
-        freed += result.freed;
+        this.#applyCleaned(outcomes, result);
+        freed += result.bytes;
         skipped += result.skipped;
+        report(downloadSteps, userSteps[0]?.title);
       }
-      const empty = { freed: 0, files: 0, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: [] };
+      const empty = { freed: 0, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0 };
+      let userDone = 0;
       const summary = ids.length
-        ? await cleanerApi.clean(ids, (e) => { if (e.event === "progress") return; this.#applyCleaned(e.data); void step(); })
+        ? await cleanerApi.clean(ids, (e) => {
+          if (e.event === "progress") return;
+          this.#applyCleaned(outcomes, e.data);
+          userDone++;
+          report(downloadSteps + userDone, userSteps[userDone]?.title);
+        })
         : empty;
       freed += summary.freed;
       skipped += summary.skipped;
       // What the user pass left in the system folders is tried again below, when there is an administrator pass; without one it stays left.
-      inUse += summary.skippedBytes - (withAdmin ? summary.adminSkippedBytes : 0);
+      remaining += summary.skippedBytes - (withAdmin ? summary.adminSkippedBytes : 0);
       // The first pass already deleted files; a declined or failed UAC step must not hide that, so it is reported on its own.
       if (withAdmin) {
-        pass = "administrator";
-        passIds = adminIds;
-        passTitles = chosen.filter((c) => adminIds.includes(c.id)).map((c) => c.title);
-        done = 0;
-        this.#setBarTarget(1);
-        this.progress = { pass, step: 1, total: passIds.length, current: passTitles[0] ?? "" };
+        let systemDone = 0;
+        report(systemStart, systemSteps[0]?.title);
         try {
-          const elevated = await cleanerApi.cleanElevated(adminIds, (e) => { if (e.event === "progress") return; this.#applyCleaned(e.data, true); void step(); });
+          const elevated = await cleanerApi.cleanElevated(systemSteps.map(({ id }) => id), (e) => {
+            if (e.event === "progress") return;
+            this.#applyCleaned(outcomes, e.data, true);
+            systemDone++;
+            report(systemStart + systemDone, systemSteps[systemDone]?.title);
+          });
           freed += elevated.freed;
           skipped = skipped - summary.adminSkipped + elevated.skipped; // only what that pass itself left
-          inUse += elevated.skippedBytes;
+          remaining += elevated.skippedBytes;
         } catch (err) {
           adminNote = `The system folders were skipped: ${message(err)}`;
-          inUse += summary.adminSkippedBytes; // not tried again: what the user pass left there is still there
+          remaining += summary.adminSkippedBytes;
         }
       }
       // What is really left, measured again, rather than the scan minus what was freed; the bytes of the skipped files are a lower bound.
-      this.#setBarTarget(1);
+      report(total - 1);
       this.settling = true;
       if (ids.length) await this.#remeasure(ids, withAdmin && adminNote === null);
       if (withDownloads) await this.#measureDownloads();
-      const all = withDownloads ? [...ids, DOWNLOADS] : ids;
-      inUse = Math.max(inUse, this.#stillThere(all));
-      for (const id of all) { this.cleaned.add(id); this.selected.delete(id); }
+      for (const { id } of chosen) {
+        this.cleaned.add(id);
+        this.selected.delete(id);
+      }
       this.#persistSelection();
       this.lastCleaned = Date.now();
       writeJson(KEY.lastCleaned, this.lastCleaned);
-      await this.#holdBar();
-      this.#announce(freed, inUse, skipped, selectedBefore);
+      this.barPercent = 1;
+      const items: CleanedCategorySummary[] = [];
+      for (const { id, title, mayNeedAdmin } of chosen) {
+        const outcome = outcomes.get(id);
+        const freed = outcome?.freed ?? 0;
+        const remaining = Math.max(this.sizes[id]?.bytes ?? 0, outcome?.skippedBytes ?? 0);
+        const inUse = outcome?.inUse ?? 0;
+        const inUseBytes = outcome?.inUseBytes ?? 0;
+        const otherSkipped = (outcome?.skipped ?? 0) - inUse - (outcome?.adminSkipped ?? 0);
+        const systemFoldersSkipped = mayNeedAdmin && (!withAdmin || adminNote !== null);
+        if (freed || remaining || inUse || otherSkipped || systemFoldersSkipped) {
+          items.push({ id, title, freed, remaining, inUse, inUseBytes, otherSkipped, systemFoldersSkipped });
+        }
+      }
+      items.sort((a, b) => b.freed - a.freed || b.remaining - a.remaining);
+      remaining = Math.max(remaining, items.reduce((sum, item) => sum + item.remaining, 0));
+
+      this.celebration = {
+        freed,
+        remaining,
+        skipped,
+        systemNote: adminNote ?? (!withAdmin && systemSteps.length ? "System folders were outside this cleanup." : null),
+        items,
+      };
     } catch (err) {
+      stopCleanAudio();
       toast.error(`Cleaning failed: ${message(err)}`);
     } finally {
-      this.#stopBar();
-      if (adminNote) toast.info(adminNote);
       this.phase = "idle";
       this.progress = null;
       this.settling = false;
       this.autoSelected = false;
-      this.#paced = null;
     }
   }
-  /** One toast with the whole outcome: what went and what stayed. */
-  #announce(freed: number, inUse: number, skipped: number, selectedBefore: number) {
-    if (inUse > 0) {
-      const ofSelection = selectedBefore > freed ? ` of ${formatSize(selectedBefore)} selected` : "";
-      toast.success(`${freedAndInUse(freed, inUse)}${ofSelection}.`);
-      if (skipped > 0) toast.info(`${skipped.toLocaleString()} file${skipped === 1 ? " is" : "s are"} open in another program and were left alone.`);
-      return;
-    }
-    toast.success(`Successfully freed up ${formatSize(freed)}!`);
-  }
-  /* Subtracts what a pass freed from a measured size, and keeps what it removed and left for the card. The administrator pass retries what the first one left in its folders, so its count replaces that part. */
+  /** Updates the card's size and collects the data needed for the result popup. */
   #applyCleaned(
-    { id, bytes, files, skipped, skippedBytes, adminSkipped, adminSkippedBytes }:
-      { id: string; bytes: number; files: number; skipped: number; skippedBytes: number; adminSkipped: number; adminSkippedBytes: number },
+    outcomes: Map<string, Outcome>,
+    { id, bytes, files, skipped, skippedBytes, inUse = 0, inUseBytes = 0, adminSkipped, adminSkippedBytes }: CategoryResult,
     retry = false,
   ) {
-    const seen = this.outcome[id];
-    this.outcome[id] = {
+    const seen = outcomes.get(id);
+    // An administrator pass replaces the skips it retried.
+    outcomes.set(id, {
       freed: (seen?.freed ?? 0) + bytes,
       skipped: retry ? (seen?.skipped ?? 0) - (seen?.adminSkipped ?? 0) + skipped : (seen?.skipped ?? 0) + skipped,
       skippedBytes: retry ? (seen?.skippedBytes ?? 0) - (seen?.adminSkippedBytes ?? 0) + skippedBytes : (seen?.skippedBytes ?? 0) + skippedBytes,
+      inUse: (seen?.inUse ?? 0) + inUse,
+      inUseBytes: (seen?.inUseBytes ?? 0) + inUseBytes,
       adminSkipped: retry ? 0 : (seen?.adminSkipped ?? 0) + adminSkipped,
       adminSkippedBytes: retry ? 0 : (seen?.adminSkippedBytes ?? 0) + adminSkippedBytes,
-    };
+    });
     const before = this.sizes[id];
     if (!before) return;
     this.sizes[id] = { bytes: Math.max(0, before.bytes - bytes), files: Math.max(0, before.files - files), locked: before.locked };
@@ -368,39 +425,6 @@ class CleanerState {
       return;
     }
     for (const [id, measured] of Object.entries(next)) this.sizes[id] = measured;
-  }
-  /** What the freshly measured categories still hold, over the whole run. */
-  #stillThere = (ids: string[]) => ids.reduce((sum, id) => sum + (this.sizes[id]?.bytes ?? 0), 0);
-  // The bar: the work sets a target, a frame loop eases up to it.
-  #startBar() {
-    this.#stopBar();
-    this.barPercent = 0;
-    this.barDone = false;
-    this.#barTarget = 0;
-    this.#tick();
-  }
-  #setBarTarget(value: number) {
-    this.#barTarget = Math.max(this.#barTarget, Math.min(1, value));
-  }
-  #tick() {
-    this.#raf = requestAnimationFrame(() => {
-      const gap = this.#barTarget - this.barPercent;
-      this.barPercent = Math.abs(gap) < 0.001 ? this.#barTarget : this.barPercent + gap * 0.16;
-      this.#tick();
-    });
-  }
-  /** Rides the bar to the end and holds the full one for a moment. */
-  async #holdBar() {
-    this.#setBarTarget(1);
-    const until = Date.now() + 900;
-    while (this.barPercent < 0.995 && Date.now() < until) await sleep(16);
-    this.barPercent = 1;
-    this.barDone = true;
-    await sleep(HOLD_MS);
-  }
-  #stopBar() {
-    if (this.#raf) cancelAnimationFrame(this.#raf);
-    this.#raf = 0;
   }
   #persistSelection() {
     writeJson(KEY.selected, [...this.selected].filter((id) => id !== DOWNLOADS));

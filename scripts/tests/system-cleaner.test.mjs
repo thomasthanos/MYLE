@@ -15,9 +15,6 @@ Object.defineProperty(globalThis, "localStorage", {
   },
 });
 Object.defineProperty(globalThis, "isTauri", { configurable: true, value: true });
-// The progress bar rides on animation frames; a timer does the same here.
-Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (run) => setTimeout(() => run(Date.now()), 16) });
-Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: (id) => clearTimeout(id) });
 const hooks = registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "svelte/reactivity") {
@@ -195,7 +192,6 @@ test.beforeEach(() => {
   scans = 0;
   state.categories = [];
   state.sizes = {};
-  state.outcome = {};
   state.selected.clear();
   state.cleaned.clear();
   state.phase = "idle";
@@ -204,7 +200,7 @@ test.beforeEach(() => {
   state.progress = null;
   state.settling = false;
   state.barPercent = 0;
-  state.barDone = false;
+  state.dismissCelebration();
   state.autoSelected = false;
   state.error = null;
 });
@@ -220,6 +216,29 @@ test("Downloads with no deletion candidates stays disabled and unchecked", async
   assert.equal(state.isTicked("downloads"), false);
   state.toggle("downloads");
   assert.equal(state.isTicked("downloads"), false);
+});
+test("confirming Downloads cleanup sends only the scanned candidates", async () => {
+  const path = "D:\\Downloads\\old.zip";
+  await scanAll([{ path, name: "old.zip", size: 1024, changed: 0, isDir: false }]);
+  state.toggleAll();
+  state.toggle("downloads");
+  let deletedPaths;
+  cleanerApi.downloadsDelete = async (paths) => {
+    deletedPaths = paths;
+    cleanerApi.downloadsPreview = async () => ({ folder: "D:\\Downloads", items: [], total: 0, kept: [] });
+    return { deleted: 1, freed: 1024, skipped: [] };
+  };
+
+  const cleaning = state.clean();
+  assert.equal(confirmState.current.title, "Clean Downloads?");
+  assert.match(confirmState.current.message, /1 Downloads item will be permanently deleted/);
+  assert.doesNotMatch(confirmState.current.message, /old\.zip/);
+  assert.equal(deletedPaths, undefined);
+  confirmState.answer(true);
+  await cleaning;
+
+  assert.deepEqual(deletedPaths, [path]);
+  assert.equal(state.celebration.freed, 1024);
 });
 test("Downloads can be selected only from its card, including a zero-byte candidate", async () => {
   await scanAll([{ path: "D:\\Downloads\\old.zip", name: "old.zip", size: 0, changed: 0, isDir: false }]);
@@ -356,7 +375,7 @@ test("what stays in use is told in bytes, without counting the admin pass twice"
     answer(onEvent, [
       {
         event: "category",
-        data: { id: "temp", bytes: 0, files: 0, skipped: 1, skippedBytes: 400, adminSkipped: 0, adminSkippedBytes: 0, locked: false },
+        data: { id: "temp", bytes: 0, files: 0, skipped: 1, skippedBytes: 400, inUse: 1, inUseBytes: 400, adminSkipped: 0, adminSkippedBytes: 0, locked: false },
       },
     ]);
     return { freed: 0, files: 0, skipped: 1, skippedBytes: 400, adminSkipped: 0, adminSkippedBytes: 0, locked: [] };
@@ -366,19 +385,37 @@ test("what stays in use is told in bytes, without counting the admin pass twice"
   assert.ok(confirmState.current, "the user is asked before anything is removed");
   confirmState.answer(true);
   await running;
-  assert.equal(state.outcome.temp.freed, 600);
-  assert.equal(state.outcome.temp.skipped, 1, "the admin pass replaces the count it retried");
   assert.equal(state.sizes.temp.bytes, 400, "what is left in use stays on the card");
   assert.equal(state.sizes.prefetch.bytes, 0);
-  assert.equal(state.outcome.temp.skippedBytes, 400, "and it is told in bytes, not twice over");
   assert.equal(state.selected.size, 0, "the cleaned categories are unticked");
   assert.equal(state.cleaned.size, 3);
   assert.equal(state.lastCleaned !== null, true);
-  assert.equal(
-    toast.visible[0].message,
-    "Freed 6.4 KB · 400 B in use of 6.8 KB selected.",
-    "the freed bytes, what is still in use, and what the scan promised",
-  );
+  assert.equal(state.celebration.freed, 6_600);
+  assert.equal(state.celebration.remaining, 400);
+  assert.equal(state.celebration.skipped, 1);
+  assert.deepEqual(state.celebration.items.map(({ id }) => id), ["recycle-bin", "prefetch", "temp"]);
+  assert.deepEqual(state.celebration.items.find(({ id }) => id === "temp"), {
+    id: "temp", title: "Temporary Files", freed: 600, remaining: 400,
+    inUse: 1, inUseBytes: 400, otherSkipped: 0, systemFoldersSkipped: false,
+  });
+});
+test("a category with nothing freed still reports which bytes are confirmed in use", async () => {
+  await scanAll();
+  state.toggle("recycle-bin");
+  cleanerApi.clean = async (_ids, onEvent) => {
+    onEvent({
+      event: "category",
+      data: { id: "temp", bytes: 0, files: 0, skipped: 2, skippedBytes: 400, inUse: 1, inUseBytes: 250, adminSkipped: 0, adminSkippedBytes: 0, locked: true },
+    });
+    return { freed: 0, files: 0, skipped: 2, skippedBytes: 400, adminSkipped: 0, adminSkippedBytes: 0, locked: ["temp"] };
+  };
+  const running = state.clean();
+  confirmState.answer(true);
+  await running;
+  assert.deepEqual(state.celebration.items, [{
+    id: "temp", title: "Temporary Files", freed: 0, remaining: 400,
+    inUse: 1, inUseBytes: 250, otherSkipped: 1, systemFoldersSkipped: true,
+  }]);
 });
 test("without the administrator pass, what the system folders kept is still counted as left", async () => {
   await scanAll();
@@ -410,15 +447,28 @@ test("without the administrator pass, what the system folders kept is still coun
     await settle(20);
     confirmState.answer(true);
     await running;
-    assert.equal(toast.visible[0].message, "Freed 6.4 KB · 400 B in use of 6.8 KB selected.", "the 400 B the admin pass never retried");
+    assert.equal(state.celebration.remaining, 400, "the 400 B the admin pass never retried");
+    assert.match(state.celebration.systemNote, /Administrator approval was declined/);
   } finally {
     remaining.temp = 400;
   }
 });
-test("the bar follows the categories and ends full", async () => {
+test("the progress covers both passes and stays below 100% until verification finishes", async () => {
   await scanAll();
   await state.allowAdmin();
-  cleanerApi.cleanElevated = async () => ({ freed: 0, files: 0, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: [] });
+  cleanerApi.cleanElevated = async () => {
+    assert.equal(state.progress.current, "Temporary Files");
+    assert.equal(state.progress.step, 4);
+    assert.equal(state.barPercent, 3 / 6);
+    return { freed: 0, files: 0, skipped: 0, skippedBytes: 0, adminSkipped: 0, adminSkippedBytes: 0, locked: [] };
+  };
+  const measure = cleanerApi.scan;
+  cleanerApi.scan = async (onEvent) => {
+    assert.equal(state.settling, true);
+    assert.equal(state.progress.step, 6);
+    assert.equal(state.barPercent, 5 / 6);
+    return measure(onEvent);
+  };
   const seen = [];
   cleanerApi.clean = async (ids, onEvent) => {
     for (const [index, id] of ids.entries()) {
@@ -436,8 +486,9 @@ test("the bar follows the categories and ends full", async () => {
   await settle(20);
   confirmState.answer(true);
   await running;
-  assert.deepEqual(seen.map((one) => one.step), [2, 3, 3], "the label counts the category being worked on");
-  assert.deepEqual(seen.map((one) => one.total), [3, 3, 3]);
+  assert.deepEqual(seen.map((one) => one.step), [2, 3, 4], "the step counts across both passes");
+  assert.deepEqual(seen.map((one) => one.total), [6, 6, 6]);
+  assert.equal(state.barPercent, 1);
   assert.equal(state.progress, null, "nothing is left running");
   assert.equal(state.phase, "idle");
   assert.equal(state.settling, false);

@@ -50,9 +50,13 @@ pub struct Totals {
     pub files: u64,
     #[serde(default)]
     pub skipped: u64,
-    /// What the skipped files hold, so the page can size what is left in use.
+    /// Bytes belonging to skipped items.
     #[serde(default)]
     pub skipped_bytes: u64,
+    #[serde(default)]
+    pub in_use: u64,
+    #[serde(default)]
+    pub in_use_bytes: u64,
 }
 impl Totals {
     /// Files that could not be removed: those in use, and the ones this
@@ -60,6 +64,13 @@ impl Totals {
     fn skip(&mut self, bytes: u64) {
         self.skipped += 1;
         self.skipped_bytes += bytes;
+    }
+    fn skip_error(&mut self, bytes: u64, is_directory: bool, error: &std::io::Error) {
+        self.skip(bytes);
+        if !is_directory && targets::is_in_use(error) {
+            self.in_use += 1;
+            self.in_use_bytes += bytes;
+        }
     }
 }
 /// One request to the helper: an action over the admin-only folders of
@@ -186,6 +197,8 @@ fn handle(request: &Request, app_pid: u32) -> Result<HashMap<String, Totals>, St
             total.files += one.files;
             total.skipped += one.skipped;
             total.skipped_bytes += one.skipped_bytes;
+            total.in_use += one.in_use;
+            total.in_use_bytes += one.in_use_bytes;
         }
         result.insert(category.id.to_string(), total);
     }
@@ -469,9 +482,12 @@ fn visit_entry(
         } else {
             0
         };
-    let Ok(child) = OwnedHandle::open_id(parent.0, entry.FileId, access) else {
-        totals.skip(listed_bytes);
-        return;
+    let child = match OwnedHandle::open_id(parent.0, entry.FileId, access) {
+        Ok(child) => child,
+        Err(error) => {
+            totals.skip_error(listed_bytes, listed_directory, &error);
+            return;
+        }
     };
     let Ok(info) = child.info() else {
         totals.skip(listed_bytes);
@@ -496,9 +512,12 @@ fn visit_entry(
         return;
     }
     // Open the discovered name without delete sharing and prove it still names the same volume/file ID. This second handle pins the name against rename and is the exact handle later passed to the delete API.
-    let Ok(pinned) = OwnedHandle::open_path(Path::new(&final_path), access) else {
-        totals.skip(listed_bytes);
-        return;
+    let pinned = match OwnedHandle::open_path(Path::new(&final_path), access) {
+        Ok(pinned) => pinned,
+        Err(error) => {
+            totals.skip_error(listed_bytes, is_directory, &error);
+            return;
+        }
     };
     let Ok(pinned_info) = pinned.info() else {
         totals.skip(listed_bytes);
@@ -546,10 +565,10 @@ fn visit_entry(
                 totals.bytes += size;
                 totals.files += 1;
             }
-            Err(_error) => {
+            Err(error) => {
                 #[cfg(test)]
-                eprintln!("delete failed for {final_path}: {_error}");
-                totals.skip(size);
+                eprintln!("delete failed for {final_path}: {error}");
+                totals.skip_error(size, false, &error);
             }
         },
     }
@@ -752,8 +771,7 @@ mod tests {
             Totals {
                 bytes: 50,
                 files: 2,
-                skipped: 0,
-                skipped_bytes: 0,
+                ..Totals::default()
             }
         );
         let cleaned = visit_target(&target, Action::Clean).unwrap();
@@ -761,6 +779,22 @@ mod tests {
         assert!(root.exists(), "the configured root itself stays");
         assert!(std::fs::read_dir(&root).unwrap().next().is_none());
         let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn handle_walk_reports_bytes_held_by_an_open_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (root, target) = temp_target("locked");
+        let path = root.join("in-use.tmp");
+        std::fs::write(&path, [0; 48]).unwrap();
+        let open = std::fs::File::options().read(true).share_mode(0).open(&path).unwrap();
+
+        let cleaned = visit_target(&target, Action::Clean).unwrap();
+        assert_eq!((cleaned.skipped, cleaned.skipped_bytes), (1, 48));
+        assert_eq!((cleaned.in_use, cleaned.in_use_bytes), (1, 48));
+        assert!(path.exists());
+
+        drop(open);
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn handle_walk_does_not_follow_a_junction() {

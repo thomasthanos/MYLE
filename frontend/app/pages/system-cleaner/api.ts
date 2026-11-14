@@ -25,6 +25,9 @@ export type CleanEvent =
         skipped: number;
         /** What the skipped files hold. */
         skippedBytes: number;
+        /** Skipped because Windows reported a file in use. */
+        inUse?: number;
+        inUseBytes?: number;
         adminSkipped: number;
         adminSkippedBytes: number;
         locked: boolean;
@@ -39,7 +42,7 @@ export interface CleanSummary {
   freed: number;
   files: number;
   skipped: number;
-  /** What the skipped files hold: after the administrator pass, what is in use. */
+  /** Bytes belonging to skipped items. */
   skippedBytes: number;
   /** Of `skipped`, those in administrator folders, which the administrator pass tries again. */
   adminSkipped: number;
