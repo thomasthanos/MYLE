@@ -1654,11 +1654,11 @@ fn identity_from_token_handle(
 impl Identity {
     fn classify(&mut self) {
         self.account_type = classify_account(&self.domain, self.upn.as_deref());
-        if self.account_type == AutoLogonAccountType::Local {
-            if let Some(principal) = microsoft_principal_for_local_user(&self.name, &self.sid) {
-                self.upn = Some(principal);
-                self.account_type = AutoLogonAccountType::Microsoft;
-            }
+        if self.account_type == AutoLogonAccountType::Local
+            && let Some(principal) = microsoft_principal_for_local_user(&self.name, &self.sid)
+        {
+            self.upn = Some(principal);
+            self.account_type = AutoLogonAccountType::Microsoft;
         }
     }
 }
