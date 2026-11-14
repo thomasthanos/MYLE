@@ -19,6 +19,15 @@ create table if not exists public.password_vault (
   updated_at timestamptz not null default now()
 );
 
+-- The header sealed on the device with the vault key: an AEAD over vault_id,
+-- kdf and both wraps. A device takes in a changed header (a new master
+-- password) by itself only if its seal opens with the vault key, so the
+-- account alone cannot replace the wraps. Null from builds before seals, and
+-- until a device that has the key next opens the vault and sends one.
+alter table public.password_vault
+  add column if not exists header_seal text
+    check (header_seal is null or length(header_seal) <= 1024);
+
 -- One row per entry. A deleted entry stays as a row with deleted = true
 -- and no ciphertext, so the deletion reaches every PC.
 create table if not exists public.password_items (

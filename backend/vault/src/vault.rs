@@ -1,8 +1,9 @@
 //! The vault: its file on disk, its entries, and locking.
 //!
 //! The file holds only what the sync may see: the Argon2id settings, the
-//! vault key wrapped twice (master password, recovery code) and each entry
-//! sealed on its own. Titles, addresses and user names are sealed too.
+//! vault key wrapped twice (master password, recovery code), a seal over
+//! those made with the vault key, and each entry sealed on its own. Titles,
+//! addresses and user names are sealed too.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,8 @@ use super::crypto::{self, KdfParams, Key};
 const FORMAT_VERSION: u32 = 1;
 const MASTER_AAD: &str = "myle-vault|master";
 const RECOVERY_AAD: &str = "myle-vault|recovery";
+/// Names the header's seal (`seal_header`) and its layout.
+const HEADER_AAD: &str = "myle-vault|header|v1";
 /// Old passwords kept per entry.
 const HISTORY: usize = 10;
 /// The longest sealed entry the account takes: `password_items.ciphertext`
@@ -39,6 +42,60 @@ const TOMBSTONE: &[u8] = b"deleted";
 
 fn tombstone_aad(id: &str, revision: u64) -> String {
     format!("myle-tombstone|{id}|{revision}")
+}
+
+/// The header's seal: the vault key vouches for the vault's id, its key
+/// settings and both wraps of the vault key, so a device takes in a header
+/// from the account by itself only if someone with the vault key made it.
+/// The account (or anyone who reaches it) cannot make one, and cannot hand
+/// back an older one: the seal holds how many times the header changed.
+#[derive(Deserialize, Serialize)]
+struct HeaderSeal {
+    epoch: u64,
+}
+
+/// What the seal covers, as a JSON array: no field can run into the next.
+fn header_aad(header: &RemoteHeader) -> String {
+    let kdf = &header.kdf;
+    serde_json::to_string(&(
+        HEADER_AAD,
+        &header.vault_id,
+        &kdf.algorithm,
+        kdf.memory,
+        kdf.iterations,
+        kdf.parallelism,
+        &kdf.salt,
+        &header.wrapped_key,
+        &header.recovery_wrapped_key,
+    ))
+    .expect("strings and numbers always serialize")
+}
+
+fn seal_header(key: &Key, header: &RemoteHeader, epoch: u64) -> Result<String, String> {
+    let body = serde_json::to_vec(&HeaderSeal { epoch }).map_err(|e| e.to_string())?;
+    crypto::seal(key, &header_aad(header), &body)
+}
+
+/// The epoch `header`'s seal vouches for, when it was made with `key` over
+/// exactly this header; `None` without a seal or with one that does not fit.
+fn seal_epoch(key: &Key, header: &RemoteHeader) -> Option<u64> {
+    let seal = header.header_seal.as_deref()?;
+    let body = crypto::open(key, &header_aad(header), seal).ok()?;
+    serde_json::from_slice::<HeaderSeal>(&body).ok().map(|s| s.epoch)
+}
+
+/// How a key for `finish_unlock` was found.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyFrom {
+    /// This device's own wrap opened with the master password or the
+    /// recovery code: it is the vault key.
+    Wrap,
+    /// The wrap of a header held from the account opened with the master
+    /// password, and the key does not contradict this vault (`key_fits`).
+    HeldWrap,
+    /// Handed in (Windows Hello, a phone's biometrics): trusted for sealing
+    /// only if it opens the header's seal or an entry.
+    Given,
 }
 
 /// Wrong master passwords in a row before each try has to wait, and the
@@ -140,6 +197,81 @@ pub struct VaultFile {
     /// The master password changed here since the last sync.
     #[serde(default)]
     pub header_dirty: bool,
+    /// The header sealed with the vault key (`seal_header`). A vault from
+    /// before seals has none until a device with the key next opens it.
+    /// Older builds read this file too: every field from here on is optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_seal: Option<String>,
+    /// A header from the account that differs from this one and is not
+    /// trusted yet: it waits for the vault key (while locked) or for the
+    /// master password that opens it (not sealed with the key). This
+    /// device's own header stays in use until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_header: Option<RemoteHeader>,
+}
+
+impl VaultFile {
+    /// The header as the account stores it, with its seal.
+    fn header(&self) -> RemoteHeader {
+        RemoteHeader {
+            vault_id: self.vault_id.clone(),
+            kdf: self.kdf.clone(),
+            wrapped_key: self.wrapped_key.clone(),
+            recovery_wrapped_key: self.recovery_wrapped_key.clone(),
+            header_seal: self.header_seal.clone(),
+        }
+    }
+
+    /// The header's epoch, when its seal opens with `key`.
+    fn epoch(&self, key: &Key) -> Option<u64> {
+        seal_epoch(key, &self.header())
+    }
+
+    /// Seals the header as it is now with `key`.
+    fn seal(&mut self, key: &Key, epoch: u64) -> Result<(), String> {
+        self.header_seal = Some(seal_header(key, &self.header(), epoch)?);
+        Ok(())
+    }
+
+    /// Takes the master password's part of `header` (its key settings and
+    /// wrap) in place of this one's. The recovery wrap stays: no MYLE ever
+    /// changes it for a vault it already has, so a different one from the
+    /// account is never genuine.
+    fn take_master(&mut self, key: &Key, header: &RemoteHeader, epoch: u64) -> Result<(), String> {
+        self.kdf = header.kdf.clone();
+        self.wrapped_key = header.wrapped_key.clone();
+        if header.vault_id == self.vault_id
+            && header.recovery_wrapped_key == self.recovery_wrapped_key
+            && seal_epoch(key, header) == Some(epoch)
+        {
+            // The same header to the letter: the same seal as the account's.
+            self.header_seal = header.header_seal.clone();
+        } else {
+            self.seal(key, epoch)?;
+        }
+        self.pending_header = None;
+        self.header_dirty = false;
+        Ok(())
+    }
+
+    /// Whether `key` is this vault's key: it opens the header's seal or one
+    /// of the entries. `None`: a vault with neither has nothing to tell by.
+    fn key_fits(&self, key: &Key) -> Option<bool> {
+        if self.epoch(key).is_some() {
+            return Some(true);
+        }
+        let mut sealed = self.records.iter().filter(|r| !r.ciphertext.is_empty()).peekable();
+        sealed.peek()?;
+        Some(sealed.any(|r| {
+            let aad = if r.deleted { tombstone_aad(&r.id, r.revision) } else { entry_aad(&r.id, r.revision) };
+            crypto::open(key, &aad, &r.ciphertext).is_ok()
+        }))
+    }
+
+    /// Whether `header` has the same master password part as this one.
+    fn same_master(&self, header: &RemoteHeader) -> bool {
+        header.kdf == self.kdf && header.wrapped_key == self.wrapped_key
+    }
 }
 
 /// A Windows program an entry belongs to, for filling in from that program.
@@ -401,7 +533,7 @@ impl Vault {
         let vault_key = Key::random();
         let master_key = crypto::derive(master, &kdf)?;
         let (code, recovery_key) = crypto::new_recovery_code();
-        self.file = Some(VaultFile {
+        let mut file = VaultFile {
             version: FORMAT_VERSION,
             vault_id: uuid::Uuid::new_v4().to_string(),
             kdf,
@@ -410,7 +542,11 @@ impl Vault {
             records: Vec::new(),
             prefs: Prefs::default(),
             header_dirty: true,
-        });
+            header_seal: None,
+            pending_header: None,
+        };
+        file.seal(&vault_key, 1)?;
+        self.file = Some(file);
         self.write()?;
         self.unlocked = Some(Unlocked {
             key: vault_key,
@@ -422,14 +558,18 @@ impl Vault {
     }
 
     pub fn unlock(&mut self, master: &str) -> Result<(), String> {
-        let key = self.master_key_check(master, "Wrong master password.")?;
-        self.finish_unlock(key)
+        let (key, from) = self.master_key_check(master, "Wrong master password.")?;
+        self.finish_unlock(key, from)
     }
 
     /// The vault key for `master`, counting wrong tries: after a few, each
     /// try has to wait longer (up to a minute), so guessing through the app
     /// is slow even for a short password.
-    fn master_key_check(&mut self, master: &str, wrong: &str) -> Result<Key, String> {
+    ///
+    /// The master password may also be one set on another device whose
+    /// header this device holds but has not taken in yet (`pending_header`):
+    /// its wrap opening with the password, to this vault's key, proves it.
+    fn master_key_check(&mut self, master: &str, wrong: &str) -> Result<(Key, KeyFrom), String> {
         if let Some(at) = self.retry_at
             && let Some(left) = at.checked_duration_since(Instant::now())
         {
@@ -440,11 +580,27 @@ impl Vault {
         }
         let file = self.file.as_ref().ok_or("There is no vault yet.")?;
         let master_key = crypto::derive(master, &file.kdf)?;
-        match crypto::unwrap(&master_key, MASTER_AAD, &file.wrapped_key) {
-            Ok(key) => {
+        let found = match crypto::unwrap(&master_key, MASTER_AAD, &file.wrapped_key) {
+            Ok(key) => Ok((key, KeyFrom::Wrap)),
+            Err(error) => file
+                .pending_header
+                .as_ref()
+                .filter(|held| held.vault_id == file.vault_id && !file.same_master(held))
+                .and_then(|held| {
+                    let master_key = crypto::derive(master, &held.kdf).ok()?;
+                    crypto::unwrap(&master_key, MASTER_AAD, &held.wrapped_key).ok()
+                })
+                // Made under this very password, so by someone who knows it:
+                // with nothing to check the key against, that is enough.
+                .filter(|key| file.key_fits(key) != Some(false))
+                .map(|key| (key, KeyFrom::HeldWrap))
+                .ok_or(error),
+        };
+        match found {
+            Ok(found) => {
                 self.failed_tries = 0;
                 self.retry_at = None;
-                Ok(key)
+                Ok(found)
             }
             Err(_) => {
                 self.failed_tries += 1;
@@ -460,8 +616,11 @@ impl Vault {
     /// Asks for the master password again before something sensitive (an
     /// export of every password), even while the vault is open.
     pub fn verify_master(&mut self, master: &str) -> Result<(), String> {
-        self.master_key_check(master, "Wrong master password.")
-            .map(|_| ())
+        let (key, from) = self.master_key_check(master, "Wrong master password.")?;
+        if from == KeyFrom::HeldWrap {
+            self.settle_header(&key, from)?;
+        }
+        Ok(())
     }
 
     /// For a forgotten master password: the recovery code opens the vault
@@ -484,11 +643,12 @@ impl Vault {
         };
         self.failed_tries = 0;
         self.retry_at = None;
-        self.finish_unlock(key)?;
+        self.finish_unlock(key, KeyFrom::Wrap)?;
         self.rewrap(new_master, kdf)
     }
 
-    fn finish_unlock(&mut self, key: Key) -> Result<(), String> {
+    fn finish_unlock(&mut self, key: Key, from: KeyFrom) -> Result<(), String> {
+        self.settle_header(&key, from)?;
         let file = self.file.as_ref().ok_or("There is no vault yet.")?;
         let mut entries = BTreeMap::new();
         let mut damaged = 0;
@@ -509,6 +669,52 @@ impl Vault {
             icons: None,
         });
         self.touch();
+        Ok(())
+    }
+
+    /// With the vault key at hand (the vault is being opened, or the master
+    /// password was asked again): checks the header held from the account,
+    /// and seals this device's header if it has no seal yet.
+    ///
+    /// A held header is taken in when its seal opens with the key and is not
+    /// older than this one's, or when its own wrap opened with the master
+    /// password just typed (`KeyFrom::HeldWrap`: a header from a build
+    /// without seals). Otherwise it stays held and this device's stays.
+    fn settle_header(&mut self, key: &Key, from: KeyFrom) -> Result<(), String> {
+        let file = self.file.as_mut().ok_or("There is no vault yet.")?;
+        // A key handed in seals nothing unless it shows it is this vault's.
+        if from == KeyFrom::Given && file.key_fits(key) != Some(true) {
+            return Ok(());
+        }
+        let ours = file.epoch(key);
+        let mut changed = false;
+        if let Some(held) = file.pending_header.clone()
+            && held.vault_id == file.vault_id
+        {
+            let theirs = seal_epoch(key, &held);
+            match theirs {
+                Some(epoch) if epoch >= ours.unwrap_or(0) => {
+                    file.take_master(key, &held, epoch)?;
+                    changed = true;
+                }
+                // Proven by the master password: newer than this header.
+                _ if from == KeyFrom::HeldWrap => {
+                    let epoch = ours.unwrap_or(0).max(theirs.unwrap_or(0)) + 1;
+                    file.take_master(key, &held, epoch)?;
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        // A header from before seals (or a seal that does not fit it) is
+        // sealed now, as the header this device already uses.
+        if file.epoch(key).is_none() {
+            file.seal(key, ours.unwrap_or(0))?;
+            changed = true;
+        }
+        if changed {
+            self.write()?;
+        }
         Ok(())
     }
 
@@ -546,7 +752,7 @@ impl Vault {
         if self.file.is_none() {
             return Err("There is no vault yet.".into());
         }
-        self.finish_unlock(key)
+        self.finish_unlock(key, KeyFrom::Given)
     }
 
     /// Forgets the key and every decrypted entry (wiped as they drop).
@@ -598,18 +804,27 @@ impl Vault {
         new_master: &str,
         kdf: KdfParams,
     ) -> Result<(), String> {
-        self.master_key_check(current, "The current master password is wrong.")?;
+        let (key, from) = self.master_key_check(current, "The current master password is wrong.")?;
+        if from == KeyFrom::HeldWrap {
+            self.settle_header(&key, from)?;
+        }
         self.rewrap(new_master, kdf)
     }
 
-    /// The vault key under a new master password; the entries stay as they are.
+    /// The vault key under a new master password; the entries stay as they
+    /// are. The new header is sealed one epoch on, so every other device
+    /// takes it in and none takes an older one back.
     fn rewrap(&mut self, new_master: &str, kdf: KdfParams) -> Result<(), String> {
         let key = &self.unlocked.as_ref().ok_or("The vault is locked.")?.key;
         let master_key = crypto::derive(new_master, &kdf)?;
         let wrapped = crypto::wrap(&master_key, MASTER_AAD, key)?;
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
+        let epoch = file.epoch(key).unwrap_or(0) + 1;
         file.kdf = kdf;
         file.wrapped_key = wrapped;
+        file.seal(key, epoch)?;
+        // This header replaces whatever the account held.
+        file.pending_header = None;
         file.header_dirty = true;
         self.write()
     }
@@ -1104,36 +1319,89 @@ impl Vault {
     /// here since the last sync. `None` before there is a vault.
     pub fn sync_header(&self) -> Option<(RemoteHeader, bool)> {
         let file = self.file.as_ref()?;
-        Some((
-            RemoteHeader {
-                vault_id: file.vault_id.clone(),
-                kdf: file.kdf.clone(),
-                wrapped_key: file.wrapped_key.clone(),
-                recovery_wrapped_key: file.recovery_wrapped_key.clone(),
-            },
-            file.header_dirty,
-        ))
+        Some((file.header(), file.header_dirty))
     }
 
+    /// The account now holds this device's header.
     pub fn header_synced(&mut self) -> Result<(), String> {
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
         file.header_dirty = false;
+        file.pending_header = None;
         self.write()
     }
 
-    /// The master password was changed on another PC: its wrapped key
-    /// replaces this one. The vault key itself is the same, so an unlocked
-    /// vault stays unlocked.
-    pub fn take_header(&mut self, header: RemoteHeader) -> Result<(), String> {
-        // Checked before anything is replaced: out-of-range settings from the
+    /// The account's header, when this device has no change of its own to
+    /// send. Nothing in it is trusted:
+    ///
+    /// - Open, a header with another master password is taken in only if its
+    ///   seal opens with the vault key and it is not older than this one's
+    ///   (the master password was changed on another device). Any other is
+    ///   held, and this device's stays in use.
+    /// - Locked, a different header is only held, never taken: it is checked
+    ///   when the vault is next opened (`settle_header`).
+    /// - A held header is also taken in when the master password typed here
+    ///   opens its wrap, to this vault's key: how a change made by a build
+    ///   without seals arrives.
+    ///
+    /// The vault key itself is the same, so an unlocked vault stays unlocked.
+    pub fn take_header(&mut self, header: RemoteHeader) -> Result<HeaderStep, String> {
+        // Checked before anything is held: out-of-range settings from the
         // account would otherwise leave this PC's vault impossible to open.
         crypto::check_kdf(&header.kdf)?;
         let file = self.file.as_mut().ok_or("There is no vault yet.")?;
-        file.kdf = header.kdf;
-        file.wrapped_key = header.wrapped_key;
-        file.recovery_wrapped_key = header.recovery_wrapped_key;
-        file.header_dirty = false;
-        self.write()
+        if header.vault_id != file.vault_id {
+            return Err("The account holds another vault.".into());
+        }
+        if file.same_master(&header) {
+            let mut changed = file.pending_header.take().is_some();
+            let mut step = HeaderStep::Nothing;
+            // Only the seals can differ; a different recovery wrap is never
+            // taken in, and nothing is sent over it.
+            if let Some(unlocked) = &self.unlocked
+                && header.recovery_wrapped_key == file.recovery_wrapped_key
+                && header.header_seal != file.header_seal
+            {
+                let key = &unlocked.key;
+                let ours = file.epoch(key);
+                match seal_epoch(key, &header) {
+                    // Another device sealed the same header: keep its seal.
+                    Some(theirs) if theirs >= ours.unwrap_or(0) => {
+                        file.header_seal = header.header_seal;
+                        changed = true;
+                    }
+                    // The account has it with no seal (from before seals),
+                    // one that does not fit, or an older one: send this one.
+                    _ if ours.is_some() => step = HeaderStep::SendSeal,
+                    _ => {}
+                }
+            }
+            if changed {
+                self.write()?;
+            }
+            return Ok(step);
+        }
+        let Some(unlocked) = &self.unlocked else {
+            if file.pending_header.as_ref() != Some(&header) {
+                file.pending_header = Some(header);
+                self.write()?;
+            }
+            return Ok(HeaderStep::Held);
+        };
+        let key = &unlocked.key;
+        match seal_epoch(key, &header) {
+            Some(theirs) if theirs >= file.epoch(key).unwrap_or(0) => {
+                file.take_master(key, &header, theirs)?;
+                self.write()?;
+                Ok(HeaderStep::Taken)
+            }
+            _ => {
+                if file.pending_header.as_ref() != Some(&header) {
+                    file.pending_header = Some(header);
+                    self.write()?;
+                }
+                Ok(HeaderStep::Held)
+            }
+        }
     }
 
     /// Entries that are not deleted.
@@ -1151,6 +1419,8 @@ impl Vault {
         crypto::check_kdf(&header.kdf)?;
         let prefs = self.prefs();
         self.unlocked = None;
+        // Nothing to check the header against yet: its master password wrap
+        // proves itself at the first unlock, and its seal is checked then.
         self.file = Some(VaultFile {
             version: FORMAT_VERSION,
             vault_id: header.vault_id,
@@ -1160,6 +1430,8 @@ impl Vault {
             records: items.into_iter().map(RemoteItem::into_record).collect(),
             prefs,
             header_dirty: false,
+            header_seal: header.header_seal,
+            pending_header: None,
         });
         self.write()
     }
@@ -1298,6 +1570,23 @@ pub struct RemoteHeader {
     pub kdf: KdfParams,
     pub wrapped_key: String,
     pub recovery_wrapped_key: String,
+    /// `seal_header`: none from builds before seals, or from an account
+    /// whose table has no `header_seal` column yet.
+    #[serde(default)]
+    pub header_seal: Option<String>,
+}
+
+/// What became of the account's header (`Vault::take_header`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderStep {
+    /// Nothing to take in or to send.
+    Nothing,
+    /// Sealed with the vault key: it replaced this device's.
+    Taken,
+    /// Kept aside, unchecked (locked) or not proven; this device's stays.
+    Held,
+    /// The account has this device's header without its seal: send it.
+    SendSeal,
 }
 
 /// One entry as the account's `password_items` row holds it.
@@ -1535,6 +1824,232 @@ mod tests {
         assert_eq!(vault.sync_header().unwrap().0, before);
         vault.lock();
         assert!(vault.unlock("master one").is_ok());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Device A made the vault and sent it; device B took it from the
+    /// account and opened it once.
+    struct TwoDevices {
+        path_a: PathBuf,
+        a: Vault,
+        path_b: PathBuf,
+        b: Vault,
+        /// A's recovery code.
+        code: Zeroizing<String>,
+        /// The account's header then.
+        first: RemoteHeader,
+        /// The entry A saved.
+        id: String,
+    }
+
+    fn two_devices(master: &str) -> TwoDevices {
+        let (path_a, mut a) = temp_vault();
+        let code = a.create(master, KdfParams::cheap_for_tests()).unwrap();
+        let id = a.save(&input("Mail", "p1")).unwrap();
+        send_all(&mut a);
+        a.header_synced().unwrap();
+        let (first, items) = account_copy(&a);
+        let (path_b, mut b) = temp_vault();
+        b.adopt(first.clone(), items).unwrap();
+        b.unlock(master).unwrap();
+        TwoDevices { path_a, a, path_b, b, code, first, id }
+    }
+
+    fn on_disk(path: &Path) -> VaultFile {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_tampered_account_header_is_refused_open_or_locked() {
+        let TwoDevices { path_a, path_b, mut b, code, first: header, id, .. } = two_devices("shared master");
+        let before = b.sync_header().unwrap().0;
+        assert_eq!(before, header, "the seal checked out at the first unlock and stays");
+
+        // Someone with the account but not the vault key: a wrap of a key of
+        // their own under a password they chose, with the seal left as it
+        // was, removed, or made with their key; or plain garbage.
+        let stranger = Key::random();
+        let kdf = KdfParams::cheap_for_tests();
+        let their_wrap = crypto::wrap(&crypto::derive("attacker master", &kdf).unwrap(), MASTER_AAD, &stranger).unwrap();
+        let stale_seal = RemoteHeader { kdf, wrapped_key: their_wrap, ..header.clone() };
+        let no_seal = RemoteHeader { header_seal: None, ..stale_seal.clone() };
+        let mut their_seal = stale_seal.clone();
+        their_seal.header_seal = Some(seal_header(&stranger, &their_seal, 99).unwrap());
+        let garbage = RemoteHeader {
+            wrapped_key: "garbage".into(),
+            recovery_wrapped_key: "garbage".into(),
+            ..header.clone()
+        };
+        for forged in [&stale_seal, &no_seal, &their_seal, &garbage] {
+            assert_eq!(b.take_header(forged.clone()).unwrap(), HeaderStep::Held, "{forged:?}");
+            assert_eq!(b.sync_header().unwrap().0, before, "this device's header stays");
+        }
+        // Only the recovery wrap changed, sealed or not: never taken in.
+        let recovery_only = RemoteHeader { recovery_wrapped_key: "garbage".into(), ..header.clone() };
+        assert_eq!(b.take_header(recovery_only).unwrap(), HeaderStep::Nothing);
+        assert_eq!(b.sync_header().unwrap().0, before);
+
+        // Locked: only held. The next unlock refuses it, and the vault opens
+        // as before; their password opens nothing.
+        b.lock();
+        assert_eq!(b.take_header(their_seal.clone()).unwrap(), HeaderStep::Held);
+        assert_eq!(on_disk(&path_b).header(), before, "not replaced while locked");
+        assert_eq!(b.unlock("attacker master").unwrap_err(), "Wrong master password.");
+        b.unlock("shared master").unwrap();
+        assert_eq!(b.sync_header().unwrap().0, before);
+        assert_eq!(b.password(&id).unwrap().as_str(), "p1");
+        assert_eq!(on_disk(&path_b).pending_header, Some(their_seal), "still held, unproven");
+
+        // The recovery code still opens it: its wrap was never replaced.
+        b.lock();
+        b.recover(&code, "new shared master", KdfParams::cheap_for_tests()).unwrap();
+        assert_eq!(on_disk(&path_b).pending_header, None, "the new header replaces the held one");
+        let _ = std::fs::remove_file(path_a);
+        let _ = std::fs::remove_file(path_b);
+    }
+
+    #[test]
+    fn a_master_password_changed_on_another_device_is_taken_in_but_never_an_older_one() {
+        let TwoDevices { path_a, mut a, path_b, mut b, first, id, .. } = two_devices("first master");
+        a.change_master("first master", "second master", KdfParams::cheap_for_tests()).unwrap();
+        let (changed, dirty) = a.sync_header().unwrap();
+        assert!(dirty && changed.header_seal.is_some() && changed.header_seal != first.header_seal);
+
+        assert_eq!(b.take_header(changed.clone()).unwrap(), HeaderStep::Taken);
+        assert_eq!(b.sync_header().unwrap(), (changed.clone(), false), "the account's header and seal");
+        assert_eq!(b.take_header(changed.clone()).unwrap(), HeaderStep::Nothing);
+        b.lock();
+        assert!(b.unlock("first master").is_err());
+        b.unlock("second master").unwrap();
+        assert_eq!(b.password(&id).unwrap().as_str(), "p1");
+
+        // The first header, handed back by the account: sealed with the
+        // vault key, but older than this one. It is not taken in, open or at
+        // the next unlock.
+        assert_eq!(b.take_header(first.clone()).unwrap(), HeaderStep::Held);
+        assert_eq!(b.sync_header().unwrap().0, changed);
+        b.lock();
+        b.unlock("second master").unwrap();
+        assert_eq!(b.sync_header().unwrap().0, changed);
+        let _ = std::fs::remove_file(path_a);
+        let _ = std::fs::remove_file(path_b);
+    }
+
+    #[test]
+    fn a_locked_device_holds_a_new_header_and_checks_it_when_next_opened() {
+        let TwoDevices { path_a, mut a, path_b, mut b, first, id, .. } = two_devices("first master");
+        let (_, items) = account_copy(&a);
+        a.change_master("first master", "second master", KdfParams::cheap_for_tests()).unwrap();
+        let (changed, _) = a.sync_header().unwrap();
+
+        // Locked: held, unchecked; the header in use stays, on disk too.
+        b.lock();
+        assert_eq!(b.take_header(changed.clone()).unwrap(), HeaderStep::Held);
+        assert_eq!(b.take_header(changed.clone()).unwrap(), HeaderStep::Held, "held once");
+        assert_eq!(b.sync_header().unwrap().0, first);
+        let file = on_disk(&path_b);
+        assert_eq!((file.header(), file.pending_header.as_ref()), (first.clone(), Some(&changed)));
+
+        // Older builds still read the file: what they know is all there.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[allow(dead_code)]
+        struct OlderBuild {
+            version: u32,
+            vault_id: String,
+            kdf: KdfParams,
+            wrapped_key: String,
+            recovery_wrapped_key: String,
+            records: Vec<Record>,
+            prefs: Prefs,
+            header_dirty: bool,
+        }
+        let older: OlderBuild = serde_json::from_slice(&std::fs::read(&path_b).unwrap()).unwrap();
+        assert_eq!(older.wrapped_key, first.wrapped_key);
+
+        // The new master password opens it: the held header's wrap gives the
+        // vault key, and its seal checks out with it.
+        b.unlock("second master").unwrap();
+        assert_eq!(b.sync_header().unwrap().0, changed);
+        assert_eq!(b.password(&id).unwrap().as_str(), "p1");
+        assert_eq!(on_disk(&path_b).pending_header, None);
+
+        // Another device, locked since it took the vault: opened with the old
+        // password, it checks the held header with the key and takes it in.
+        let (path_c, mut c) = temp_vault();
+        c.adopt(first, items).unwrap();
+        assert_eq!(c.take_header(changed.clone()).unwrap(), HeaderStep::Held);
+        c.unlock("first master").unwrap();
+        assert_eq!(c.sync_header().unwrap().0, changed);
+        c.lock();
+        c.unlock("second master").unwrap();
+        let _ = std::fs::remove_file(path_a);
+        let _ = std::fs::remove_file(path_b);
+        let _ = std::fs::remove_file(path_c);
+    }
+
+    #[test]
+    fn a_new_master_password_from_a_build_without_seals_waits_for_that_password() {
+        let TwoDevices { path_a, mut a, path_b, mut b, first, id, .. } = two_devices("first master");
+        // An older build changes the master password: its header goes up
+        // without a seal, and the account keeps the old one beside it.
+        a.change_master("first master", "second master", KdfParams::cheap_for_tests()).unwrap();
+        let older = RemoteHeader { header_seal: first.header_seal.clone(), ..a.sync_header().unwrap().0 };
+
+        assert_eq!(b.take_header(older.clone()).unwrap(), HeaderStep::Held, "the seal does not fit");
+        assert_eq!(b.sync_header().unwrap().0, first);
+        b.lock();
+        b.unlock("first master").unwrap();
+        assert_eq!(b.sync_header().unwrap().0, first, "the old password still opens it, unchanged");
+        b.lock();
+        // The new password opens the held header's wrap to this vault's key:
+        // it is taken in, and sealed here.
+        b.unlock("second master").unwrap();
+        assert_eq!(b.password(&id).unwrap().as_str(), "p1");
+        let (sealed, dirty) = b.sync_header().unwrap();
+        assert!(!dirty);
+        assert_eq!(RemoteHeader { header_seal: older.header_seal.clone(), ..sealed.clone() }, older);
+        assert!(sealed.header_seal.is_some() && sealed.header_seal != older.header_seal);
+        // The account has it with the old seal: this device sends its own.
+        assert_eq!(b.take_header(older).unwrap(), HeaderStep::SendSeal);
+        assert_eq!(b.take_header(sealed.clone()).unwrap(), HeaderStep::Nothing);
+        // Device A, now on this build, takes the seal and keeps its header.
+        assert_eq!(a.take_header(sealed.clone()).unwrap(), HeaderStep::Nothing);
+        assert_eq!(a.sync_header().unwrap().0, sealed);
+        let _ = std::fs::remove_file(path_a);
+        let _ = std::fs::remove_file(path_b);
+    }
+
+    #[test]
+    fn a_vault_from_before_seals_is_sealed_when_next_opened() {
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        vault.save(&input("Mail", "p1")).unwrap();
+        vault.header_synced().unwrap();
+        drop(vault);
+        // The file as an older build writes it.
+        let mut text: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(text.as_object_mut().unwrap().remove("headerSeal").is_some());
+        std::fs::write(&path, serde_json::to_vec(&text).unwrap()).unwrap();
+
+        let mut vault = Vault::open(path.clone()).unwrap();
+        let (legacy, _) = vault.sync_header().unwrap();
+        assert!(legacy.header_seal.is_none());
+        // Locked, nothing can be sealed or sent.
+        assert_eq!(vault.take_header(legacy.clone()).unwrap(), HeaderStep::Nothing);
+        // A key handed in that is not this vault's seals nothing.
+        vault.unlock_with_key(Key::random()).unwrap();
+        assert!(vault.sync_header().unwrap().0.header_seal.is_none());
+        vault.lock();
+
+        vault.unlock("master one").unwrap();
+        let (sealed, dirty) = vault.sync_header().unwrap();
+        assert!(!dirty, "only the seal is new: nothing to send over the account's header");
+        assert_eq!(RemoteHeader { header_seal: None, ..sealed.clone() }, legacy);
+        assert_eq!(Vault::open(path.clone()).unwrap().sync_header().unwrap().0, sealed, "saved");
+        // The account has it without a seal: this device sends its own.
+        assert_eq!(vault.take_header(legacy).unwrap(), HeaderStep::SendSeal);
+        assert_eq!(vault.take_header(sealed).unwrap(), HeaderStep::Nothing);
         let _ = std::fs::remove_file(path);
     }
 

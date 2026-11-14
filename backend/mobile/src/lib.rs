@@ -9,12 +9,29 @@ mod unlock;
 mod update;
 
 use tauri::Manager;
+use tauri_plugin_myle_mobile::MobileExt;
 
 /// Android's back button on the first screen: the app closes, and the vault
 /// with it.
 #[tauri::command]
 fn mobile_leave(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+/// iPhone: the app's folder (the vault, the account's session, Face ID's
+/// wrapped key) stays out of iCloud and computer backups; set on the folder,
+/// it holds for every file written there later. Android's manifest rules do
+/// the same there. Asked at every start, so a folder made again is marked
+/// again.
+fn keep_out_of_backups(app: &tauri::AppHandle, dir: &std::path::Path) {
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let app = app.clone();
+    let dir = dir.to_string_lossy().into_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = app.myle_mobile().exclude_from_backup(&dir);
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,6 +49,7 @@ pub fn run() {
     builder
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            keep_out_of_backups(app.handle(), &dir);
             let passwords = passwords::PasswordsState::new(dir.clone());
             app.manage(account::AccountState::new(dir));
             app.manage(passwords.clone());

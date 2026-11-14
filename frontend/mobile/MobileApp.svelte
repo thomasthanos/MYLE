@@ -2,12 +2,14 @@
   import { onMount } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { onBackButtonPress } from "@tauri-apps/api/app";
+  import { listen } from "@tauri-apps/api/event";
   import Lock from "@lucide/svelte/icons/lock";
   import Settings from "@lucide/svelte/icons/settings";
   import ConfirmHost from "../lib/components/ConfirmHost.svelte";
   import Logo from "../lib/components/Logo.svelte";
   import Toaster from "../lib/components/Toaster.svelte";
   import { confirmState } from "../lib/confirm.svelte";
+  import { toast } from "../lib/toast.svelte";
   import { passwordsApi as api } from "../app/pages/password-manager/api";
   import PasswordManager from "../app/pages/password-manager/PasswordManager.svelte";
   import { passwords as p } from "../app/pages/password-manager/state.svelte";
@@ -22,7 +24,7 @@
 
   /** This phone has a vault: null until known. */
   let hasVault = $state<boolean | null>(null);
-  /* Out of sight: the page is covered, so the app switcher's picture of it shows no passwords. */
+  /* Out of sight: the page is covered. On iPhone this blur comes after the app switcher's picture, so the native side covers the window first; Android keeps the app out of Recents. */
   let away = $state(false);
 
   const welcome = $derived(account.loaded && !account.profile);
@@ -34,6 +36,8 @@
   });
 
   onMount(() => {
+    // Face ID's key can no longer open the vault (Face ID changed, or it was kept the old way): it turned itself off, and this says why. Before anything asks about it.
+    const quickUnlockOff = listen<string>("passwords-quick-unlock-off", (event) => toast.error(event.payload)).catch(() => null);
     void account.init();
     void api
       .status()
@@ -50,6 +54,7 @@
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       void back.then((listener) => listener?.unregister());
+      void quickUnlockOff.then((unlisten) => unlisten?.());
     };
   });
 

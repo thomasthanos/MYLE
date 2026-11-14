@@ -7,6 +7,10 @@
 //! Every change is sent with compare-and-swap: a row is replaced only if the
 //! account still has the revision this PC last saw. When another PC got
 //! there first, the next pass merges the two (`Vault::merge`).
+//!
+//! The header carries a seal made with the vault key (`header_seal`), so a
+//! device takes in a changed header (a new master password) only if someone
+//! with the vault key made it (`Vault::take_header`).
 
 use reqwest::{Method, StatusCode};
 use serde::Serialize;
@@ -15,7 +19,7 @@ use serde_json::json;
 use crate::VaultCell;
 use crate::account::Cloud;
 use crate::http::err;
-use crate::vault::{Record, RemoteHeader, RemoteItem};
+use crate::vault::{HeaderStep, Record, RemoteHeader, RemoteItem};
 
 const PAGE: usize = 1000;
 /// Bound progress lost to a crash, without rewriting the vault for every row.
@@ -60,15 +64,27 @@ async fn send(request: reqwest::RequestBuilder) -> Result<(StatusCode, String), 
     Ok((status, body))
 }
 
+/// The account's database was set up before header seals: `password_vault`
+/// has no `header_seal` column yet (Postgres 42703 on reading it, PostgREST
+/// PGRST204 on writing it). The header then goes without its seal, as from
+/// an older build, until the column is added.
+fn no_seal_column(status: StatusCode, body: &str) -> bool {
+    status == StatusCode::BAD_REQUEST && body.contains("header_seal")
+}
+
 async fn get_header(cloud: &Cloud) -> Result<Option<RemoteHeader>, String> {
-    let url = cloud.url(
-        "password_vault",
-        &[
-            ("select", "vault_id,kdf,wrapped_key,recovery_wrapped_key".into()),
-            ("user_id", format!("eq.{}", cloud.user_id)),
-        ],
-    )?;
-    let (status, body) = send(cloud.request(Method::GET, url)).await?;
+    let read = |columns: &str| -> Result<reqwest::RequestBuilder, String> {
+        let url = cloud.url(
+            "password_vault",
+            &[("select", columns.into()), ("user_id", format!("eq.{}", cloud.user_id))],
+        )?;
+        Ok(cloud.request(Method::GET, url))
+    };
+    const COLUMNS: &str = "vault_id,kdf,wrapped_key,recovery_wrapped_key";
+    let (mut status, mut body) = send(read(&format!("{COLUMNS},header_seal"))?).await?;
+    if no_seal_column(status, &body) {
+        (status, body) = send(read(COLUMNS)?).await?;
+    }
     if !status.is_success() {
         return Err(explain(status, &body));
     }
@@ -77,28 +93,60 @@ async fn get_header(cloud: &Cloud) -> Result<Option<RemoteHeader>, String> {
 }
 
 async fn put_header(cloud: &Cloud, header: &RemoteHeader, exists: bool) -> Result<(), String> {
-    let body = json!({
-        "user_id": cloud.user_id,
-        "vault_id": header.vault_id,
-        "kdf": header.kdf,
-        "wrapped_key": header.wrapped_key,
-        "recovery_wrapped_key": header.recovery_wrapped_key,
-    });
-    let request = if exists {
-        // Only this vault's row: never another vault's by mistake.
-        let url = cloud.url(
-            "password_vault",
-            &[
-                ("user_id", format!("eq.{}", cloud.user_id)),
-                ("vault_id", format!("eq.{}", header.vault_id)),
-            ],
-        )?;
-        cloud.request(Method::PATCH, url)
-    } else {
-        cloud.request(Method::POST, cloud.url("password_vault", &[])?)
+    let write = |with_seal: bool| -> Result<reqwest::RequestBuilder, String> {
+        let mut body = json!({
+            "user_id": cloud.user_id,
+            "vault_id": header.vault_id,
+            "kdf": header.kdf,
+            "wrapped_key": header.wrapped_key,
+            "recovery_wrapped_key": header.recovery_wrapped_key,
+        });
+        if with_seal {
+            // Null too: a seal left from an earlier header would not fit.
+            body["header_seal"] = json!(header.header_seal);
+        }
+        let request = if exists {
+            // Only this vault's row: never another vault's by mistake.
+            let url = cloud.url(
+                "password_vault",
+                &[
+                    ("user_id", format!("eq.{}", cloud.user_id)),
+                    ("vault_id", format!("eq.{}", header.vault_id)),
+                ],
+            )?;
+            cloud.request(Method::PATCH, url)
+        } else {
+            cloud.request(Method::POST, cloud.url("password_vault", &[])?)
+        };
+        Ok(request.header("Prefer", "return=minimal").json(&body))
     };
-    let (status, text) = send(request.header("Prefer", "return=minimal").json(&body)).await?;
+    let (mut status, mut text) = send(write(true)?).await?;
+    if no_seal_column(status, &text) {
+        (status, text) = send(write(false)?).await?;
+    }
     if status.is_success() {
+        Ok(())
+    } else {
+        Err(explain(status, &text))
+    }
+}
+
+/// Sends this device's seal for the header the account holds already, and
+/// only while the account still holds exactly that header: a master
+/// password changed meanwhile on another device is never overwritten.
+async fn put_seal(cloud: &Cloud, header: &RemoteHeader) -> Result<(), String> {
+    let url = cloud.url(
+        "password_vault",
+        &[
+            ("user_id", format!("eq.{}", cloud.user_id)),
+            ("vault_id", format!("eq.{}", header.vault_id)),
+            ("wrapped_key", format!("eq.{}", header.wrapped_key)),
+            ("recovery_wrapped_key", format!("eq.{}", header.recovery_wrapped_key)),
+        ],
+    )?;
+    let body = json!({ "header_seal": header.header_seal });
+    let (status, text) = send(cloud.request(Method::PATCH, url).header("Prefer", "return=minimal").json(&body)).await?;
+    if status.is_success() || no_seal_column(status, &text) {
         Ok(())
     } else {
         Err(explain(status, &text))
@@ -207,8 +255,12 @@ pub async fn run(cloud: Option<Cloud>, state: &VaultCell) -> Result<SyncResult, 
             if dirty {
                 put_header(&cloud, &local, true).await?;
                 state.with_quiet(|vault| vault.header_synced())?;
-            } else if local != remote {
-                state.with_quiet(|vault| vault.take_header(remote))?;
+            } else if state.with_quiet(|vault| vault.take_header(remote))? == HeaderStep::SendSeal
+                && let Some((ours, _)) = state.with_quiet(|vault| Ok(vault.sync_header()))?
+            {
+                // Taken in only if sealed with the vault key (take_header);
+                // a header from before seals gets this device's seal.
+                put_seal(&cloud, &ours).await?;
             }
         }
     }
