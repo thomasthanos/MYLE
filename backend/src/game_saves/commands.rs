@@ -838,6 +838,7 @@ pub async fn game_saves_restore(
     let total = games.len();
     send_progress(&on_event, 0, total, None);
     let mut targets = Vec::new();
+    let mut keys = Vec::new();
     for (index, (game, snapshot)) in games.iter().enumerate() {
         send_progress(&on_event, index, total, Some(game.title.clone()));
         let input = stdin_titles(std::slice::from_ref(&game.title));
@@ -857,6 +858,7 @@ pub async fn game_saves_restore(
             ));
         }
         targets.extend(safety::targets(&api));
+        keys.extend(safety::key_targets(&api));
         send_progress(&on_event, index + 1, total, Some(game.title.clone()));
     }
     // Each snapshot is read through (every file's CRC) before anything is touched: a damaged backup must not be half written over a good save.
@@ -891,13 +893,13 @@ pub async fn game_saves_restore(
     // Every file the restore writes is copied first (and each copy checked), so any game whose restore does not finish cleanly is put back at once, and "Undo last restore" can put the whole restore back. From here on, Cancel stops only between games: a save is never cut off half-written.
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
     operation.set_killable(false);
-    let slot = if targets.is_empty() {
+    let slot = if targets.is_empty() && keys.is_empty() {
         // Nothing on this PC changes: there is nothing to undo, and an older restore's undo must not stay offered as if it were this one's.
         undo::clear(&safety_root);
         None
     } else {
         let (undo_record, slot) = undo::create_slot(&safety_root)?;
-        match safety::take(&slot, &targets, parser::now()) {
+        match safety::take(&slot, &targets, &keys, parser::now()) {
             Ok(manifest) => {
                 if let Err(error) = undo::commit(&safety_root, undo_record.clone(), manifest.games()) {
                     undo::discard_slot(&safety_root, &undo_record.id);
@@ -1051,18 +1053,26 @@ pub async fn game_saves_undo_last_restore(
     // What the undo will write: the files of the restore's own copy, or (a copy an older MYLE made with the engine) what the engine would restore.
     send_stage(&on_event, OperationStage::Preparing);
     let manifest = safety::load(&slot);
-    let targets = match &manifest {
-        Some(manifest) => manifest
-            .entries
-            .iter()
-            .map(|entry| safety::Target { game: entry.game.clone(), path: PathBuf::from(&entry.target), bytes: entry.bytes })
-            .collect(),
+    let (targets, keys) = match &manifest {
+        Some(manifest) => (
+            manifest
+                .entries
+                .iter()
+                .map(|entry| safety::Target { game: entry.game.clone(), path: PathBuf::from(&entry.target), bytes: entry.bytes })
+                .collect(),
+            manifest
+                .registry
+                .iter()
+                .map(|entry| safety::KeyTarget { game: entry.game.clone(), key: entry.key.clone() })
+                .collect(),
+        ),
         None => {
             let input = stdin_titles(&undo_record.games);
             let output = run_engine(&engine, &Engine::restore_preview_args(&slot.to_string_lossy(), None), Some(&input), &operation)
                 .await
                 .map_err(|error| format!("Could not read the safety copy: {error}"))?;
-            safety::targets(&parser::parse_api(&output.stdout)?)
+            let api = parser::parse_api(&output.stdout)?;
+            (safety::targets(&api), safety::key_targets(&api))
         }
     };
     let locked = safety::locked(&targets);
@@ -1073,7 +1083,7 @@ pub async fn game_saves_undo_last_restore(
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
     operation.set_killable(false);
     let (now_record, now_slot) = undo::create_slot(&safety_root)?;
-    let now_manifest = match safety::take(&now_slot, &targets, parser::now()) {
+    let now_manifest = match safety::take(&now_slot, &targets, &keys, parser::now()) {
         Ok(taken) => taken,
         Err(error) => {
             undo::discard_slot(&safety_root, &now_record.id);

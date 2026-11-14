@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use super::atomic;
 use super::parser::ApiOutput;
+use super::registry_copy::{self, KeyCopy};
 /// The slot's list of what it holds.
 pub(crate) const MANIFEST: &str = "manifest.json";
 /// The copies themselves, by number, inside the slot.
@@ -23,13 +24,23 @@ pub(crate) struct Target {
     /// The size the restore writes.
     pub bytes: u64,
 }
-/// What a slot holds: one entry per file the restore writes.
+/// A registry key a restore will write (`HKEY_CURRENT_USER\Software\…`), and
+/// the game it belongs to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct KeyTarget {
+    pub game: String,
+    pub key: String,
+}
+/// What a slot holds: one entry per file the restore writes, and one per
+/// registry key.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Manifest {
     pub version: u32,
     pub created_at: u64,
     pub entries: Vec<Entry>,
+    #[serde(default)]
+    pub registry: Vec<KeyEntry>,
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,9 +61,29 @@ pub(crate) struct Entry {
     #[serde(default)]
     pub readonly: bool,
 }
+/// A registry key as it was before the restore, values and subkeys.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyEntry {
+    pub game: String,
+    pub key: String,
+    /// Whether the key was there before the restore. When it was not, putting
+    /// the game back removes it.
+    pub existed: bool,
+    /// The copy's name in the slot's `files` folder.
+    #[serde(default)]
+    pub copy: Option<String>,
+    #[serde(default)]
+    pub sha256: String,
+}
 impl Manifest {
     pub(crate) fn games(&self) -> Vec<String> {
-        let mut games: Vec<String> = self.entries.iter().map(|entry| entry.game.clone()).collect();
+        let mut games: Vec<String> = self
+            .entries
+            .iter()
+            .map(|entry| entry.game.clone())
+            .chain(self.registry.iter().map(|entry| entry.game.clone()))
+            .collect();
         games.sort();
         games.dedup();
         games
@@ -76,6 +107,28 @@ pub(crate) fn targets(api: &ApiOutput) -> Vec<Target> {
         }
     }
     found.into_values().collect()
+}
+/// The registry keys a restore will write, from its fresh preview: every key
+/// not ignored. A key inside another of the same game is copied with it.
+pub(crate) fn key_targets(api: &ApiOutput) -> Vec<KeyTarget> {
+    let mut found: BTreeMap<String, KeyTarget> = BTreeMap::new();
+    for (game, entry) in &api.games {
+        for (key, item) in &entry.registry {
+            if item.ignored {
+                continue;
+            }
+            let key = key.replace('/', "\\").trim_end_matches('\\').to_string();
+            found.entry(key.to_lowercase()).or_insert(KeyTarget { game: game.clone(), key });
+        }
+    }
+    let outer: Vec<(String, String)> = found.iter().map(|(lower, target)| (lower.clone(), target.game.clone())).collect();
+    found
+        .into_iter()
+        .filter(|(lower, target)| {
+            !outer.iter().any(|(other, game)| *game == target.game && lower.starts_with(&format!("{other}\\")))
+        })
+        .map(|(_, target)| target)
+        .collect()
 }
 /// Ludusavi writes paths with forward slashes ("C:/Users/…").
 fn windows_path(path: &str) -> PathBuf {
@@ -131,7 +184,7 @@ fn free_space(folder: &Path) -> Option<u64> {
 /// Copies every target that exists into `slot` and checks each copy, and
 /// lists the targets that do not exist yet, then writes the slot's manifest.
 /// Any failure is an error: the restore must not start without its copy.
-pub(crate) fn take(slot: &Path, targets: &[Target], now: u64) -> Result<Manifest, String> {
+pub(crate) fn take(slot: &Path, targets: &[Target], keys: &[KeyTarget], now: u64) -> Result<Manifest, String> {
     let files = slot.join(FILES);
     fs::create_dir_all(&files).map_err(|error| error.to_string())?;
     let mut entries = Vec::with_capacity(targets.len());
@@ -165,10 +218,26 @@ pub(crate) fn take(slot: &Path, targets: &[Target], now: u64) -> Result<Manifest
             }
         }
     }
+    let mut registry = Vec::with_capacity(keys.len());
+    for (index, target) in keys.iter().enumerate() {
+        let copy = registry_copy::capture(&target.key).map_err(|error| format!("{} could not be read: {error}", target.key))?;
+        let (existed, copy, sha256) = match copy {
+            None => (false, None, String::new()),
+            Some(copy) => {
+                let name = format!("registry-{index}.json");
+                let json = serde_json::to_vec(&copy).map_err(|error| error.to_string())?;
+                let sha256 = write_verified(&files.join(&name), &json)
+                    .map_err(|error| format!("{} could not be copied: {error}", target.key))?;
+                (true, Some(name), sha256)
+            }
+        };
+        registry.push(KeyEntry { game: target.game.clone(), key: target.key.clone(), existed, copy, sha256 });
+    }
     let manifest = Manifest {
         version: 1,
         created_at: now,
         entries,
+        registry,
     };
     let json = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     atomic::write(&slot.join(MANIFEST), &json)?;
@@ -180,10 +249,11 @@ pub(crate) fn load(slot: &Path) -> Option<Manifest> {
     let text = fs::read_to_string(slot.join(MANIFEST)).ok()?;
     serde_json::from_str(&text).ok()
 }
-/// Puts the files of `games` (every game when `None`) back as they were
-/// before the restore: each copy comes back (checked by its SHA-256 first),
-/// files the restore created are removed, and read-only files are read-only
-/// again. Answers what could not be put back, file by file.
+/// Puts the files and registry keys of `games` (every game when `None`) back
+/// as they were before the restore: each copy comes back (checked by its
+/// SHA-256 first), files and keys the restore created are removed, and
+/// read-only files are read-only again. Answers what could not be put back,
+/// one by one.
 pub(crate) fn put_back(slot: &Path, manifest: &Manifest, games: Option<&HashSet<String>>) -> Vec<String> {
     let mut failed = Vec::new();
     for entry in manifest
@@ -201,7 +271,28 @@ pub(crate) fn put_back(slot: &Path, manifest: &Manifest, games: Option<&HashSet<
             failed.push(format!("{}: {error}", entry.target));
         }
     }
+    for entry in manifest
+        .registry
+        .iter()
+        .filter(|entry| games.is_none_or(|games| games.contains(&entry.game)))
+    {
+        if let Err(error) = restore_key(slot, entry) {
+            failed.push(format!("{}: {error}", entry.key));
+        }
+    }
     failed
+}
+fn restore_key(slot: &Path, entry: &KeyEntry) -> Result<(), String> {
+    if !entry.existed {
+        return registry_copy::put_back(&entry.key, None).map_err(|error| error.to_string());
+    }
+    let file = slot.join(FILES).join(entry.copy.as_deref().ok_or("its safety copy is missing")?);
+    let bytes = fs::read(&file).map_err(|error| format!("its safety copy cannot be read: {error}"))?;
+    if crate::download::to_hex(&Sha256::digest(&bytes)) != entry.sha256 {
+        return Err("its safety copy is damaged".into());
+    }
+    let copy: KeyCopy = serde_json::from_slice(&bytes).map_err(|error| format!("its safety copy is damaged: {error}"))?;
+    registry_copy::put_back(&entry.key, Some(&copy)).map_err(|error| error.to_string())
 }
 /// After a game restored cleanly: its files that were read-only before are
 /// read-only again (Ludusavi clears the flag to write them).
@@ -293,6 +384,21 @@ fn copy_verified(from: &Path, to: &Path) -> io::Result<(u64, String)> {
         return Err(io::Error::other("the copy does not match the original"));
     }
     Ok((bytes, expected))
+}
+/// Writes `bytes` into the new file `to`, flushes it to disk and reads it back.
+/// Answers the SHA-256.
+fn write_verified(to: &Path, bytes: &[u8]) -> io::Result<String> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(to)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    let expected = crate::download::to_hex(&Sha256::digest(bytes));
+    let (written, actual) = hash_of(to)?;
+    if written != bytes.len() as u64 || actual != expected {
+        let _ = fs::remove_file(to);
+        return Err(io::Error::other("the copy does not match the original"));
+    }
+    Ok(expected)
 }
 fn hash_of(path: &Path) -> io::Result<(u64, String)> {
     let mut file = File::open(path)?;
@@ -435,6 +541,55 @@ mod tests {
         assert!(found.iter().all(|target| target.game == "Game"));
     }
     #[test]
+    fn the_registry_keys_a_restore_writes_come_from_its_preview_and_a_key_inside_another_goes_with_it() {
+        let api = parser::parse_api(
+            r#"{"games":{"Game":{"decision":"Processed","files":{},"registry":{
+                "HKEY_CURRENT_USER/Software/Studio/Game":{},
+                "HKEY_CURRENT_USER/Software/Studio/Game/Profiles":{},
+                "HKEY_CURRENT_USER/Software/Studio/Skipped":{"ignored":true}
+            }},"Other":{"decision":"Processed","files":{},"registry":{
+                "HKEY_CURRENT_USER/Software/Studio/Game/Other":{}
+            }}}}"#,
+        )
+        .unwrap();
+        let keys: Vec<(String, String)> = key_targets(&api).into_iter().map(|target| (target.game, target.key)).collect();
+        assert_eq!(
+            keys,
+            vec![
+                ("Game".to_string(), r"HKEY_CURRENT_USER\Software\Studio\Game".to_string()),
+                ("Other".to_string(), r"HKEY_CURRENT_USER\Software\Studio\Game\Other".to_string()),
+            ]
+        );
+    }
+    #[test]
+    fn registry_saves_are_put_back_and_a_key_the_restore_made_is_removed() {
+        use crate::game_saves::registry_copy::tests::TestKey;
+        let root = temp("registry");
+        let kept = TestKey::new("safety-kept");
+        let made = TestKey::new("safety-made");
+        kept.open().set_value("Slot", &"before").unwrap();
+        let keys = vec![
+            KeyTarget { game: "Game".into(), key: kept.0.clone() },
+            KeyTarget { game: "Game".into(), key: made.0.clone() },
+        ];
+        let slot = root.join("slot");
+        let manifest = take(&slot, &[], &keys, 1).unwrap();
+        assert!(manifest.registry[0].existed && !manifest.registry[1].existed);
+        assert_eq!(manifest.games(), vec!["Game".to_string()]);
+        assert_eq!(load(&slot), Some(manifest.clone()));
+        kept.open().set_value("Slot", &"after").unwrap();
+        made.open().set_value("Slot", &"new").unwrap();
+        assert!(put_back(&slot, &manifest, None).is_empty());
+        assert_eq!(kept.open().get_value::<String, _>("Slot").unwrap(), "before");
+        assert_eq!(registry_copy::capture(&made.0).unwrap(), None);
+        // A damaged copy is never written over the key.
+        kept.open().set_value("Slot", &"after").unwrap();
+        fs::write(slot.join(FILES).join(manifest.registry[0].copy.as_deref().unwrap()), b"{}").unwrap();
+        assert_eq!(put_back(&slot, &manifest, None).len(), 1);
+        assert_eq!(kept.open().get_value::<String, _>("Slot").unwrap(), "after");
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
     fn a_game_is_put_back_byte_for_byte_and_what_the_restore_made_is_removed() {
         let root = temp("put-back");
         let saves = root.join("saves");
@@ -447,7 +602,7 @@ mod tests {
             Target { game: "Game".into(), path: made.clone(), bytes: 5 },
         ];
         let slot = root.join("slot");
-        let manifest = take(&slot, &targets, 1).unwrap();
+        let manifest = take(&slot, &targets, &[], 1).unwrap();
         assert!(manifest.entries[0].existed && !manifest.entries[1].existed);
         // The restore writes both, then something goes wrong.
         fs::write(&kept, b"after!").unwrap();
@@ -469,7 +624,7 @@ mod tests {
             Target { game: "B".into(), path: b.clone(), bytes: 2 },
         ];
         let slot = root.join("slot");
-        let manifest = take(&slot, &targets, 1).unwrap();
+        let manifest = take(&slot, &targets, &[], 1).unwrap();
         fs::write(&a, b"a2").unwrap();
         fs::write(&b, b"b2").unwrap();
         let only_b: HashSet<String> = ["B".to_string()].into();
@@ -484,7 +639,7 @@ mod tests {
         let save = root.join("save.sav");
         fs::write(&save, b"good").unwrap();
         let slot = root.join("slot");
-        let manifest = take(&slot, &[Target { game: "G".into(), path: save.clone(), bytes: 4 }], 1).unwrap();
+        let manifest = take(&slot, &[Target { game: "G".into(), path: save.clone(), bytes: 4 }], &[], 1).unwrap();
         fs::write(&save, b"restored").unwrap();
         fs::write(slot.join(FILES).join("0"), b"rot!").unwrap();
         let failed = put_back(&slot, &manifest, None);
@@ -499,7 +654,7 @@ mod tests {
         fs::write(&save, b"keep").unwrap();
         set_readonly(&save, true).unwrap();
         let slot = root.join("slot");
-        let manifest = take(&slot, &[Target { game: "G".into(), path: save.clone(), bytes: 4 }], 1).unwrap();
+        let manifest = take(&slot, &[Target { game: "G".into(), path: save.clone(), bytes: 4 }], &[], 1).unwrap();
         assert!(manifest.entries[0].readonly);
         set_readonly(&save, false).unwrap();
         fs::write(&save, b"overwritten").unwrap();
@@ -552,7 +707,7 @@ mod tests {
         let save = root.join("save.sav");
         fs::write(&save, b"x").unwrap();
         let slot = root.join("slot");
-        let manifest = take(&slot, &[Target { game: "G".into(), path: save, bytes: 1 }], 9).unwrap();
+        let manifest = take(&slot, &[Target { game: "G".into(), path: save, bytes: 1 }], &[], 9).unwrap();
         assert_eq!(load(&slot), Some(manifest));
         assert_eq!(load(&root.join("ludusavi-slot")), None);
         let _ = fs::remove_dir_all(root);
