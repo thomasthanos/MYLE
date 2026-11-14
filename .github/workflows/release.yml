@@ -44,18 +44,18 @@ jobs:
     steps:
       # No token left in .git/config for the build's tools to read: the one
       # step that needs it (gh release) is handed it explicitly.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: backend
 
@@ -79,6 +79,8 @@ jobs:
           # Explicit per-release opt-out; normal releases retain their checks.
           $skipChecks = $false
           if ("${{ github.ref_type }}" -eq "tag") {
+            # The checkout may hold the tag without its message.
+            git fetch --force --depth=1 origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}" 2>$null
             $tagNotes = @(git for-each-ref '--format=%(contents)' "refs/tags/${{ github.ref_name }}")
             $skipChecks = $tagNotes -contains "Checks: skip"
           }
@@ -114,6 +116,18 @@ jobs:
           }
           # Windows PowerShell, as `npm run build` runs it.
           powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-setup.ps1 -Phase binaries
+
+      # The unit tests, as CI runs them, before anything is signed or sent.
+      # The build above made the app's frontend and the Ludusavi files.
+      - name: Tests
+        if: env.SKIP_CHECKS != 'true'
+        shell: pwsh
+        run: |
+          npx vite build --mode mobile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path backend/Cargo.toml --workspace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test "scripts/tests/*.test.mjs"
 
       - name: Sign the app and the uninstaller
         if: env.HAS_CERT == 'true'
@@ -175,7 +189,7 @@ jobs:
 
       - name: Keep the installer (dry run)
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: MYLE
           path: out/*
