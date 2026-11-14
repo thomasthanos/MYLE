@@ -6,7 +6,7 @@
   import JobProgress from "./JobProgress.svelte";
   import { appsState, type AppEntry } from "./state.svelte";
 
-  let { app, view }: { app: AppEntry; view: "grid" | "list" } = $props();
+  let { app }: { app: AppEntry } = $props();
 
   const uid = $props.id();
   const status = $derived(appsState.statusOf(app));
@@ -30,10 +30,10 @@
   });
 </script>
 
-<div class="card surface {view}" class:selected class:working={!!job}>
+<div class="card surface" class:selected class:working={!!job}>
   <input id="{uid}-check" type="checkbox" class="check" checked={selected} disabled={appsState.externallyLocked} onchange={() => appsState.toggle(app)} />
   <label class="main" for="{uid}-check">
-    <AppIcon {app} {status} size={view === "grid" ? 32 : 24} />
+    <AppIcon {app} {status} size={32} />
     <span class="names">
       <span class="name">{app.name}</span>
       <span class="id">{app.id}</span>
@@ -65,14 +65,10 @@
 
 <style>
   /* Off-screen cards skip layout and paint: the catalog is well over a thousand elements. */
-  .card { position: relative; display: grid; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 118px; transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main check" "foot actions"; gap: 12px 8px; min-width: 0; padding: 13px 13px 11px; content-visibility: auto; contain-intrinsic-size: auto 118px; transition: border-color var(--dur-fast), background var(--dur-fast); }
   .card:hover { border-color: rgb(255 255 255 / 0.12); }
   .card.selected { border-color: rgb(var(--accent-rgb) / 0.45); background: var(--selected); }
-  /* Grid: checkbox top-right, action bottom-right; list: one compact row. */
-  .card.grid { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main check" "foot actions"; gap: 12px 8px; padding: 13px 13px 11px; }
-  .card.list { contain-intrinsic-size: auto 52px; grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) auto; grid-template-areas: "check main foot actions"; align-items: center; gap: 12px; padding: 7px 10px 7px 12px; }
-  .check { grid-area: check; }
-  .grid .check { justify-self: end; }
+  .check { grid-area: check; justify-self: end; }
   .main { grid-area: main; display: flex; align-items: center; gap: 11px; min-width: 0; }
   .names { display: grid; min-width: 0; }
   .name, .id { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

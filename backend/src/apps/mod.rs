@@ -154,20 +154,47 @@ pub enum JobOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct InstalledReport {
     winget: Vec<winget::InstalledPackage>,
+    /// Every package `winget upgrade` offers an update for, including ones
+    /// MYLE's own catalog does not list.
+    updates: Vec<winget::UpgradePackage>,
     /// Set when winget itself could not be queried (e.g. not installed).
     winget_error: Option<String>,
     custom: Vec<custom::CustomStatus>,
 }
-/// Installed state of every winget package plus the custom apps.
+/// Installed state of every winget package plus the custom apps, and the
+/// updates winget itself reports.
 #[tauri::command]
 pub async fn apps_installed(app: AppHandle) -> Result<InstalledReport, String> {
-    let (winget, custom) = tokio::join!(winget::list_installed(), custom::statuses(&app));
-    let (winget, winget_error) = match winget {
-        Ok(list) => (list, None),
-        Err(e) => (Vec::new(), Some(e)),
+    // The two winget queries run one after the other on purpose: winget's
+    // source cache is not safe to touch from two processes at once.
+    let ((installed, upgrades), custom) = tokio::join!(
+        async {
+            let installed = winget::list_installed().await;
+            let upgrades = winget::list_upgrades().await;
+            (installed, upgrades)
+        },
+        custom::statuses(&app),
+    );
+    let mut winget_error = None;
+    let winget = match installed {
+        Ok(list) => list,
+        Err(e) => {
+            winget_error = Some(e);
+            Vec::new()
+        }
+    };
+    let updates = match upgrades {
+        Ok(list) => list,
+        Err(e) => {
+            if winget_error.is_none() {
+                winget_error = Some(e);
+            }
+            Vec::new()
+        }
     };
     Ok(InstalledReport {
         winget,
+        updates,
         winget_error,
         custom,
     })

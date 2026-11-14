@@ -7,20 +7,17 @@ import type { GameSavesSettings } from "../pages/game-saves/api";
 import { diskState } from "../pages/disk-analyzer/state.svelte";
 import { appsState } from "../pages/install-apps/state.svelte";
 import { cleanerState } from "../pages/system-cleaner/state.svelte";
-import { maintenanceState } from "../pages/system-maintenance/state.svelte";
 import { githubReleases as githubReleasesState } from "../pages/github-releases/state.svelte";
 import type { PageState, SyncedProjects } from "../pages/github-releases/api";
 export const SYNCED_KEYS = [
   "myle.dark",
   "myle.sidebar.collapsed",
-  "myle.apps.view",
   "myle.apps.filter",
   "myle.apps.sort",
   "myle.apps.selected",
   "myle.apps.pinned",
   "myle.gameSaves.tab",
   "myle.gameSaves.filter",
-  "myle.maintenance.view",
   "cleaner.selected",
   // View choices only: scan results and paths never leave this PC.
   "myle.diskAnalyzer.sizeMode",
@@ -90,7 +87,6 @@ export async function apply(snapshot: Snapshot, includeGithubProjects = false): 
   settings.reload();
   nav.reload();
   appsState.reloadChoices();
-  maintenanceState.reloadView();
   cleanerState.reloadSelection();
   diskState.reloadChoices();
   gameSavesState.reloadChoices();

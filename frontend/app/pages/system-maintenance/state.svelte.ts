@@ -2,15 +2,12 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { confirm } from "../../../lib/confirm.svelte";
-import { readJson, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { maintenanceApi, type MaintenanceAction, type MaintenanceCard, type TaskOutcome } from "./api";
 import { appendOutput } from "./output";
-const KEY = { view: "myle.maintenance.view" };
 /** Kept per console; older lines are dropped so a long run stays responsive. */
 const MAX_LINES = 1200;
 const TRIM_TO = 1000;
-export type View = "grid" | "list";
 export type MaintenanceStatusKind =
   | "ready"
   | "running"
@@ -34,17 +31,12 @@ interface PendingLine {
   text: string;
   replace: boolean;
 }
-const oneOf =
-  <T extends string>(...values: T[]) =>
-  (v: unknown) =>
-    values.includes(v as T);
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 class MaintenanceState {
   cards = $state<MaintenanceCard[]>([]);
   loading = $state(true);
-  view = $state<View>(readJson(KEY.view, "grid", oneOf("grid", "list")));
   /** The action id that is running; everything else is locked while it is set. */
   running = $state<string | null>(null);
   /** "waiting" while the UAC prompt is up, "running" once it started. */
@@ -120,14 +112,6 @@ class MaintenanceState {
       this.stopping = false;
     };
     setTimeout(tick, 2000);
-  }
-  /** Re-reads the saved layout (after account sync replaced it). */
-  reloadView() {
-    this.view = readJson(KEY.view, this.view, oneOf("grid", "list"));
-  }
-  setView(view: View) {
-    this.view = view;
-    writeJson(KEY.view, view);
   }
   toggleConsole(cardId: string) {
     const buffer = (this.consoles[cardId] ??= { lines: [], open: false, dropped: 0 });

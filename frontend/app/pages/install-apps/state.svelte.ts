@@ -11,7 +11,8 @@ import { toast } from "../../../lib/toast.svelte";
 import { api, type JobEvent, type JobOutcome, type Mode, type PackageLinks, type Stage } from "./api";
 import { CATEGORIES, categorize, isCategory, type Category } from "./categories";
 import catalog from "./data/apps.json";
-export type Source = "winget" | "custom" | "catalog";
+import { autoUpdateCards, type WingetUpgrade } from "./updates";
+export type Source = "winget" | "custom" | "catalog" | "update";
 export interface AppEntry {
   id: string;
   name: string;
@@ -32,7 +33,6 @@ export interface AppEntry {
   version?: string;
 }
 export type Status = "installed" | "update" | "missing" | "unknown";
-export type View = "grid" | "list";
 export type Filter = "all" | "installed" | "updates" | "missing";
 export type Sort = "category" | "az" | "za" | "status";
 export interface AppStatus {
@@ -55,7 +55,6 @@ export interface Pack {
   apps: string[];
 }
 const KEY = {
-  view: "myle.apps.view",
   filter: "myle.apps.filter",
   sort: "myle.apps.sort",
   selected: "myle.apps.selected",
@@ -100,7 +99,6 @@ class InstallAppsState {
   readonly curated: AppEntry[] = catalog.apps.map(fromCatalog);
   custom = $state<AppEntry[]>([]);
   // Persisted choices
-  view = $state<View>(readJson(KEY.view, "grid", oneOf("grid", "list")));
   filter = $state<Filter>(readJson(KEY.filter, "all", oneOf("all", "installed", "updates", "missing")));
   sort = $state<Sort>(readJson(KEY.sort, "category", oneOf("category", "az", "za", "status")));
   readonly selected = new SvelteSet<string>(readJson<string[]>(KEY.selected, [], isStringArray));
@@ -116,6 +114,10 @@ class InstallAppsState {
   #searchSeq = 0;
   // Installed state (cached, then refreshed)
   statuses = $state<Record<string, AppStatus>>(readJson(KEY.statuses, {}, isRecord));
+  /** Packages winget reports an update for; empty until the first check. */
+  updates = $state<WingetUpgrade[]>([]);
+  /** Selected updates: they may only ever be upgraded, never installed fresh. */
+  #updatePicked = new Set<string>();
   checking = $state(false);
   checkedOnce = $state(false);
   wingetError = $state<string | null>(null);
@@ -162,10 +164,14 @@ class InstallAppsState {
         c.installed++;
       } else if (s === "missing") c.missing++;
     }
+    // The Updates view also draws cards MYLE has no entry for, and pinned ones:
+    // its badge counts exactly the cards it shows.
+    c.updates += this.autoUpdates.length + this.pinned.filter((p) => this.statusOf(p) === "update").length;
     return c;
   });
   readonly visible = $derived.by(() => {
     const list = this.scoped.filter((a) => this.matchesFilter(a));
+    if (this.filter === "updates") list.push(...this.autoUpdates);
     const byName = (a: AppEntry, b: AppEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
     switch (this.sort) {
       case "za":
@@ -185,8 +191,21 @@ class InstallAppsState {
   });
   /** Pinned catalog apps that pass the status filter. */
   readonly visiblePinned = $derived(this.pinned.filter((a) => this.matchesFilter(a)));
+  readonly updatesById = $derived(new Map(this.updates.map((u) => [key(u.id), u])));
+  /** Cards for updates MYLE has no entry for: the Updates view shows these. */
+  readonly autoUpdates = $derived.by(() => {
+    // A pack lists its own apps only.
+    if (this.activePack) return [];
+    const known = [...this.all, ...this.pinned].map((a) => a.id);
+    return autoUpdateCards(this.updates, known, this.appliedQuery).map((card) => this.#updateEntry({
+      ...this.updatesById.get(key(card.id))!,
+      ...card,
+    }));
+  });
   /** The "More from catalog" section shows when a search matches nothing local. */
-  readonly showCatalog = $derived(this.appliedQuery.trim().length >= 2 && this.scoped.length === 0 && !this.activePack);
+  readonly showCatalog = $derived(
+    this.appliedQuery.trim().length >= 2 && this.scoped.length === 0 && !this.activePack && this.filter !== "updates",
+  );
   readonly shownCount = $derived(
     this.visible.length + this.visiblePinned.length + (this.showCatalog ? this.catalogResults.length : 0),
   );
@@ -195,17 +214,25 @@ class InstallAppsState {
   readonly externallyLocked = $derived(operationGate.lockedFor("install-apps"));
   // ---------------------------------------------------------------- status
   statusOf(app: AppEntry): Status {
+    // `winget upgrade` is the authority on updates: it also covers packages
+    // whose installed version it cannot read, and self-updating apps.
+    if (this.updatesById.has(key(app.id))) return "update";
     const s = this.statuses[key(app.id)];
     if (!s) return this.checkedOnce ? "missing" : "unknown";
     if (!s.installed) return "missing";
-    if (s.available && !app.selfUpdating) return "update";
     return "installed";
   }
   statusInfo(app: AppEntry): AppStatus | undefined {
-    return this.statuses[key(app.id)];
+    const s = this.statuses[key(app.id)];
+    const update = this.updatesById.get(key(app.id));
+    // A card made from the update list only knows what winget reported.
+    if (!s) return update ? { installed: true, version: update.version, available: update.available } : undefined;
+    // When winget offers an update, its own list knows the version it offers.
+    return update ? { ...s, available: update.available } : s;
   }
   private matchesFilter(app: AppEntry): boolean {
-    if (this.recent.has(key(app.id))) return true;
+    // An app that just finished must not linger in the Updates list.
+    if (this.filter !== "updates" && this.recent.has(key(app.id))) return true;
     const s = this.statusOf(app);
     switch (this.filter) {
       case "installed":
@@ -286,6 +313,9 @@ class InstallAppsState {
         };
       }
       this.statuses = next;
+      this.updates = report.updates ?? [];
+      // A tick left on an update winget no longer offers must not become a fresh install.
+      if (!report.wingetError) this.#pruneUpdateSelection();
       this.checkedOnce = true;
       this.#lastCheck = Date.now();
       writeJson(KEY.statuses, next);
@@ -298,20 +328,31 @@ class InstallAppsState {
       this.checking = false;
     }
   }
+  /** Unticks updates winget stopped offering (updated, removed): they may only be upgraded. */
+  #pruneUpdateSelection() {
+    if (!this.#updatePicked.size) return;
+    const updating = new Set(this.updates.map((u) => key(u.id)));
+    let changed = false;
+    for (const id of [...this.#updatePicked]) {
+      if (updating.has(id)) continue;
+      this.#updatePicked.delete(id);
+      for (const selected of [...this.selected]) {
+        if (key(selected) !== id) continue;
+        this.selected.delete(selected);
+        changed = true;
+      }
+    }
+    if (changed) this.persistSelection();
+  }
   // ---------------------------------------------------------------- choices
   /** Re-reads the saved choices (after account sync replaced them). */
   reloadChoices() {
-    this.view = readJson(KEY.view, this.view, oneOf("grid", "list"));
     this.filter = readJson(KEY.filter, this.filter, oneOf("all", "installed", "updates", "missing"));
     this.sort = readJson(KEY.sort, this.sort, oneOf("category", "az", "za", "status"));
     const selected = readJson<string[]>(KEY.selected, [...this.selected], isStringArray);
     this.selected.clear();
     for (const id of selected) this.selected.add(id);
     this.pinned = readJson(KEY.pinned, this.pinned, isEntryArray);
-  }
-  setView(view: View) {
-    this.view = view;
-    writeJson(KEY.view, view);
   }
   setFilter(filter: Filter) {
     this.forgetRecent();
@@ -334,6 +375,7 @@ class InstallAppsState {
     this.activePack = null;
     this.filter = "all";
     this.selected.clear();
+    this.#updatePicked.clear();
     this.pinned = [];
     this.selected.add(app.id);
     writeJson(KEY.filter, this.filter);
@@ -358,15 +400,18 @@ class InstallAppsState {
   toggle(app: AppEntry) {
     if (this.selected.has(app.id)) {
       this.selected.delete(app.id);
+      this.#updatePicked.delete(key(app.id));
       if (app.source === "catalog") this.pinned = this.pinned.filter((p) => p.id !== app.id);
     } else {
       this.selected.add(app.id);
+      if (this.statusOf(app) === "update") this.#updatePicked.add(key(app.id));
       if (app.source === "catalog" && !this.pinned.some((p) => p.id === app.id)) this.pinned.push(app);
     }
     this.persistSelection();
   }
   uncheckAll() {
     this.selected.clear();
+    this.#updatePicked.clear();
     this.pinned = [];
     this.persistSelection();
   }
@@ -413,7 +458,7 @@ class InstallAppsState {
   // ---------------------------------------------------------------- catalog links
   /* Gives a catalog result its website and favicon (called when its card scrolls into view). Results are cached across sessions. */
   resolveLinks(app: AppEntry) {
-    if (app.source !== "catalog" || app.site || !isTauri()) return;
+    if ((app.source !== "catalog" && app.source !== "update") || app.site || !isTauri()) return;
     const k = key(app.id);
     const cached = this.#links[k];
     if (cached) {
@@ -452,7 +497,7 @@ class InstallAppsState {
   }
   private applyLinks(k: string, links: PackageLinks) {
     let pinnedChanged = false;
-    for (const list of [this.catalogResults, this.pinned]) {
+    for (const list of [this.catalogResults, this.pinned, this.updates]) {
       for (const app of list) {
         if (key(app.id) !== k || app.site) continue;
         app.site = links.homepage?.replace(/^https?:\/\//, "") ?? undefined;
@@ -466,7 +511,7 @@ class InstallAppsState {
   async openSite(app: AppEntry) {
     try {
       let url = app.site ? `https://${app.site}` : null;
-      if (!url && app.source === "catalog") url = (this.#links[key(app.id)] ?? (await this.fetchLinks(app.id))).homepage;
+      if (!url && (app.source === "catalog" || app.source === "update")) url = (this.#links[key(app.id)] ?? (await this.fetchLinks(app.id))).homepage;
       if (url) await openUrl(url);
       else toast.info(`${app.name} has no website listed.`);
     } catch (err) {
@@ -516,6 +561,17 @@ class InstallAppsState {
     if (this.#running || this.#selecting || this.#activations > 0 || this.#queue.length) return;
     operationGate.end("install-apps");
   }
+  /** One card for an update MYLE has no app entry for. */
+  #updateEntry(update: WingetUpgrade): AppEntry {
+    return {
+      id: update.id,
+      name: update.name,
+      source: "update",
+      category: categorize(update.id),
+      site: update.site,
+      iconDomain: update.iconDomain,
+    };
+  }
   /** Installs the checked apps; ones with an update are updated instead. */
   async installSelected() {
     if (this.#selecting) return;
@@ -533,14 +589,30 @@ class InstallAppsState {
     }
   }
   async #queueSelected() {
+    // Every update card, not just the ones the search box currently shows: a
+    // tick must keep working after the search is changed.
     const byId = new Map([...this.all, ...this.pinned].map((a) => [a.id, a]));
+    const known = new Set([...byId.keys()].map(key));
+    for (const update of this.updates) {
+      if (known.has(key(update.id))) continue;
+      byId.set(update.id, this.#updateEntry(update));
+    }
     let skipped = 0;
+    let stale = 0;
     for (const id of [...this.selected]) {
       const app = byId.get(id);
-      if (!app) continue;
+      // An update card that winget stopped offering is gone from `autoUpdates`: never install it.
+      if (!app) {
+        stale++;
+        continue;
+      }
       const status = this.statusOf(app);
       if (status === "installed") {
         skipped++;
+        continue;
+      }
+      if (app.source === "update" && status !== "update") {
+        stale++;
         continue;
       }
       const mode = status === "update" ? "upgrade" : "install";
@@ -548,6 +620,7 @@ class InstallAppsState {
       this.enqueue(app, mode);
     }
     if (skipped) toast.info(`${skipped} selected ${skipped === 1 ? "app is" : "apps are"} already installed.`);
+    if (stale) toast.info(`${stale} selected ${stale === 1 ? "update is" : "updates are"} no longer available.`);
   }
   /** Warns before installing an app that cannot coexist with an installed one. */
   private async confirmConflicts(app: AppEntry): Promise<boolean> {
@@ -611,6 +684,11 @@ class InstallAppsState {
       }, LATE_RECHECK_MS);
     }
   }
+  /** An update winget just finished (or no longer needs) leaves the list at once. */
+  #dropUpdate(k: string) {
+    if (!this.updates.some((u) => key(u.id) === k)) return;
+    this.updates = this.updates.filter((u) => key(u.id) !== k);
+  }
   /** Runs one job; returns true if something was installed or updated. */
   private async run(entry: AppEntry, mode: Mode): Promise<boolean> {
     const k = key(entry.id);
@@ -649,14 +727,17 @@ class InstallAppsState {
       switch (outcome.result) {
         case "done": {
           const s = this.statuses[k];
+          const update = this.updatesById.get(k);
           this.statuses[k] = {
             ...s,
             installed: true,
-            version: s?.available ?? s?.version,
+            version: update?.available ?? s?.version,
             available: undefined,
             activated: entry.activateAfterInstall || s?.activated,
           };
           this.selected.delete(entry.id);
+          this.#updatePicked.delete(k);
+          this.#dropUpdate(k);
           this.recent.add(k);
           this.persistSelection();
           toast.success(`${entry.name} ${verb}.${outcome.note ? ` ${outcome.note}` : ""}`);
@@ -665,7 +746,11 @@ class InstallAppsState {
         case "upToDate": {
           const s = this.statuses[k];
           if (s) s.available = undefined;
+          this.selected.delete(entry.id);
+          this.#updatePicked.delete(k);
+          this.#dropUpdate(k);
           this.recent.add(k);
+          this.persistSelection();
           toast.info(`${entry.name} is already up to date.`);
           return false;
         }

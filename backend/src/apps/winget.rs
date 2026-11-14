@@ -43,6 +43,19 @@ pub struct SearchHit {
     pub name: String,
     pub version: String,
 }
+/// One package `winget upgrade` offers an update for. Its own list, not the
+/// `Available` column of `winget list`, so unknown and self-updating packages
+/// are included exactly when winget reports them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpgradePackage {
+    pub id: String,
+    pub name: String,
+    /// Installed version; "Unknown" when winget cannot read it.
+    pub version: String,
+    /// Newer version offered by winget.
+    pub available: String,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
@@ -210,6 +223,21 @@ pub async fn list_installed() -> Result<Vec<InstalledPackage>, String> {
     }
     Ok(parse_installed(&out))
 }
+/// The packages winget reports an update for. `--include-unknown` covers the
+/// ones whose installed version it cannot read (e.g. GitHub CLI, .NET runtimes).
+pub async fn list_upgrades() -> Result<Vec<UpgradePackage>, String> {
+    let (code, out) = capture(&["upgrade", "--include-unknown", "--source", "winget"]).await?;
+    if code == 0 || code == NO_APPLICABLE_UPDATE || code == NO_PACKAGES_FOUND {
+        return Ok(parse_upgrades(&out));
+    }
+    // Older winget builds do not know `--include-unknown`: the plain list still
+    // answers for everything whose installed version they can read.
+    let (code, out) = capture(&["upgrade", "--source", "winget"]).await?;
+    if code != 0 && code != NO_APPLICABLE_UPDATE && code != NO_PACKAGES_FOUND {
+        return Err(format!("winget upgrade failed: {}", describe(code)));
+    }
+    Ok(parse_upgrades(&out))
+}
 /// Runs winget hidden and returns (exit code, stdout).
 async fn capture(args: &[&str]) -> Result<(i32, String), String> {
     let output = hidden(super::process::winget())
@@ -330,6 +358,34 @@ pub fn parse_installed(out: &str) -> Vec<InstalledPackage> {
             available: available
                 .map(|a| row[a].clone())
                 .filter(|v| v.chars().any(|c| c.is_ascii_digit())),
+        })
+        .collect()
+}
+/// The `winget upgrade` table: Name, Id, Version, Available, Source. A package
+/// appears once even if winget lists it twice (several installed copies).
+pub fn parse_upgrades(out: &str) -> Vec<UpgradePackage> {
+    let Some(table) = parse_table(out) else {
+        return Vec::new();
+    };
+    let (Some(name), Some(id), Some(version), Some(available)) = (
+        table.column("Name", 0),
+        table.column("Id", 1),
+        table.column("Version", 2),
+        table.column("Available", 3),
+    ) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    table
+        .rows
+        .iter()
+        .filter(|row| validate_id(&row[id]).is_ok())
+        .filter(|row| !row[available].is_empty() && seen.insert(row[id].to_ascii_lowercase()))
+        .map(|row| UpgradePackage {
+            id: row[id].clone(),
+            name: row[name].clone(),
+            version: row[version].clone(),
+            available: row[available].clone(),
         })
         .collect()
 }
@@ -469,6 +525,10 @@ fn install_args(id: &str, mode: Mode, attempt: &Attempt) -> Vec<String> {
     }
     if attempt.user_scope {
         args.extend(["--scope".into(), "user".into()]);
+    }
+    // A package whose installed version winget cannot read needs this to be upgraded at all.
+    if mode == Mode::Upgrade {
+        args.push("--include-unknown".into());
     }
     args
 }
@@ -759,6 +819,49 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
         assert!(parse_installed("No installed package found matching input criteria.").is_empty());
         assert!(parse_search("").is_empty());
     }
+    /// `winget upgrade --include-unknown --source winget` layout (rows taken
+    /// from real output): unknown versions, the same package listed twice, and
+    /// the Source column after Available.
+    fn upgrade_output() -> String {
+        let row = |cells: [&str; 5]| {
+            format!(
+                "{:<30}{:<30}{:<14}{:<12}{}\r\n",
+                cells[0], cells[1], cells[2], cells[3], cells[4]
+            )
+        };
+        let mut out = String::from("   - \r   \\ \r");
+        out += &row(["Name", "Id", "Version", "Available", "Source"]);
+        out += &format!("{}\r\n", "-".repeat(95));
+        out += &row(["GitHub CLI", "GitHub.cli", "Unknown", "2.80.0", "winget"]);
+        out += &row([
+            "Microsoft .NET Runtime 8",
+            "Microsoft.DotNet.Runtime.8",
+            "8.0.15",
+            "8.0.20",
+            "winget",
+        ]);
+        out += &row(["Spotify", "Spotify.Spotify", "Unknown", "1.2.70.224", "winget"]);
+        out += &row(["GitHub CLI", "GitHub.cli", "Unknown", "2.80.0", "winget"]);
+        out += "\r\n";
+        out
+    }
+    #[test]
+    fn upgrade_table_keeps_unknown_versions_and_dedupes() {
+        let upgrades = parse_upgrades(&upgrade_output());
+        assert_eq!(upgrades.len(), 3);
+        assert_eq!(upgrades[0].id, "GitHub.cli");
+        assert_eq!(upgrades[0].version, "Unknown");
+        assert_eq!(upgrades[0].available, "2.80.0");
+        assert_eq!(upgrades[1].id, "Microsoft.DotNet.Runtime.8");
+        assert_eq!(upgrades[1].available, "8.0.20");
+        assert_eq!(upgrades[2].id, "Spotify.Spotify");
+        assert_eq!(upgrades[2].version, "Unknown");
+    }
+    #[test]
+    fn no_upgrade_table_means_no_updates() {
+        assert!(parse_upgrades("No installed package found matching input criteria.").is_empty());
+        assert!(parse_upgrades("").is_empty());
+    }
     #[test]
     fn links_prefer_the_homepage() {
         let show = "Found Bforartists 4 [Bforartists.Bforartists]\nPublisher Url: https://www.bforartists.de/\nHomepage: https://www.bforartists.de/download/\n";
@@ -924,6 +1027,18 @@ Installer:\n  Installer Url: https://download.blender.org/release/Blender5.2/ble
         assert!(args.windows(2).any(|w| w == ["--scope", "user"]));
         assert!(
             !install_args("Git.Git", Mode::Install, &ATTEMPTS[1]).contains(&"--silent".to_string())
+        );
+    }
+    #[test]
+    fn upgrades_of_unknown_versions_pass_include_unknown() {
+        // winget refuses to update a package whose installed version it cannot read without it.
+        assert!(
+            install_args("GitHub.cli", Mode::Upgrade, &ATTEMPTS[0])
+                .contains(&"--include-unknown".to_string())
+        );
+        assert!(
+            !install_args("GitHub.cli", Mode::Install, &ATTEMPTS[0])
+                .contains(&"--include-unknown".to_string())
         );
     }
 }

@@ -6,6 +6,15 @@ export interface InstalledPackage {
   version: string;
   available: string | null;
 }
+/** One package `winget upgrade` reports an update for. */
+export interface UpgradePackage {
+  id: string;
+  name: string;
+  /** Installed version; "Unknown" when winget cannot read it. */
+  version: string;
+  /** Newer version offered by winget. */
+  available: string;
+}
 export interface CustomStatus {
   id: string;
   installed: boolean;
@@ -16,6 +25,8 @@ export interface CustomStatus {
 }
 export interface InstalledReport {
   winget: InstalledPackage[];
+  /** Every package winget offers an update for, catalog or not. */
+  updates: UpgradePackage[];
   wingetError: string | null;
   custom: CustomStatus[];
 }

@@ -21,9 +21,9 @@
     if (isResolvedFavicon && Math.min(image.naturalWidth, image.naturalHeight) < 48) rejectSource();
   }
 
-  // Catalog search results carry no site: look it up once the card is visible.
+  // Catalog search results and update cards carry no site: look it up once the card is visible.
   function lookUpWhenVisible(node: HTMLElement) {
-    if (app.source !== "catalog" || app.site) return;
+    if ((app.source !== "catalog" && app.source !== "update") || app.site) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) {
         observer.disconnect();

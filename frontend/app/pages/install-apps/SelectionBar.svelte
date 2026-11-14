@@ -8,6 +8,8 @@
   import { appsState } from "./state.svelte";
 
   const n = $derived(appsState.selected.size);
+  // On the Updates view the batch can only ever upgrade, never install.
+  const updating = $derived(appsState.filter === "updates");
 </script>
 
 <div class="selection-bar">
@@ -43,7 +45,7 @@
 
     <button class="btn primary install" disabled={!n || appsState.externallyLocked} onclick={() => appsState.installSelected()}>
       <Download size={15} />
-      Install ({n})
+      {updating ? "Update" : "Install"} ({n})
     </button>
   </div>
 </div>

@@ -2,8 +2,6 @@
   import ArrowDownUp from "@lucide/svelte/icons/arrow-down-up";
   import Boxes from "@lucide/svelte/icons/boxes";
   import Check from "@lucide/svelte/icons/check";
-  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
-  import List from "@lucide/svelte/icons/list";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -78,27 +76,6 @@
         </div>
       {/snippet}
     </Popover>
-
-    <div class="segmented" role="group" aria-label="View">
-      <button
-        class="icon-btn"
-        class:active={appsState.view === "grid"}
-        aria-pressed={appsState.view === "grid"}
-        title="Grid view"
-        onclick={() => appsState.setView("grid")}
-      >
-        <LayoutGrid size={16} />
-      </button>
-      <button
-        class="icon-btn"
-        class:active={appsState.view === "list"}
-        aria-pressed={appsState.view === "list"}
-        title="List view"
-        onclick={() => appsState.setView("list")}
-      >
-        <List size={16} />
-      </button>
-    </div>
 
     <Popover align="end">
       {#snippet trigger({ toggle, open })}
@@ -187,10 +164,6 @@
   .clear { position: absolute; right: 3px; width: 28px; height: 28px; }
 
   .btn.open { background: rgb(255 255 255 / 0.1); }
-
-  .segmented { display: flex; gap: 2px; padding: 1px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.15); }
-
-  .segmented .icon-btn { width: 32px; height: 28px; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 

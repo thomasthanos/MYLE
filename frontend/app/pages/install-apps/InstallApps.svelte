@@ -17,9 +17,9 @@
 </script>
 
 {#snippet apps(list: AppEntry[])}
-  <div class="apps {appsState.view}">
+  <div class="apps">
     {#each list as app (app.id)}
-      <AppCard {app} view={appsState.view} />
+      <AppCard {app} />
     {/each}
   </div>
 {/snippet}
@@ -65,7 +65,9 @@
 {/if}
 
 {#if nothingShown}
-  <p class="empty">No apps match these filters.</p>
+  <p class="empty">
+    {appsState.filter === "updates" && appsState.checkedOnce ? "Everything is up to date." : "No apps match these filters."}
+  </p>
 {/if}
 
 <SelectionBar />
@@ -98,15 +100,10 @@
     font-weight: 500;
   }
 
-  .apps.grid {
+  .apps {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 10px;
-  }
-
-  .apps.list {
-    display: grid;
-    gap: 6px;
   }
 
   .banner {

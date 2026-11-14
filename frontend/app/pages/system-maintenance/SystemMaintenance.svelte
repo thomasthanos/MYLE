@@ -2,8 +2,6 @@
   import { onMount } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
-  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
-  import List from "@lucide/svelte/icons/list";
   import PackageCheck from "@lucide/svelte/icons/package-check";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Wifi from "@lucide/svelte/icons/wifi";
@@ -36,26 +34,6 @@
         <ShieldCheck size={13} />
         One action at a time
       </span>
-      <div class="segmented" role="group" aria-label="View">
-        <button
-          class="icon-btn"
-          class:active={s.view === "grid"}
-          aria-pressed={s.view === "grid"}
-          title="Grid view"
-          onclick={() => s.setView("grid")}
-        >
-          <LayoutGrid size={16} />
-        </button>
-        <button
-          class="icon-btn"
-          class:active={s.view === "list"}
-          aria-pressed={s.view === "list"}
-          title="List view"
-          onclick={() => s.setView("list")}
-        >
-          <List size={16} />
-        </button>
-      </div>
     </div>
   </div>
 
@@ -92,12 +70,11 @@
             <span class="section-count">{section.cards.length}</span>
             <span class="section-divider" aria-hidden="true"></span>
           </div>
-          <div class="cards {s.view}">
+          <div class="cards">
             {#each section.cards as card, i (card.id)}
               <MaintenanceCard
                 {card}
-                view={s.view}
-                wide={s.view === "grid" && section.cards.length % 2 === 1 && i === section.cards.length - 1}
+                wide={section.cards.length % 2 === 1 && i === section.cards.length - 1}
               />
             {/each}
           </div>
@@ -115,10 +92,6 @@
   .tools { display: flex; align-items: center; gap: 10px; /* Line the controls up with the page title, not the subtitle. */ margin-top: 4px; }
 
   .safety { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid rgb(var(--accent-rgb) / 0.18); border-radius: 999px; background: rgb(var(--accent-rgb) / 0.065); color: var(--text-2); font-size: 11.5px; font-weight: 500; }
-
-  .segmented { display: flex; gap: 2px; padding: 1px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 10px; background: rgb(0 0 0 / 0.15); }
-
-  .segmented .icon-btn { width: 32px; height: 28px; }
 
   .banner { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border-color: rgb(229 72 77 / 0.35); color: #ffb4b0; font-size: 13px; }
 
@@ -138,14 +111,10 @@
 
   .section-divider { height: 1px; flex: 1; background: linear-gradient(90deg, rgb(255 255 255 / 0.085), transparent); }
 
-  .cards { display: grid; gap: 12px; align-items: stretch; }
+  .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 
   /* A card with its console open must not stretch the one beside it. */
   .cards:has(:global(.console.expanded)) { align-items: start; }
-
-  .cards.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-  .cards.list { grid-template-columns: 1fr; }
 
   .skeleton-heading { width: 210px; height: 22px; margin: 0 0 12px; }
 
@@ -163,7 +132,7 @@
   .skeleton-footer { grid-column: 1 / -1; align-self: end; width: 100%; height: 28px; margin-top: 8px; }
 
   @container maintenance (max-width: 760px) {
-    .cards.grid,
+    .cards,
     .skeleton-grid {
       grid-template-columns: 1fr;
     }

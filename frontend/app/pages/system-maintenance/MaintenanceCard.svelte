@@ -12,9 +12,9 @@
   import Volume2 from "@lucide/svelte/icons/volume-2";
   import type { MaintenanceCard } from "./api";
   import Console from "./Console.svelte";
-  import { maintenanceState as s, type View } from "./state.svelte";
+  import { maintenanceState as s } from "./state.svelte";
 
-  let { card, view, wide = false }: { card: MaintenanceCard; view: View; wide?: boolean } = $props();
+  let { card, wide = false }: { card: MaintenanceCard; wide?: boolean } = $props();
 
   const icons: Record<string, typeof Globe> = {
     dns: Globe,
@@ -33,7 +33,7 @@
 </script>
 
 <article
-  class="card {view}"
+  class="card"
   class:wide
   class:has-notice={card.caution !== null}
   class:working={card.actions.some((a) => s.isRunning(a.id))}
@@ -157,22 +157,16 @@
   /* The console spans the whole card, under all columns. */
   .console-slot { grid-column: 1 / -1; }
 
-  .card.list,
   .card.wide { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 18px; }
 
-  .card.list .footer,
   .card.wide .footer { grid-column: 2; grid-row: 1 / span 2; align-self: stretch; justify-content: flex-end; gap: 16px; margin-top: 0; padding-top: 0; padding-left: 18px; border-top: 0; border-left: 1px solid rgb(255 255 255 / 0.06); }
 
-  .card.list .notice,
   .card.wide .notice { grid-column: 1; }
 
-  .card.list .console-slot,
   .card.wide .console-slot { grid-row: 3; }
 
-  .card.list:not(.has-notice) .footer,
   .card.wide:not(.has-notice) .footer { grid-row: 1; }
 
-  .card.list:not(.has-notice) .console-slot,
   .card.wide:not(.has-notice) .console-slot { grid-row: 2; }
 
   @keyframes status-pulse {
@@ -181,14 +175,12 @@
   }
 
   @container maintenance (max-width: 650px) {
-    .card.list,
     .card.wide {
       display: flex;
       flex-direction: column;
       align-items: stretch;
     }
 
-    .card.list .footer,
     .card.wide .footer {
       justify-content: space-between;
       margin-top: auto;
