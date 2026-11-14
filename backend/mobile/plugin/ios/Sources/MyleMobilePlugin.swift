@@ -5,8 +5,6 @@ import SwiftRs
 import Tauri
 import UIKit
 import WebKit
-import WebKit
-
 class SignInArgs: Decodable {
   let url: String
   let callbackScheme: String
