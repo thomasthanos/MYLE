@@ -540,15 +540,27 @@ pub(crate) async fn upload_asset(
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(20))
+        // A server that stops reading or answering is given up on.
+        .read_timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| error.to_string())?;
-    let result = send(
+    let sending = send(
         request(&client, reqwest::Method::POST, &url, token)
             .header("Content-Type", content_type(name))
             .header("Content-Length", total)
             .body(reqwest::Body::wrap_stream(stream)),
-    )
-    .await;
+    );
+    // Cancel was only seen while the body was being read: with the server
+    // not reading, nothing asked for it and Cancel did nothing.
+    let cancelled = async {
+        while !cancel.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    };
+    let result = tokio::select! {
+        result = sending => result,
+        () = cancelled => return Err(CANCELLED.into()),
+    };
     if cancel.load(Ordering::Relaxed) {
         return Err(CANCELLED.into());
     }

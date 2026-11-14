@@ -219,9 +219,12 @@ async fn cached_executable_version(exe: &std::path::Path) -> (Option<String>, bo
     (version, healthy)
 }
 async fn executable_version(exe: &std::path::Path) -> (Option<String>, bool) {
-    let output = hidden(exe).arg("-v").stdin(Stdio::null()).output().await;
+    // A broken install can hang on `-v`: the page must not wait for it.
+    let mut command = hidden(exe);
+    command.arg("-v").stdin(Stdio::null()).kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(15), command.output()).await;
     match output {
-        Ok(output) if output.status.success() => {
+        Ok(Ok(output)) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout);
             let version = text
                 .split_whitespace()

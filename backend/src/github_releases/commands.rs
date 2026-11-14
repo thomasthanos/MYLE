@@ -1987,11 +1987,15 @@ pub struct GhStatus {
 }
 async fn gh_token() -> Option<zeroize::Zeroizing<String>> {
     let gh = git::gh_exe()?;
-    let output = crate::apps::process::hidden(gh)
+    let mut command = crate::apps::process::hidden(gh);
+    command
         .args(["auth", "token", "--hostname", "github.com"])
         .stdin(std::process::Stdio::null())
-        .output()
+        .kill_on_drop(true);
+    // A gh waiting on its keyring (or for input) must not hold the page.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(20), command.output())
         .await
+        .ok()?
         .ok()?;
     let token = zeroize::Zeroizing::new(String::from_utf8_lossy(&output.stdout).trim().to_string());
     (output.status.success() && !token.is_empty()).then_some(token)

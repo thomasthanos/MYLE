@@ -239,14 +239,21 @@ pub async fn list_upgrades() -> Result<Vec<UpgradePackage>, String> {
     Ok(parse_upgrades(&out))
 }
 /// Runs winget hidden and returns (exit code, stdout).
+/// How long a query (list, search, show) may take: a winget stuck on its
+/// source left the page waiting for good.
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 async fn capture(args: &[&str]) -> Result<(i32, String), String> {
-    let output = hidden(super::process::winget())
+    let mut command = hidden(super::process::winget());
+    command
         .args(args)
         .args(COMMON_ARGS)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
-        .output()
+        // Dropped on the timeout: the query is killed with it.
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(QUERY_TIMEOUT, command.output())
         .await
+        .map_err(|_| "winget did not answer in time. Try again.".to_string())?
         .map_err(spawn_error)?;
     Ok((
         output.status.code().unwrap_or(-1),
@@ -540,6 +547,11 @@ async fn install_with_retries(
 ) -> Result<JobOutcome, String> {
     let mut last_error = String::new();
     for attempt in &ATTEMPTS {
+        // A Cancel between two attempts found no winget to stop: the next
+        // attempt (possibly with the installer's window) must not start.
+        if job.is_cancelled() {
+            return Ok(JobOutcome::Cancelled);
+        }
         if let Some(note) = attempt.note {
             let _ = on_event.send(JobEvent::Note { text: note.into() });
         }
@@ -635,9 +647,23 @@ async fn run_streaming(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        // Any early return (a read error) ends winget instead of orphaning it.
+        .kill_on_drop(true)
         .spawn()
         .map_err(spawn_error)?;
+    // winget and the installer it starts, killed together if this goes away.
+    let tree = super::process::JobObject::new()
+        .filter(|tree| child.raw_handle().is_some_and(|handle| tree.assign(handle as _)));
     job.set_pid(child.id());
+    // Cancelled while it was starting: the PID was not there to stop yet.
+    if job.is_cancelled() {
+        match &tree {
+            Some(tree) => tree.kill(),
+            None => {
+                let _ = child.start_kill();
+            }
+        }
+    }
     let mut stdout = child
         .stdout
         .take()
@@ -645,7 +671,14 @@ async fn run_streaming(
     let mut splitter = LineSplitter::default();
     let mut buf = [0u8; 4096];
     loop {
-        let n = stdout.read(&mut buf).await.map_err(err)?;
+        let n = match stdout.read(&mut buf).await {
+            Ok(n) => n,
+            Err(error) => {
+                let _ = child.kill().await;
+                job.set_pid(None);
+                return Err(err(error));
+            }
+        };
         if n == 0 {
             break;
         }

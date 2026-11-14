@@ -953,11 +953,12 @@ async fn run_activation(entry: &CustomApp, activate: &Activate) -> Result<(), St
 }
 
 async fn run_activation_tool(exe: &Path, args: &[impl AsRef<std::ffi::OsStr>]) -> Result<(), String> {
-    let output = hidden(exe)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
+    let mut command = hidden(exe);
+    command.args(args).stdin(Stdio::null()).kill_on_drop(true);
+    // A tool waiting on something that never comes must not hold the card.
+    let output = tokio::time::timeout(std::time::Duration::from_secs(300), command.output())
         .await
+        .map_err(|_| format!("{} did not finish in 5 minutes and was stopped.", exe.display()))?
         .map_err(err)?;
     if output.status.success() {
         return Ok(());

@@ -269,8 +269,10 @@ mod tests {
     #[test]
     fn a_path_with_a_typographic_quote_reaches_powershell_whole() {
         let path = r"C:\Users\O’Brien\it's ‘odd’.txt";
+        // UTF-8 out: the console's own code page (737 on Greek Windows) has no ’.
+        let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write({})", ps_quote(path));
         let mut command = std::process::Command::new(powershell());
-        command.args(["-NoProfile", "-NonInteractive", "-Command", &format!("[Console]::Out.Write({})", ps_quote(path))]);
+        command.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encode_command(&script)]);
         let output = output_within(command, std::time::Duration::from_secs(60)).unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout), path);
     }
