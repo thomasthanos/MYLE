@@ -92,22 +92,26 @@ pub struct StartupSettings {
     /// A Startup shortcut is there.
     enabled: bool,
     minimized: bool,
-    /// Only the installed app can add itself (a dev build would point
-    /// Windows at the build folder).
+    /// Only an installed app or dev build with target exe can add itself.
     can_change: bool,
+}
+fn target_exe() -> Option<std::path::PathBuf> {
+    crate::updater::installed_exe()
+        .or_else(crate::updater::installed_copy)
+        .or_else(|| if cfg!(debug_assertions) { std::env::current_exe().ok() } else { None })
 }
 #[tauri::command]
 pub fn startup_get() -> StartupSettings {
     StartupSettings {
         enabled: !startup_links().is_empty(),
         minimized: start_minimized(),
-        can_change: crate::updater::installed_exe().is_some(),
+        can_change: target_exe().is_some(),
     }
 }
 #[tauri::command]
 pub async fn startup_set_enabled(enabled: bool) -> Result<(), String> {
-    let exe = crate::updater::installed_exe()
-        .ok_or("Only the installed app can start with Windows.")?;
+    let exe = target_exe()
+        .ok_or("The app executable could not be found.")?;
     if enabled {
         let folder = startup_folder().ok_or("The Startup folder could not be found.")?;
         std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
