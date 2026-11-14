@@ -947,13 +947,32 @@ async fn serve_client(app: AppHandle, state: PasswordsState, client: PipeServer)
                     .unwrap_or_else(|_| json!({ "ok": false, "error": "failed" }))
             }
         }
-        Err(_) => json!({ "ok": false, "error": "badRequest" }),
+        Err(_) => refusal(&line),
     };
     health(|h| h.last_served_at = Some(super::vault::now() * 1000));
     let mut out = Zeroizing::new(reply.to_string());
     out.push('\n');
     let _ = client.get_mut().write_all(out.as_bytes()).await;
     let _ = client.get_mut().flush().await;
+}
+/// The bridge's version: what a newer extension can count on from this MYLE.
+const BRIDGE_PROTOCOL: u32 = 1;
+/// Every request type this MYLE answers (`Request`).
+const KNOWN_TYPES: [&str; 18] = [
+    "status", "open", "logins", "fill", "totp", "saveTotp", "totpFromImage", "totpKnown", "totpFromPixels", "known",
+    "save", "copy", "generate", "passkeySites", "passkeyList", "passkeyCreate", "passkeyGet", "passkeyCancel",
+];
+/// The answer to a line that is not a request this MYLE takes: a type it
+/// does not know (from a newer extension, which can then say MYLE needs an
+/// update) is told apart from a malformed message.
+fn refusal(line: &str) -> Value {
+    let kind = serde_json::from_str::<Value>(line.trim())
+        .ok()
+        .and_then(|value| value.get("request")?.get("type")?.as_str().map(str::to_string));
+    match kind {
+        Some(kind) if !KNOWN_TYPES.contains(&kind.as_str()) => json!({ "ok": false, "error": "unknownType", "protocol": BRIDGE_PROTOCOL }),
+        _ => json!({ "ok": false, "error": "badRequest" }),
+    }
 }
 /// What the host passes on: the browser's request, and which browser.
 #[derive(Deserialize)]
@@ -1114,7 +1133,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
     if let Request::Status = request {
         // `appVersion` tells the extension how old this MYLE is. A vault file that can't be read is said so, never taken for "no vault yet".
         return match opened {
-            Ok((enabled, status)) => json!({ "ok": true, "enabled": enabled, "state": status, "appVersion": app_version }),
+            Ok((enabled, status)) => json!({ "ok": true, "enabled": enabled, "state": status, "appVersion": app_version, "protocol": BRIDGE_PROTOCOL }),
             Err(_) => json!({ "ok": false, "error": "vaultError", "appVersion": app_version }),
         };
     }
@@ -2168,6 +2187,20 @@ mod tests {
         assert_eq!(envelope.browser, "Edge");
         assert!(matches!(envelope.request, Request::Status));
         assert!(serde_json::from_value::<Envelope>(json!({ "type": "status" })).is_err(), "a bare request is refused");
+    }
+    #[test]
+    fn a_request_from_a_newer_extension_is_told_apart_from_a_malformed_one() {
+        let newer = refusal(r#"{"browser":"Edge","request":{"type":"somethingNew"}}"#);
+        assert_eq!(newer["error"], "unknownType");
+        assert_eq!(newer["protocol"], BRIDGE_PROTOCOL);
+        assert_eq!(refusal("not json")["error"], "badRequest");
+        // A known type with wrong fields is malformed, not unknown.
+        assert_eq!(refusal(r#"{"browser":"Edge","request":{"type":"fill"}}"#)["error"], "badRequest");
+        // Every type in the list is one `Request` reads.
+        for kind in KNOWN_TYPES {
+            let error = serde_json::from_value::<Request>(json!({ "type": kind })).err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(!error.contains("unknown variant"), "{kind}: {error}");
+        }
     }
     #[test]
     fn passkey_requests_are_read_with_the_extensions_names() {

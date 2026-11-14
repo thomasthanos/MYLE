@@ -288,7 +288,7 @@ async function copyTab(tabId, frameId, id, field) {
   if (!frame) return { ok: false, error: "pageChanged" };
   const answer = await ask({ type: "copy", id, url: frame.url, field });
   // A MYLE older than this extension does not know the request.
-  if (answer?.ok === false && answer.error === "badRequest") return { ok: false, error: "oldApp" };
+  if (answer?.ok === false && (answer.error === "badRequest" || answer.error === "unknownType")) return { ok: false, error: "oldApp" };
   return answer;
 }
 
