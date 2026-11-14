@@ -67,11 +67,31 @@ pub fn copy_secret(text: &str) -> Result<(), String> {
         return Err("Could not copy to the clipboard.".into());
     }
     let sequence = unsafe { GetClipboardSequenceNumber() };
+    *pending() = Some(sequence);
     std::thread::spawn(move || {
         std::thread::sleep(CLEAR_AFTER);
-        clear_if_unchanged(sequence);
+        let mut pending = pending();
+        if *pending == Some(sequence) {
+            *pending = None;
+            clear_if_unchanged(sequence);
+        }
     });
     Ok(())
+}
+/// The clipboard's sequence number right after the last secret was put on
+/// it, until that secret is cleared. The timer alone is not enough: it dies
+/// with the app, so a password copied just before closing (or an update)
+/// stayed on the clipboard for good.
+static PENDING: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+fn pending() -> std::sync::MutexGuard<'static, Option<u32>> {
+    PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+/// Clears a secret this app put on the clipboard, now, unless something
+/// else has been copied since: when the vault locks and when the app exits.
+pub fn clear_pending() {
+    if let Some(sequence) = pending().take() {
+        clear_if_unchanged(sequence);
+    }
 }
 /// The picture on the clipboard (a snip, a copied image), if there is one.
 pub fn read_image() -> Result<Option<super::qr::Grey>, String> {
@@ -89,12 +109,16 @@ pub fn read_image() -> Result<Option<super::qr::Grey>, String> {
     Ok(dib.and_then(|dib| super::qr::grey_from_dib(&dib)))
 }
 /// Empties the clipboard only if nothing has been copied since `sequence`.
+/// The check is made with the clipboard open: opening may wait for another
+/// program, and what that program copied meanwhile must not be wiped.
 pub fn clear_if_unchanged(sequence: u32) {
-    if unsafe { GetClipboardSequenceNumber() } != sequence || open().is_err() {
+    if open().is_err() {
         return;
     }
     unsafe {
-        EmptyClipboard();
+        if GetClipboardSequenceNumber() == sequence {
+            EmptyClipboard();
+        }
         CloseClipboard();
     }
 }

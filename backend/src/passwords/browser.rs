@@ -1542,13 +1542,13 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
             if allow.len() > 64 {
                 return Err("badRequest".into());
             }
-            let found = state.with_quiet(|vault| vault.passkeys_for(&rp_id, &allow))?;
+            let found = state.with_quiet(|vault| vault.passkey_infos_for(&rp_id, &allow))?;
             // Passkeys of this site the page did not ask for (its list names others): MYLE says so instead of quietly stepping aside. Their ids (not secret: sites list them) help the debug log.
             let unlisted: Vec<String> = if allow.is_empty() {
                 Vec::new()
             } else {
                 state
-                    .with_quiet(|vault| vault.passkeys_for(&rp_id, &[]))?
+                    .with_quiet(|vault| vault.passkey_infos_for(&rp_id, &[]))?
                     .into_iter()
                     .map(|(_, _, key)| key.credential_id)
                     .filter(|id| !found.iter().any(|(_, _, key)| key.credential_id == *id))
@@ -1591,7 +1591,7 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
                 return Err("badRequest".into());
             }
             // The vault already holds a passkey the site lists as taken.
-            if !exclude.is_empty() && !state.with_quiet(|vault| vault.passkeys_for(&rp_id, &exclude))?.is_empty() {
+            if !exclude.is_empty() && !state.with_quiet(|vault| vault.passkey_infos_for(&rp_id, &exclude))?.is_empty() {
                 return Err("excluded".into());
             }
             let operation = start_operation(browser, copy, &url, operation_id)?;
@@ -1615,19 +1615,22 @@ async fn passkey_reply(app: &AppHandle, state: &PasswordsState, browser: &str, c
             let host = page_host(&url).ok_or("insecure")?;
             let origin = passkeys::origin_of(&url).ok_or("insecure")?;
             let rp_id = passkeys::rp_id_for(&host, rp_id.as_deref())?;
-            let passkey = state
-                .with_quiet(|vault| vault.passkeys_for(&rp_id, std::slice::from_ref(&credential_id)))?
-                .into_iter()
-                .map(|(_, _, key)| key)
-                .next()
-                .ok_or("notFound")?;
+            // Only whether it exists here: the key stays in the vault.
+            if state
+                .with_quiet(|vault| vault.passkey_infos_for(&rp_id, std::slice::from_ref(&credential_id)))?
+                .is_empty()
+            {
+                return Err("notFound".into());
+            }
             let operation = start_operation(browser, copy, &url, operation_id)?;
             let verified = operation.verify(verify_user(app, &user_verification, &rp_id)).await?;
-            let credential = passkeys::sign_in(&passkey, &challenge, &origin, verified)?;
-            operation.commit(|| {
+            // Signed inside the vault, after the user said yes: a vault that
+            // locked during the prompt answers "locked" and signs nothing.
+            let credential = operation.commit(|| {
                 state.with_quiet(|vault| {
+                    let credential = vault.passkey_sign_in(&rp_id, &credential_id, &challenge, &origin, verified)?;
                     vault.touch();
-                    Ok(())
+                    Ok(credential)
                 })
             })?;
             Ok(json!({ "ok": true, "credential": credential }))

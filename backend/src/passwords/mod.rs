@@ -1,6 +1,6 @@
 // ! The Password Manager: an end-to-end encrypted vault (`vault.rs`, ! `crypto.rs`). The page never receives the vault key; a password reaches ! it only when the user reveals it, and copying goes through ! `clipboard.rs` without passing through the page at all.
 pub mod browser;
-mod clipboard;
+pub(crate) mod clipboard;
 mod extension_folder;
 mod hello;
 pub mod icons;
@@ -127,6 +127,8 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
                 }
             };
             if locked_now {
+                // A password copied before it locked does not outlive the vault.
+                clipboard::clear_pending();
                 let _ = app.emit(LOCKED_EVENT, ());
             }
         }
@@ -143,6 +145,7 @@ pub fn lock_now(app: &AppHandle) {
             Ok(open)
         })
         .unwrap_or(false);
+    clipboard::clear_pending();
     if was_open {
         let _ = app.emit(LOCKED_EVENT, ());
     }
@@ -264,6 +267,7 @@ pub async fn passwords_hello_unlock(state: State<'_, PasswordsState>) -> Result<
 }
 #[tauri::command(async)]
 pub fn passwords_lock(state: State<'_, PasswordsState>) -> Result<(), String> {
+    clipboard::clear_pending();
     state.with(|vault| {
         vault.lock();
         Ok(())

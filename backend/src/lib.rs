@@ -671,6 +671,8 @@ pub fn run() {
             autoclicker_state.shutdown();
             jobs.cancel_all();
             cleanup.run();
+            // A password copied in the last half-minute is not left behind.
+            passwords::clipboard::clear_pending();
         }
     });
 }

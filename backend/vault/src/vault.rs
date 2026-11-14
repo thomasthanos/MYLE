@@ -914,6 +914,44 @@ impl Vault {
         Ok(found)
     }
 
+    /// The same, without the private keys: what listing them, or checking
+    /// whether one exists, needs. A copy of a key left in memory is a copy
+    /// nobody wipes.
+    pub fn passkey_infos_for(
+        &mut self,
+        rp_id: &str,
+        allow: &[String],
+    ) -> Result<Vec<(String, String, super::passkeys::PasskeyInfo)>, String> {
+        let mut found = self.passkeys_for(rp_id, allow)?;
+        let infos = found.iter().map(|(id, title, key)| (id.clone(), title.clone(), key.info())).collect();
+        for (_, _, key) in &mut found {
+            key.zeroize();
+        }
+        Ok(infos)
+    }
+
+    /// Signs `challenge` with the passkey `credential_id` of `rp_id`, inside
+    /// the vault: the key never leaves it, and a vault that locked meanwhile
+    /// (a Windows Hello prompt can take two minutes) signs nothing.
+    pub fn passkey_sign_in(
+        &mut self,
+        rp_id: &str,
+        credential_id: &str,
+        challenge: &str,
+        origin: &str,
+        user_verified: bool,
+    ) -> Result<serde_json::Value, String> {
+        let mut found = self.passkeys_for(rp_id, &[credential_id.to_string()])?;
+        let signed = match found.first() {
+            Some((_, _, key)) => super::passkeys::sign_in(key, challenge, origin, user_verified),
+            None => Err("notFound".into()),
+        };
+        for (_, _, key) in &mut found {
+            key.zeroize();
+        }
+        signed
+    }
+
     /// Keeps a new passkey in the login `target`, or in a new login named
     /// `title` for `url`. A passkey of the same account on the same site goes
     /// (a site that makes a new one replaces the old). Returns the entry's id.
@@ -2245,6 +2283,31 @@ mod tests {
         vault.save(&rename).unwrap();
         let stored = &vault.unlocked().unwrap().entries[&newer];
         assert_eq!(stored.extra["fromLater"][0]["site"], "example.com");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_passkey_signs_inside_the_vault_and_never_once_it_is_locked() {
+        use super::super::passkeys;
+        let (path, mut vault) = temp_vault();
+        vault.create("master one", KdfParams::cheap_for_tests()).unwrap();
+        let user = passkeys::User { handle: "aGFuZGxl".into(), name: "me@example.com".into(), display_name: "Me".into() };
+        let challenge = "Y2hhbGxlbmdlLWNoYWxsZW5nZS0zMi1ieXRlcy0wMA";
+        let (passkey, _) = passkeys::create("example.com", "Example", &user, challenge, "https://example.com", true, 1).unwrap();
+        let credential_id = passkey.credential_id.clone();
+        vault.add_passkey(None, passkey, "Example", "https://example.com").unwrap();
+        // Listing gives what the page may see, never the key.
+        let listed = vault.passkey_infos_for("example.com", &[]).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].2.credential_id, credential_id);
+        assert!(vault.passkey_sign_in("example.com", &credential_id, challenge, "https://example.com", true).is_ok());
+        assert_eq!(
+            vault.passkey_sign_in("example.com", "unknown", challenge, "https://example.com", true).unwrap_err(),
+            "notFound"
+        );
+        // Locked while the user was being asked: nothing is signed.
+        vault.lock();
+        assert!(vault.passkey_sign_in("example.com", &credential_id, challenge, "https://example.com", true).is_err());
         let _ = std::fs::remove_file(path);
     }
 
