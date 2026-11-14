@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <filter id="nnz-shadow" x="20" y="20" width="216" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#020617" flood-opacity="0.72" />
+    </filter>
+    <linearGradient id="nnz-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F203D" />
+      <stop offset="52%" stop-color="#081224" />
+      <stop offset="100%" stop-color="#030811" />
+    </linearGradient>
+    <radialGradient id="nnz-glow-top" cx="28%" cy="18%" r="78%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.42" />
+      <stop offset="55%" stop-color="#0284C7" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#081224" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="nnz-glow-bottom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#818CF8" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#081224" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="nnz-rim" x1="128" y1="0" x2="128" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#BAE6FD" stop-opacity="0.65" />
+      <stop offset="25%" stop-color="#38BDF8" stop-opacity="0.32" />
+      <stop offset="80%" stop-color="#1E1B4B" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#818CF8" stop-opacity="0.42" />
+    </linearGradient>
+    <linearGradient id="nnz-sheen" x1="128" y1="0" x2="128" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="nnz-clip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#nnz-clip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#nnz-bg)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#nnz-glow-top)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#nnz-glow-bottom)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#nnz-sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#nnz-rim)" stroke-width="3" />
+  <g filter="url(#nnz-shadow)">
+    
+      <defs>
+        <linearGradient id="nnz-shield" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38BDF8" />
+          <stop offset="100%" stop-color="#0284C7" />
+        </linearGradient>
+        <linearGradient id="nnz-inner" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0F172A" />
+          <stop offset="100%" stop-color="#1E293B" />
+        </linearGradient>
+      </defs>
+      <path d="M128 52L192 76V132C192 170 164 198 128 208C92 198 64 170 64 132V76L128 52Z" fill="url(#nnz-shield)" stroke="#BAE6FD" stroke-width="4"/>
+      <path d="M128 66L180 86V130C180 160 158 184 128 194C98 184 76 160 76 130V86L128 66Z" fill="url(#nnz-inner)"/>
+      <!-- Zipper teeth -->
+      <rect x="122" y="80" width="12" height="6" rx="2" fill="#BAE6FD"/>
+      <rect x="122" y="92" width="12" height="6" rx="2" fill="#BAE6FD"/>
+      <rect x="122" y="104" width="12" height="6" rx="2" fill="#BAE6FD"/>
+      <rect x="122" y="116" width="12" height="6" rx="2" fill="#BAE6FD"/>
+      <!-- 7Z Typography -->
+      <text x="128" y="162" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">7Z</text>
+    
+  </g>
+</svg>

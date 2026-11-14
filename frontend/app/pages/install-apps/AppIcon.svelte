@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CUSTOM_ICONS, iconSources as sourcesOf } from "./icons";
+  import { resolveCustomIcon, iconSources as sourcesOf } from "./icons";
   import { appsState, type AppEntry, type Status } from "./state.svelte";
 
   let { app, status, size = 36 }: { app: AppEntry; status: Status; size?: number } = $props();
@@ -9,7 +9,7 @@
   let rejectedSources = $state<string[]>([]);
   const src = $derived(iconSources.find((candidate) => !rejectedSources.includes(candidate)) ?? null);
   const isCustomSvg = $derived(!!src && src.startsWith("/icons/"));
-  const isResolvedFavicon = $derived(!app.icon && !CUSTOM_ICONS[app.id] && !!src);
+  const isResolvedFavicon = $derived(!app.icon && !resolveCustomIcon(app.id) && !!src);
 
   function rejectSource() {
     if (src && !rejectedSources.includes(src)) rejectedSources = [...rejectedSources, src];

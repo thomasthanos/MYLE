@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <filter id="vc-shadow" x="20" y="20" width="216" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#020617" flood-opacity="0.72" />
+    </filter>
+    <linearGradient id="vc-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0A1F3D" />
+      <stop offset="52%" stop-color="#061224" />
+      <stop offset="100%" stop-color="#020712" />
+    </linearGradient>
+    <radialGradient id="vc-glow-top" cx="28%" cy="18%" r="78%">
+      <stop offset="0%" stop-color="#00599C" stop-opacity="0.42" />
+      <stop offset="55%" stop-color="#0284C7" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#061224" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="vc-glow-bottom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#061224" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="vc-rim" x1="128" y1="0" x2="128" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#BAE6FD" stop-opacity="0.65" />
+      <stop offset="25%" stop-color="#00599C" stop-opacity="0.32" />
+      <stop offset="80%" stop-color="#082F49" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0.42" />
+    </linearGradient>
+    <linearGradient id="vc-sheen" x1="128" y1="0" x2="128" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="vc-clip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#vc-clip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#vc-bg)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#vc-glow-top)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#vc-glow-bottom)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#vc-sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#vc-rim)" stroke-width="3" />
+  <g filter="url(#vc-shadow)">
+    <svg x="50" y="50" width="156" height="156" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="vc-mark" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#38BDF8" />
+          <stop offset="100%" stop-color="#00599C" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#vc-mark)" d="M22.394 6c-.167-.29-.398-.543-.652-.69L12.926.22c-.509-.294-1.34-.294-1.848 0L2.26 5.31c-.508.293-.923 1.013-.923 1.6v10.18c0 .294.104.62.271.91.167.29.398.543.652.69l8.816 5.09c.508.293 1.34.293 1.848 0l8.816-5.09c.254-.147.485-.4.652-.69.167-.29.27-.616.27-.91V6.91c.003-.294-.1-.62-.268-.91zM12 19.11c-3.92 0-7.109-3.19-7.109-7.11 0-3.92 3.19-7.11 7.11-7.11a7.133 7.133 0 016.156 3.553l-3.076 1.78a3.567 3.567 0 00-3.08-1.78A3.56 3.56 0 008.444 12 3.56 3.56 0 0012 15.555a3.57 3.57 0 003.08-1.778l3.078 1.78A7.135 7.135 0 0112 19.11zm7.11-6.715h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79zm2.962 0h-.79v.79h-.79v-.79h-.79v-.79h.79v-.79h.79v.79h.79z" />
+    </svg>
+  </g>
+</svg>

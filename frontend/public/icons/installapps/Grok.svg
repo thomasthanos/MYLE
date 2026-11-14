@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <filter id="grk-shadow" x="20" y="20" width="216" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#020617" flood-opacity="0.72" />
+    </filter>
+    <linearGradient id="grk-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#161619" />
+      <stop offset="52%" stop-color="#0B0B0D" />
+      <stop offset="100%" stop-color="#040405" />
+    </linearGradient>
+    <radialGradient id="grk-glow-top" cx="28%" cy="18%" r="78%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.42" />
+      <stop offset="55%" stop-color="#94A3B8" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#0B0B0D" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="grk-glow-bottom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#64748B" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#0B0B0D" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="grk-rim" x1="128" y1="0" x2="128" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.65" />
+      <stop offset="25%" stop-color="#94A3B8" stop-opacity="0.32" />
+      <stop offset="80%" stop-color="#1E293B" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#64748B" stop-opacity="0.42" />
+    </linearGradient>
+    <linearGradient id="grk-sheen" x1="128" y1="0" x2="128" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="grk-clip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#grk-clip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#grk-bg)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#grk-glow-top)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#grk-glow-bottom)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#grk-sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#grk-rim)" stroke-width="3" />
+  <g filter="url(#grk-shadow)">
+    <svg x="52" y="52" width="152" height="152" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
+      <path fill="#FFFFFF" d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z" />
+    </svg>
+  </g>
+</svg>

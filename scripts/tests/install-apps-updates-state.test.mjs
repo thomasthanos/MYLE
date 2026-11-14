@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { compileModule } from "svelte/compiler";
 import { autoUpdateCards } from "../../frontend/app/pages/install-apps/updates.ts";
+import { CATEGORIES, categorize, isCategory } from "../../frontend/app/pages/install-apps/categories.ts";
 const source = readFileSync(new URL("../../frontend/app/pages/install-apps/state.svelte.ts", import.meta.url), "utf8");
 const transpile = (text, module = ModuleKind.ESNext) => transpileModule(text, {
   compilerOptions: { target: ScriptTarget.ESNext, module },
@@ -47,9 +48,9 @@ function harness(initial = report()) {
     require, exports: {}, console,
     isTauri: () => true,
     catalog,
-    categorize: () => "Others",
-    CATEGORIES: [],
-    isCategory: () => false,
+    categorize,
+    CATEGORIES,
+    isCategory,
     autoUpdateCards,
     readJson: (_key, fallback) => fallback,
     writeJson: () => {},
@@ -89,6 +90,51 @@ function harness(initial = report()) {
   } };
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+test("WinGet update cards are grouped by package family or recognizable product name", async () => {
+  const cases = [
+    ["Microsoft.DotNet.SDK.10", "Microsoft .NET SDK", "Development"],
+    ["Microsoft.DotNet.DesktopRuntime.8", "Microsoft Windows Desktop Runtime", "System Components"],
+    ["Microsoft.VCRedist.2015+.x64", "Microsoft Visual C++ Redistributable", "System Components"],
+    ["CreativeTechnology.OpenAL", "OpenAL", "System Components"],
+    ["OpenSCAD.OpenSCAD.Nightly", "OpenSCAD", "Design & 3D"],
+    ["Roblox.Roblox", "Roblox Player", "Games"],
+    ["IObit.DriverBooster", "Driver Booster", "Hardware"],
+    ["xAI.GrokBot", "Grok Bot", "AI"],
+    ["Google.Antigravity", "Antigravity", "Development"],
+    ["Valve.Steam", "Steam", "Games"],
+    ["Vendor.Opaque", "Arduino IDE 2.3", "Development"],
+    ["Microsoft.Office", "Microsoft 365", "Productivity"],
+    ["ONLYOFFICE.DesktopEditors", "ONLYOFFICE Desktop Editors", "Productivity"],
+    ["Adobe.Acrobat.Reader.64-bit", "Adobe Acrobat Reader", "Productivity"],
+    ["Adobe.CreativeCloud", "Adobe Creative Cloud", "Design & 3D"],
+    ["DuckDuckGo.DesktopBrowser", "DuckDuckGo", "Browsers"],
+    ["Ferdium.Ferdium", "Ferdium", "Communication"],
+    ["NexusMods.Vortex", "Vortex", "Games"],
+    ["Unity.UnityHub", "Unity Hub", "Development"],
+    ["Tailscale.Tailscale", "Tailscale", "Networking & Remote Access"],
+    ["WinSCP.WinSCP", "WinSCP", "Networking & Remote Access"],
+    ["RustDesk.RustDesk", "RustDesk", "Networking & Remote Access"],
+    ["Bitdefender.Bitdefender", "Bitdefender", "Security"],
+    ["Microsoft.Sysinternals.Sigcheck", "Sigcheck", "Security"],
+    ["Microsoft.Sysinternals.ProcessExplorer", "Process Explorer", "Utilities"],
+    ["Microsoft.EdgeWebView2Runtime", "Microsoft Edge WebView2 Runtime", "System Components"],
+    ["EclipseAdoptium.Temurin.21.JDK", "Eclipse Temurin JDK", "Development"],
+    ["Amazon.AWSCLI", "AWS Command Line Interface", "Development"],
+    ["yt-dlp.yt-dlp", "yt-dlp", "Media"],
+    ["Corsair.iCUE.5", "Corsair iCUE", "Hardware"],
+    ["Vendor.OpaquePdf", "PDFgear", "Productivity"],
+    ["Vendor.Unknown", "Random Product", "Others"],
+  ];
+  const scan = report(2);
+  scan.updates = cases.map(([id, name]) => ({ id, name, version: "1.0", available: "2.0" }));
+  const { state } = harness(scan);
+  await state.checkInstalled();
+  state.filter = "updates";
+  assert.equal(state.counts.updates, cases.length);
+  for (const [id, , category] of cases) {
+    assert.ok(state.groups.find(({ title }) => title === category)?.apps.some((app) => app.id === id), id);
+  }
+});
 test("twenty winget updates become twenty cards in Updates", async () => {
   const { state } = harness();
   await state.checkInstalled();

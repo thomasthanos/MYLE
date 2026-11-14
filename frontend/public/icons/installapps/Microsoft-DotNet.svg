@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <filter id="dnet-shadow" x="20" y="20" width="216" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#020617" flood-opacity="0.72" />
+    </filter>
+    <linearGradient id="dnet-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1C0E40" />
+      <stop offset="52%" stop-color="#100726" />
+      <stop offset="100%" stop-color="#070213" />
+    </linearGradient>
+    <radialGradient id="dnet-glow-top" cx="28%" cy="18%" r="78%">
+      <stop offset="0%" stop-color="#512BD4" stop-opacity="0.42" />
+      <stop offset="55%" stop-color="#4338CA" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#100726" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="dnet-glow-bottom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#100726" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="dnet-rim" x1="128" y1="0" x2="128" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DDD6FE" stop-opacity="0.65" />
+      <stop offset="25%" stop-color="#512BD4" stop-opacity="0.32" />
+      <stop offset="80%" stop-color="#2E1065" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0.42" />
+    </linearGradient>
+    <linearGradient id="dnet-sheen" x1="128" y1="0" x2="128" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="dnet-clip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#dnet-clip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#dnet-bg)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#dnet-glow-top)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#dnet-glow-bottom)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#dnet-sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#dnet-rim)" stroke-width="3" />
+  <g filter="url(#dnet-shadow)">
+    <svg x="46" y="46" width="164" height="164" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="dnet-circle" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#6739EE" />
+          <stop offset="100%" stop-color="#512BD4" />
+        </linearGradient>
+      </defs>
+      <circle cx="64" cy="64" r="60" fill="url(#dnet-circle)" />
+      <g transform="translate(18, 18) scale(3.833)">
+        <path fill="#FFFFFF" d="M24 8.77h-2.468v7.565h-1.425V8.77h-2.462V7.53H24zm-6.852 7.565h-4.821V7.53h4.63v1.24h-3.205v2.494h2.953v1.234h-2.953v2.604h3.396zm-6.708 0H8.882L4.78 9.863a2.896 2.896 0 0 1-.258-.51h-.036c.032.189.048.592.048 1.21v5.772H3.157V7.53h1.659l3.965 6.32c.167.261.275.442.323.54h.024c-.04-.233-.06-.629-.06-1.185V7.529h1.372zm-8.703-.693a.868.829 0 0 1-.869.829.868.829 0 0 1-.868-.83.868.829 0 0 1 .868-.828.868.829 0 0 1 .869.829Z" />
+      </g>
+    </svg>
+  </g>
+</svg>

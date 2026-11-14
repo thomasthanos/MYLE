@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <filter id="oal-shadow" x="20" y="20" width="216" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#020617" flood-opacity="0.72" />
+    </filter>
+    <linearGradient id="oal-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2F0D0E" />
+      <stop offset="52%" stop-color="#190607" />
+      <stop offset="100%" stop-color="#0B0203" />
+    </linearGradient>
+    <radialGradient id="oal-glow-top" cx="28%" cy="18%" r="78%">
+      <stop offset="0%" stop-color="#DC2626" stop-opacity="0.45" />
+      <stop offset="55%" stop-color="#991B1B" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#190607" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="oal-glow-bottom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#EF4444" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#190607" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="oal-rim" x1="128" y1="0" x2="128" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FECACA" stop-opacity="0.65" />
+      <stop offset="25%" stop-color="#DC2626" stop-opacity="0.32" />
+      <stop offset="80%" stop-color="#450A0A" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#EF4444" stop-opacity="0.42" />
+    </linearGradient>
+    <linearGradient id="oal-sheen" x1="128" y1="0" x2="128" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="oal-clip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#oal-clip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#oal-bg)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#oal-glow-top)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#oal-glow-bottom)" />
+    <ellipse cx="128" cy="4" rx="126" ry="64" fill="url(#oal-sheen)" />
+  </g>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#oal-rim)" stroke-width="3" />
+  <g filter="url(#oal-shadow)">
+    
+    <defs>
+      <linearGradient id="oal-badge" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#B91C1C" />
+        <stop offset="100%" stop-color="#7F1D1D" />
+      </linearGradient>
+      <linearGradient id="oal-text" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#FFFFFF" />
+        <stop offset="100%" stop-color="#F3F4F6" />
+      </linearGradient>
+      <filter id="oal-inset" x="-10%" y="-10%" width="120%" height="120%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.3" />
+      </filter>
+    </defs>
+    <!-- Inner Crimson Badge Plate -->
+    <rect x="48" y="48" width="160" height="160" rx="36" fill="url(#oal-badge)" stroke="#EF4444" stroke-width="2.5" />
+    <!-- Authentic OpenAL 'A' and 'L' Typography -->
+    <g filter="url(#oal-inset)">
+      <!-- Letter 'A' -->
+      <path fill="url(#oal-text)" fill-rule="evenodd" d="
+        M 103 84
+        C 94 84, 82 89, 75 97
+        C 68 105, 64 116, 64 128
+        L 64 172
+        C 64 174.5, 66.5 177, 69.5 177
+        L 83 177
+        C 86 177, 88.5 174.5, 88.5 172
+        L 88.5 152
+        L 117.5 152
+        L 117.5 172
+        C 117.5 174.5, 120 177, 123 177
+        L 136.5 177
+        C 139.5 177, 142 174.5, 142 172
+        L 142 128
+        C 142 116, 138 105, 131 97
+        C 124 89, 112 84, 103 84 Z
+        M 88.5 134
+        L 88.5 125
+        C 88.5 119, 91 113, 95 109
+        C 99 105, 104 103, 108 103
+        C 112 103, 117 105, 121 109
+        C 125 113, 127.5 119, 127.5 125
+        L 127.5 134 Z
+      "/>
+      <!-- Letter 'L' with the signature OpenAL upward curved flick -->
+      <path fill="url(#oal-text)" d="
+        M 152 89
+        C 152 86.5, 154.5 84, 157.5 84
+        L 171 84
+        C 174 84, 176.5 86.5, 176.5 89
+        L 176.5 152
+        C 176.5 156, 180 159, 185 159
+        C 190 159, 195 156, 198 150
+        C 200 146, 203 143, 206 143
+        C 209 143, 211 146, 211 150
+        C 210 162, 201 172, 190 176
+        C 183 178, 173 178, 166 174
+        C 157 169, 152 161, 152 152 Z
+      "/>
+    </g>
+  
+  </g>
+</svg>

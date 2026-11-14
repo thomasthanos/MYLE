@@ -448,7 +448,7 @@ class InstallAppsState {
       const known = new Set([...this.all, ...this.pinned].map((a) => key(a.id)));
       this.catalogResults = hits
         .filter((h) => !known.has(key(h.id)))
-        .map((h) => ({ id: h.id, name: h.name, source: "catalog", category: categorize(h.id), version: h.version }));
+        .map((h) => ({ id: h.id, name: h.name, source: "catalog", category: categorize(h.id, h.name), version: h.version }));
     } catch (err) {
       if (seq === this.#searchSeq) toast.error(`Catalog search failed: ${message(err)}`);
     } finally {
@@ -567,7 +567,7 @@ class InstallAppsState {
       id: update.id,
       name: update.name,
       source: "update",
-      category: categorize(update.id),
+      category: categorize(update.id, update.name),
       site: update.site,
       iconDomain: update.iconDomain,
     };
@@ -804,7 +804,7 @@ class InstallAppsState {
         } else if (!id.startsWith("Custom.")) {
           const name = typeof (row as { name?: unknown }).name === "string" ? (row as { name: string }).name : id;
           if (!this.pinned.some((p) => key(p.id) === key(id))) {
-            this.pinned.push({ id, name, source: "catalog", category: categorize(id) });
+            this.pinned.push({ id, name, source: "catalog", category: categorize(id, name) });
           }
           this.selected.add(id);
         } else {
