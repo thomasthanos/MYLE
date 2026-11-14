@@ -125,6 +125,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: 1.99.1
           targets: aarch64-linux-android,armv7-linux-androideabi
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -247,6 +248,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: 1.99.1
           targets: aarch64-apple-ios
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -409,17 +411,15 @@ jobs:
             gh release upload "$tag" "${files[@]}" --clobber
           fi
 
-      # SideStore reads docs/sidestore.json from the repository too: point it
-      # at this release's IPA (version, date, size) and commit it to main.
+      # SideStore reads docs/sidestore.json from the repository too: it gets
+      # the version just published to R2 (its address there, size and
+      # SHA-256), and is committed to main.
       - name: Update docs/sidestore.json
         if: startsWith(github.ref, 'refs/tags/')
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
-          size=$(stat -c %s out/MYLE-Passwords.ipa)
           git fetch --depth=1 origin main
           git checkout -B sidestore-update origin/main
-          node scripts/update-sidestore.mjs "$size"
+          node scripts/update-sidestore.mjs out/sidestore.json
           if git diff --quiet docs/sidestore.json; then
             echo "docs/sidestore.json is already current"
             exit 0
