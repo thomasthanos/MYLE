@@ -16,7 +16,7 @@ use myle_vault::http::err;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Url};
 use tauri_plugin_deep_link::DeepLinkExt;
-use tauri_plugin_myle_mobile::{CANCELLED, MobileExt};
+use tauri_plugin_myle_mobile::{CANCELLED, ENDED_BY_APP, MobileExt};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::oneshot;
 
@@ -119,13 +119,18 @@ impl AccountState {
         write_private(&self.dir.join(PENDING_FILE), &serde_json::to_vec(&pending).map_err(err)?)
     }
 
+    /// The sign-in waiting for the browser, left in place.
+    fn peek_pending(&self) -> Option<Pending> {
+        let pending: Pending = serde_json::from_slice(&std::fs::read(self.dir.join(PENDING_FILE)).ok()?).ok()?;
+        (supabase::now().saturating_sub(pending.at) < PENDING_LIFETIME_SECS).then_some(pending)
+    }
+
     /// The sign-in waiting for the browser, once: a second return of the
     /// same link finds none.
     fn take_pending(&self) -> Option<Pending> {
-        let path = self.dir.join(PENDING_FILE);
-        let pending: Pending = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-        let _ = std::fs::remove_file(&path);
-        (supabase::now().saturating_sub(pending.at) < PENDING_LIFETIME_SECS).then_some(pending)
+        let pending = self.peek_pending();
+        let _ = std::fs::remove_file(self.dir.join(PENDING_FILE));
+        pending
     }
 
     /// A session with at least a minute left, refreshed (and saved) if needed.
@@ -222,14 +227,18 @@ fn returned(app: &AppHandle, url: Url) {
 
 async fn finish(state: &AccountState, url: &Url) -> Result<Profile, String> {
     let _account = state.gate.lock().await;
-    let pending = state
-        .take_pending()
-        .ok_or("That sign-in is over. Tap Sign in again.")?;
+    // Any app can open this link: one without a code, or with a code that
+    // does not work, leaves the sign-in waiting for its page as it was, and
+    // its text is never shown.
     let code = match callback(url) {
         Callback::Code(code) => code,
-        Callback::Error(message) => return Err(message),
+        Callback::Error(_) => return Err("The sign-in did not finish. Try again.".into()),
     };
+    let pending = state
+        .peek_pending()
+        .ok_or("That sign-in is over. Tap Sign in again.")?;
     let session = supabase::exchange_code(&client()?, &code, &pending.verifier).await?;
+    state.take_pending();
     let profile = session.profile.clone();
     state.store(Some(session))?;
     Ok(profile)
@@ -320,6 +329,9 @@ pub async fn account_sign_in(
     match shown {
         Ok(Some(back)) => returned(&app, Url::parse(&back).map_err(err)?),
         Ok(None) => {}
+        // Replaced by another sign-in, or the page stopped waiting: that
+        // already settled what is waiting, and this one is over.
+        Err(e) if e.contains(ENDED_BY_APP) => {}
         Err(e) if e.contains(CANCELLED) => { cancel(&state); }
         // No sign-in page in the app here (Windows): the browser.
         Err(_) => app
@@ -355,7 +367,12 @@ pub async fn account_sign_out(app: AppHandle, state: State<'_, AccountState>, pa
     let _sync = crate::passwords::SYNCING.lock().await;
     let _account = state.gate.lock().await;
     let session = state.session();
-    crate::unlock::passwords_hello_disable(app.clone(), passwords.clone()).await?;
+    if let Err(error) = crate::unlock::passwords_hello_disable(app.clone(), passwords.clone()).await {
+        // The phone kept its key, but without the wrapped copy (removed
+        // here) it opens nothing: signing out goes on.
+        eprintln!("Quick unlock was not turned off cleanly: {error}");
+        remove_private(&state.dir.join(crate::unlock::FILE))?;
+    }
     passwords.clear_local()?;
     remove_private(&state.dir.join("passwords-biometry.tmp"))?;
     let export = app.path().app_cache_dir().map_err(err)?.join("export/MYLE Passwords.csv");
@@ -435,6 +452,18 @@ mod tests {
         };
         write_private(&dir.join(PENDING_FILE), &serde_json::to_vec(&old).unwrap()).unwrap();
         assert!(state.take_pending().is_none(), "a sign-in left long ago");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_link_without_a_code_leaves_the_sign_in_waiting_and_its_text_unshown() {
+        let dir = std::env::temp_dir().join(format!("myle-passwords-callback-{}", std::process::id()));
+        let state = AccountState::new(dir.clone());
+        state.save_pending("verifier").unwrap();
+        let forged = Url::parse(&format!("{REDIRECT_URL}?error_description=Call%20this%20number")).unwrap();
+        let error = finish(&state, &forged).await.unwrap_err();
+        assert!(!error.contains("Call this number"), "{error}");
+        assert_eq!(state.take_pending().unwrap().verifier, "verifier", "the real return still finds it");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

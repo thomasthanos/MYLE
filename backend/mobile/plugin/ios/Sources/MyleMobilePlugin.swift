@@ -45,6 +45,10 @@ private let enrolmentService = "uk.thomast.myle.passwords.unlock-enrolment"
 /// the app switcher, and keeping the app's folder out of backups.
 class MyleMobilePlugin: Plugin {
   private var session: ASWebAuthenticationSession?
+  /// The call waiting for the sign-in sheet. It is answered once: when the
+  /// sheet comes back, or "ended-by-app" when another sign-in replaces it or
+  /// the app stops waiting (iOS does not call back a sheet the app cancels).
+  private var signInCall: Invoke?
   /// Over the window while the app is not in front.
   private var cover: UIView?
 
@@ -81,10 +85,13 @@ class MyleMobilePlugin: Plugin {
       return
     }
     DispatchQueue.main.async {
-      self.session?.cancel()
+      self.endSignIn()
       let session = ASWebAuthenticationSession(url: url, callbackURLScheme: args.callbackScheme) {
         [weak self] callback, error in
-        self?.session = nil
+        // A sheet the app already ended was answered then.
+        guard let self = self, let waiting = self.signInCall, waiting === invoke else { return }
+        self.signInCall = nil
+        self.session = nil
         if let callback = callback {
           invoke.resolve(["callbackUrl": callback.absoluteString])
         } else if let error = error as? ASWebAuthenticationSessionError, error.code == .canceledLogin {
@@ -100,8 +107,10 @@ class MyleMobilePlugin: Plugin {
       // Passwords about the account on every visit ("Passkey Updated").
       session.prefersEphemeralWebBrowserSession = args.ephemeral ?? false
       self.session = session
+      self.signInCall = invoke
       if !session.start() {
         self.session = nil
+        self.signInCall = nil
         invoke.reject("The sign-in sheet could not open.")
       }
     }
@@ -138,10 +147,17 @@ class MyleMobilePlugin: Plugin {
   /// Closes the sheet when the app stopped waiting for it.
   @objc public func cancelSignIn(_ invoke: Invoke) throws {
     DispatchQueue.main.async {
-      self.session?.cancel()
-      self.session = nil
+      self.endSignIn()
       invoke.resolve()
     }
+  }
+
+  /// Ends the sheet on screen, if any, and answers the call waiting for it.
+  private func endSignIn() {
+    signInCall?.reject("ended-by-app")
+    signInCall = nil
+    session?.cancel()
+    session = nil
   }
 
   /// Keeps the key that opens the vault, for Face ID or Touch ID only: as

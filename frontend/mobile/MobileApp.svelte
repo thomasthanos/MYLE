@@ -35,6 +35,11 @@
     }
   });
 
+  // The camera never stays open over a locked vault: Lock now, the idle lock, or the app put away.
+  $effect(() => {
+    if (p.status !== "unlocked" && scanner.active) scanner.stop();
+  });
+
   onMount(() => {
     // Face ID's key can no longer open the vault (Face ID changed, or it was kept the old way): it turned itself off, and this says why. Before anything asks about it.
     const quickUnlockOff = listen<string>("passwords-quick-unlock-off", (event) => toast.error(event.payload)).catch(() => null);

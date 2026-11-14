@@ -25,6 +25,9 @@ tauri::ios_plugin_binding!(init_plugin_myle_mobile);
 pub const ALLOW_INSTALLS: &str = "allow-installs";
 /// What `sign_in` answers when the user closed the sign-in sheet.
 pub const CANCELLED: &str = "cancelled";
+/// What `sign_in` answers when the app ended its sheet: another sign-in
+/// replaced it, or the page stopped waiting (`cancel_sign_in`).
+pub const ENDED_BY_APP: &str = "ended-by-app";
 #[cfg(not(target_os = "ios"))]
 const FOR_IPHONE: &str = "Face ID and Touch ID are for iPhone.";
 

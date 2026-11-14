@@ -24,7 +24,7 @@ use tauri_plugin_myle_mobile::{KeyError, KeyGone};
 
 use crate::passwords::PasswordsState;
 
-const FILE: &str = "passwords-biometry.json";
+pub(crate) const FILE: &str = "passwords-biometry.json";
 const WRAP_AAD: &str = "myle-biometry-v1";
 /// Quick unlock turned itself off; the payload says why.
 const OFF_EVENT: &str = "passwords-quick-unlock-off";
@@ -68,6 +68,36 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 }
 
 /// What the user reads when the key can never open the vault again.
+#[cfg(target_os = "android")]
+fn gone_reason(gone: KeyGone) -> &'static str {
+    android_gone_reason(gone)
+}
+#[cfg(any(target_os = "android", test))]
+fn android_gone_reason(gone: KeyGone) -> &'static str {
+    match gone {
+        KeyGone::Changed => {
+            "The fingerprints or face set up on this phone changed, so they no longer open your vault. Unlock with your master password, then turn it on again in Settings › Security & vault."
+        }
+        KeyGone::Missing | KeyGone::Legacy => {
+            "This phone no longer has the key that let your fingerprint or face open your vault. Unlock with your master password, then turn it on again in Settings › Security & vault."
+        }
+    }
+}
+/// What the Keystore's refusal means: a key Android invalidated (a
+/// fingerprint or face was added or removed) or lost can never open the vault
+/// again; anything else is passed on.
+#[cfg(any(target_os = "android", test))]
+fn android_key_error(text: String) -> KeyError {
+    if text.to_lowercase().contains("permanently invalidated") {
+        KeyError::Gone(KeyGone::Changed)
+    } else if text.contains("No key pair found") {
+        KeyError::Gone(KeyGone::Missing)
+    } else {
+        KeyError::Failed(text)
+    }
+}
+/// What the user reads when the key can never open the vault again.
+#[cfg(not(target_os = "android"))]
 fn gone_reason(gone: KeyGone) -> &'static str {
     match gone {
         KeyGone::Changed => {
@@ -252,7 +282,7 @@ mod key {
                 cancel_title: Some("Use the master password".into()),
             })
             .map(|answer| Zeroizing::new(answer.data))
-            .map_err(|e| KeyError::Failed(e.to_string()))
+            .map_err(|e| super::android_key_error(e.to_string()))
     }
 
     pub fn remove(app: &AppHandle, name: &str) -> Result<(), String> {
@@ -323,5 +353,19 @@ mod tests {
         }
         assert_ne!(gone_reason(KeyGone::Changed), gone_reason(KeyGone::Missing));
         assert!(gone_reason(KeyGone::Legacy).contains("never the iPhone passcode"));
+    }
+
+    #[test]
+    fn an_android_key_invalidated_or_lost_turns_quick_unlock_off() {
+        assert_eq!(
+            android_key_error("Failed to get data: Key permanently invalidated".into()),
+            KeyError::Gone(KeyGone::Changed)
+        );
+        assert_eq!(android_key_error("No key pair found".into()), KeyError::Gone(KeyGone::Missing));
+        assert_eq!(android_key_error("Too many attempts".into()), KeyError::Failed("Too many attempts".into()));
+        for gone in [KeyGone::Changed, KeyGone::Missing] {
+            let why = android_gone_reason(gone);
+            assert!(why.contains("master password") && !why.contains("iPhone"), "{why}");
+        }
     }
 }
