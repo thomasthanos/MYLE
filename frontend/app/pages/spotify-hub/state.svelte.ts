@@ -122,11 +122,11 @@ class SpotifyHubState {
       this.liveJob = snapshot.activeJob;
       this.statuses[snapshot.activeJob.action] = "Running";
       this.consoles[snapshot.activeJob.action].open = true;
-      operationGate.begin("spotify-hub");
+      operationGate.begin("spotify-hub", "backend");
       this.watchActiveJob();
     } else if (!this.startingAction) {
       this.liveJob = null;
-      operationGate.end("spotify-hub");
+      operationGate.end("spotify-hub", "backend");
       if (snapshot.lastOutcome) this.adoptOutcome(snapshot.lastOutcome);
     }
   }
@@ -152,7 +152,7 @@ class SpotifyHubState {
           if (snapshot.lastOutcome?.jobId === previousJob) this.adoptOutcome(snapshot.lastOutcome);
           else if (previous) this.statuses[previous] = "Error";
           this.stopping = false;
-          operationGate.end("spotify-hub");
+          operationGate.end("spotify-hub", "backend");
         }
       } catch {
         this.#pollTimer = setTimeout(poll, POLL_MS);
@@ -256,7 +256,7 @@ class SpotifyHubState {
     this.consoles[action].open = !this.consoles[action].open;
   }
   private async run(action: SpotifyHubAction, purgeToken: string | null, requestedLabel?: string) {
-    if (this.locked || !operationGate.begin("spotify-hub")) {
+    if (this.locked || !operationGate.begin("spotify-hub", "run")) {
       toast.info("Finish the current app task before starting another action.");
       return;
     }
@@ -286,7 +286,9 @@ class SpotifyHubState {
       // A page revisit may have cached this job; completion must release it even if detection fails.
       if (this.snapshot) this.snapshot.activeJob = null;
       this.stopping = false;
-      operationGate.end("spotify-hub");
+      operationGate.end("spotify-hub", "run");
+      // The job is over either way: a reload must not keep a hold for it.
+      operationGate.end("spotify-hub", "backend");
       await this.load(true);
     }
   }

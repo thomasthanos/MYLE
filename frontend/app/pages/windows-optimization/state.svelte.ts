@@ -13,6 +13,8 @@ import {
   type WindowsOptimizationSnapshot,
 } from "./api";
 const POLL_MS = 1500;
+/** The gate keys of this tab (Auto-Logon, the firmware restart, an operation the backend reports). */
+export const TOOLS_KEYS = ["autologon", "firmware", "backend"] as const;
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -32,7 +34,9 @@ class WindowsOptimizationState {
   );
   readonly ownBusy = $derived(this.autoLogonBusy || this.firmwareRestartBusy);
   readonly externallyLocked = $derived(operationGate.lockedFor("windows-optimization"));
-  readonly locked = $derived(this.ownBusy || this.externallyLocked);
+  /** The debloat run or a Start menu change (the same page): not at the same time as these. */
+  readonly debloatRunning = $derived(operationGate.heldBesides("windows-optimization", TOOLS_KEYS));
+  readonly locked = $derived(this.ownBusy || this.externallyLocked || this.debloatRunning);
   async load() {
     if (!isTauri() || this.loading) return;
     this.loading = true;
@@ -67,7 +71,7 @@ class WindowsOptimizationState {
   }
   async restartToFirmware() {
     if (this.locked || !this.snapshot?.firmwareRestart.available) return;
-    if (!operationGate.begin("windows-optimization")) {
+    if (!operationGate.begin("windows-optimization", "firmware")) {
       toast.info("Finish the current app task before restarting to BIOS / UEFI.");
       return;
     }
@@ -84,7 +88,7 @@ class WindowsOptimizationState {
       toast.error(`Restart to BIOS / UEFI: ${message(error)}`);
     } finally {
       this.firmwareRestartRequest = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "firmware");
       await this.load();
     }
   }
@@ -120,7 +124,7 @@ class WindowsOptimizationState {
             },
     );
     if (!approved || this.locked) return;
-    if (!operationGate.begin("windows-optimization")) {
+    if (!operationGate.begin("windows-optimization", "autologon")) {
       toast.info("Finish the current app task before changing Auto-Logon.");
       return;
     }
@@ -133,17 +137,18 @@ class WindowsOptimizationState {
       toast.error(`Windows Auto-Logon: ${message(error)}`);
     } finally {
       this.autoLogonRequest = null;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "autologon");
       await this.load();
     }
   }
   private applySnapshot(snapshot: WindowsOptimizationSnapshot) {
     this.snapshot = snapshot;
     if (isAutoLogonActive(snapshot.autoLogon) || snapshot.firmwareRestart.active) {
-      operationGate.begin("windows-optimization");
+      operationGate.begin("windows-optimization", "backend");
       this.watchBackendOperation();
-    } else if (!this.autoLogonRequest && !this.firmwareRestartRequest) {
-      operationGate.end("windows-optimization");
+    } else {
+      // Only its own hold: a debloat run on this page keeps the gate.
+      operationGate.end("windows-optimization", "backend");
     }
   }
   private watchBackendOperation() {
@@ -161,7 +166,7 @@ class WindowsOptimizationState {
         if (isAutoLogonActive(snapshot.autoLogon) || snapshot.firmwareRestart.active) {
           this.#pollTimer = setTimeout(poll, POLL_MS);
         } else {
-          operationGate.end("windows-optimization");
+          operationGate.end("windows-optimization", "backend");
         }
       } catch {
         this.#pollTimer = setTimeout(poll, POLL_MS);

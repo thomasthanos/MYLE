@@ -1744,7 +1744,10 @@ fn sealed(
 fn resolve(ours: Option<Entry>, ours_at: u64, theirs: Option<Entry>, theirs_at: u64) -> Option<Entry> {
     match (ours, theirs) {
         (Some(ours), Some(theirs)) => {
-            let (mut win, lose) = if ours_at >= theirs_at { (ours, theirs) } else { (theirs, ours) };
+            // The times sealed inside the entries, not the rows' plain ones:
+            // the server cannot choose which edit wins.
+            let (mut win, lose) =
+                if ours.updated_at >= theirs.updated_at { (ours, theirs) } else { (theirs, ours) };
             if !lose.password.is_empty() && lose.password != win.password {
                 win.history.insert(
                     0,
@@ -2284,6 +2287,18 @@ mod tests {
         let stored = &vault.unlocked().unwrap().entries[&newer];
         assert_eq!(stored.extra["fromLater"][0]["site"], "example.com");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_sealed_time_decides_a_conflict_not_the_rows_plain_one() {
+        let older = Entry { password: "older".into(), updated_at: 100, ..Entry::default() };
+        let newer = Entry { password: "newer".into(), updated_at: 200, ..Entry::default() };
+        // The account's row claims a far later time for its older edit.
+        let won = resolve(Some(newer.clone()), 200, Some(older.clone()), u64::MAX).unwrap();
+        assert_eq!(won.password, "newer");
+        assert_eq!(won.history[0].password, "older", "the losing password is kept in the history");
+        let won = resolve(Some(older), u64::MAX, Some(newer), 0).unwrap();
+        assert_eq!(won.password, "newer");
     }
 
     #[test]

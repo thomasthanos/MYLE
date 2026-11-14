@@ -306,25 +306,57 @@ pub async fn account_push(
         return Err("Settings must be an object.".into());
     }
     let session = fresh_session(&app, &state).await?;
-    let data = settings_sync::write(read_row(&session).await?, settings)?;
-    let body = serde_json::json!({
-        "user_id": session.profile.id,
-        "data": data,
-        "updated_at": iso8601(now()),
-    });
-    client()?
-        .post(format!("{SUPABASE_URL}/rest/v1/{TABLE}?on_conflict=user_id"))
-        .header("apikey", SUPABASE_ANON_KEY)
-        .bearer_auth(&session.access_token)
-        .header("Prefer", "resolution=merge-duplicates,return=minimal")
-        .json(&body)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(err)?
-        .error_for_status()
-        .map_err(|e| format!("The cloud did not accept the settings: {e}"))?;
-    Ok(())
+    // Compare-and-swap: the row is replaced only if it is still the one read
+    // (another PC's push in between, its GitHub Releases projects say, is
+    // merged in on the next try instead of being overwritten).
+    for _ in 0..4 {
+        let seen = read_row_at(&session).await?;
+        let (row, seen_at) = match seen {
+            Some((data, at)) => (Some(data), Some(at)),
+            None => (None, None),
+        };
+        let data = settings_sync::write(row, settings.clone())?;
+        let mut body = serde_json::json!({
+            "data": data,
+            "updated_at": iso8601(now()),
+        });
+        let request = match seen_at.as_ref().and_then(Value::as_str) {
+            Some(at) => {
+                let url = reqwest::Url::parse_with_params(
+                    &format!("{SUPABASE_URL}/rest/v1/{TABLE}"),
+                    &[("user_id", format!("eq.{}", session.profile.id)), ("updated_at", format!("eq.{at}"))],
+                )
+                .map_err(err)?;
+                client()?.patch(url).header("Prefer", "return=representation")
+            }
+            None => {
+                body["user_id"] = session.profile.id.clone().into();
+                client()?
+                    .post(format!("{SUPABASE_URL}/rest/v1/{TABLE}"))
+                    .header("Prefer", "return=representation")
+            }
+        };
+        let response = request
+            .header("apikey", SUPABASE_ANON_KEY)
+            .bearer_auth(&session.access_token)
+            .json(&body)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(err)?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        // Another PC created the row first (409), or changed it since it was
+        // read (no row matched): read again and merge.
+        if status == reqwest::StatusCode::CONFLICT || (status.is_success() && text.trim() == "[]") {
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("The cloud did not accept the settings ({status})."));
+        }
+        return Ok(());
+    }
+    Err("The cloud settings kept changing while saving. Try again.".into())
 }
 // --------------------------------------------------------------------------- Sign-in
 async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String> {
@@ -362,10 +394,15 @@ async fn fresh_session(app: &AppHandle, state: &AccountState) -> Result<Session,
 // --------------------------------------------------------------------------- user_settings
 /// The row's whole `data` object, or `None` when the user has no row yet.
 async fn read_row(session: &Session) -> Result<Option<Value>, String> {
+    Ok(read_row_at(session).await?.map(|(data, _)| data))
+}
+/// The row's data and its `updated_at` as the database wrote it (the
+/// compare-and-swap of `account_push` names it back exactly).
+async fn read_row_at(session: &Session) -> Result<Option<(Value, Value)>, String> {
     let url = reqwest::Url::parse_with_params(
         &format!("{SUPABASE_URL}/rest/v1/{TABLE}"),
         &[
-            ("select", "data".to_string()),
+            ("select", "data,updated_at".to_string()),
             ("user_id", format!("eq.{}", session.profile.id)),
         ],
     )
@@ -383,10 +420,10 @@ async fn read_row(session: &Session) -> Result<Option<Value>, String> {
         .json()
         .await
         .map_err(err)?;
-    Ok(rows
-        .into_iter()
-        .next()
-        .and_then(|mut row| row.get_mut("data").map(Value::take)))
+    Ok(rows.into_iter().next().and_then(|mut row| {
+        let updated = row.get_mut("updated_at").map(Value::take).unwrap_or(Value::Null);
+        row.get_mut("data").map(Value::take).map(|data| (data, updated))
+    }))
 }
 /// `2026-09-27T12:34:56Z` from Unix seconds (UTC), for `updated_at`.
 fn iso8601(seconds: u64) -> String {

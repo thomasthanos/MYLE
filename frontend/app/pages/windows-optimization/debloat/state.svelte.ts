@@ -76,7 +76,9 @@ class DebloatState {
   outcome = $state<DebloatOutcome | null>(null);
   /** The phase of a run: for the button and the progress header. */
   phase = $state<"idle" | "restorePoint" | "running" | "done">("idle");
-  readonly locked = $derived(this.busy || this.startMenuBusy || operationGate.lockedFor("windows-optimization"));
+  /** Auto-Logon, a firmware restart or a backend operation of the Tools tab (the same page). */
+  readonly toolsRunning = $derived(operationGate.heldBesides("windows-optimization", ["debloat", "start-menu"]));
+  readonly locked = $derived(this.busy || this.startMenuBusy || this.toolsRunning || operationGate.lockedFor("windows-optimization"));
   readonly tweaks = $derived(this.status?.tweaks ?? []);
   readonly installedApps = $derived((this.status?.apps ?? []).filter((app) => app.packages.length > 0));
   /** What "Review & apply" would do. */
@@ -227,7 +229,7 @@ class DebloatState {
     });
   }
   async #perform(work: () => Promise<DebloatOutcome>, withRestorePoint: boolean, steps: number) {
-    if (this.locked || !operationGate.begin("windows-optimization")) {
+    if (this.locked || !operationGate.begin("windows-optimization", "debloat")) {
       toast.error("Another app task is running. Try again when it finishes.");
       return;
     }
@@ -252,7 +254,7 @@ class DebloatState {
       toast.error(message(error));
     } finally {
       this.busy = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "debloat");
       await this.load();
     }
   }
@@ -319,7 +321,7 @@ class DebloatState {
     }
   }
   async setStartMenu(update: StartMenuUpdate) {
-    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
+    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization", "start-menu")) return;
     this.startMenuBusy = true;
     try {
       const next = await api.startMenuSet(update);
@@ -328,11 +330,11 @@ class DebloatState {
       toast.error(message(error));
     } finally {
       this.startMenuBusy = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "start-menu");
     }
   }
   async setHideRecommended(hide: boolean) {
-    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
+    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization", "start-menu")) return;
     this.startMenuBusy = true;
     try {
       const next = await api.startMenuHideRecommended(hide);
@@ -342,7 +344,7 @@ class DebloatState {
       toast.error(message(error));
     } finally {
       this.startMenuBusy = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "start-menu");
     }
   }
   async applyStartPins(pins: string[], label: string) {
@@ -356,7 +358,7 @@ class DebloatState {
       confirmLabel: "Apply",
     });
     if (!ok) return;
-    if (this.locked || !operationGate.begin("windows-optimization")) return;
+    if (this.locked || !operationGate.begin("windows-optimization", "start-menu")) return;
     this.startMenuBusy = true;
     try {
       const next = await api.startMenuApplyPins(pins);
@@ -366,11 +368,11 @@ class DebloatState {
       toast.error(message(error));
     } finally {
       this.startMenuBusy = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "start-menu");
     }
   }
   async restoreStartPins() {
-    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization")) return;
+    if (this.locked || !this.status?.startMenu.supported || !operationGate.begin("windows-optimization", "start-menu")) return;
     this.startMenuBusy = true;
     try {
       const next = await api.startMenuRestorePins();
@@ -380,7 +382,7 @@ class DebloatState {
       toast.error(message(error));
     } finally {
       this.startMenuBusy = false;
-      operationGate.end("windows-optimization");
+      operationGate.end("windows-optimization", "start-menu");
     }
   }
 }
