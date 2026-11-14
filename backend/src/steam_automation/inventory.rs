@@ -155,8 +155,11 @@ pub(crate) fn seller_gets(buyer_cents: u32) -> u32 {
 type Page<T> = Result<(Vec<T>, Option<String>), String>;
 async fn read_pages<C: Community, T>(api: &C, steam_id: u64, parse: fn(&str) -> Page<T>) -> Result<Vec<T>, CommunityError> {
     let mut all = Vec::new();
-    let mut start = None;
-    loop {
+    let mut start: Option<String> = None;
+    // 2,000 items a page: far more pages than any inventory has. Steam
+    // naming the same page again (or never stopping) would otherwise keep
+    // the engine here for good, a request every few seconds.
+    for _ in 0..MAX_INVENTORY_PAGES {
         let mut url = format!("{COMMUNITY}/inventory/{steam_id}/753/6?l=english&count=2000");
         if let Some(last) = &start {
             url.push_str(&format!("&start_assetid={last}"));
@@ -164,11 +167,16 @@ async fn read_pages<C: Community, T>(api: &C, steam_id: u64, parse: fn(&str) -> 
         let (found, more) = parse(&api.get(&url).await?).map_err(CommunityError::Other)?;
         all.extend(found);
         match more {
+            Some(next) if start.as_deref() == Some(next.as_str()) => {
+                return Err(CommunityError::Other("Steam kept sending the same inventory page.".into()));
+            }
             Some(next) => start = Some(next),
             None => return Ok(all),
         }
     }
+    Err(CommunityError::Other("The inventory has more pages than expected; try again later.".into()))
 }
+const MAX_INVENTORY_PAGES: usize = 100;
 pub(crate) async fn read_items<C: Community>(api: &C, steam_id: u64) -> Result<Vec<InventoryItem>, CommunityError> {
     read_pages(api, steam_id, parse_items).await
 }
@@ -871,5 +879,21 @@ mod tests {
         });
         sold(&api, &mut HashSet::new()).await;
         assert_eq!(api.gets().iter().filter(|url| url.contains("/inventory/")).count(), 2);
+    }
+    #[tokio::test]
+    async fn steam_naming_the_same_page_again_ends_the_read() {
+        let api = FakeCommunity::answering(|_| Ok(r#"{"assets":[],"descriptions":[],"more_items":1,"last_assetid":"55","success":1}"#.to_string()));
+        let error = read_items(&api, 1).await.unwrap_err();
+        assert_eq!(error, CommunityError::Other("Steam kept sending the same inventory page.".into()));
+        assert_eq!(api.gets().len(), 2);
+    }
+    #[tokio::test]
+    async fn an_inventory_that_never_ends_is_not_read_for_ever() {
+        let api = FakeCommunity::answering(|url| {
+            let next = url.split("start_assetid=").nth(1).map_or(0, |last| last.parse::<u64>().unwrap() + 1);
+            Ok(format!(r#"{{"assets":[],"descriptions":[],"more_items":1,"last_assetid":"{next}","success":1}}"#))
+        });
+        assert!(read_items(&api, 1).await.is_err());
+        assert_eq!(api.gets().len(), MAX_INVENTORY_PAGES);
     }
 }
