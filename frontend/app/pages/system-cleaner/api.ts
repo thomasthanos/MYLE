@@ -56,8 +56,9 @@ export const cleanerApi = {
   downloadsPreview: () => invoke<import("./downloads").Preview>("cleaner_downloads_preview"),
   downloadsDelete: (paths: string[]) => invoke<import("./downloads").Outcome>("cleaner_downloads_delete", { paths }),
   categories: () => invoke<CleanerCategory[]>("cleaner_categories"),
+  isElevated: () => invoke<boolean>("cleaner_is_elevated"),
   scan: (onEvent: (e: ScanEvent) => void) => invoke<ScanSummary>("cleaner_scan", { onEvent: channel(onEvent) }),
-  /** The administrator helper approved during a scan is still running. */
+  /** The app or its administrator helper can access system folders. */
   adminReady: () => invoke<boolean>("cleaner_admin_ready"),
   /** Reports the system folders only, to be added to the user scan. */
   scanElevated: (onEvent: (e: ScanEvent) => void) =>

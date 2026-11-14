@@ -108,7 +108,14 @@ pub async fn run(
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    ask(Request { action, ids, trees: Vec::new(), spotify_registry: false }).await
+    let request = Request { action, ids, trees: Vec::new(), spotify_registry: false };
+    let pid = std::process::id();
+    if elevated_pipe::is_elevated(pid) {
+        return tauri::async_runtime::spawn_blocking(move || handle(&request, pid))
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    ask(request).await
 }
 async fn ask(request: Request) -> Result<HashMap<String, Totals>, String> {
     let mut session = SESSION.lock().await;

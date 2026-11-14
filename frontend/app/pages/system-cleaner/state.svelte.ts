@@ -24,7 +24,7 @@ function addSystemMeasurement(user: Measured | undefined, system: Measured): Mea
 export interface Outcome { freed: number; skipped: number; skippedBytes: number; adminSkipped: number; adminSkippedBytes: number }
 /** The step the running clean is on. */
 export interface CleanProgress { pass: "user" | "administrator"; step: number; total: number; current: string }
-type Phase = "idle" | "scanning" | "scanning-admin" | "cleaning";
+type Phase = "idle" | "scanning" | "scanning-all" | "scanning-admin" | "cleaning";
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,6 +47,7 @@ class CleanerState {
   scanned = $state(false);
   /** Whether the current results include an approved administrator scan. */
   adminGranted = $state(false);
+  appElevated = $state<boolean | null>(null);
   progress = $state<CleanProgress | null>(null);
   /** Both passes are done and what is left is being measured again. */
   settling = $state(false);
@@ -63,9 +64,9 @@ class CleanerState {
   #barTarget = 0;
   /** When the running visual step is free to move on; see `step` in `clean`. */
   #paced: number | null = null;
-  readonly canScanSystemFolders = $derived(this.scanned && !this.adminGranted && this.categories.some((category) => category.mayNeedAdmin));
+  readonly canScanSystemFolders = $derived(this.appElevated === false && !this.adminGranted && this.categories.some((category) => category.mayNeedAdmin));
   readonly busy = $derived(this.phase !== "idle");
-  readonly scanning = $derived(this.phase === "scanning" || this.phase === "scanning-admin");
+  readonly scanning = $derived(this.phase === "scanning" || this.phase === "scanning-all" || this.phase === "scanning-admin");
   readonly selectable = $derived(this.categories.filter((category) => this.canSelectCategory(category)));
   readonly bulkSelectable = $derived(this.selectable.filter(({ id }) => id !== DOWNLOADS));
   readonly selection = $derived(this.selectable.filter(({ id }) => this.selected.has(id)));
@@ -75,6 +76,7 @@ class CleanerState {
   readonly allTicked = $derived(this.scanned && this.allSelected);
   readonly status = $derived.by(() => {
     if (this.phase === "scanning") return "Scanning…";
+    if (this.phase === "scanning-all") return "Scanning user and system folders…";
     if (this.phase === "scanning-admin") return "Scanning system folders…";
     if (this.phase === "cleaning") {
       if (this.settling) return "Checking what is left…";
@@ -82,14 +84,16 @@ class CleanerState {
       return p?.current ? `Cleaning ${p.current} (${p.step}/${p.total})` : "Cleaning…";
     }
     if (!this.scanned) return "Ready to scan";
-    if (this.canScanSystemFolders) return "Scan completed · system folders not scanned";
+    if (!this.adminGranted && this.categories.some((category) => category.mayNeedAdmin)) return "Scan completed · system folders not scanned";
     return this.autoSelected ? "Scan completed · available categories selected" : "Scan completed";
   });
   async load() {
     if (!isTauri()) return;
     try {
       // Downloads is measured and cleaned by its own commands, with the same card, tick and Clean button as the rest.
-      this.categories = [...(await cleanerApi.categories()), DOWNLOADS_CATEGORY];
+      const [categories, elevated] = await Promise.all([cleanerApi.categories(), cleanerApi.isElevated()]);
+      this.appElevated = elevated;
+      this.categories = [...categories, DOWNLOADS_CATEGORY];
       const known = new Set(this.categories.map((c) => c.id)); // drop ids of an older build
       for (const id of [...this.selected]) if (!known.has(id)) this.selected.delete(id);
     } catch (err) {
@@ -128,10 +132,10 @@ class CleanerState {
     }
     this.#persistSelection();
   }
-  /** A regular scan starts fresh with the user folders and skips every system folder. */
-  async scan() {
+  /** A fresh scan includes system folders when requested or when MYLE already runs elevated. */
+  async scan(includeSystem = this.appElevated === true) {
     if (this.busy) return;
-    this.phase = "scanning";
+    this.phase = includeSystem ? "scanning-all" : "scanning";
     this.scanned = false;
     this.adminGranted = false;
     this.error = null;
@@ -139,6 +143,7 @@ class CleanerState {
     this.cleaned.clear();
     this.outcome = {};
     this.autoSelected = false;
+    const systemPass = includeSystem ? this.#measureSystemFolders() : undefined;
     const downloadsPass = this.#measureDownloads();
     let scanSucceeded = false;
     try {
@@ -148,8 +153,9 @@ class CleanerState {
       this.error = message(err);
       toast.error(`Scan failed: ${message(err)}`);
     }
-    // A failed category scan must still own its Downloads request until it finishes.
-    await downloadsPass;
+    // Wait for each pass before releasing the scan. Merge system sizes after the user measurements, regardless of completion order.
+    const [, admin] = await Promise.all([downloadsPass, systemPass]);
+    if (scanSucceeded && admin) this.#addSystemFolders(admin);
     this.scanned = scanSucceeded;
     if (scanSucceeded) this.#selectAllAfterScan();
     this.phase = "idle";
@@ -181,27 +187,38 @@ class CleanerState {
   /** Asks for administrator approval and adds system folders to the existing results. */
   async allowAdmin() {
     if (this.busy || !this.canScanSystemFolders) return;
+    if (!this.scanned) return this.scan(true);
     this.phase = "scanning-admin";
+    const previouslyAvailable = new Set(this.selectable.map(({ id }) => id));
+    const added = await this.#measureSystemFolders();
+    if (added) {
+      this.#addSystemFolders(added);
+      for (const { id } of this.bulkSelectable) {
+        if (added[id] && !previouslyAvailable.has(id)) this.selected.add(id);
+      }
+      this.#persistSelection();
+    }
+    this.phase = "idle";
+  }
+
+  async #measureSystemFolders(): Promise<Record<string, Measured> | undefined> {
     const admin: Record<string, Measured> = {};
     try {
       await cleanerApi.scanElevated((e) => { admin[e.data.id] = e.data; });
-      const previouslyAvailable = new Set(this.selectable.map(({ id }) => id));
-      for (const [id, system] of Object.entries(admin)) {
-        if (this.sizes[id]?.locked && this.cleaned.delete(id)) delete this.outcome[id];
-        this.sizes[id] = addSystemMeasurement(this.sizes[id], system);
-      }
-      this.adminGranted = true;
-      for (const { id } of this.selectable) {
-        if (admin[id] && !previouslyAvailable.has(id)) this.selected.add(id);
-      }
-      this.#persistSelection();
+      return admin;
     } catch (err) {
       const error = message(err);
       if (error === DECLINED) toast.info("System folders were left out: administrator approval was declined.");
       else toast.error(`System folders could not be measured: ${error}`);
-    } finally {
-      this.phase = "idle";
     }
+  }
+
+  #addSystemFolders(admin: Record<string, Measured>) {
+    for (const [id, system] of Object.entries(admin)) {
+      if (this.sizes[id]?.locked && this.cleaned.delete(id)) delete this.outcome[id];
+      this.sizes[id] = addSystemMeasurement(this.sizes[id], system);
+    }
+    this.adminGranted = true;
   }
   async clean() {
     if (this.busy) return;
@@ -216,7 +233,9 @@ class CleanerState {
     const withAdmin = this.adminGranted === true && adminIds.length > 0;
     const adminReady = withAdmin && (await cleanerApi.adminReady().catch(() => false)); // the scan's helper still runs: no second prompt
     const adminLine = withAdmin
-      ? adminReady ? "\n\nThe system folders are emptied with the administrator approval from the scan." : "\n\nWindows will ask for administrator approval again to empty the system folders."
+      ? this.appElevated ? "\n\nSystem folders are included because MYLE is running as administrator."
+        : adminReady ? "\n\nThe system folders are emptied with the administrator approval from the scan."
+        : "\n\nWindows will ask for administrator approval again to empty the system folders."
       : adminIds.length ? "\n\nSystem folders are skipped: administrator approval was not given during the scan." : "";
     const ok = await confirm({
       title: "Clean selected items?",

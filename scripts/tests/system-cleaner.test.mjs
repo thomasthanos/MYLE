@@ -64,6 +64,59 @@ const measureEvent = (id) => ({ event: "category", data: { id, bytes: sizes[id],
 /** What the second measurement of a run — the one after the cleaning — finds. */
 const remeasureEvent = (id) => ({ event: "category", data: { id, bytes: remaining[id], files: 1, locked: false } });
 const original = { ...cleanerApi };
+test("the admin scan can start from a fresh page", async () => {
+  await scanAll([], { deferScan: true });
+  assert.equal(state.canScanSystemFolders, true);
+  let resumeUserScan;
+  let resumeDownloads;
+  let adminStarted = false;
+  const scanUserFolders = cleanerApi.scan;
+  const scanDownloads = cleanerApi.downloadsPreview;
+  const scanSystem = cleanerApi.scanElevated;
+  cleanerApi.scan = async (emit) => {
+    await new Promise((resolve) => { resumeUserScan = resolve; });
+    return scanUserFolders(emit);
+  };
+  cleanerApi.downloadsPreview = async () => {
+    await new Promise((resolve) => { resumeDownloads = resolve; });
+    return scanDownloads();
+  };
+  cleanerApi.scanElevated = async (emit) => {
+    adminStarted = true;
+    return scanSystem(emit);
+  };
+  const scanning = state.allowAdmin();
+  try {
+    assert.equal(adminStarted, true, "the system scan starts before either other scan finishes");
+    assert.equal(state.phase, "scanning-all");
+  } finally {
+    resumeUserScan();
+    resumeDownloads();
+    await scanning;
+  }
+  assert.equal(scans, 1);
+  assert.equal(state.adminGranted, true);
+  assert.equal(state.selectedBytes, 7_000);
+});
+
+test("an elevated app includes system folders in Scan and hides the separate action", async () => {
+  await scanAll([], { elevated: true, deferScan: true });
+  assert.equal(state.canScanSystemFolders, false);
+  await state.scan();
+  assert.equal(state.adminGranted, true);
+  assert.equal(state.selectedBytes, 7_000);
+});
+
+test("declining admin on the first scan keeps the user scan results", async () => {
+  await scanAll([], { deferScan: true });
+  cleanerApi.scanElevated = async () => { throw new Error("Administrator approval was declined."); };
+  await state.allowAdmin();
+  assert.equal(state.scanned, true);
+  assert.equal(state.phase, "idle");
+  assert.equal(state.canScanSystemFolders, true);
+  assert.equal(state.isTicked("prefetch"), false);
+  assert.equal(state.selectedBytes, 5_000);
+});
 test("only an explicit admin scan includes system folders, even when a helper is available", async () => {
   let adminScans = 0;
   let standardScans = 0;
@@ -111,8 +164,9 @@ test("only an explicit admin scan includes system folders, even when a helper is
 });
 /** The first scan of a test measures full sizes; later ones measure what is left. */
 let scans = 0;
-async function scanAll(downloadItems = []) {
+async function scanAll(downloadItems = [], { elevated = false, deferScan = false } = {}) {
   scans = 0;
+  cleanerApi.isElevated = async () => elevated;
   cleanerApi.categories = async () => categories;
   cleanerApi.scan = async (onEvent) => {
     scans++;
@@ -131,12 +185,13 @@ async function scanAll(downloadItems = []) {
   cleanerApi.downloadsPreview = async () => ({ folder: "D:\\Downloads", items: downloadItems, total: downloadItems.reduce((sum, item) => sum + item.size, 0), kept: [] });
   cleanerApi.downloadsDelete = async () => ({ deleted: 0, freed: 0, skipped: [] });
   await state.load();
-  await state.scan();
+  if (!deferScan) await state.scan();
 }
 const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 test.beforeEach(() => {
   storage.clear();
   Object.assign(cleanerApi, original);
+  cleanerApi.isElevated = async () => false;
   scans = 0;
   state.categories = [];
   state.sizes = {};

@@ -482,6 +482,7 @@ pub fn run() {
             cleaner::cleaner_scan,
             cleaner::cleaner_scan_elevated,
             cleaner::cleaner_admin_ready,
+            cleaner::cleaner_is_elevated,
             cleaner::cleaner_clean,
             cleaner::cleaner_clean_elevated,
             cleaner::downloads::cleaner_downloads_preview,

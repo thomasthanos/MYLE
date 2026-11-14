@@ -27,9 +27,11 @@
   const measured = $derived(cleanerState.sizes[category.id]);
   const checked = $derived(cleanerState.isTicked(category.id));
   const requiresAdmin = $derived(cleanerState.requiresAdmin(category));
-  const scanningSystemFiles = $derived(cleanerState.phase === "scanning-admin" && category.mayNeedAdmin);
+  const scanningSystemFiles = $derived(
+    (cleanerState.phase === "scanning-admin" || cleanerState.phase === "scanning-all") && category.mayNeedAdmin,
+  );
   const pending = $derived(
-    (cleanerState.phase === "scanning" && !requiresAdmin && !measured) ||
+    ((cleanerState.phase === "scanning" || cleanerState.phase === "scanning-all") && !requiresAdmin && !measured) ||
     (scanningSystemFiles && category.adminOnly),
   );
   const locked = $derived(measured?.locked ?? false);
@@ -50,9 +52,9 @@
     if (cleanerState.phase === "cleaning") return "Wait for the cleanup to finish.";
     if (health.scanning) return "Wait for the Software Health scan to finish.";
     if (health.busy) return "Wait for the Software Health operation to finish.";
-    if (requiresAdmin) return cleanerState.scanned
-      ? "Choose Scan system folders and approve administrator access to scan this category."
-      : "Run Scan, then choose Scan system folders to scan this category with administrator access.";
+    if (requiresAdmin) return cleanerState.appElevated
+      ? "Run Scan to measure this system folder."
+      : "Choose Scan system folders and approve administrator access to scan this category.";
     if (!cleanerState.scanned) return "Run a scan before selecting this category.";
     if (done) return "This category was already processed. Scan again to select it.";
     if (!measured) return "Scan again to measure this category before selecting it.";

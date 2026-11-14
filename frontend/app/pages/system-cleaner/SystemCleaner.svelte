@@ -81,7 +81,7 @@
 <section class="hero surface">
   <div class="stats">
     <div class="stat"><span class="label">Last cleaned</span><strong class="value small" title={lastCleanedTitle}>{lastCleanedLabel}</strong></div>
-    <div class="stat"><span class="label">Available to clean</span><strong class="value" class:shimmer={cleanerState.phase === "scanning"}>{formatSize(cleanerState.total)}</strong></div>
+    <div class="stat"><span class="label">Available to clean</span><strong class="value" class:shimmer={cleanerState.phase === "scanning" || cleanerState.phase === "scanning-all"}>{formatSize(cleanerState.total)}</strong></div>
     <div class="stat"><span class="label">Selected</span><strong class="value accent">{formatSize(cleanerState.selectedBytes)}</strong></div>
   </div>
 
@@ -91,7 +91,7 @@
       {cleanerState.status}
     </p>
     <div class="actions">
-      <button class="btn" disabled={locked} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
+      <button class="btn" disabled={locked || cleanerState.appElevated === null} onclick={() => cleanerState.scan()}><RadarIcon size={15} /> Scan</button>
       {#if cleanerState.canScanSystemFolders}
         <button class="btn" disabled={locked} onclick={() => cleanerState.allowAdmin()}><ShieldCheck size={15} /> Scan system folders</button>
       {/if}

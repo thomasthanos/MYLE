@@ -121,11 +121,15 @@ pub async fn cleaner_scan(on_event: Channel<ScanEvent>) -> Result<ScanSummary, S
     });
     handle.await.map_err(|e| e.to_string())
 }
-/// Whether the administrator helper approved earlier is still running, so the
-/// next scan or clean will not ask again.
+/// Whether the application itself was started as administrator.
+#[tauri::command]
+pub fn cleaner_is_elevated() -> bool {
+    crate::elevated_pipe::is_elevated(std::process::id())
+}
+
 #[tauri::command]
 pub async fn cleaner_admin_ready() -> bool {
-    elevated::is_running().await
+    cleaner_is_elevated() || elevated::is_running().await
 }
 /// Measures only the system folders. The caller adds these figures to its
 /// existing user scan. The helper asks for approval the first time it starts.
