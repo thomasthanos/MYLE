@@ -423,7 +423,7 @@ mod tests {
             .flat_map(|action| match &action.run {
                 tasks::Run::Batch(steps) => steps.iter().collect::<Vec<_>>(),
                 tasks::Run::Stream(step) => vec![step],
-                tasks::Run::DiskScan | tasks::Run::WingetUpgradeAll => Vec::new(),
+                tasks::Run::DiskScan => Vec::new(),
             })
             .map(|step| system32(step.exe).to_string_lossy().to_ascii_lowercase())
             .chain([
@@ -447,7 +447,6 @@ mod tests {
                         Path::new(r"C:\Temp\o.log"),
                         Path::new(r"C:\Temp\o.stop"),
                     ),
-                    tasks::Run::WingetUpgradeAll => continue,
                 };
                 for exe in script.match_indices(".exe").map(|(at, _)| at) {
                     let start = script[..exe].rfind(['\'', '"']).unwrap() + 1;
@@ -473,7 +472,6 @@ mod tests {
                     tasks::Run::Batch(steps) => batch_script(steps, &log),
                     tasks::Run::Stream(step) => stream_script(step, &log, &stop),
                     tasks::Run::DiskScan => disk_script(&log, &stop),
-                    tasks::Run::WingetUpgradeAll => continue,
                 };
                 // What the UAC prompt starts: powershell.exe plus its arguments.
                 let program = crate::apps::process::powershell().to_string_lossy().into_owned();

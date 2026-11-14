@@ -6,7 +6,6 @@ use serde::Serialize;
 pub enum Section {
     Network,
     Health,
-    Software,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Elevation {
@@ -30,8 +29,6 @@ pub enum Run {
     Stream(Step),
     /// Windows Storage's online check, independent of the chkdsk executable.
     DiskScan,
-    /// `winget upgrade --all`, which runs without elevation.
-    WingetUpgradeAll,
 }
 pub struct Action {
     pub id: &'static str,
@@ -281,27 +278,6 @@ pub const CARDS: &[Card] = &[
             ..NO_ACTION_EXTRAS
         }],
     },
-    // -- Software updates ---------------------------------------------------
-    Card {
-        id: "update-apps",
-        section: Section::Software,
-        title: "Update All Applications",
-        description: "Upgrades every installed program winget knows about, including ones whose current version it cannot read.",
-        icon: "updates",
-        elevation: Elevation::No,
-        caution: None,
-        console: true,
-        actions: &[Action {
-            id: "update-apps",
-            label: "Update all",
-            run: Run::WingetUpgradeAll,
-            cancellable: true,
-            confirm: Some(
-                "Windows may ask for administrator approval once per program, and this can take a while.",
-            ),
-            ..NO_ACTION_EXTRAS
-        }],
-    },
 ];
 pub fn find(id: &str) -> Option<(&'static Card, &'static Action)> {
     CARDS
@@ -322,7 +298,7 @@ mod tests {
         match &action.run {
             Run::Batch(list) => list.iter().collect(),
             Run::Stream(step) => vec![step],
-            Run::DiskScan | Run::WingetUpgradeAll => Vec::new(),
+            Run::DiskScan => Vec::new(),
         }
     }
     fn actions() -> impl Iterator<Item = (&'static Card, &'static Action)> {
@@ -406,7 +382,7 @@ mod tests {
         for card in CARDS.iter().filter(|c| c.console) {
             for action in card.actions {
                 assert!(
-                    matches!(action.run, Run::Stream(_) | Run::DiskScan | Run::WingetUpgradeAll),
+                    matches!(action.run, Run::Stream(_) | Run::DiskScan),
                     "{} has a console but produces no live output",
                     action.id
                 );
@@ -414,7 +390,7 @@ mod tests {
         }
         for (_, action) in actions().filter(|(_, a)| a.cancellable) {
             assert!(
-                matches!(action.run, Run::Stream(_) | Run::WingetUpgradeAll),
+                matches!(action.run, Run::Stream(_)),
                 "{} claims to be cancellable but runs as one batch",
                 action.id
             );
@@ -422,7 +398,7 @@ mod tests {
     }
     #[test]
     fn the_disruptive_actions_ask_first() {
-        for id in ["net-reset", "ip-renew", "audio-restart", "update-apps"] {
+        for id in ["net-reset", "ip-renew", "audio-restart"] {
             assert!(
                 find(id).unwrap().1.confirm.is_some(),
                 "{id} must confirm first"

@@ -411,9 +411,8 @@ Windows diagnostics and repairs, one at a time (`backend/src/maintenance/`, page
 |---|---|
 | **Network** | Flush DNS, renew the IP, restart the audio service, Network Reset |
 | **Health** | `sfc /scannow` (System Files), `DISM /RestoreHealth` (Disk image) |
-| **Software** | Update all applications (winget `upgrade --all`) |
 
-- Every action runs one at a time (the console shows its output live, `Console.svelte`), can be cancelled, and reports its exit code. `3010` means "done, restart Windows"; winget's `0x8A15_002B` means nothing had an update — both are shown as success with the right wording, not as errors.
+- Every action runs one at a time (the console shows its output live, `Console.svelte`), can be cancelled, and reports its exit code. `3010` means "done, restart Windows" — shown as success with the right wording, not as an error.
 - Network Reset and the DISM repair need administrator rights and go through `elevated_pipe`.
 - The output is parsed into sections and bullet points (`output.ts`) rather than shown as raw log lines where a known tool produced it.
 

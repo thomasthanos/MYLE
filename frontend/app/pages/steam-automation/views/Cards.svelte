@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import type { BadgeGame, LibraryGame } from "../api";
   import FeaturePanel from "../FeaturePanel.svelte";
   import GameTile from "../GameTile.svelte";
@@ -26,6 +27,8 @@
   const current = $derived(chosen.find((game) => status?.running.includes(game.appid))?.name ?? null);
   const panel = $derived(farmPanel(started, status?.farm ?? { phase: "done", gamesLeft: 0, dropsLeft: 0 }, cards, chosen.length, current));
   const next = $derived(started && status?.farm.nextCheckAt ? untilText(status.farm.nextCheckAt, now) : "");
+  const shared = $derived((page.library ?? []).filter((game) => game.shared).length);
+  const total = $derived(page.library?.length ?? 0);
 
   onMount(() => {
     void page.loadDrops(false);
@@ -48,7 +51,7 @@
 {/if}
 
 <div class="row">
-  <h3>Games with cards left</h3>
+  <h3>Games with card drops left</h3>
   <span class="count">{games.length}</span>
   <span class="grow"></span>
   <button class="icon-btn" type="button" aria-label="Look for cards again" title="Look for cards again" disabled={page.dropsLoading} onclick={() => void page.loadDrops(true)}><RefreshCw size={15} /></button>
@@ -70,7 +73,19 @@
 {:else if page.dropsError}
   <div class="empty" role="alert"><p>{page.dropsError}</p><button class="btn small" type="button" onclick={() => void page.loadDrops(true)}>Try again</button></div>
 {:else}
-  <p class="empty">No games have cards left to drop.</p>
+  <div class="empty">
+    <p>
+      {#if status?.steamAccount}
+        Steam says <strong>{status.steamAccount}</strong> has no card drops left.
+      {:else}
+        Steam says there are no card drops left.
+      {/if}
+    </p>
+    <p class="hint">
+      Steam drops only about half of a card set. The “trading cards left to collect” count on a game's store page is the rest of the set, and those cards come from trading or the Market, never from playing. Cards you have already earned are on the Inventory tab. {#if shared}{shared} of your {total} games {shared === 1 ? "comes" : "come"} through Steam Family, which never drops cards. {/if}Free promotional copies do not drop cards either, and Steam can take a while to list a newly added game here.
+    </p>
+    <button class="btn small" type="button" onclick={() => void openUrl("https://steamcommunity.com/my/badges/")}>Open Steam's badges page</button>
+  </div>
 {/if}
 
 <style>
@@ -80,4 +95,6 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 12px; }
   .empty { margin: 40px auto; color: var(--text-3); font-size: 13px; text-align: center; }
   .empty p { margin: 0 0 10px; }
+  .empty .hint { max-width: 540px; margin: 6px auto 14px; font-size: 12px; line-height: 1.55; }
+  .empty strong { color: var(--text-2); font-weight: 600; }
 </style>

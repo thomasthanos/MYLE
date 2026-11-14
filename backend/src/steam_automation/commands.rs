@@ -203,7 +203,9 @@ pub(crate) fn now() -> u64 {
 }
 #[tauri::command]
 pub fn steam_automation_status(state: State<'_, SteamAutomationState>) -> Status {
-    state.status.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    let mut status = state.status.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    status.steam_account = super::steam_state::active_persona();
+    status
 }
 #[tauri::command]
 pub fn steam_automation_settings(state: State<'_, SteamAutomationState>) -> Settings {

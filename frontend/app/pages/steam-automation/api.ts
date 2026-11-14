@@ -8,6 +8,8 @@ export interface Status {
   steamRunning: boolean;
   communitySignedIn: boolean;
   communityOk: boolean;
+  /** The Steam account's persona name, when the client is signed in. */
+  steamAccount: string | null;
   waiting: WaitingView | null;
   purchaseDatesUnknown: boolean;
   started: Record<Feature, boolean>;

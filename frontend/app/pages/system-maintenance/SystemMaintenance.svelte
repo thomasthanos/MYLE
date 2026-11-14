@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import HeartPulse from "@lucide/svelte/icons/heart-pulse";
-  import PackageCheck from "@lucide/svelte/icons/package-check";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Wifi from "@lucide/svelte/icons/wifi";
   import PageHeader from "../../../lib/components/PageHeader.svelte";
@@ -17,7 +16,6 @@
   const sections: { id: SectionId; title: string; icon: typeof Wifi }[] = [
     { id: "network", title: "Network & Connectivity", icon: Wifi },
     { id: "health", title: "System Health & Diagnostics", icon: HeartPulse },
-    { id: "software", title: "Software Updates", icon: PackageCheck },
   ];
 
   const bySection = $derived(sections.map((section) => ({ ...section, cards: s.cards.filter((c) => c.section === section.id) })));
@@ -99,7 +97,6 @@
 
   section[data-section="network"] { --section-tone: #63d7e9; }
   section[data-section="health"] { --section-tone: rgb(var(--accent-soft-rgb)); }
-  section[data-section="software"] { --section-tone: #54d6a0; }
 
   .section-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 

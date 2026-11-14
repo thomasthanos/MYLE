@@ -183,15 +183,15 @@ const farm = (phase, gamesLeft = 2, dropsLeft = 6) => ({ phase, gamesLeft, drops
 test("before starting, card farming says what would happen", () => {
   assert.equal(farmPanel(false, farm("done"), 6, 2, null).title, "6 cards to collect from 2 games");
   assert.equal(farmPanel(false, farm("done"), 1, 1, null).title, "1 card to collect from 1 game");
-  assert.equal(farmPanel(false, farm("done"), 0, 0, null).title, "No cards left to collect");
+  assert.equal(farmPanel(false, farm("done"), 0, 0, null).title, "No card drops left");
 });
 test("while running, card farming says what it is doing now", () => {
   assert.equal(farmPanel(true, farm("reading"), 6, 2, null).title, "Checking your games for cards");
   assert.equal(farmPanel(true, farm("signedOut"), 6, 2, null).title, "Waiting for you to sign in to Steam");
   assert.equal(farmPanel(true, farm("building"), 6, 2, null).title, "Warming up 2 games");
   assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").title, "Farming Detroit");
-  assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").detail, "5 cards left to collect.");
-  assert.equal(farmPanel(true, farm("done", 0, 0), 0, 0, null).title, "All your cards have dropped");
+  assert.equal(farmPanel(true, farm("solo", 1, 5), 5, 1, "Detroit").detail, "5 card drops left.");
+  assert.equal(farmPanel(true, farm("done", 0, 0), 0, 0, null).title, "All card drops collected");
 });
 
 import { rarity, percentText, filterAchievements, sortAchievements, achievementProgress, namesToChange, changeText } from "../../frontend/app/pages/steam-automation/model.ts";

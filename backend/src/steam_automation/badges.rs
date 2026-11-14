@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 use regex_lite::Regex;
 use super::community::{Community, CommunityError};
-const ROW: &str = r#"class="badge_row is_link""#;
 /// Fourteen days, plus one because a licence is dated at midnight of the day it was bought.
 const REFUND_SECONDS: u64 = 15 * 86_400;
 const REFUND_MINUTES: u32 = 120;
@@ -14,9 +13,13 @@ const LICENCES_URL: &str = "https://store.steampowered.com/account/licenses/?l=e
 fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
-static APP: LazyLock<Regex> = LazyLock::new(|| regex(r"gamecards/(\d+)"));
+/// A game's row on the badges page: `class="badge_row"`, with ` is_link` when it links out.
+static ROW: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="badge_row(?: is_link)?""#));
+/// The app id is not always in a `gamecards` link: Steam draws a wide "Play" button for games with
+/// drops still to collect, and that button (`steam://run/<appid>`) is then the only place the id is.
+static APP: LazyLock<Regex> = LazyLock::new(|| regex(r"(?:gamecards/|steam://run/)(\d+)"));
 static PLAYTIME: LazyLock<Regex> = LazyLock::new(|| regex(r"([\d,]+(?:\.\d+)?) hrs on record"));
-static DROPS: LazyLock<Regex> = LazyLock::new(|| regex(r#"progress_info_bold">(\d+) card drops? remaining"#));
+static DROPS: LazyLock<Regex> = LazyLock::new(|| regex(r#"progress_info_bold[^>]*>\s*(\d+)\s+card\s+drops?\s+remaining"#));
 static TITLE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="badge_title">\s*([^<]*?)\s*(?:&nbsp;|<)"#));
 static PAGE: LazyLock<Regex> = LazyLock::new(|| regex(r#"class="pagelink"[^>]*>(\d+)<"#));
 static LICENCE: LazyLock<Regex> = LazyLock::new(|| regex(r#"(?s)<td\s+class="license_date_col">([^<]+)</td>\s*<td>(.*?)</td>(?:\s*<td\s+class="license_acquisition_col">\s*([^<]*?)\s*</td>)?"#));
@@ -41,11 +44,11 @@ fn minutes_played(row: &str) -> u32 {
 }
 /// The games on one badges page that still have drops, and the number of the last page.
 pub(crate) fn parse_badges(html: &str) -> Result<(Vec<BadgeGame>, u32), String> {
-    if !html.contains(ROW) {
+    if !html.contains("badge_row") && !html.contains("badges_sheet") {
         return Err("Steam did not send the badges page.".to_string());
     }
-    let games = html
-        .split(ROW)
+    let games = ROW
+        .split(html)
         .skip(1)
         .filter_map(|row| {
             Some(BadgeGame {
@@ -132,13 +135,14 @@ impl RefundCheck {
 pub(crate) fn is_refundable(recent: Option<bool>, minutes_played: u32) -> bool {
     minutes_played < REFUND_MINUTES && recent != Some(false)
 }
-/// Every game with drops left, across all the badges pages.
+/// Every game with drops left, across all the badges pages. `sort=p` puts the games Steam still
+/// has drops for first, as Steam's own badge page does for the owner.
 pub(crate) async fn read_badges<C: Community>(api: &C, steam_id: u64) -> Result<Vec<BadgeGame>, CommunityError> {
     let mut games = Vec::new();
     let mut seen = HashSet::new();
     let mut page = 1;
     loop {
-        let url = format!("{COMMUNITY}/profiles/{steam_id}/badges/?l=english&p={page}");
+        let url = format!("{COMMUNITY}/profiles/{steam_id}/badges/?l=english&sort=p&p={page}");
         let (found, last) = parse_badges(&api.get(&url).await?).map_err(CommunityError::Other)?;
         games.extend(found.into_iter().filter(|game| seen.insert(game.appid)));
         if page >= last {
@@ -160,6 +164,9 @@ mod tests {
     use super::*;
     use crate::steam_automation::community::{CommunityError, FakeCommunity};
     const BADGES: &str = include_str!("fixtures/badges.html");
+    /// The owner's page as Steam draws it for a game with drops still to collect: no `gamecards`
+    /// link in the row, only the wide "Play" button carrying `steam://run/<appid>`.
+    const OWNER: &str = include_str!("fixtures/badges-owner.html");
     const LICENCES: &str = include_str!("fixtures/licences.html");
     fn game(appid: u32) -> Option<BadgeGame> {
         parse_badges(BADGES).unwrap().0.into_iter().find(|g| g.appid == appid)
@@ -188,6 +195,20 @@ mod tests {
     #[test]
     fn the_last_page_comes_from_the_page_links() {
         assert_eq!(parse_badges(BADGES).unwrap().1, 3);
+        assert_eq!(parse_badges(OWNER).unwrap().1, 2);
+    }
+    #[test]
+    fn a_play_button_row_gives_its_app_id_and_drops() {
+        let games = parse_badges(OWNER).unwrap().0;
+        assert_eq!(games.len(), 2, "the badge with no game and no drops is left out");
+        let mgsv = games.iter().find(|game| game.appid == 287700).expect("the play-button row is parsed");
+        assert_eq!(mgsv.name, "METAL GEAR SOLID V: THE PHANTOM PAIN");
+        assert_eq!((mgsv.drops, mgsv.minutes_played), (7, 312));
+        assert_eq!(games.iter().find(|game| game.appid == 620).unwrap().drops, 1);
+    }
+    #[test]
+    fn an_empty_badge_sheet_is_no_games_not_an_error() {
+        assert_eq!(parse_badges(r#"<div class="badges_sheet"></div>"#).unwrap().0.len(), 0);
     }
     #[test]
     fn a_page_that_is_not_badges_is_an_error() {
@@ -279,7 +300,7 @@ mod tests {
         let api = FakeCommunity::answering(|_| Ok(BADGES.to_string()));
         let games = read_badges(&api, 76561198000000001).await.unwrap();
         assert_eq!(api.gets().len(), 3);
-        assert!(api.gets()[1].contains("/profiles/76561198000000001/badges/?l=english&p=2"));
+        assert!(api.gets()[1].contains("/profiles/76561198000000001/badges/?l=english&sort=p&p=2"));
         assert_eq!(games.len(), 3, "the same game on several pages counts once");
     }
     #[tokio::test]

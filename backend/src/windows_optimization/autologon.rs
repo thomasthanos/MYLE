@@ -31,6 +31,19 @@ const HELPER_UNSUPPORTED: i32 = 22;
 const HELPER_FAILED: i32 = 23;
 const HELPER_INVALID_CREDENTIALS: i32 = 24;
 const HELPER_SID_MISMATCH: i32 = 25;
+const HELPER_LOGON_ERROR_BASE: u32 = 0x2000_0000;
+
+fn helper_logon_exit_code(error: u32) -> i32 {
+    u16::try_from(error).ok().filter(|error| *error != 0).map_or(
+        HELPER_INVALID_CREDENTIALS,
+        |error| (HELPER_LOGON_ERROR_BASE | u32::from(error)) as i32,
+    )
+}
+
+fn helper_logon_error(code: u32) -> Option<u32> {
+    let error = code & 0xffff;
+    (code & 0xffff_0000 == HELPER_LOGON_ERROR_BASE && error != 0).then_some(error)
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HelperRequest {
@@ -432,6 +445,15 @@ pub async fn set_auto_logon(app: &AppHandle, enabled: bool) -> Result<AutoLogonO
             ));
         }
     };
+    if let Some(error) = helper_logon_error(code) {
+        use windows_sys::Win32::Foundation::ERROR_LOGON_FAILURE;
+        let detail = if error == ERROR_LOGON_FAILURE {
+            "Windows rejected the account name or password. Enter your Windows account password. A Windows Hello PIN cannot be used for Auto-Logon.".to_owned()
+        } else {
+            format!("Windows could not verify the sign-in: {}", std::io::Error::from_raw_os_error(error as i32))
+        };
+        return Err(detail);
+    }
     match code {
         code if code == HELPER_OK as u32 && enabled => {
             Ok(AutoLogonOutcome {
@@ -560,7 +582,7 @@ fn run_helper(request_path: &Path) -> i32 {
             drop(note);
             HELPER_UNSUPPORTED
         }
-        Err(HelperError::InvalidCredentials) => HELPER_INVALID_CREDENTIALS,
+        Err(HelperError::LogonRejected(error)) => helper_logon_exit_code(error),
         Err(HelperError::SidMismatch) => HELPER_SID_MISMATCH,
         Err(HelperError::Failed(note)) => {
             drop(note);
@@ -607,7 +629,7 @@ enum HelperError {
     Cancelled(String),
     Conflict(String),
     Unsupported(String),
-    InvalidCredentials,
+    LogonRejected(u32),
     SidMismatch,
     Failed(String),
 }
@@ -663,7 +685,7 @@ fn helper_enable(
                 "The Windows credential prompt was cancelled.".into(),
             ));
         }
-        Err(PromptError::InvalidCredentials) => return Err(HelperError::InvalidCredentials),
+        Err(PromptError::LogonRejected(error)) => return Err(HelperError::LogonRejected(error)),
         Err(PromptError::SidMismatch) => return Err(HelperError::SidMismatch),
         Err(PromptError::Failed(error)) => return Err(HelperError::Failed(error)),
     };
@@ -742,7 +764,7 @@ struct VerifiedCredential {
 }
 enum PromptError {
     Cancelled,
-    InvalidCredentials,
+    LogonRejected(u32),
     SidMismatch,
     Failed(String),
 }
@@ -798,7 +820,6 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
             "Windows could not show the credential prompt (error {status})."
         )));
     }
-    password.commit_from_nul();
     let mut parsed_user = vec![0u16; CREDUI_MAX_USERNAME_LENGTH as usize + 1];
     let mut parsed_domain = vec![0u16; 338];
     let parsed = unsafe {
@@ -818,7 +839,12 @@ fn prompt_for_password(identity: &Identity) -> Result<VerifiedCredential, Prompt
     } else {
         split_credential_name(&wide_slice_to_string(&user_name))
     };
-    let validated = validate_credential_sid(&user, &domain, &password, &identity.sid)?;
+    let windows_password = password.nul_terminated().ok_or_else(|| {
+        PromptError::Failed("Windows returned a password buffer without a terminator.".into())
+    })?;
+    let validated = validate_credential_sid(&user, &domain, windows_password, &identity.sid)?;
+    // LSA stores a counted string. Trim the terminator only after LogonUserW has read it.
+    password.commit_from_nul();
     // Do not trust text returned by the dialog, even though KEEP_USERNAME and PASSWORD_ONLY_OK lock that field. Rebuild the Winlogon identity from the token returned by LogonUserW after its SID has been matched.
     let (user, domain) = split_credential_name(&validated.credential_name());
     Ok(VerifiedCredential {
@@ -837,7 +863,7 @@ fn split_credential_name(value: &str) -> (String, String) {
 fn validate_credential_sid(
     user: &str,
     domain: &str,
-    password: &SecretWide,
+    password: &[u16],
     expected_sid: &str,
 ) -> Result<Identity, PromptError> {
     use windows_sys::Win32::Security::{
@@ -859,7 +885,8 @@ fn validate_credential_sid(
         )
     };
     if logged_on == 0 {
-        return Err(PromptError::InvalidCredentials);
+        let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        return Err(PromptError::LogonRejected(error));
     }
     let identity = identity_from_token_handle(token).map_err(PromptError::Failed);
     unsafe { windows_sys::Win32::Foundation::CloseHandle(token) };
@@ -883,14 +910,15 @@ impl SecretWide {
     fn with_capacity(words: usize) -> Self {
         Self(vec![0; words])
     }
-    fn as_ptr(&self) -> *const u16 {
-        self.0.as_ptr()
-    }
     fn as_mut_ptr(&mut self) -> *mut u16 {
         self.0.as_mut_ptr()
     }
     fn capacity(&self) -> usize {
         self.0.len()
+    }
+    fn nul_terminated(&self) -> Option<&[u16]> {
+        let end = self.0.iter().position(|word| *word == 0)?;
+        Some(&self.0[..=end])
     }
     fn commit_from_nul(&mut self) {
         let length = self
@@ -1573,7 +1601,7 @@ fn current_identity() -> Result<Identity, String> {
             windows_sys::Win32::Security::Authentication::Identity::NameUserPrincipal,
         )
         .filter(|value| !value.trim().is_empty());
-        identity.account_type = classify_account(&identity.domain, identity.upn.as_deref());
+        identity.classify();
         Ok(identity)
     })();
     unsafe { windows_sys::Win32::Foundation::CloseHandle(token) };
@@ -1619,8 +1647,55 @@ fn identity_from_token_handle(
     let (display_name, upn) = extended_names_for_token(token)?;
     identity.upn = upn.filter(|value| !value.trim().is_empty());
     identity.display_name = display_name.unwrap_or_else(|| identity.name.clone());
-    identity.account_type = classify_account(&identity.domain, identity.upn.as_deref());
+    identity.classify();
     Ok(identity)
+}
+
+impl Identity {
+    fn classify(&mut self) {
+        self.account_type = classify_account(&self.domain, self.upn.as_deref());
+        if self.account_type == AutoLogonAccountType::Local {
+            if let Some(principal) = microsoft_principal_for_local_user(&self.name, &self.sid) {
+                self.upn = Some(principal);
+                self.account_type = AutoLogonAccountType::Microsoft;
+            }
+        }
+    }
+}
+
+fn microsoft_principal_for_local_user(name: &str, expected_sid: &str) -> Option<String> {
+    use windows_sys::Win32::NetworkManagement::NetManagement::{
+        NetApiBufferFree, NetUserGetInfo, USER_INFO_24,
+    };
+    let name = wide_null(std::ffi::OsStr::new(name));
+    let mut buffer = std::ptr::null_mut();
+    let status = unsafe { NetUserGetInfo(std::ptr::null(), name.as_ptr(), 24, &mut buffer) };
+    if buffer.is_null() {
+        return None;
+    }
+    let principal = if status == 0 {
+        // Level 24 returns the connected identity and its local SID in this buffer.
+        let info = unsafe { &*buffer.cast::<USER_INFO_24>() };
+        if info.usri24_internet_identity != 0
+            && !info.usri24_internet_provider_name.is_null()
+            && !info.usri24_internet_principal_name.is_null()
+            && sid_to_string(info.usri24_user_sid).is_ok_and(|sid| same_text(&sid, expected_sid))
+        {
+            let provider = unsafe { wide_pointer_to_string(info.usri24_internet_provider_name) };
+            if same_text(&provider, "MicrosoftAccount") {
+                let principal = unsafe { wide_pointer_to_string(info.usri24_internet_principal_name) };
+                Some(principal).filter(|principal| principal.contains('@'))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    unsafe { NetApiBufferFree(buffer.cast()) };
+    principal
 }
 fn base_identity_from_token(
     token: windows_sys::Win32::Foundation::HANDLE,
@@ -1888,6 +1963,29 @@ unsafe fn wide_pointer_to_string(value: *const u16) -> String {
 mod tests {
     use std::collections::HashMap;
     use super::*;
+    #[test]
+    fn prompted_password_keeps_its_windows_terminator_until_validation() {
+        for input in ["", "κωδικός🔑", &"x".repeat(256)] {
+            let expected: Vec<_> = input.encode_utf16().collect();
+            let mut password = SecretWide::with_capacity(257);
+            copy_wide(input, &mut password.0).unwrap();
+            let windows = password.nul_terminated().unwrap();
+            assert_eq!(windows.split_last(), Some((&0, expected.as_slice())));
+            password.commit_from_nul();
+            assert_eq!(password.words(), expected);
+        }
+        assert!(SecretWide(vec![65; 257]).nul_terminated().is_none());
+    }
+
+    #[test]
+    fn windows_logon_failure_details_survive_the_helper_exit_code() {
+        use windows_sys::Win32::Foundation::{ERROR_LOGON_FAILURE, ERROR_LOGON_TYPE_NOT_GRANTED};
+        for error in [ERROR_LOGON_FAILURE, ERROR_LOGON_TYPE_NOT_GRANTED] {
+            assert_eq!(helper_logon_error(helper_logon_exit_code(error) as u32), Some(error));
+        }
+        assert_eq!(helper_logon_error(HELPER_SID_MISMATCH as u32), None);
+        assert_eq!(helper_logon_error(HELPER_FAILED as u32), None);
+    }
     fn identity() -> Identity {
         Identity {
             sid: "S-1-5-21-1000".into(),

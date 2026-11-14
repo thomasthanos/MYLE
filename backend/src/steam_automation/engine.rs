@@ -105,6 +105,8 @@ pub struct Status {
     pub steam_running: bool,
     pub community_signed_in: bool,
     pub community_ok: bool,
+    /// The Steam account's persona name, filled in when the page asks for the status.
+    pub steam_account: Option<String>,
     pub waiting: Option<WaitingView>,
     pub purchase_dates_unknown: bool,
     pub started: Started,
@@ -374,6 +376,7 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             steam_running: world.steam_running,
             community_signed_in: session_exists,
             community_ok: session_exists && self.community_ok,
+            steam_account: None,
             waiting: waiting.map(|waiting| match waiting {
                 Waiting::NoSteam => WaitingView { kind: "noSteam", appid: None },
                 Waiting::OtherAccount => WaitingView { kind: "otherAccount", appid: None },

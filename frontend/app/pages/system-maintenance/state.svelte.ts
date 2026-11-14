@@ -63,7 +63,7 @@ class MaintenanceState {
     return this.cardStatuses[card.id] ?? { state: "ready", label: "Ready" };
   }
   #actionName(action: MaintenanceAction): string {
-    return action.label.replace(/^Run\s+/i, "").replace(/^Update all$/i, "Updates");
+    return action.label.replace(/^Run\s+/i, "");
   }
   #setStatus(card: MaintenanceCard, action: MaintenanceAction, state: MaintenanceStatusKind, label: string) {
     this.cardStatuses[card.id] = { state, label, actionId: action.id };

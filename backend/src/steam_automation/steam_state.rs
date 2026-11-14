@@ -1,6 +1,8 @@
 //! What the Steam client on this PC is doing, from the registry keys it keeps up to date.
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use regex_lite::Regex;
 use winreg::RegKey;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
@@ -37,6 +39,24 @@ pub(crate) fn read() -> Option<SteamState> {
 /// The Steam client's process id, 0 when it has closed.
 pub(crate) fn steam_pid() -> u32 {
     RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Software\Valve\Steam\ActiveProcess").ok().and_then(|key| key.get_value("pid").ok()).unwrap_or(0)
+}
+/// The name Steam shows for the account signed in to the client, from its own login list.
+pub(crate) fn active_persona() -> Option<String> {
+    let state = read()?;
+    let text = std::fs::read_to_string(state.path.join("config").join("loginusers.vdf")).ok()?;
+    persona_of(&text, state.active_user)
+}
+/// The persona of the account whose low 32 bits are `active_user`, out of `loginusers.vdf`.
+pub(crate) fn persona_of(text: &str, active_user: u32) -> Option<String> {
+    static USER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?s)"(\d{17})"\s*\{(.*?)\}"#).expect("a valid pattern"));
+    static PERSONA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""PersonaName"\s*"([^"]*)""#).expect("a valid pattern"));
+    USER.captures_iter(text).find_map(|user| {
+        let id: u64 = user.get(1)?.as_str().parse().ok()?;
+        if !same_account(active_user, id) {
+            return None;
+        }
+        PERSONA.captures(user.get(2)?.as_str())?.get(1).map(|name| name.as_str().to_string())
+    })
 }
 pub(crate) fn process_alive(pid: u32) -> bool {
     // Steam leaves its id behind if it crashes, so the process itself has to be looked at.
@@ -90,5 +110,32 @@ mod tests {
     #[test]
     fn no_active_user_matches_nobody() {
         assert!(!same_account(0, 76561197960265728));
+    }
+    const LOGINS: &str = r#""users"
+{
+	"76561199083028124"
+	{
+		"AccountName"		"nikospepponis132"
+		"PersonaName"		"Souvlatzis"
+		"RememberPassword"		"1"
+		"timestamp"		"1794672655"
+	}
+	"76561198998326527"
+	{
+		"AccountName"		"serrialkiller102"
+		"PersonaName"		"Thomas28"
+		"RememberPassword"		"1"
+		"timestamp"		"1790969780"
+	}
+}"#;
+    #[test]
+    fn the_persona_comes_from_the_active_account() {
+        assert_eq!(persona_of(LOGINS, 1_122_762_396).as_deref(), Some("Souvlatzis"));
+        assert_eq!(persona_of(LOGINS, 1_038_060_799).as_deref(), Some("Thomas28"));
+    }
+    #[test]
+    fn an_account_missing_from_the_list_has_no_persona() {
+        assert_eq!(persona_of(LOGINS, 7), None);
+        assert_eq!(persona_of("", 1_122_762_396), None);
     }
 }

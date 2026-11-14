@@ -1,6 +1,6 @@
 // Typed bridge to the maintenance commands in backend/src/maintenance/.
 import { Channel, invoke } from "@tauri-apps/api/core";
-export type SectionId = "network" | "health" | "software";
+export type SectionId = "network" | "health";
 export interface MaintenanceAction {
   id: string;
   label: string;

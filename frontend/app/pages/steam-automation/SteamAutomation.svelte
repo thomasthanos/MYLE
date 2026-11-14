@@ -60,7 +60,7 @@
     {#if ready && !connected}
       <button class="btn small primary" type="button" disabled={page.signingIn} onclick={() => void page.signIn()}>{page.signingIn ? "Finish in the Steam window" : status?.communitySignedIn ? "Sign in again" : "Sign in to Steam"}</button>
     {:else if connected}
-      <span class="pill"><span class="light on"></span>Signed in</span>
+      <span class="pill" title={status?.steamAccount ? `The Steam account MYLE acts for: ${status.steamAccount}` : "Signed in to Steam"}><span class="light on"></span>{status?.steamAccount ? `Signed in as ${status.steamAccount}` : "Signed in"}</span>
     {/if}
     <button class="btn small" type="button" title={paused ? "Let everything run again" : "Stop everything until you press Resume"} onclick={() => void page.setPaused(!paused)}>{#if paused}<Play size={13} />Resume{:else}<Pause size={13} />Pause{/if}</button>
     <Popover align="end">

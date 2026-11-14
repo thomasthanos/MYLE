@@ -6,14 +6,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
-use crate::apps::Jobs;
 use crate::apps::process::ERROR_CANCELLED;
 use crate::console::Line;
 use tasks::{Elevation, Run, Section};
 /// DISM's "the work is done, now restart".
 const REBOOT_REQUIRED: i32 = 3010;
-/// winget: nothing had an update available.
-const NOTHING_TO_UPGRADE: i32 = 0x8A15_002B_u32 as i32;
 // --------------------------------------------------------------------------- The cards
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -164,13 +161,11 @@ pub fn maintenance_running(running: State<'_, Running>) -> Option<String> {
     running.current()
 }
 #[tauri::command(async)]
-pub fn maintenance_cancel(running: State<'_, Running>, jobs: State<'_, Jobs>, id: String) {
+pub fn maintenance_cancel(running: State<'_, Running>, id: String) {
     if !tasks::find(&id).is_some_and(|(_, action)| action.cancellable) {
         return;
     }
     running.cancel(&id);
-    // winget runs unelevated, so it can simply be killed.
-    jobs.cancel(&id);
 }
 // --------------------------------------------------------------------------- Running an action
 /// Forwards each line to the page and remembers the last one, which is what a
@@ -192,22 +187,14 @@ impl Sink<'_> {
 }
 #[tauri::command]
 pub async fn maintenance_run(
-    jobs: State<'_, Jobs>,
     running: State<'_, Running>,
     id: String,
     elevated: bool,
     on_event: Channel<TaskEvent>,
 ) -> Result<TaskOutcome, String> {
     let (card, action) = tasks::find(&id).ok_or("Unknown maintenance action.")?;
-    if matches!(action.run, Run::WingetUpgradeAll) && !jobs.is_idle() {
-        return Err(
-            "An install is still running on the Install Apps page. Wait for it to finish.".into(),
-        );
-    }
-    let workspace = (!matches!(action.run, Run::WingetUpgradeAll))
-        .then(|| runner::Workspace::new(action.id))
-        .transpose()?;
-    let stop = workspace.as_ref().map(|w| w.stop.clone());
+    let workspace = runner::Workspace::new(action.id)?;
+    let stop = Some(workspace.stop.clone());
     let _guard = running
         .claim(&id, stop)
         .ok_or("Another maintenance task is already running.")?;
@@ -217,12 +204,11 @@ pub async fn maintenance_run(
     };
     let code = match &action.run {
         Run::Batch(steps) => {
-            let workspace = workspace.as_ref().expect("batch actions get a workspace");
             let with_uac = card.elevation == Elevation::Yes || elevated;
             if with_uac {
                 // A batch gives no sign of life until it is over, so it stays in "waiting" rather than claiming a start it cannot see.
                 let _ = on_event.send(TaskEvent::Waiting);
-                runner::run_batch_elevated(steps, workspace, &mut |line| sink.line(line)).await?
+                runner::run_batch_elevated(steps, &workspace, &mut |line| sink.line(line)).await?
             } else {
                 let code = runner::run_plain(steps, &mut |line| sink.line(line)).await?;
                 // It turned out to need rights after all: offer the retry.
@@ -233,10 +219,9 @@ pub async fn maintenance_run(
             }
         }
         Run::Stream(step) => {
-            let workspace = workspace.as_ref().expect("stream actions get a workspace");
             runner::run_stream_elevated(
                 step,
-                workspace,
+                &workspace,
                 &mut |phase| {
                     let _ = on_event.send(match phase {
                         runner::Phase::Waiting => TaskEvent::Waiting,
@@ -248,9 +233,8 @@ pub async fn maintenance_run(
             .await?
         }
         Run::DiskScan => {
-            let workspace = workspace.as_ref().expect("disk scans get a workspace");
             runner::run_disk_scan(
-                workspace,
+                &workspace,
                 &mut |phase| {
                     let _ = on_event.send(match phase {
                         runner::Phase::Waiting => TaskEvent::Waiting,
@@ -260,16 +244,6 @@ pub async fn maintenance_run(
                 &mut |line| sink.line(line),
             )
             .await?
-        }
-        Run::WingetUpgradeAll => {
-            let job = jobs.start(&id)?;
-            let _ = on_event.send(TaskEvent::Started);
-            let code =
-                crate::apps::winget::upgrade_all(&job, &mut |line| sink.line(line.clone())).await?;
-            if job.is_cancelled() {
-                return Ok(TaskOutcome::Cancelled);
-            }
-            code
         }
     };
     if running.is_cancelled() {
@@ -287,15 +261,6 @@ fn classify(action: &tasks::Action, code: i32, last_line: &str) -> Result<TaskOu
     }
     if code == 0 {
         return Ok(TaskOutcome::Done { note: None });
-    }
-    if matches!(action.run, Run::WingetUpgradeAll) {
-        return Ok(TaskOutcome::Done {
-            note: Some(if code == NOTHING_TO_UPGRADE {
-                "Everything is already up to date.".into()
-            } else {
-                "Some programs could not be updated — see the output.".into()
-            }),
-        });
     }
     if matches!(action.run, Run::DiskScan) && code == 2 {
         // Our disk worker reserves 2 for a completed scan with findings. Launch errors, incomplete scans and provider failures remain errors.
@@ -323,7 +288,6 @@ mod tests {
         assert!(by_id("net-reset").admin);
         assert!(by_id("ip-renew").admin, "ipconfig /release needs rights");
         assert!(!by_id("flush-dns").admin, "asks only if Windows refuses");
-        assert!(!by_id("update-apps").admin, "winget runs unelevated");
         assert_eq!(
             by_id("system-repair").actions.len(),
             2,
@@ -446,16 +410,6 @@ mod tests {
         assert_eq!(
             classify(action("sfc"), 0, ""),
             Ok(TaskOutcome::Done { note: None })
-        );
-    }
-    #[test]
-    fn nothing_to_upgrade_reads_as_success() {
-        let outcome = classify(action("update-apps"), NOTHING_TO_UPGRADE, "").unwrap();
-        assert_eq!(
-            outcome,
-            TaskOutcome::Done {
-                note: Some("Everything is already up to date.".into())
-            }
         );
     }
 }

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import Bluetooth from "@lucide/svelte/icons/bluetooth";
   import Globe from "@lucide/svelte/icons/globe";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
@@ -24,7 +23,6 @@
     repair: Stethoscope,
     disk: HardDrive,
     audio: Volume2,
-    updates: ArrowUp,
   };
   const Icon = $derived(icons[card.icon] ?? Stethoscope);
   const status = $derived(s.statusOf(card));
@@ -103,8 +101,6 @@
   .card[data-section="network"] { --tone: #63d7e9; --tone-soft: rgb(83 211 234 / 0.11); }
 
   .card[data-section="health"] { --tone: rgb(var(--accent-soft-rgb)); --tone-soft: rgb(var(--accent-rgb) / 0.12); }
-
-  .card[data-section="software"] { --tone: #54d6a0; --tone-soft: rgb(73 215 155 / 0.11); }
 
   .card:hover { transform: translateY(-2px); border-color: rgb(255 255 255 / 0.13); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 15px 34px -24px rgb(0 0 0 / 0.9); }
 

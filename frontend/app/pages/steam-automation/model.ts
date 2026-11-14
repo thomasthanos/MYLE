@@ -135,7 +135,7 @@ export function farmPanel(
   current: string | null,
 ): { title: string; detail: string } {
   if (!started) {
-    if (cards === 0) return { title: "No cards left to collect", detail: "Games that can still drop trading cards will show up here." };
+    if (cards === 0) return { title: "No card drops left", detail: "Games with card drops remaining will show up here." };
     return { title: `${plural(cards, "card")} to collect from ${plural(games, "game")}`, detail: "Press Start and MYLE plays these games in the background until every card has dropped. Untick a game to leave it out." };
   }
   switch (farm.phase) {
@@ -146,9 +146,9 @@ export function farmPanel(
     case "building":
       return { title: `Warming up ${plural(farm.gamesLeft, "game")}`, detail: "Steam starts dropping cards after 2 hours of playtime, so these run together first." };
     case "solo":
-      return { title: current ? `Farming ${current}` : "Farming your cards", detail: `${plural(farm.dropsLeft, "card")} left to collect.` };
+      return { title: current ? `Farming ${current}` : "Farming your cards", detail: `${plural(farm.dropsLeft, "card drop")} left.` };
     default:
-      return { title: "All your cards have dropped", detail: "New games with cards will show up here." };
+      return { title: "All card drops collected", detail: "New games with card drops will show up here." };
   }
 }
 

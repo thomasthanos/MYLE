@@ -617,24 +617,6 @@ fn describe(code: i32) -> String {
         _ => format!("winget failed with code 0x{:08X}.", code as u32),
     }
 }
-/// Upgrades every package winget can, streaming its output line by line.
-/// `--include-unknown` covers packages whose installed version it cannot read.
-pub(crate) async fn upgrade_all(
-    job: &JobHandle,
-    on_line: &mut (dyn FnMut(&Line) + Send),
-) -> Result<i32, String> {
-    let args: Vec<String> = [
-        "upgrade",
-        "--all",
-        "--include-unknown",
-        "--silent",
-        "--accept-package-agreements",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    run_streaming(job, &args, on_line).await
-}
 /// Runs winget, handing each finished line to `on_line` as it appears.
 async fn run_streaming(
     job: &JobHandle,
