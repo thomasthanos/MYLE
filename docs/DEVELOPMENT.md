@@ -555,7 +555,7 @@ Versions up to 7.0.x kept their data in `com.thomasthanos.makeyourlifeeasier` fo
 
 ## 8. Updates and releases
 
-The old Electron app (v4.x) lives on the `old` branch and no longer receives updates; the current line starts at **7.0.0** and is at **11.0.1**. The old `latest.yml` on R2 stays untouched, so old installs simply see "up to date".
+The old Electron app (v4.x) lives on the `old` branch and no longer receives updates; the current line starts at **7.0.0** and is at **11.0.2**. The old `latest.yml` on R2 stays untouched, so old installs simply see "up to date".
 
 ### Release
 
