@@ -8,9 +8,10 @@ const project = import.meta.dirname;
 const frontend = resolve(project, "frontend");
 // Next to the Rust builds, so every build output lives in one ignored folder.
 const target = resolve(project, "backend/target");
-// The browser extension's download page (`myle.extensionUrl` in package.json),
-// the same one the setup offers. Empty until the extension is published.
-const extensionUrl: string = JSON.parse(readFileSync(resolve(project, "package.json"), "utf8")).myle?.extensionUrl ?? "";
+// The browser extension's download pages (`myle.extensionUrl` and `myle.firefoxExtensionUrl` in package.json).
+const myleConfig = JSON.parse(readFileSync(resolve(project, "package.json"), "utf8")).myle ?? {};
+const extensionUrl: string = myleConfig.extensionUrl ?? "";
+const firefoxExtensionUrl: string = myleConfig.firefoxExtensionUrl ?? "";
 
 // https://v2.tauri.app/start/frontend/vite/
 //
@@ -32,6 +33,7 @@ export default defineConfig(({ mode }): UserConfig => {
     plugins: [svelte()],
     define: {
       "import.meta.env.VITE_EXTENSION_URL": JSON.stringify(extensionUrl),
+      "import.meta.env.VITE_FIREFOX_EXTENSION_URL": JSON.stringify(firefoxExtensionUrl),
       "import.meta.env.MYLE_MOBILE": JSON.stringify(mobile),
     },
     clearScreen: false,

@@ -41,7 +41,9 @@
       "../extension/popup.html": "extension/popup.html",
       "../extension/popup.css": "extension/popup.css",
       "../extension/popup.js": "extension/popup.js",
+      "../extension/icons/16.png": "extension/icons/16.png",
       "../extension/icons/32.png": "extension/icons/32.png",
+      "../extension/icons/48.png": "extension/icons/48.png",
       "../extension/icons/128.png": "extension/icons/128.png",
       "../extension/firefox/manifest.json": "extension/firefox/manifest.json",
       "../extension/firefox/psl.js": "extension/firefox/psl.js",
@@ -51,7 +53,9 @@
       "../extension/firefox/popup.html": "extension/firefox/popup.html",
       "../extension/firefox/popup.css": "extension/firefox/popup.css",
       "../extension/firefox/popup.js": "extension/firefox/popup.js",
+      "../extension/firefox/icons/16.png": "extension/firefox/icons/16.png",
       "../extension/firefox/icons/32.png": "extension/firefox/icons/32.png",
+      "../extension/firefox/icons/48.png": "extension/firefox/icons/48.png",
       "../extension/firefox/icons/128.png": "extension/firefox/icons/128.png"
     }
   }

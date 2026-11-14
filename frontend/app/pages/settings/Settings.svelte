@@ -31,6 +31,7 @@
   import SyncedData from "./SyncedData.svelte";
   import { passwordsApi, type BrowserSetup } from "../password-manager/api";
   import { EXTENSION_URL } from "../../../lib/extension";
+  import { FIREFOX_EXTENSION_URL } from "../../../lib/extension";
 
   const REPO_URL = "https://github.com/thomasthanos/MYLE";
 
@@ -390,10 +391,15 @@
               <strong>{extensionState.title}</strong>
               {#if extensionState.detail}<small>{extensionState.detail}</small>{/if}
             </span>
-            <button class="btn small" onclick={() => (showBrowserSetup = true)}>Firefox / Local setup</button>
+            <button class="btn small" onclick={() => (showBrowserSetup = true)}>Browser Setup</button>
             {#if browser?.lastContact?.copy !== "firefox" && EXTENSION_URL.startsWith("https://")}
               <button class="btn small primary" onclick={() => open(EXTENSION_URL)}>
                 <Download size={12} /> Install from Chrome Web Store
+              </button>
+            {/if}
+            {#if FIREFOX_EXTENSION_URL.startsWith("https://")}
+              <button class="btn small primary" onclick={() => open(FIREFOX_EXTENSION_URL)}>
+                <Download size={12} /> Install from Firefox Add-ons
               </button>
             {/if}
           </div>

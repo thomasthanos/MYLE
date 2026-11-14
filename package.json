@@ -4,7 +4,8 @@
   "version": "11.0.2",
   "type": "module",
   "myle": {
-    "extensionUrl": "https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca"
+    "extensionUrl": "https://chromewebstore.google.com/detail/mifjffbnaeeljjfboiglbcoaokgdilca",
+    "firefoxExtensionUrl": "https://addons.mozilla.org/en-US/firefox/addon/myle-passwords/"
   },
   "scripts": {
     "tauri": "tauri",

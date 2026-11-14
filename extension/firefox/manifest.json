@@ -5,16 +5,16 @@
   "version": "11.1.0",
   "description": "Fills in your saved logins from your MYLE password vault, and offers to save new ones.",
   "icons": {
-    "16": "icons/32.png",
+    "16": "icons/16.png",
     "32": "icons/32.png",
-    "48": "icons/128.png",
+    "48": "icons/48.png",
     "128": "icons/128.png"
   },
   "action": {
     "default_popup": "popup.html",
     "default_title": "MYLE Passwords",
     "default_icon": {
-      "16": "icons/32.png",
+      "16": "icons/16.png",
       "32": "icons/32.png"
     }
   },
@@ -47,7 +47,10 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "myle-passwords@thomast.uk",
-      "strict_min_version": "128.0"
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }

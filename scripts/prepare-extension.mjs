@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 const source = new URL("../extension/", import.meta.url);
 const firefox = new URL("../extension/firefox/", import.meta.url);
-const sharedFiles = ["psl.js", "background.js", "content.js", "passkeys.js", "popup.html", "popup.css", "popup.js", "icons/32.png", "icons/128.png"];
+const sharedFiles = ["psl.js", "background.js", "content.js", "passkeys.js", "popup.html", "popup.css", "popup.js", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"];
 await mkdir(new URL("icons/", firefox), { recursive: true });
 for (const file of sharedFiles) await copyFile(new URL(file, source), new URL(file, firefox));
 function buildZip(entries) {

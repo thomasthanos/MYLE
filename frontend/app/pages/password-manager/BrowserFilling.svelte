@@ -16,10 +16,12 @@
   import { toast } from "../../../lib/toast.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { passwordsApi as api, type BrowserSetup } from "./api";
-  import { EXTENSION_URL } from "../../../lib/extension";
+  import { EXTENSION_URL, FIREFOX_EXTENSION_URL } from "../../../lib/extension";
 
   /** The extension's store page (package.json "myle.extensionUrl"). */
   const storeUrl = EXTENSION_URL;
+  /** The extension's Firefox Add-ons page (package.json "myle.firefoxExtensionUrl"). */
+  const firefoxStoreUrl = FIREFOX_EXTENSION_URL;
 
   let { onclose, local = false }: { onclose: () => void; local?: boolean } = $props();
 
@@ -43,7 +45,7 @@
       setup = await api.browserGet();
       loadedAt = clock = Date.now();
       loadError = null;
-      showSteps ??= setup.lastContact?.copy === "firefox" || (!setup.lastContact && !storeUrl.startsWith("https://"));
+      showSteps ??= local || (!storeUrl.startsWith("https://") && !firefoxStoreUrl.startsWith("https://"));
     } catch (error) {
       loadError = error instanceof Error ? error.message : String(error);
     }
@@ -75,6 +77,15 @@
       await openUrl(storeUrl);
     } catch (error) {
       toast.error(`Could not open the Chrome Web Store: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** The extension's page in Firefox Add-ons (AMO), in the default browser. */
+  async function openFirefoxStore() {
+    try {
+      await openUrl(firefoxStoreUrl);
+    } catch (error) {
+      toast.error(`Could not open Firefox Add-ons: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -116,7 +127,6 @@
       await load();
       toast.success(enabled ? "Browser filling is on." : "Browser filling is off.");
     } catch (error) {
-      // Not changed: the switch shows what is really set.
       input.checked = setup.enabled;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -141,7 +151,7 @@
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Copied.");
+      toast.success("Copied to clipboard.");
     } catch {
       toast.error("Could not copy. Select the text and copy it instead.");
     }
@@ -159,32 +169,52 @@
     transition:scale={{ start: 0.96, duration: 180, easing: cubicOut }}
   >
     <div class="dialog-body">
-      <header>
-        <h2 id="browser-filling-title">Fill in logins in your browser</h2>
-        <button type="button" class="icon-btn" aria-label="Close" onclick={onclose}><X size={16} /></button>
+      <!-- Header -->
+      <header class="dialog-header">
+        <div class="title-wrap">
+          <h2 id="browser-filling-title">Fill in logins in your browser</h2>
+          <span class="header-subtitle">Browser auto-fill integration</span>
+        </div>
+        <button type="button" class="icon-btn close-btn" aria-label="Close" onclick={onclose}>
+          <X size={16} />
+        </button>
       </header>
 
-      <div class="status" class:good={connected} class:bad={!!setup && setup.enabled && !registered}>
-        <span class="status-icon" aria-hidden="true">
-          {#if connected}<Check size={16} />{:else if setup?.enabled && !registered}<CircleAlert size={16} />{:else}<CircleDashed size={16} />{/if}
-        </span>
-        <span class="status-text">
-          <strong>
-            {#if !setup}Checking…
-            {:else if !setup.enabled}Browser filling is off
-            {:else if !registered}The browsers cannot reach MYLE
-            {:else if connected}Connected to {setup.lastContact?.browser}
-            {:else}Waiting for the extension{/if}
-          </strong>
-          <small>
-            {#if loadError}{loadError}
-            {:else if !setup}&nbsp;
-            {:else if !setup.enabled}Turn it on to fill in logins in Chrome, Edge, Brave, Vivaldi, Opera, Firefox, Zen, LibreWolf and other Chromium or Firefox browsers.
-            {:else if !registered}{setup.registrationError}
-            {:else if connected && setup.lastContact}Last asked {ago(setup.lastContact.at)}.
-            {:else}Add the extension below, then click a sign-in field.{/if}
-          </small>
-        </span>
+      <!-- Connection Status Card -->
+      <div class="status-card" class:good={connected} class:bad={!!setup && setup.enabled && !registered}>
+        <div class="status-left">
+          <span class="status-icon" aria-hidden="true">
+            {#if connected}
+              <Check size={17} strokeWidth={2.4} />
+            {:else if setup?.enabled && !registered}
+              <CircleAlert size={17} />
+            {:else}
+              <CircleDashed size={17} />
+            {/if}
+          </span>
+          <div class="status-info">
+            <div class="status-title-row">
+              <strong>
+                {#if !setup}Checking connection…
+                {:else if !setup.enabled}Browser filling is off
+                {:else if !registered}The browsers cannot reach MYLE
+                {:else if connected}Connected to {setup.lastContact?.browser}
+                {:else}Waiting for extension…{/if}
+              </strong>
+              {#if connected && setup?.lastContact?.copy === "folder"}
+                <span class="badge local-badge">Local files active</span>
+              {/if}
+            </div>
+            <p class="status-desc">
+              {#if loadError}{loadError}
+              {:else if !setup}&nbsp;
+              {:else if !setup.enabled}Turn it on to fill in logins in Chrome, Edge, Brave, Vivaldi, Opera, Firefox, Zen, LibreWolf and other Chromium or Firefox browsers.
+              {:else if !registered}{setup.registrationError}
+              {:else if connected && setup.lastContact}Last active {ago(setup.lastContact.at)}. Secure end-to-end bridge.
+              {:else}Add the extension below, then click any sign-in field.{/if}
+            </p>
+          </div>
+        </div>
         <input
           type="checkbox"
           class="switch"
@@ -197,16 +227,16 @@
       </div>
 
       {#if setup?.elevated}
-        <p class="refusal">
-          <CircleAlert size={13} />
-          <span>MYLE runs as administrator, so the browsers cannot reach it. Close MYLE and start it normally (not "Run as administrator").</span>
-        </p>
+        <div class="alert-box warning">
+          <CircleAlert size={15} />
+          <span>MYLE runs as administrator, so browsers cannot connect. Close MYLE and run it normally.</span>
+        </div>
       {:else if notListening}
-        <p class="refusal">
-          <CircleAlert size={13} />
-          <span>MYLE is not taking the browsers' requests right now{setup?.serverError ? ` (${setup.serverError})` : ""}. It keeps trying by itself; Repair points the browsers at MYLE again.</span>
+        <div class="alert-box warning">
+          <CircleAlert size={15} />
+          <span>MYLE is not taking browser requests{setup?.serverError ? ` (${setup.serverError})` : ""}.</span>
           <button type="button" class="btn small" disabled={saving} onclick={repair}><Wrench size={13} /> Repair</button>
-        </p>
+        </div>
       {/if}
 
       {#if setup?.enabled && !connected}
@@ -232,204 +262,658 @@
         </ul>
       {/if}
 
-      {#if !firefox && setup?.lastContact?.copy === "folder" && storeUrl.startsWith("https://")}
-        <div class="folder-copy">
+      {#if refusal}
+        <div class="alert-box warning">
           <CircleAlert size={14} />
-          <span>
-            {setup.lastContact.browser} uses the copy loaded from a folder, which never updates. Install the one from the store, then
-            remove the folder copy in <button type="button" class="link" onclick={() => copy(extensionsPage)}><code>{extensionsPage}</code></button>.
-          </span>
-          <button type="button" class="btn small primary" onclick={openStore}><Download size={13} /> Store</button>
+          <span><code>{refusal.program}</code> tried to connect {ago(refusal.at)}: {refusal.reason}. MYLE works with Chrome, Edge, Brave, Vivaldi, Opera, Arc, Thorium, Firefox, Zen, LibreWolf, Waterfox and Floorp.</span>
         </div>
       {/if}
 
-      {#if refusal}
-        <p class="refusal">
-          <CircleAlert size={13} />
-          <span><code>{refusal.program}</code> tried to connect {ago(refusal.at)}: {refusal.reason}. MYLE works with Chrome, Edge, Brave, Vivaldi, Opera, Arc, Thorium, Firefox, Zen, LibreWolf, Waterfox and Floorp.</span>
-        </p>
-      {/if}
-
-      {#if !firefox && storeUrl.startsWith("https://")}
+      <!-- Store Options -->
+      {#if storeUrl.startsWith("https://") || firefoxStoreUrl.startsWith("https://")}
         <div class="store-row">
-          <button type="button" class="btn primary store" onclick={openStore}>
-            <Download size={14} /> Install from Chrome Web Store
-          </button>
+          <div class="store-buttons">
+            {#if !firefox && storeUrl.startsWith("https://")}
+              <button type="button" class="btn primary store" onclick={openStore}>
+                <Download size={15} /> Install from Chrome Web Store
+              </button>
+            {/if}
+            {#if firefoxStoreUrl.startsWith("https://")}
+              <button type="button" class="btn primary store" onclick={openFirefoxStore}>
+                <Download size={15} /> Install from Firefox Add-ons
+              </button>
+            {/if}
+          </div>
           <p class="or">
-            MYLE Passwords for Chrome, Edge, Brave, Vivaldi, Opera and other Chromium browsers; it updates itself. In Edge, allow extensions from other stores when
-            it asks.
+            MYLE Passwords for Chrome, Edge, Brave, Vivaldi, Opera and other Chromium browsers; it updates itself. In Edge, allow extensions from other stores when it asks. In Firefox, install from Firefox Add-ons.
           </p>
         </div>
       {/if}
-      <div class="store-row">
-        <button type="button" class="btn secondary" onclick={openLocal}>
-          <FolderOpen size={14} /> Firefox: Open local extension
-        </button>
-        <p class="or">Firefox, Zen, LibreWolf, Waterfox and Floorp use the local copy bundled with MYLE. No Firefox store download is needed.</p>
-      </div>
+
+      <!-- Local Extension Update if available -->
       <LocalExtensionUpdate {setup} />
 
-      <section>
-        <button type="button" class="steps-toggle" aria-expanded={!!showSteps} onclick={() => (showSteps = !showSteps)}>
-          <h3>{storeUrl.startsWith("https://") ? "Firefox, Zen, LibreWolf, or a copy from MYLE's folder" : "Add the extension"}</h3>
-          <span class="chevron" class:open={showSteps}><ChevronDown size={14} /></span>
+      <!-- Local Extension Setup Section -->
+      <section class="local-setup-section">
+        <button
+          type="button"
+          class="steps-toggle"
+          aria-expanded={!!showSteps}
+          onclick={() => (showSteps = !showSteps)}
+        >
+          <div class="toggle-title">
+            <FolderOpen size={16} />
+            <h3>{storeUrl.startsWith("https://") || firefoxStoreUrl.startsWith("https://") ? "Or load unpacked from MYLE's folder" : "Add the extension"}</h3>
+          </div>
+          <span class="chevron" class:open={showSteps}><ChevronDown size={15} /></span>
         </button>
+
         {#if showSteps}
-          <div class="path">
-            <code class="selectable" title={setup?.extensionDir ?? undefined}>{setup?.extensionDir ?? "The extension's folder was not found."}</code>
-            {#if setup?.extensionDir}
-              <button type="button" class="icon-btn" title="Copy the folder" aria-label="Copy the folder" onclick={() => copy(setup!.extensionDir!)}><Copy size={14} /></button>
-              <button type="button" class="btn small" onclick={openLocal}><FolderOpen size={13} /> Open</button>
-            {/if}
+          <!-- Path Bar -->
+          <div class="folder-card">
+            <div class="folder-header">
+              <span class="folder-title">Extension Folder (Local Files)</span>
+              <span class="folder-badge">Ready</span>
+            </div>
+            <div class="path-row">
+              <code class="path-code" title={setup?.extensionDir ?? undefined}>
+                {setup?.extensionDir ?? "The extension's folder was not found."}
+              </code>
+              {#if setup?.extensionDir}
+                <button
+                  type="button"
+                  class="btn small secondary"
+                  title="Copy the folder path"
+                  onclick={() => copy(setup!.extensionDir!)}
+                >
+                  <Copy size={13} /> Copy Path
+                </button>
+                <button
+                  type="button"
+                  class="btn small primary"
+                  title="Open folder in Windows Explorer"
+                  onclick={openLocal}
+                >
+                  <FolderOpen size={13} /> Open Folder
+                </button>
+              {/if}
+            </div>
           </div>
 
-          <div class="browsers">
-            <div class="browser">
-              <strong>Chrome, Edge, Brave, Vivaldi, Opera</strong>
-              <ol>
-                <li>
-                  Open
-                  <button type="button" class="link" onclick={() => copy("chrome://extensions")}><code>chrome://extensions</code></button>
-                  (Edge: <button type="button" class="link" onclick={() => copy("edge://extensions")}><code>edge://extensions</code></button>;
-                  Vivaldi: <button type="button" class="link" onclick={() => copy("vivaldi://extensions")}><code>vivaldi://extensions</code></button>;
-                  Opera: <button type="button" class="link" onclick={() => copy("opera://extensions")}><code>opera://extensions</code></button>).
-                </li>
-                <li>Turn on <b>Developer mode</b>.</li>
-                <li><b>Load unpacked</b>, and choose the folder above.</li>
-              </ol>
+          <!-- Browser Cards Side by Side -->
+          <div class="browser-grid">
+            <!-- Chromium Card -->
+            <div class="browser-card">
+              <div class="browser-head">
+                <span class="browser-icon">🌐</span>
+                <span class="browser-name">Chrome, Edge, Brave, Vivaldi, Opera</span>
+              </div>
+              <div class="steps-list">
+                <div class="step-item">
+                  <span class="step-num">1</span>
+                  <div class="step-content">
+                    <span>Open extensions page:</span>
+                    <div class="url-chips">
+                      {#if extensionsPage && extensionsPage !== "chrome://extensions"}
+                        <button type="button" class="chip active-browser-chip" onclick={() => copy(extensionsPage)}>
+                          <Copy size={11} /> {extensionsPage}
+                        </button>
+                      {/if}
+                      <button type="button" class="chip" onclick={() => copy("chrome://extensions")}>
+                        <Copy size={11} /> chrome://extensions
+                      </button>
+                      <button type="button" class="chip" onclick={() => copy("edge://extensions")}>
+                        <Copy size={11} /> edge://extensions
+                      </button>
+                      <button type="button" class="chip" onclick={() => copy("vivaldi://extensions")}>
+                        <Copy size={11} /> vivaldi://extensions
+                      </button>
+                      <button type="button" class="chip" onclick={() => copy("opera://extensions")}>
+                        <Copy size={11} /> opera://extensions
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <span class="step-num">2</span>
+                  <div class="step-content">
+                    <span>Turn on <b>Developer mode</b> (toggle at top right).</span>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <span class="step-num">3</span>
+                  <div class="step-content">
+                    <span>Click <b>Load unpacked</b>, and choose the folder above.</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div class="browser">
-              <strong>Firefox, Zen, LibreWolf, Waterfox, Floorp</strong>
-              <ol>
-                <li>
-                  Open
-                  <button type="button" class="link" onclick={() => copy("about:debugging#/runtime/this-firefox")}><code>about:debugging</code></button>
-                  → This Firefox (This Zen, This LibreWolf…).
-                </li>
-                <li><b>Load Temporary Add-on</b>, and choose <code>firefox/manifest.json</code> in that folder.</li>
-              </ol>
-              <p class="hint">Local installation only: after restarting Firefox, load this file again. After a MYLE update, press Reload here to use the updated local files.</p>
+            <!-- Firefox Card -->
+            <div class="browser-card">
+              <div class="browser-head">
+                <span class="browser-icon">🦊</span>
+                <span class="browser-name">Firefox, Zen, LibreWolf, Waterfox, Floorp</span>
+              </div>
+              <div class="steps-list">
+                <div class="step-item">
+                  <span class="step-num">1</span>
+                  <div class="step-content">
+                    <span>Open debugging page:</span>
+                    <div class="url-chips">
+                      <button type="button" class="chip" onclick={() => copy("about:debugging#/runtime/this-firefox")}>
+                        <Copy size={11} /> about:debugging
+                      </button>
+                    </div>
+                    <small class="step-sub">→ Click "This Firefox" (or This Zen, This LibreWolf).</small>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <span class="step-num">2</span>
+                  <div class="step-content">
+                    <span>Click <b>Load Temporary Add-on</b>.</span>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <span class="step-num">3</span>
+                  <div class="step-content">
+                    <span>Choose <code>firefox/manifest.json</code> in that folder.</span>
+                  </div>
+                </div>
+              </div>
+              <p class="firefox-note">Local installation bundled with MYLE. Works seamlessly while browser is open.</p>
             </div>
           </div>
         {/if}
       </section>
 
-      <p class="hint">
-        Click a user name or password field on a sign-in page, and pick the login. Nothing is filled in without your
-        click, only on secure (https) pages, and only with logins saved for that site.
-      </p>
+      <!-- Discreet Footer Hint -->
+      <footer class="dialog-footer">
+        <p class="hint">
+          Click any user name or password field on a sign-in page to fill logins. Your data is decrypted only locally on secure pages.
+        </p>
+      </footer>
     </div>
   </div>
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; padding: clamp(12px, 3vh, 24px); background: var(--scrim); }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 91;
+    display: grid;
+    place-items: center;
+    padding: clamp(12px, 3vh, 24px);
+    background: var(--scrim, rgba(0, 0, 0, 0.72));
+    backdrop-filter: blur(8px);
+  }
 
-  /* Never set overflow on a .glass element: .glass::before sits at inset: -1px and would cause a permanent 1px scrollbar. */
-  .dialog { display: flex; flex-direction: column; width: min(560px, 100%); max-height: calc(100dvh - clamp(24px, 6vh, 48px)); border-radius: var(--radius-xl); }
+  .dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(620px, 100%);
+    max-height: calc(100dvh - clamp(24px, 6vh, 48px));
+    border-radius: var(--radius-xl, 18px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(165deg, rgba(26, 32, 48, 0.88) 0%, rgba(14, 18, 28, 0.96) 100%);
+    box-shadow: 0 24px 60px -10px rgba(0, 0, 0, 0.8),
+                0 0 35px rgba(56, 189, 248, 0.12);
+    overflow: hidden;
+  }
 
-  .dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(10px, 1.6vh, 14px); min-height: 0; padding: clamp(14px, 2.2vh, 20px); overflow-x: hidden; overflow-y: auto; scrollbar-width: none; border-radius: inherit; }
+  .dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 22px 24px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
 
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+  .dialog-body::-webkit-scrollbar {
+    width: 5px;
+  }
+  .dialog-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9999px;
+  }
 
-  header :global(.icon-btn) { flex: none; }
+  /* Header */
+  .dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
 
-  h2 { min-width: 0; margin: 0; font-size: 17px; }
+  .title-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
 
-  h3 { margin: 0; color: var(--text-2); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #f8fafc;
+  }
 
-  .status { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid rgb(255 255 255 / 0.07); border-radius: 12px; background: rgb(0 0 0 / 0.16); }
+  .header-subtitle {
+    font-size: 0.8rem;
+    color: var(--text-muted, #94a3b8);
+  }
 
-  .status.good { border-color: rgb(74 222 128 / 0.28); background: rgb(74 222 128 / 0.07); }
+  .close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    transition: all 160ms ease;
+  }
+  .close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
 
-  .status.bad { border-color: rgb(255 140 120 / 0.3); background: rgb(255 140 120 / 0.07); }
+  /* Status Card */
+  .status-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 200ms ease;
+  }
 
-  .status-icon { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--text-2); background: rgb(255 255 255 / 0.06); }
+  .status-card.good {
+    border-color: rgba(74, 222, 128, 0.32);
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08) 0%, rgba(74, 222, 128, 0.02) 100%);
+    box-shadow: 0 4px 20px rgba(74, 222, 128, 0.06);
+  }
 
-  .good .status-icon { color: #4ade80; background: rgb(74 222 128 / 0.14); }
+  .status-card.bad {
+    border-color: rgba(248, 113, 113, 0.35);
+    background: rgba(248, 113, 113, 0.06);
+  }
 
-  .bad .status-icon { color: #ffb6a8; background: rgb(255 140 120 / 0.14); }
+  .status-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
 
-  .status-text { display: grid; flex: 1 1 0%; min-width: 0; gap: 2px; }
+  .status-icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted, #94a3b8);
+  }
 
-  .status-text small { color: var(--text-3); font-size: 12px; line-height: 1.4; overflow-wrap: break-word; }
+  .status-card.good .status-icon {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.16);
+    box-shadow: 0 0 12px rgba(74, 222, 128, 0.3);
+  }
 
-  .status .switch { flex: none; }
+  .status-card.bad .status-icon {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.16);
+  }
 
-  .checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .status-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
 
-  .checks li { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 26px; color: var(--text-3); font-size: 12.5px; }
+  .status-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
 
-  .checks li.done { color: var(--text-2); }
+  .status-title-row strong {
+    font-size: 0.95rem;
+    font-weight: 650;
+    color: #f1f5f9;
+  }
 
-  .checks li.done :global(svg) { color: #4ade80; }
+  .local-badge {
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+  }
 
-  .checks li :global(svg) { flex: none; }
+  .status-desc {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.4;
+  }
 
-  .checks li span { flex: 1 1 0%; min-width: 0; }
+  /* Checks list */
+  .checks {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
 
-  .checks li .btn { flex: none; }
+  .checks li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    color: var(--text-muted, #94a3b8);
+  }
 
-  .refusal { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: #ffcf9e; font-size: 12px; line-height: 1.45; }
+  .checks li.done {
+    color: #cbd5e1;
+  }
+  .checks li.done :global(svg) {
+    color: #4ade80;
+  }
 
-  .refusal :global(svg) { flex: none; margin-top: 2px; }
+  /* Alert box */
+  .alert-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
 
-  section { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(8px, 1.4vh, 12px); min-width: 0; }
+  .alert-box.warning {
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    background: rgba(251, 191, 36, 0.08);
+    color: #fde68a;
+  }
 
-  .steps-toggle { display: flex; align-items: center; justify-content: space-between; padding: 2px 0; }
+  /* Store Row */
+  .store-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    background: rgba(56, 189, 248, 0.04);
+  }
 
-  .chevron { display: grid; color: var(--text-3); transition: transform 160ms ease; }
+  .store-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
 
-  .chevron.open { transform: rotate(180deg); }
+  .store-row .store {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
 
-  .store-row { display: grid; gap: 6px; justify-items: start; }
+  .store-row .or {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.4;
+  }
 
-  .store { height: 36px; }
+  /* Local Setup Section */
+  .local-setup-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
 
+  .steps-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0 4px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
 
+  .toggle-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #e2e8f0;
+  }
 
-  .folder-copy { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid rgb(255 196 102 / 0.3); border-radius: 10px; background: rgb(255 196 102 / 0.08); color: #ffd18f; font-size: 12px; line-height: 1.45; }
+  .toggle-title h3 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
 
-  .folder-copy span { flex: 1; color: var(--text-2); }
+  .chevron {
+    display: grid;
+    place-items: center;
+    color: var(--text-muted, #94a3b8);
+    transition: transform 180ms ease;
+  }
+  .chevron.open {
+    transform: rotate(180deg);
+  }
 
-  .folder-copy :global(svg),
-  .folder-copy .btn { flex: none; }
+  /* Folder Card */
+  .folder-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(0, 0, 0, 0.25);
+  }
 
-  .or { margin: 0; color: var(--text-3); font-size: 12px; }
+  .folder-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
 
-  .path { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 6px 6px 6px 10px; border: 1px solid rgb(255 255 255 / 0.06); border-radius: 10px; background: rgb(0 0 0 / 0.22); }
+  .folder-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #94a3b8);
+  }
 
-  .path code { flex: 1 1 0%; min-width: 0; overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-badge {
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+  }
 
-  .path button { flex: none; }
+  .path-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
 
-  /* Side by side when the dialog is wide enough: no scrolling at 1080p. */
-  .browsers { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; min-width: 0; }
+  .path-code {
+    flex: 1 1 200px;
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-  .browser { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4px; min-width: 0; }
+  /* Browser Grid */
+  .browser-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px;
+  }
 
-  .browser strong { font-size: 13px; }
+  .browser-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+  }
 
-  ol { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; margin: 2px 0 0; padding-left: 20px; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+  .browser-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-  li { min-width: 0; overflow-wrap: break-word; }
+  .store-card-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
 
-  code { font-family: var(--font-mono); font-size: 11.5px; }
+  .browser-icon {
+    font-size: 1.1rem;
+  }
 
-  .link { display: inline; padding: 0; color: #b9c2ff; }
+  .browser-name {
+    font-size: 0.88rem;
+    font-weight: 650;
+    color: #f1f5f9;
+  }
 
-  .link:hover { text-decoration: underline; }
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
 
-  .hint { min-width: 0; margin: 0; color: var(--text-3); font-size: 11.5px; line-height: 1.5; overflow-wrap: break-word; }
+  .step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
 
-  @media (max-width: 480px) {
-    .path {
-      flex-wrap: wrap;
-    }
+  .step-num {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
 
-    .path code {
-      flex-basis: 100%;
-    }
+  .step-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.82rem;
+    color: #cbd5e1;
+    line-height: 1.4;
+  }
+
+  .step-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted, #94a3b8);
+  }
+
+  .url-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 3px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    background: rgba(56, 189, 248, 0.08);
+    color: #38bdf8;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 140ms ease;
+  }
+  .chip:hover {
+    background: rgba(56, 189, 248, 0.18);
+    border-color: rgba(56, 189, 248, 0.45);
+    color: #fff;
+  }
+
+  .firefox-note {
+    margin: 4px 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.35;
+  }
+
+  /* Footer */
+  .dialog-footer {
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.45;
   }
 </style>
