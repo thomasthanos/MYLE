@@ -16,22 +16,36 @@ const ICON_RETRY_AFTER = 5 * 60_000;
 export function searchWords(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 }
+/** Each login's searchable text, made once per login object: a refresh brings new objects, so an edited login is searched afresh. */
+const haystacks = new WeakMap<Summary, string>();
+function haystackOf(entry: Summary): string {
+  let haystack = haystacks.get(entry);
+  if (haystack === undefined) {
+    haystack = [
+      entry.title,
+      entry.username,
+      entry.folder,
+      entry.notes,
+      ...entry.urls,
+      ...entry.apps.flatMap((a) => [a.name, a.exe]),
+      ...entry.passkeys.flatMap((k) => [k.rpId, k.userName]),
+    ]
+      .join("\n")
+      .toLowerCase();
+    haystacks.set(entry, haystack);
+  }
+  return haystack;
+}
 /** Whether `entry` has every word of the search in one of its fields. */
 export function matches(entry: Summary, words: string[]): boolean {
   if (!words.length) return true;
-  const haystack = [
-    entry.title,
-    entry.username,
-    entry.folder,
-    entry.notes,
-    ...entry.urls,
-    ...entry.apps.flatMap((a) => [a.name, a.exe]),
-    ...entry.passkeys.flatMap((k) => [k.rpId, k.userName]),
-  ]
-    .join("\n")
-    .toLowerCase();
+  const haystack = haystackOf(entry);
   return words.every((word) => haystack.includes(word));
 }
+/* One collator for every comparison: `localeCompare` with options makes a new one each call. */
+const titles = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+const usernames = new Intl.Collator(undefined, { sensitivity: "base" });
+const byName = (a: Summary, b: Summary) => titles.compare(a.title, b.title) || usernames.compare(a.username, b.username);
 /** Phones: Face ID / fingerprint was offered after an unlock. */
 const QUICK_UNLOCK_OFFERED_KEY = "myle.passwords.quickUnlockOffered";
 /** How the vault stands with the account, for the sync indicator. */
@@ -114,24 +128,23 @@ class PasswordsState {
   #vaultEpoch = 0;
   #listSequence = 0;
   #loading: { epoch: number; promise: Promise<void> } | null = null;
+  /* Sorted once per change of the list or the order, not on every key typed in the search. */
+  readonly #sorted = $derived(
+    [...this.entries].sort((a, b) =>
+      this.sort === "recent"
+        ? b.updatedAt - a.updatedAt || byName(a, b)
+        : Number(b.favorite) - Number(a.favorite) || byName(a, b),
+    ),
+  );
   readonly visible = $derived.by(() => {
     const words = searchWords(this.query);
-    const byName = (a: Summary, b: Summary) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }) ||
-      a.username.localeCompare(b.username, undefined, { sensitivity: "base" });
-    return this.entries
-      .filter((e) => {
-        if (this.filter === "favorites" && !e.favorite) return false;
-        if (this.filter === "weak" && e.strength !== "weak") return false;
-        if (this.filter === "reused" && !e.reused) return false;
-        if (this.filter === "totp" && !e.hasTotp) return false;
-        return matches(e, words);
-      })
-      .sort((a, b) =>
-        this.sort === "recent"
-          ? b.updatedAt - a.updatedAt || byName(a, b)
-          : Number(b.favorite) - Number(a.favorite) || byName(a, b),
-      );
+    return this.#sorted.filter((e) => {
+      if (this.filter === "favorites" && !e.favorite) return false;
+      if (this.filter === "weak" && e.strength !== "weak") return false;
+      if (this.filter === "reused" && !e.reused) return false;
+      if (this.filter === "totp" && !e.hasTotp) return false;
+      return matches(e, words);
+    });
   });
   readonly counts = $derived({
     all: this.entries.length,

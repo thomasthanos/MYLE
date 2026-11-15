@@ -24,7 +24,8 @@
   let logEl = $state<HTMLDivElement>();
   let follow = $state(true);
 
-  const shown = $derived(showAll ? session.lines : session.lines.slice(-SHOWN));
+  // A copy: the session's log grows in place.
+  const shown = $derived(showAll ? session.lines.slice() : session.lines.slice(-SHOWN));
   const hiddenAbove = $derived(session.lines.length - shown.length);
   const errors = $derived(session.diagnostics.filter((d) => d.severity === "error"));
   const warnings = $derived(session.diagnostics.filter((d) => d.severity === "warning"));

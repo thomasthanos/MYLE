@@ -40,6 +40,8 @@ const TAB_KEY = "myle.githubReleases.tab";
 const tabs: Tab[] = ["changes", "build", "release", "history"];
 /** Lines a build log keeps on screen; the whole log is in its file. */
 export const LOG_LIMIT = 20_000;
+/** Room made at once when the log is full. */
+const LOG_TRIM = 1_000;
 /** Matches the native outcome limit; the full build log remains on disk. */
 const DIAGNOSTIC_LIMIT = 1000;
 export const buildKindLabels: Record<BuildKind, string> = {
@@ -67,7 +69,14 @@ export class BuildSession {
   install = $state(false);
   command = $state("");
   logPath = $state<string | null>(null);
-  lines = $state.raw<LogLine[]>([]);
+  /* Appended in place: copying 20,000 lines for every batch (one every 120 ms) cost more than drawing them. `#version` tells the page it changed. */
+  #lines: LogLine[] = [];
+  #version = $state(0);
+  /** The log so far, at most LOG_LIMIT lines. The same array grows: copy it to keep a snapshot. */
+  get lines(): readonly LogLine[] {
+    void this.#version;
+    return this.#lines;
+  }
   /** Lines dropped from the top to keep the log at LOG_LIMIT. */
   dropped = $state(0);
   diagnostics = $state.raw<Diagnostic[]>([]);
@@ -85,7 +94,8 @@ export class BuildSession {
     this.install = install;
     this.command = command;
     this.logPath = null;
-    this.lines = [];
+    this.#lines = [];
+    this.#version++;
     this.dropped = 0;
     this.diagnostics = [];
     this.stage = null;
@@ -105,17 +115,18 @@ export class BuildSession {
         this.logPath = event.data.logPath;
         break;
       case "lines": {
-        const next = this.lines.slice();
+        const lines = this.#lines;
         for (const line of event.data.lines) {
-          if (line.replace && next.length) next[next.length - 1] = line;
-          else next.push(line);
+          if (line.replace && lines.length) lines[lines.length - 1] = line;
+          else lines.push(line);
         }
-        const extra = next.length - LOG_LIMIT;
-        if (extra > 0) {
-          next.splice(0, extra);
+        // Full: the oldest lines go a thousand at a time, not a few on every batch.
+        if (lines.length > LOG_LIMIT) {
+          const extra = lines.length - (LOG_LIMIT - LOG_TRIM);
+          lines.splice(0, extra);
           this.dropped += extra;
         }
-        this.lines = next;
+        this.#version++;
         break;
       }
       case "diagnostic":
