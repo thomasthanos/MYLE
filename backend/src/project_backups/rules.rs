@@ -379,7 +379,7 @@ impl Exclusion {
         match self {
             Exclusion::Pattern(source) => source.clone(),
             Exclusion::Detected(rule) => (*rule).into(),
-            Exclusion::Gitignore => "listed in .gitignore".into(),
+            Exclusion::Gitignore => "ignored by git".into(),
             Exclusion::Internal => "backup file".into(),
         }
     }
@@ -658,9 +658,20 @@ struct GitignoreFile {
     patterns: Vec<(Pattern, bool)>,
 }
 /// Every `.gitignore` in the project, outside the folders the patterns or
-/// the markers already leave out.
+/// the markers already leave out, after the repository's `info/exclude`:
+/// git ignores what that lists in the whole work tree, below every
+/// `.gitignore` (whose lines win, as they come later).
 fn load_gitignores(root: &Path, rules: &Rules) -> Vec<GitignoreFile> {
     let mut found = Vec::new();
+    if let Some(text) = gitindex::info_exclude(root) {
+        let patterns = parse_gitignore(&text);
+        if !patterns.is_empty() {
+            found.push(GitignoreFile {
+                base: String::new(),
+                patterns,
+            });
+        }
+    }
     let listing = StackListing::default();
     let mut pending: Vec<String> = vec![String::new()];
     let mut visited = 0usize;
@@ -943,6 +954,39 @@ mod tests {
             Some(Exclusion::Gitignore)
         );
         assert_eq!(on.excluded_file("keep/this.txt", &NoListing), None);
+        let _ = fs::remove_dir_all(root);
+    }
+    /// What `.git/info/exclude` lists is left out like a `.gitignore` at the
+    /// project's root (a promo folder of renders, say), a `.gitignore` line
+    /// takes a path back from it, and a linked worktree reads its main
+    /// repository's.
+    #[test]
+    fn the_repositorys_own_exclude_list_is_followed_too() {
+        let root = temp("info-exclude");
+        fs::create_dir_all(root.join(".git").join("info")).unwrap();
+        fs::write(root.join(".git").join("info").join("exclude"), "# local only\n/promo/\n*.wav\n").unwrap();
+        fs::write(root.join(".gitignore"), "!keep.wav\n").unwrap();
+        let follow = RuleInput {
+            follow_gitignore: true,
+            ..defaults()
+        };
+        let on = Rules::compile(&follow, Some(&root)).unwrap();
+        assert_eq!(on.excluded_dir("promo", &NoListing), Some(Exclusion::Gitignore));
+        assert_eq!(on.excluded_dir("src/promo", &NoListing), None);
+        assert_eq!(on.excluded_file("audio/voice.wav", &NoListing), Some(Exclusion::Gitignore));
+        assert_eq!(on.excluded_file("keep.wav", &NoListing), None, "the .gitignore line wins");
+        let off = Rules::compile(&defaults(), Some(&root)).unwrap();
+        assert_eq!(off.excluded_file("audio/voice.wav", &NoListing), None);
+        // `.git` names the worktree's folder, whose `commondir` is the main
+        // repository's.
+        let tree = root.join("tree");
+        let linked = root.join(".git").join("worktrees").join("tree");
+        fs::create_dir_all(&tree).unwrap();
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(tree.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let worktree = Rules::compile(&follow, Some(&tree)).unwrap();
+        assert_eq!(worktree.excluded_dir("promo", &NoListing), Some(Exclusion::Gitignore));
         let _ = fs::remove_dir_all(root);
     }
 }

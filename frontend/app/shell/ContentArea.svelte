@@ -8,6 +8,7 @@
   import PageBoundary from "../../lib/components/PageBoundary.svelte";
   import PageHeader from "../../lib/components/PageHeader.svelte";
   import PageLoading from "./PageLoading.svelte";
+  import Toaster from "../../lib/components/Toaster.svelte";
 
   let { modules }: { modules: PageModules } = $props();
 
@@ -83,6 +84,7 @@
       </div>
     {/key}
   </div>
+  <Toaster />
 </main>
 
 <style>
@@ -116,6 +118,7 @@
     grid-area: main;
     min-width: 0;
     min-height: 0;
+    position: relative;
     border-radius: var(--shell-panel-radius);
   }
 

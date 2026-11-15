@@ -1,25 +1,26 @@
 <script module lang="ts">
   export type SplashPhase = "checking" | "downloading" | "verifying" | "installing" | "restarting" | "starting" | "error";
+  type VisualPhase = SplashPhase | "awaiting-choice" | "removing" | "removed";
 </script>
 
 <script lang="ts">
   import CoderScene from "./CoderScene.svelte";
 
-  let { phase }: { phase: SplashPhase } = $props();
-  const opening = $derived(phase === "restarting" || phase === "starting");
+  let { phase }: { phase: VisualPhase } = $props();
+  const settled = $derived(phase === "restarting" || phase === "starting" || phase === "removed");
 </script>
 
-<div class="visual" data-phase={phase} class:opening aria-hidden="true">
+<div class="visual" data-phase={phase} class:settled aria-hidden="true">
   <div class="grid"></div>
   <div class="orbital">
     <div class="halo"></div>
     <div class="rim"></div>
     <div class="orbit"></div>
     <div class="mark">
-      <CoderScene size={130} paused={opening || phase === "error"} />
+      <CoderScene size={130} paused={settled || phase === "error"} />
     </div>
     {#if phase === "verifying"}<div class="scan"></div>{/if}
-    {#if phase === "installing" || opening}<div class="pulse"></div>{/if}
+    {#if phase === "installing" || settled}<div class="pulse"></div>{/if}
   </div>
 </div>
 
@@ -115,9 +116,9 @@
     opacity: 0.25;
   }
 
-  .opening .orbit { border-color: color-mix(in srgb, var(--signal) 56%, transparent); }
-  .opening .orbit::before,
-  .opening .orbit::after,
+  .settled .orbit { border-color: color-mix(in srgb, var(--signal) 56%, transparent); }
+  .settled .orbit::before,
+  .settled .orbit::after,
   [data-phase="error"] .orbit::before,
   [data-phase="error"] .orbit::after { opacity: 0; }
 
@@ -129,12 +130,12 @@
     .orbital { animation: enter 540ms var(--ease-out) both; }
     .halo { animation: illuminate 560ms var(--ease-out) both; }
 
-    [data-phase="checking"] .orbit { animation: orbit 4s linear infinite; }
-    [data-phase="downloading"] .orbit { animation: orbit 2.2s linear infinite; }
+    :is([data-phase="checking"], [data-phase="awaiting-choice"]) .orbit { animation: orbit 4s linear infinite; }
+    :is([data-phase="downloading"], [data-phase="removing"]) .orbit { animation: orbit 2.2s linear infinite; }
     [data-phase="verifying"] .scan { animation: scan 840ms var(--ease-in-out) infinite; }
     [data-phase="installing"] .pulse { animation: ripple 1.65s var(--ease-out) infinite; }
-    .opening .pulse { animation: ripple 680ms var(--ease-out) both; }
-    .opening .mark { animation: ready 440ms var(--ease-out) both; }
+    .settled .pulse { animation: ripple 680ms var(--ease-out) both; }
+    .settled .mark { animation: ready 440ms var(--ease-out) both; }
   }
 
   @keyframes enter {

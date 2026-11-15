@@ -96,7 +96,7 @@ scripts/
   build-setup.ps1             the whole setup (npm run build)
   bootstrap-game-saves.ps1    download and SHA-256 verification of the pinned resources
   sign.ps1                    exe signing (release.yml)
-  smoke-test-setup.ps1        silent install → update → uninstall, with checks (CI)
+  smoke-test-setup.ps1        silent install and update, then interactive uninstall (CI)
   verify-install.ps1          checks one install, or with -Removed an uninstall
   check-site.mjs              checks site/ (files, links, headers, stale references)
   mobile-feeds.mjs            sidestore.json and mobile-latest.json for R2
@@ -605,9 +605,11 @@ The setup is our own: the `backend/installer` crate (Rust) with a Svelte window 
 
 **`setup.exe`** carries the app as one solid XZ payload (`installer/src/payload.rs`). It shows the install folder, toggles for Desktop / Start menu (All apps) / taskbar pin / launch with Windows / open when finished, per-file progress, and a completion screen. On the same version it plainly says "Reinstall" and keeps settings and data. It repairs the app's own recognised shortcuts and checks their targets, working folders and stable `MYLE.ico` icon; shortcuts and the process share an AppUserModelID. The Startup shortcut launches with `--autostart`. The choices are remembered in `HKCU\Software\ThomasThanos\MakeYourLifeEasier` (`DesktopShortcut`, `StartMenuShortcut`, `StartupShortcut`) and offered again next time. Missing selected links are repaired on updates; explicit opt-outs in the setup or in Settings remain off. `TaskbarShortcut` stores the taskbar checkbox separately from `TaskbarPinPending`. Only an interactive setup request passes `--pin-taskbar` to the foreground app to show Windows' confirmation; passive updates keep both values and never auto-prompt, and a denied pin is not reported as success. A shortcut Windows refuses (retried a few times, since the shell and virus scanners open new `.lnk` files at once) does not fail the install: the app is installed and the completion screen lists what is missing. A dead link, or one to an older copy of the app, under our shortcut name is taken over rather than becoming a second entry beside it. If the app is running, it asks you to close it before changing files. With "Open when finished" checked it opens the app and closes the setup once the install succeeds.
 
-**`uninstall.exe`** sits next to the app and is what Windows runs from "Installed apps". It asks whether to also remove settings and data (`%APPDATA%\ThomasThanos\MakeYourLifeEasier` / `%LOCALAPPDATA%\ThomasThanos\MakeYourLifeEasier\data`, cache), and cleans up the older `com.thomasthanos.makeyourlifeeasier` folders. Game Saves backups are never touched. Because a program cannot delete its own file while running, `uninstall.exe` (like NSIS's) copies itself to a new folder in `%TEMP%` and runs from there (`installer/src/relocate.rs`): the copy does the work and, once the original has exited, deletes it and the folder too. The `/S` exit code still reaches whoever ran it, and old copies in `%TEMP%` are swept up on the next uninstall. Uninstall also removes the Game Saves scheduled task, and only the shortcuts that point to our own app.
+**`uninstall.exe`** sits next to the app and is what Windows runs from "Installed apps". Its window requires a choice to keep or remove local settings and data, followed by confirmation. This applies to external callers that pass legacy `/S`, `/P` or `/PURGE` flags too. Install and update clear the old `QuietUninstallString` registry value. The remove-data option clears the local and roaming MYLE data folders, including the older identifier-named locations. Both choices keep Game Saves backups and remove the Game Saves scheduled task and MYLE shortcuts.
 
-Command line (the same as NSIS's, which the updater already speaks):
+The uninstaller runs a copy in `%TEMP%` so it can remove the original executable after it exits. The calling process receives 0 on success and 2 if the user closes the window before confirming. If WebView2 is unavailable, uninstall stops and asks the user to repair or install it.
+
+Setup command line (the same as NSIS's, which the updater already speaks):
 
 | Flag | What it does |
 |---|---|
@@ -618,7 +620,6 @@ Command line (the same as NSIS's, which the updater already speaks):
 | `/NS` | no shortcuts |
 | `/LIVE` | (with `/S /UPDATE`) update while the app is running; the app reopens itself |
 | `/D=<folder>` | a different folder (last, unquoted); testing only, the window does not change the folder |
-| `/PURGE` | (uninstall) also removes settings and data |
 
 For each shortcut the setup remembers whether it is wanted and whether it was made (`0` off, `1` wanted but not made yet, `2` made). `/UPDATE` (and the in-app update) retries a wanted one that never got made; one that was made and has since gone was deleted by the user, so it is not brought back and is saved as off (the setup then offers it unticked). Updates refresh the others of ours and remove none. Uninstall turns `2` back into `1`, so a reinstall offers the same shortcuts. The first update over an install from before any of this was remembered adds the Start menu entry and turns the old app's `Run` value into a Startup shortcut.
 
@@ -637,7 +638,7 @@ Preview the window in a browser: `npx vite` and `http://localhost:1420/installer
 |---|---|
 | `cargo test --workspace` | everything in Rust, including every feature's unit and integration tests |
 | `node --test "scripts/tests/*.test.mjs"` | everything outside Rust: the extension's sites and manifest, the pages' pure logic, the setup's version order, the site check |
-| `scripts/smoke-test-setup.ps1` | a silent install, an update and an uninstall, with checks (CI) |
+| `scripts/smoke-test-setup.ps1` | silent install and update, then uninstall confirmation and cancellation (CI) |
 | `scripts/verify-install.ps1` | one install, or with `-Removed` one uninstall |
 | `cargo test <feature>` | one feature's tests, e.g. `cargo test project_backups` |
 | `cargo test live_steam_still_answers -- --ignored` | asks the real Steam store, for checking by hand when Steam changes something |

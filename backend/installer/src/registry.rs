@@ -52,23 +52,25 @@ pub fn register(dir: &Path, version: &str, size_kb: u32) -> Result<(), String> {
         .create_subkey(product::uninstall_key())
         .map_err(|e| format!("Windows did not accept the uninstall entry: {e}"))?;
     let quoted = |path: &Path| format!("\"{}\"", path.display());
-    let text: [(&str, String); 10] = [
+    let text: [(&str, String); 9] = [
         ("DisplayName", product::NAME.to_string()),
         ("DisplayIcon", quoted(&crate::shell_identity::icon_path(&exe))),
         ("DisplayVersion", version.to_string()),
         ("Publisher", product::PUBLISHER.to_string()),
         ("InstallLocation", dir.display().to_string()),
         ("UninstallString", quoted(&uninstaller)),
-        (
-            "QuietUninstallString",
-            format!("{} /S", quoted(&uninstaller)),
-        ),
         ("MainBinaryName", product::exe_name()),
         ("InstallDate", today()),
         ("Comments", format!("{} for Windows", product::NAME)),
     ];
     for (name, value) in text {
         key.set_value(name, &value).map_err(|e| e.to_string())?;
+    }
+    // Installations and updates clear the silent command left by older releases.
+    if let Err(error) = key.delete_value("QuietUninstallString")
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(error.to_string());
     }
     key.set_value("NoModify", &1u32)
         .map_err(|e| e.to_string())?;

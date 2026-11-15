@@ -4,13 +4,12 @@
 //! folder to remove). The copy does the work, tells the original how it went
 //! (one line on a pipe), waits for it to exit, then removes it and the
 //! folder. The original exits with the copy's code, so whoever ran
-//! `uninstall.exe /S` still learns whether it worked.
+//! the uninstaller still learns whether the user confirmed and it worked.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::cli::Cli;
 use crate::{FAILED, product};
 
 fn copy_prefix() -> String {
@@ -19,7 +18,7 @@ fn copy_prefix() -> String {
 
 /// Runs the uninstall from a copy and returns its exit code, or `None` when
 /// no copy could be started (nothing has been changed then).
-pub fn run_from_temp(cli: &Cli, dir: &Path) -> Option<i32> {
+pub fn run_from_temp(dir: &Path) -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let temp = std::env::temp_dir();
     sweep(&temp);
@@ -34,7 +33,7 @@ pub fn run_from_temp(cli: &Cli, dir: &Path) -> Option<i32> {
         .and_then(|()| std::fs::copy(&exe, &copy))
         .and_then(|_| {
             Command::new(&copy)
-                .args(arguments(cli, dir))
+                .args(arguments(dir))
                 .current_dir(&folder)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -67,22 +66,13 @@ pub fn run_from_temp(cli: &Cli, dir: &Path) -> Option<i32> {
     }
 }
 
-/// What the copy is told: the choices already made, who to wait for, and
-/// the folder (last, as `_?=` takes the rest of the line).
-fn arguments(cli: &Cli, dir: &Path) -> Vec<String> {
-    let mut args = Vec::new();
-    for (on, flag) in [
-        (cli.silent, "/S"),
-        (cli.passive, "/P"),
-        (cli.purge, "/PURGE"),
-    ] {
-        if on {
-            args.push(flag.to_string());
-        }
-    }
-    args.push(format!("--parent={}", std::process::id()));
-    args.push(format!("_?={}", dir.display()));
-    args
+/// The caller and the install folder. The folder goes last because `_?=`
+/// takes the rest of the command line.
+fn arguments(dir: &Path) -> [String; 2] {
+    [
+        format!("--parent={}", std::process::id()),
+        format!("_?={}", dir.display()),
+    ]
 }
 
 /// In the copy: tells the original uninstaller the exit code.
@@ -122,19 +112,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_copy_gets_the_choices_and_the_folder_last() {
-        let cli = Cli {
-            silent: true,
-            purge: true,
-            ..Cli::default()
-        };
-        let args = arguments(&cli, Path::new(r"C:\My Apps\MakeYourLifeEasier"));
-        assert_eq!(args[..2], ["/S", "/PURGE"]);
-        assert!(args[2].starts_with("--parent="));
-        assert_eq!(args[3], r"_?=C:\My Apps\MakeYourLifeEasier");
-
+    fn the_copy_gets_the_parent_and_folder_without_removal_flags() {
+        let args = arguments(Path::new(r"C:\My Apps\MakeYourLifeEasier"));
         let parsed = crate::cli::parse(args);
-        assert!(parsed.silent && parsed.purge && !parsed.passive);
+        assert!(!parsed.silent && !parsed.passive);
         assert_eq!(parsed.parent, Some(std::process::id()));
         assert_eq!(
             parsed.in_place,

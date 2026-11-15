@@ -13,10 +13,20 @@
 <div class="toaster" aria-live="polite">
   {#each toast.visible as t (t.id)}
     {@const Icon = icons[t.kind]}
-    <div class="toast {t.kind}" role={t.kind === "error" ? "alert" : "status"} transition:fly={{ x: 24, duration: 200, easing: cubicOut }}>
-      <span class="icon"><Icon size={17} strokeWidth={2} /></span>
-      <p class="message selectable">{t.message}</p>
-      {#if t.count > 1}<span class="count">×{t.count}</span>{/if}
+    <div
+      class="toast {t.kind}"
+      role={t.kind === "error" ? "alert" : "status"}
+      transition:fly={{ y: 16, duration: 220, easing: cubicOut }}
+    >
+      <div class="icon-badge" aria-hidden="true">
+        <Icon size={16} strokeWidth={2.2} />
+      </div>
+
+      <div class="toast-body">
+        <p class="message selectable">{t.message}</p>
+        {#if t.count > 1}<span class="count">×{t.count}</span>{/if}
+      </div>
+
       {#if t.action}
         {@const action = t.action}
         <button
@@ -24,11 +34,19 @@
           onclick={() => {
             toast.dismiss(t.id);
             action.run();
-          }}>{action.label}</button
+          }}
         >
+          {action.label}
+        </button>
       {/if}
-      <button class="close" aria-label="Dismiss" onclick={() => toast.dismiss(t.id)}>
-        <X size={14} />
+
+      <button
+        class="close"
+        aria-label="Dismiss notification"
+        title="Dismiss"
+        onclick={() => toast.dismiss(t.id)}
+      >
+        <X size={14} strokeWidth={2} />
       </button>
     </div>
   {/each}
@@ -36,95 +54,171 @@
 
 <style>
   .toaster {
-    position: fixed;
-    top: calc(var(--titlebar-h) + 12px);
-    right: calc(var(--gap) + 14px);
+    position: absolute;
+    bottom: 20px;
+    right: 22px;
     z-index: 120;
-    display: grid;
-    gap: 8px;
-    width: min(360px, calc(100vw - 48px));
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 10px;
+    width: min(390px, calc(100% - 44px));
     pointer-events: none;
   }
 
   .toast {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 11px 12px;
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: var(--radius-md);
-    background: var(--toast-bg);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), var(--elev-2);
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(28, 30, 36, 0.95), rgba(18, 20, 26, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 16px 36px -6px rgba(0, 0, 0, 0.65),
+      0 4px 12px -2px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px) saturate(190%);
+    -webkit-backdrop-filter: blur(20px) saturate(190%);
     pointer-events: auto;
+    position: relative;
+    overflow: hidden;
   }
 
-  .icon {
+  /* Status accents */
+  .toast.info {
+    border-color: rgba(107, 133, 255, 0.28);
+    box-shadow:
+      0 16px 36px -6px rgba(0, 0, 0, 0.65),
+      0 0 22px -4px rgba(107, 133, 255, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+
+  .toast.success {
+    border-color: rgba(16, 185, 129, 0.28);
+    box-shadow:
+      0 16px 36px -6px rgba(0, 0, 0, 0.65),
+      0 0 22px -4px rgba(16, 185, 129, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+
+  .toast.error {
+    border-color: rgba(229, 72, 77, 0.35);
+    box-shadow:
+      0 16px 36px -6px rgba(0, 0, 0, 0.65),
+      0 0 22px -4px rgba(229, 72, 77, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+
+  /* Icon badges */
+  .icon-badge {
     flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
     display: grid;
-    margin-top: 1px;
+    place-items: center;
   }
 
-  .action {
-    flex: none;
-    align-self: center;
-    padding: 3px 9px;
-    border: 1px solid rgb(var(--accent-rgb) / 0.3);
-    border-radius: 999px;
-    background: rgb(var(--accent-rgb) / 0.12);
-    color: var(--text-1);
-    font-size: 11.5px;
-    font-weight: 600;
+  .info .icon-badge {
+    background: radial-gradient(circle at 35% 35%, rgba(107, 133, 255, 0.25), rgba(107, 133, 255, 0.08));
+    border: 1px solid rgba(107, 133, 255, 0.35);
+    color: #8ba2ff;
+    box-shadow: 0 2px 8px rgba(107, 133, 255, 0.2);
   }
 
-  .action:hover {
-    background: rgb(var(--accent-rgb) / 0.22);
+  .success .icon-badge {
+    background: radial-gradient(circle at 35% 35%, rgba(16, 185, 129, 0.25), rgba(16, 185, 129, 0.08));
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #34d399;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
   }
 
-  .success .icon {
-    color: var(--ok);
+  .error .icon-badge {
+    background: radial-gradient(circle at 35% 35%, rgba(229, 72, 77, 0.28), rgba(229, 72, 77, 0.1));
+    border: 1px solid rgba(229, 72, 77, 0.4);
+    color: #ff6b70;
+    box-shadow: 0 2px 8px rgba(229, 72, 77, 0.2);
   }
 
-  .info .icon {
-    color: var(--accent);
-  }
-
-  .error .icon {
-    color: var(--danger);
-  }
-
-  .error {
-    border-color: rgb(229 72 77 / 0.35);
+  /* Body */
+  .toast-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-right: 2px;
   }
 
   .message {
     flex: 1;
+    min-width: 0;
     font-size: 13px;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--text-1);
+    word-break: break-word;
   }
 
   .count {
     flex: none;
-    padding: 1px 7px;
+    padding: 2px 7px;
     border-radius: 999px;
-    background: rgb(255 255 255 / 0.1);
-    font-size: 11.5px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
 
+  /* Action button */
+  .action {
+    flex: none;
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: linear-gradient(135deg, #5369e4, #4459cb);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow:
+      0 2px 6px rgba(68, 89, 203, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    transition: filter 140ms, transform 100ms;
+    white-space: nowrap;
+  }
+
+  .action:hover {
+    filter: brightness(1.12);
+    transform: translateY(-0.5px);
+  }
+
+  .action:active {
+    transform: translateY(0.5px);
+    filter: brightness(0.95);
+  }
+
+  /* Close */
   .close {
     flex: none;
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    margin: -2px -4px 0 0;
-    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
     color: var(--text-3);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 140ms, color 140ms;
+    margin-right: -2px;
   }
 
   .close:hover {
-    background: var(--hover);
+    background: rgba(255, 255, 255, 0.09);
     color: var(--text-1);
   }
 </style>

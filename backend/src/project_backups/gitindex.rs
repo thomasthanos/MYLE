@@ -20,6 +20,17 @@ pub(crate) fn tracked_paths(root: &Path) -> Option<Vec<String>> {
     }
     Some(paths)
 }
+/// The repository's own ignore list that is never committed
+/// (`.git/info/exclude`; a linked worktree's is in the main repository's
+/// folder), or `None` when there is none.
+pub(crate) fn info_exclude(root: &Path) -> Option<String> {
+    let git_dir = git_dir(root)?;
+    let common = fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .map(|text| git_dir.join(text.trim()))
+        .unwrap_or(git_dir);
+    fs::read_to_string(common.join("info").join("exclude")).ok()
+}
 /// `.git` is a folder, or (worktrees, submodules) a file naming one.
 fn git_dir(root: &Path) -> Option<PathBuf> {
     let dot_git = root.join(".git");

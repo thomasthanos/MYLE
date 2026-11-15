@@ -30,6 +30,7 @@ mod updater;
 mod webview_cache;
 mod webview_memory;
 mod webview_policy;
+mod window_placement;
 mod whats_new;
 mod window_sizing;
 mod windows_optimization;
@@ -61,7 +62,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Windo
 /// (`splash_shown`), so the two web views don't compete for the first paint.
 fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     use tauri::window::Color;
-    let monitor = window_sizing::cursor_monitor(app.handle());
+    let monitor = window_placement::cursor_monitor(app.handle());
     let data_dir = storage::webview_dir().map_err(std::io::Error::other)?;
     let splash = WebviewWindowBuilder::new(
         app,

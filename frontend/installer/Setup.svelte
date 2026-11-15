@@ -19,6 +19,7 @@
   import Brand from "./Brand.svelte";
   import Titlebar from "./Titlebar.svelte";
   import Toggle from "./Toggle.svelte";
+  import Uninstall from "./Uninstall.svelte";
   import { compareVersions } from "./versions";
   import Working, { type Step } from "./Working.svelte";
   import { errorMessage as message } from "../lib/errors";
@@ -31,7 +32,6 @@
     /** The share of the whole bar this step fills, in percent. */
     from: number;
     to: number;
-    onlyWithData?: boolean;
   }
 
   const INSTALL_STEPS: StepDef[] = [
@@ -41,20 +41,12 @@
     { label: "Setting up shortcuts", stages: ["shortcuts"], from: 94, to: 98 },
     { label: "Finishing up", stages: ["finishing"], from: 98, to: 100 },
   ];
-  const UNINSTALL_STEPS: StepDef[] = [
-    { label: "Closing the app", stages: ["closingApp", "preparing"], from: 0, to: 8 },
-    { label: "Removing shortcuts", stages: ["shortcuts"], from: 8, to: 16 },
-    { label: "Removing files", stages: ["removingFiles"], from: 16, to: 80 },
-    { label: "Removing it from Installed apps", stages: ["registering"], from: 80, to: 88 },
-    { label: "Removing settings and data", stages: ["removingData"], from: 88, to: 96, onlyWithData: true },
-    { label: "Finishing up", stages: ["finishing"], from: 96, to: 100 },
-  ];
 
   /* Passive mode: how long "Updated to …" shows, then how long the setup stays once the app's window is on screen (`launch` waits for it). */
   const PASSIVE_SHOW_MS = 250;
   const PASSIVE_HANDOVER_MS = 300;
 
-  let api: SetupApi | null = null;
+  let api = $state.raw<SetupApi | null>(null);
   let info = $state<SetupState | null>(null);
   let screen = $state<Screen>("loading");
 
@@ -69,7 +61,6 @@
   let launchAfter = $state(true);
   /** Open the browser extension's page when done: offered on a first install. */
   let getExtension = $state(false);
-  let removeData = $state(false);
 
   let folderError = $state<string | null>(null);
   let launchError = $state<string | null>(null);
@@ -78,8 +69,6 @@
   let finishing = $state(false);
   /** Programs to close before going on; set, it shows the question. */
   let running = $state<string[] | null>(null);
-  /** Uninstall: the app is open right now (a heads-up, not a question). */
-  let openNow = $state(false);
 
   // Progress
   let stage = $state<Stage>("preparing");
@@ -87,13 +76,12 @@
   let error = $state("");
   let installedDir = $state("");
 
-  const uninstalling = $derived(info?.mode === "uninstall");
   const busy = $derived(screen === "working");
 
   /** Where this setup's version stands against the installed one. */
   const relation = $derived.by(() => {
     const installed = info?.installed?.version;
-    if (!info || uninstalling || !installed) return "fresh" as const;
+    if (!info || !installed) return "fresh" as const;
     const order = compareVersions(info.version, installed);
     return order > 0 ? ("update" as const) : order === 0 ? ("same" as const) : ("older" as const);
   });
@@ -137,9 +125,7 @@
     }
   });
 
-  const steps = $derived(
-    (uninstalling ? UNINSTALL_STEPS : INSTALL_STEPS).filter((step) => !step.onlyWithData || removeData),
-  );
+  const steps = INSTALL_STEPS;
   const activeStep = $derived(Math.max(0, steps.findIndex((step) => step.stages.includes(stage))));
   const stepStates = $derived<Step[]>(
     steps.map((step, index) => ({
@@ -152,7 +138,7 @@
     if (screen === "done") return 100;
     const step = steps[activeStep];
     if (!step) return 0;
-    const counted = stage === "copying" || stage === "removingFiles";
+    const counted = stage === "copying";
     const fraction = counted && files.total > 0 ? files.done / files.total : 0.35;
     return step.from + (step.to - step.from) * fraction;
   });
@@ -161,7 +147,6 @@
     if (stage === "copying" && files.total > 0) {
       return `${files.file.replaceAll("/", "\\")}  ·  ${formatBytes(files.done)} of ${formatBytes(files.total)}`;
     }
-    if (stage === "removingFiles") return files.file.replaceAll("/", "\\");
     return "";
   });
 
@@ -171,29 +156,28 @@
       case "closingApp":
         return `Closing ${app}…`;
       case "preparing":
-        return uninstalling ? "Getting ready…" : "Preparing the install folder…";
+        return "Preparing the install folder…";
       case "copying":
         return "Copying files…";
       case "registering":
-        return uninstalling ? "Removing it from Installed apps…" : "Adding it to Installed apps…";
+        return "Adding it to Installed apps…";
       case "shortcuts":
-        return uninstalling ? "Removing shortcuts…" : "Setting up shortcuts…";
-      case "removingFiles":
-        return "Removing files…";
-      case "removingData":
-        return "Removing settings and data…";
+        return "Setting up shortcuts…";
       case "finishing":
         return "Finishing up…";
+      default:
+        return "";
     }
   }
 
 
   onMount(() => {
-    if (isTauri()) {
-      // Show the window only after the first frame is painted (no blank flash).
-      requestAnimationFrame(() => requestAnimationFrame(() => void getCurrentWindow().show()));
-    }
-    void load();
+    void load().then(() => {
+      if (isTauri()) {
+        // Paint the right mode before showing the window.
+        requestAnimationFrame(() => requestAnimationFrame(() => void getCurrentWindow().show()));
+      }
+    });
   });
 
   async function load() {
@@ -214,6 +198,7 @@
     }
     const state = await api.state();
     info = state;
+    if (state.mode === "uninstall") return;
     dir = state.dir;
     desktop = state.shortcuts.desktop;
     startMenu = state.shortcuts.startMenu;
@@ -226,13 +211,10 @@
       return;
     }
     screen = "options";
-    if (state.mode === "uninstall") {
-      openNow = (await api.running(state.dir).catch(() => [])).length > 0;
-    }
     if (state.passive) void start();
   }
 
-  /* "Try again": the install (or uninstall) again, or the first question to the setup when even that failed. */
+  /* Retry the install, or ask setup for its initial state again. */
   function retry() {
     if (info) {
       void start();
@@ -249,17 +231,14 @@
     starting = true;
     try {
       folderError = null;
-      if (!uninstalling) {
-        try {
-          await api.checkFolder(dir);
-        } catch (err) {
-          folderError = message(err);
-          return;
-        }
+      try {
+        await api.checkFolder(dir);
+      } catch (err) {
+        folderError = message(err);
+        return;
       }
-      const apps = await api.running(uninstalling ? info.dir : dir).catch(() => []);
-      // The uninstaller already said the app will be closed; passive asks nothing.
-      if (apps.length && !uninstalling && !info.passive) {
+      const apps = await api.running(dir).catch(() => []);
+      if (apps.length && !info.passive) {
         running = apps;
         return;
       }
@@ -283,15 +262,12 @@
       else files = e.data;
     };
     try {
-      if (uninstalling) await api.uninstall(removeData, onEvent);
-      else {
-        const done = await api.install({ desktop, startMenu, startup, taskbar, startMinimized }, onEvent);
-        installedDir = done.dir;
-        shortcutWarnings = done.warnings;
-      }
+      const done = await api.install({ desktop, startMenu, startup, taskbar, startMinimized }, onEvent);
+      installedDir = done.dir;
+      shortcutWarnings = done.warnings;
       screen = "done";
       if (info.passive) void finishPassive();
-      else if (!uninstalling && launchAfter) void finish();
+      else if (launchAfter) void finish();
     } catch (err) {
       error = message(err);
       screen = "error";
@@ -301,7 +277,7 @@
   async function finish() {
     if (!api || !info || finishing) return;
     finishing = true;
-    if (!uninstalling && (launchAfter || info.passive)) {
+    if (launchAfter || info.passive) {
       try {
         await api.launch();
       } catch (err) {
@@ -311,7 +287,7 @@
       }
     }
     // The page opens in the browser, over the app: a nicety, never a blocker.
-    if (!uninstalling && !info.passive && getExtension && info.extensionUrl) {
+    if (!info.passive && getExtension && info.extensionUrl) {
       await api.openExtension().catch(() => {});
     }
     await api.exit();
@@ -322,16 +298,14 @@
     await sleep(PASSIVE_SHOW_MS);
     if (!api || !info || finishing) return;
     finishing = true;
-    if (!uninstalling) {
-      try {
-        await api.launch();
-      } catch (err) {
-        launchError = message(err);
-        finishing = false;
-        return;
-      }
-      await sleep(PASSIVE_HANDOVER_MS);
+    try {
+      await api.launch();
+    } catch (err) {
+      launchError = message(err);
+      finishing = false;
+      return;
     }
+    await sleep(PASSIVE_HANDOVER_MS);
     await api.exit();
   }
 
@@ -349,6 +323,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (info?.mode === "uninstall") return;
     if (running) {
       if (e.key === "Escape") running = null;
       return;
@@ -363,10 +338,13 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+{#if info?.mode === "uninstall" && api}
+  <Uninstall {info} {api} />
+{:else}
 <div class="app-backdrop" aria-hidden="true"></div>
 
 <div class="window">
-  <Titlebar label={uninstalling ? "Uninstall" : "Setup"} {busy} onclose={close} />
+  <Titlebar label="Setup" {busy} onclose={close} />
 
   <div class="body">
     <Brand
@@ -390,28 +368,6 @@
               </p>
             </div>
           {:else if screen === "options" && info}
-            {#if uninstalling}
-              <h2>Uninstall {info.product}?</h2>
-              <p class="lead">
-                Version {info.version} · {formatBytes(info.size)} in
-                <span class="path selectable" title={info.dir}>{info.dir}</span>
-              </p>
-
-              <div class="card">
-                <Toggle
-                  bind:checked={removeData}
-                  label="Also remove my settings and data"
-                  hint="Settings, sign-in, Game Saves setup and restore safety copies, caches. Your Game Saves backups are always kept."
-                />
-              </div>
-
-              {#if openNow}
-                <p class="notice">
-                  <span class="dot"></span>
-                  {info.product} is open. It will be closed first.
-                </p>
-              {/if}
-            {:else}
               <div class="title-row">
                 <h2>{copy.title}</h2>
                 {#if relation === "same"}
@@ -460,10 +416,8 @@
                 <Toggle bind:checked={launchAfter} icon={Rocket} label="Open when finished" />
               </div>
 
-            {/if}
-
             <div class="footer">
-              {#if !uninstalling && info.extensionUrl}
+              {#if info.extensionUrl}
                 <!-- In the footer's free corner: the window keeps its size. -->
                 <button
                   type="button"
@@ -480,13 +434,13 @@
               {/if}
               <span class="spacer"></span>
               <button class="btn" onclick={close}>Cancel</button>
-              <button class="btn primary big" class:danger={uninstalling} onclick={start} disabled={starting}>
-                {uninstalling ? "Uninstall" : copy.action}
+              <button class="btn primary big" onclick={start} disabled={starting}>
+                {copy.action}
               </button>
             </div>
           {:else if screen === "working"}
             <Working
-              title={uninstalling ? "Uninstalling…" : copy.working}
+              title={copy.working}
               {percent}
               {action}
               {detail}
@@ -498,16 +452,10 @@
                 <circle cx="32" cy="32" r="29" />
                 <path d="M19 33.5l9 9 17-19" />
               </svg>
-              <h2>{uninstalling ? `${info.product} was removed` : copy.done}</h2>
+              <h2>{copy.done}</h2>
               <p class="lead">
-                {#if uninstalling}
-                  {removeData
-                    ? "Its settings and data were removed too."
-                    : "Your settings are kept, in case you come back."}
-                {:else}
-                  {info.product} {info.version} is ready in
-                  <span class="path selectable" title={installedDir}>{installedDir}</span>
-                {/if}
+                {info.product} {info.version} is ready in
+                <span class="path selectable" title={installedDir}>{installedDir}</span>
               </p>
               {#if shortcutWarnings.length}
                 <div class="launch-error" role="status">
@@ -527,9 +475,9 @@
               {#if info.passive && !launchError}
                 <span class="opening" role="status">
                   <span class="dot" aria-hidden="true"></span>
-                  {uninstalling ? "Closing…" : `Opening ${info.product}…`}
+                  Opening {info.product}…
                 </span>
-              {:else if !uninstalling && !launchError}
+              {:else if !launchError}
                 <Toggle bind:checked={launchAfter} icon={Rocket} label="Open {info.product}" />
               {:else if launchError}
                 <button class="btn" onclick={closeAfterInstall}>Close setup</button>
@@ -537,7 +485,7 @@
               <span class="spacer"></span>
               {#if !info.passive || launchError}
                 <button class="btn primary big" onclick={finish} disabled={finishing}>
-                  {launchError ? "Try again" : !uninstalling && launchAfter ? "Finish and open" : "Finish"}
+                  {launchError ? "Try again" : launchAfter ? "Finish and open" : "Finish"}
                 </button>
               {/if}
             </div>
@@ -547,7 +495,7 @@
                 <circle cx="32" cy="32" r="29" />
                 <path d="M23 23l18 18m0-18L23 41" />
               </svg>
-              <h2>{!info ? "Setup could not start" : uninstalling ? "Uninstall could not finish" : "Setup could not finish"}</h2>
+              <h2>{!info ? "Setup could not start" : "Setup could not finish"}</h2>
               <p class="error-text selectable">{error}</p>
             </div>
             <div class="footer">
@@ -577,6 +525,7 @@
     </div>
   {/if}
 </div>
+{/if}
 
 <style>
   .window {
@@ -826,23 +775,6 @@
     color: var(--text-3);
   }
 
-  .card {
-    margin-top: 20px;
-    padding: 4px;
-    border-radius: 14px;
-    background: rgb(255 255 255 / 0.03);
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
-  }
-
-  .notice {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-top: 14px;
-    font-size: 12.5px;
-    color: var(--text-2);
-  }
-
   .dot {
     width: 8px;
     height: 8px;
@@ -872,13 +804,6 @@
     min-width: 112px;
     padding: 0 18px;
     font-weight: 600;
-  }
-
-  .btn.primary.danger {
-    background: linear-gradient(135deg, #ff7a70, #e5484d);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.25),
-      0 6px 16px -6px rgb(229 72 77 / 0.6);
   }
 
   .center {

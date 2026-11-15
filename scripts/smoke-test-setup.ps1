@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Installs, updates and uninstalls a built setup silently, and checks what
+  Installs and updates a built setup silently, then tests its uninstall window and checks what
   each step leaves on disk and in the registry. CI runs it on every change.
 
 .EXAMPLE
@@ -46,6 +46,25 @@ function Assert([bool]$Condition, [string]$What) {
 function Invoke-Silently([string]$Program, [string[]]$Arguments) {
   $process = Start-Process -FilePath $Program -ArgumentList $Arguments -Wait -PassThru
   return $process.ExitCode
+}
+
+function Wait-UninstallControl($Parent, [string]$Name, $Scope) {
+  $condition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::NameProperty, $Name
+  )
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    $control = $Parent.FindFirst($Scope, $condition)
+    if ($control) { return $control }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+  throw "Uninstall control '$Name' did not appear."
+}
+
+function Wait-UninstallExit($Process, $WindowProcess, [int]$ExpectedCode) {
+  Assert ($Process.WaitForExit(30000)) "the calling uninstaller exited"
+  Assert ($Process.ExitCode -eq $ExpectedCode) "the caller received exit code $ExpectedCode"
+  Assert ($WindowProcess.WaitForExit(30000)) "the temporary uninstaller exited"
 }
 
 $registryEntries = @(
@@ -98,7 +117,7 @@ $entry = Get-ItemProperty $uninstallKey
 Assert ($entry.DisplayVersion -eq $version) "Installed apps lists version $version"
 Assert ($entry.DisplayName -eq "MYLE") "Installed apps displays MYLE"
 Assert ($entry.UninstallString -like "*uninstall.exe*") "Installed apps knows the uninstaller"
-Assert ($entry.QuietUninstallString -like "*/S") "Installed apps has a quiet uninstall"
+Assert (-not $entry.PSObject.Properties["QuietUninstallString"]) "Installed apps offers interactive uninstall"
 $shell = New-Object -ComObject WScript.Shell
 $expectedExe = Join-Path $dir "$binary.exe"
 function Assert-Shortcuts([string]$ExpectedTarget, [string[]]$Names) {
@@ -155,7 +174,9 @@ $legacyExe = Join-Path $dir "MakeYourLifeEasier.exe"
 [IO.File]::WriteAllBytes($legacyExe, [byte[]](1, 2, 3, 4))
 
 # Update over it, as the in-app updater does (without relaunching)
+Set-ItemProperty -LiteralPath $uninstallKey -Name QuietUninstallString -Value ('"{0}" /S' -f (Join-Path $dir "uninstall.exe"))
 Assert ((Invoke-Silently $Setup @("/S", "/UPDATE")) -eq 0) "silent update exits 0"
+Assert (-not (Get-ItemProperty $uninstallKey).PSObject.Properties["QuietUninstallString"]) "update removes the legacy quiet uninstall command"
 Assert ((Get-FileHash $legacyExe).Hash -eq (Get-FileHash $expectedExe).Hash) "old executable launches the new build"
 Assert ((Get-Content (Join-Path $dir "install.json") -Raw) -match '"MakeYourLifeEasier.exe"') "legacy executable is tracked for uninstall"
 Assert (-not (Get-ChildItem $dir -Recurse -Filter "*.myle-*")) "no leftovers from the update"
@@ -176,8 +197,32 @@ foreach ($path in $shortcutPaths.Values) {
 Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarShortcut -eq 0) "the update keeps taskbar disabled"
 Assert ((Get-ItemProperty -LiteralPath $productKey).TaskbarPinPending -eq 0) "the update does not queue a declined taskbar choice"
 
-# Uninstall
-Assert ((Invoke-Silently (Join-Path $dir "uninstall.exe") @("/S")) -eq 0) "silent uninstall exits 0"
+# Exercise external callers with legacy flags, then confirm a normal uninstall.
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$rootElement = [System.Windows.Automation.AutomationElement]::RootElement
+$children = [System.Windows.Automation.TreeScope]::Children
+$descendants = [System.Windows.Automation.TreeScope]::Descendants
+$invoke = [System.Windows.Automation.InvokePattern]::Pattern
+$select = [System.Windows.Automation.SelectionItemPattern]::Pattern
+$uninstaller = Join-Path $dir "uninstall.exe"
+
+$cancelled = Start-Process -FilePath $uninstaller -ArgumentList @("/S", "/P", "/PURGE") -PassThru
+$window = Wait-UninstallControl $rootElement "Uninstall MYLE" $children
+$copy = [Diagnostics.Process]::GetProcessById($window.Current.ProcessId)
+$confirm = Wait-UninstallControl $window "Uninstall" $descendants
+Assert (-not $confirm.Current.IsEnabled) "legacy flags still require a data choice"
+(Wait-UninstallControl $window "Cancel" $descendants).GetCurrentPattern($invoke).Invoke()
+Wait-UninstallExit $cancelled $copy 2
+Assert (Test-Path -LiteralPath $expectedExe) "cancelling leaves the application installed"
+Assert (Test-Path -LiteralPath $uninstallKey) "cancelling leaves the Installed apps entry"
+
+$confirmed = Start-Process -FilePath $uninstaller -PassThru
+$window = Wait-UninstallControl $rootElement "Uninstall MYLE" $children
+$copy = [Diagnostics.Process]::GetProcessById($window.Current.ProcessId)
+(Wait-UninstallControl $window "Keep my settings and data" $descendants).GetCurrentPattern($select).Select()
+(Wait-UninstallControl $window "Uninstall" $descendants).GetCurrentPattern($invoke).Invoke()
+(Wait-UninstallControl $window "Finish" $descendants).GetCurrentPattern($invoke).Invoke()
+Wait-UninstallExit $confirmed $copy 0
 Assert (-not (Test-Path $uninstallKey)) "Installed apps entry removed"
 foreach ($name in $shortcutPaths.Keys) {
   Assert (-not (Test-Path -LiteralPath $shortcutPaths[$name])) "$name shortcut removed"

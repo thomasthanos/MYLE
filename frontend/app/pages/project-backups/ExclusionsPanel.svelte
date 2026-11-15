@@ -85,7 +85,7 @@
       <label class="toggle surface">
         <span>
           <strong>Follow .gitignore</strong>
-          <small>Also leave out what the project's <code>.gitignore</code> files ignore. <code>.env</code> files are backed up either way.</small>
+          <small>Also leave out what git ignores: the project's <code>.gitignore</code> files and its own <code>.git/info/exclude</code> list. <code>.env</code> files are backed up either way.</small>
         </span>
         <input class="switch" type="checkbox" bind:checked={followGitignore} onchange={edited} disabled={!!pb.busy} />
       </label>

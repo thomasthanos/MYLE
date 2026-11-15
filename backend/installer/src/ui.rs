@@ -3,7 +3,7 @@
 //! passes the user's choices here and shows the progress it is sent.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use crate::cleanup::AfterExit;
 use crate::cli::Cli;
 use crate::engine::{self, InstallOptions, Progress, ShortcutChoice, ShortcutMode};
-use crate::{payload, processes, product, registry, shell};
+use crate::{DECLINED, FAILED, payload, processes, product, registry, shell};
 
 pub enum Mode {
     Install { payload: &'static [u8] },
@@ -27,6 +27,7 @@ struct Context {
     /// Set while files are being changed: the window cannot be closed then.
     busy: AtomicBool,
     installed_exe: Mutex<Option<PathBuf>>,
+    uninstall_exit: Arc<AtomicI32>,
     /// Deleted once the window has closed.
     after_exit: Arc<Mutex<AfterExit>>,
 }
@@ -134,28 +135,13 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
             version: registry::installed_version().unwrap_or_else(|| product::VERSION.to_string()),
             installed,
             dir: dir.display().to_string(),
-            size: folder_size(dir),
+            size: 0,
             shortcuts: ShortcutChoice::from_array([false; 3]).into(),
-            passive: context.cli.passive,
+            passive: false,
             ready: true,
             extension_url: None,
         },
     }
-}
-
-fn folder_size(dir: &Path) -> u64 {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|entry| match entry.file_type() {
-                    Ok(kind) if kind.is_dir() => folder_size(&entry.path()),
-                    Ok(_) => entry.metadata().map_or(0, |m| m.len()),
-                    Err(_) => 0,
-                })
-                .sum()
-        })
-        .unwrap_or(0)
 }
 
 /// Names of the programs running from the folder, for the "close it?" prompt.
@@ -290,6 +276,10 @@ async fn setup_uninstall(
         return Err("This is the installer.".into());
     };
     let _busy = Busy::start(&context.busy)?;
+    if context.uninstall_exit.load(Ordering::SeqCst) == 0 {
+        return Err("MYLE was already removed.".into());
+    }
+    context.uninstall_exit.store(FAILED, Ordering::SeqCst);
     let dir = dir.clone();
     let after_exit = tauri::async_runtime::spawn_blocking(move || {
         let mut report = |event: Progress| {
@@ -308,6 +298,7 @@ async fn setup_uninstall(
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .append(after_exit);
+    context.uninstall_exit.store(0, Ordering::SeqCst);
     Ok(())
 }
 
@@ -360,11 +351,13 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
     after_exit.remove.push(webview_dir.clone());
     let after_exit = Arc::new(Mutex::new(after_exit));
     let uninstalling = matches!(mode, Mode::Uninstall { .. });
+    let uninstall_exit = Arc::new(AtomicI32::new(DECLINED));
     let context = Context {
         mode,
         cli,
         busy: AtomicBool::new(false),
         installed_exe: Mutex::new(None),
+        uninstall_exit: uninstall_exit.clone(),
         after_exit: after_exit.clone(),
     };
 
@@ -378,17 +371,33 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
             };
             let window = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("installer.html".into()))
                 .title(title)
-                .inner_size(720.0, 540.0)
                 .resizable(false)
                 .maximizable(false)
                 .decorations(false)
                 .shadow(true)
-                .center()
                 .visible(false)
                 .devtools(cfg!(debug_assertions))
                 .background_color(tauri::window::Color(10, 12, 18, 255))
-                .data_directory(webview_dir.clone())
-                .build()?;
+                .data_directory(webview_dir.clone());
+            let window = if uninstalling {
+                let size = tauri::LogicalSize::new(420.0, 550.0);
+                let monitor = crate::window_placement::cursor_monitor(app.handle());
+                let window = window.inner_size(size.width, size.height).build()?;
+                if let Some(monitor) = monitor {
+                    let work = monitor.work_area().size;
+                    let size = size.to_physical::<u32>(monitor.scale_factor());
+                    crate::window_placement::place_on_monitor(
+                        &window,
+                        &monitor,
+                        tauri::PhysicalSize::new(size.width.min(work.width), size.height.min(work.height)),
+                    )?;
+                } else {
+                    window.center()?;
+                }
+                window
+            } else {
+                window.inner_size(720.0, 540.0).center().build()?
+            };
             crate::webview_policy::harden(&window)?;
             Ok(())
         })
@@ -426,6 +435,11 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
         }
     };
     let code = app.run_return(|_, _| {});
+    let code = if uninstalling && code == 0 {
+        uninstall_exit.load(Ordering::SeqCst)
+    } else {
+        code
+    };
     let pending = std::mem::take(&mut *after_exit.lock().unwrap_or_else(|p| p.into_inner()));
     (code, pending)
 }

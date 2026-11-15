@@ -26,6 +26,8 @@ mod ui;
 mod webview2;
 #[path = "../../src/webview_policy.rs"]
 mod webview_policy;
+#[path = "../../src/window_placement.rs"]
+mod window_placement;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,7 +35,7 @@ use std::time::Duration;
 use cleanup::AfterExit;
 use cli::Cli;
 
-/// Exit codes of the silent modes (0 is success).
+/// Exit codes reported to the program that started setup or uninstall.
 const FAILED: i32 = 1;
 const DECLINED: i32 = 2;
 const ALREADY_RUNNING: i32 = 3;
@@ -42,7 +44,7 @@ const STILL_RUNNING: i32 = 4;
 pub fn setup_main(payload: &'static [u8]) -> i32 {
     let cli = cli::parse(std::env::args().skip(1));
     let Some(_lock) = shell::SingleInstance::acquire() else {
-        return already_running(&cli);
+        return already_running(cli.silent);
     };
     if payload.is_empty() {
         if !cli.silent {
@@ -133,13 +135,11 @@ fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
 pub fn uninstall_main() -> i32 {
     let cli = cli::parse(std::env::args().skip(1));
     let not_installed = || {
-        if !cli.silent {
-            shell::message(
-                product::NAME,
-                &format!("{} is not installed.", product::NAME),
-                false,
-            );
-        }
+        shell::message(
+            product::NAME,
+            &format!("{} is not installed.", product::NAME),
+            false,
+        );
         FAILED
     };
 
@@ -159,9 +159,9 @@ pub fn uninstall_main() -> i32 {
             if parent.is_some() {
                 relocate::report(ALREADY_RUNNING);
             }
-            return already_running(&cli);
+            return already_running(false);
         };
-        let (code, after_exit) = uninstall_from(&cli, dir);
+        let (code, after_exit) = uninstall_from(dir);
         if let Some(parent) = parent {
             relocate::report(code);
             // Its file, and so the folder, can only go once it has exited.
@@ -174,49 +174,37 @@ pub fn uninstall_main() -> i32 {
     let Some(dir) = install_dir_to_remove() else {
         return not_installed();
     };
-    if let Some(code) = relocate::run_from_temp(&cli, &dir) {
+    if let Some(code) = relocate::run_from_temp(&dir) {
         return code;
     }
     // No copy could be started: uninstall from here, leaving this program
     // (and so its folder) behind.
     let Some(_lock) = shell::SingleInstance::acquire() else {
-        return already_running(&cli);
+        return already_running(false);
     };
-    let (code, after_exit) = uninstall_from(&cli, dir);
+    let (code, after_exit) = uninstall_from(dir);
     after_exit.finish();
     code
 }
 
-fn already_running(cli: &Cli) -> i32 {
-    if !cli.silent {
+fn already_running(silent: bool) -> i32 {
+    if !silent {
         shell::message(product::NAME, "Setup is already running.", false);
     }
     ALREADY_RUNNING
 }
 
-/// Removes the app in `dir`, with or without a window. Returns the exit code
-/// and what can only be deleted later.
-fn uninstall_from(cli: &Cli, dir: PathBuf) -> (i32, AfterExit) {
-    // Without WebView2 there is no window: ask with a plain message box.
-    let windowless = !cli.silent && !webview2::installed();
-    if windowless
-        && !shell::ask(
-            &format!("Uninstall {}", product::NAME),
-            &format!("Remove {} from this PC?", product::NAME),
-        )
-    {
-        return (DECLINED, AfterExit::default());
+/// The data choice and confirmation come from the uninstall window.
+fn uninstall_from(dir: PathBuf) -> (i32, AfterExit) {
+    if !webview2::installed() {
+        shell::message(
+            "Uninstall MYLE",
+            "The uninstall window needs Microsoft Edge WebView2 Runtime. Install or repair it, then try uninstalling MYLE again.",
+            true,
+        );
+        return (FAILED, AfterExit::default());
     }
-    if cli.silent || windowless {
-        if engine::close_running(&dir, Duration::from_secs(3)).is_err() {
-            return (STILL_RUNNING, AfterExit::default());
-        }
-        return match engine::uninstall(&dir, cli.purge, &mut |_| {}) {
-            Ok(after_exit) => (0, after_exit),
-            Err(_) => (FAILED, AfterExit::default()),
-        };
-    }
-    ui::run(ui::Mode::Uninstall { dir }, cli.clone())
+    ui::run(ui::Mode::Uninstall { dir }, Cli::default())
 }
 
 fn has_app(dir: &Path) -> bool {
