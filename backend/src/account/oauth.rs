@@ -1,11 +1,40 @@
 // ! Sign-in in the user's own browser (RFC 8252): a one-shot loopback ! server that receives Supabase's redirect (PKCE: `myle_vault::account`). ! ! The browser, not a webview, shows the provider's page: Google refuses ! embedded browsers, and the user is usually signed in there already.
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+
+const COMPLETE_URL: &str = "https://make-your-life-easier.pages.dev/sign-in/complete/";
+const FAILED_URL: &str = "https://make-your-life-easier.pages.dev/sign-in/failed/";
+
 /// What came back from the provider on the redirect.
-#[derive(Debug, PartialEq)]
-pub enum Callback {
+#[cfg_attr(test, derive(Debug, PartialEq))]
+enum Callback {
     Code(String),
     Error(String),
+}
+
+pub struct BrowserCallback {
+    callback: Callback,
+    stream: TcpStream,
+}
+
+impl BrowserCallback {
+    pub fn code(&self) -> Result<&str, String> {
+        match &self.callback {
+            Callback::Code(code) => Ok(code),
+            Callback::Error(message) => Err(message.clone()),
+        }
+    }
+
+    /// Only the outcome goes to the public website. Suppress the referrer
+    /// because the incoming loopback URL contains the one-time code.
+    pub async fn finish(mut self, signed_in: bool) {
+        let location = if signed_in { COMPLETE_URL } else { FAILED_URL };
+        let response = format!(
+            "HTTP/1.1 303 See Other\r\nLocation: {location}\r\nReferrer-Policy: no-referrer\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let _ = self.stream.write_all(response.as_bytes()).await;
+        let _ = self.stream.shutdown().await;
+    }
 }
 /// Listens on `localhost:<port>`, both IPv4 and IPv6: browsers try either.
 pub struct Loopback {
@@ -24,8 +53,8 @@ impl Loopback {
     /// (a favicon, a stray visit) gets a 404 and is ignored. Every connection
     /// is served on its own: browsers open spare connections that may never
     /// send a request, and one of those must not hold up the real redirect.
-    pub async fn next_callback(&self) -> Callback {
-        let (found, mut callbacks) = tokio::sync::mpsc::channel::<Callback>(1);
+    pub async fn next_callback(&self) -> BrowserCallback {
+        let (found, mut callbacks) = tokio::sync::mpsc::channel(1);
         // Request tasks belong to this attempt. Dropping the callback future
         // (cancel/timeout) or accepting its result also closes spare sockets.
         let mut connections = tokio::task::JoinSet::new();
@@ -51,31 +80,25 @@ async fn accept_optional(
         None => std::future::pending().await,
     }
 }
-/// Answers one request. A code or an error is handed on only after the
-/// browser has its page, so the tab never hangs on a closed app.
-async fn serve(mut stream: TcpStream, found: tokio::sync::mpsc::Sender<Callback>) {
+/// Gives the accepted browser connection to the sign-in attempt so its
+/// response can reflect the result of exchanging the code and saving the session.
+async fn serve(mut stream: TcpStream, found: tokio::sync::mpsc::Sender<BrowserCallback>) {
     let Some((target, opened_as_page)) = read_request(&mut stream).await else {
         return;
     };
     // The redirect opens a page in the tab. A web page elsewhere could load this address unseen (an image, a frame, a fetch), and that must not end the sign-in with a made-up error.
     if !opened_as_page {
-        respond(&mut stream, 404, "").await;
+        not_found(&mut stream).await;
         return;
     }
-    match parse_callback(&target) {
-        Some(Callback::Code(code)) => {
-            respond(&mut stream, 200, &page(true, "")).await;
-            let _ = found.send(Callback::Code(code)).await;
-        }
-        Some(Callback::Error(message)) => {
-            respond(&mut stream, 200, &page(false, &message)).await;
-            let _ = found.send(Callback::Error(message)).await;
-        }
-        None => respond(&mut stream, 404, "").await,
+    if let Some(callback) = parse_callback(&target) {
+        let _ = found.send(BrowserCallback { callback, stream }).await;
+    } else {
+        not_found(&mut stream).await;
     }
 }
 /// `/?code=…` or `/?error=…&error_description=…` from the request target.
-pub fn parse_callback(target: &str) -> Option<Callback> {
+fn parse_callback(target: &str) -> Option<Callback> {
     let url = reqwest::Url::parse(&format!("http://localhost{target}")).ok()?;
     if url.path() != "/" {
         return None;
@@ -126,42 +149,9 @@ fn opened_as_page<'a>(headers: impl Iterator<Item = &'a str>) -> bool {
         .find(|(name, _)| name.trim().eq_ignore_ascii_case("sec-fetch-dest"))
         .is_none_or(|(_, value)| value.trim().eq_ignore_ascii_case("document"))
 }
-async fn respond(stream: &mut TcpStream, status: u16, body: &str) {
-    let reason = if status == 200 { "OK" } else { "Not Found" };
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
+async fn not_found(stream: &mut TcpStream) {
+    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").await;
     let _ = stream.shutdown().await;
-}
-/// The page left in the browser tab after the redirect.
-fn page(ok: bool, message: &str) -> String {
-    let (title, text) = if ok {
-        (
-            "You're signed in",
-            "You can close this tab and go back to Make Your Life Easier.".to_string(),
-        )
-    } else {
-        ("Sign-in didn't finish", escape(message))
-    };
-    let accent = if ok { "#8b97ff" } else { "#ff8b8d" };
-    format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
-<style>
-html,body{{height:100%;margin:0}}
-body{{display:grid;place-items:center;background:radial-gradient(circle at 30% 20%,#1b2040,#0a0c12 70%);color:#e8eaf6;font:15px/1.5 "Segoe UI",system-ui,sans-serif}}
-.card{{max-width:420px;padding:32px 36px;border:1px solid rgba(255,255,255,.1);border-radius:18px;background:rgba(255,255,255,.05);box-shadow:0 24px 60px -24px rgba(0,0,0,.8);text-align:center}}
-h1{{margin:0 0 8px;font-size:20px;color:{accent}}}
-p{{margin:0;color:#aab0c8}}
-</style></head><body><div class="card"><h1>{title}</h1><p>{text}</p></div></body></html>"#
-    )
-}
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 #[cfg(test)]
 mod tests {
@@ -206,11 +196,8 @@ mod tests {
         let callback = tokio::time::timeout(std::time::Duration::from_secs(2), server.next_callback())
             .await
             .unwrap();
-        assert_eq!(callback, Callback::Code("real".into()));
-    }
-    #[test]
-    fn error_text_cannot_inject_markup() {
-        assert!(!page(false, "<script>x</script>").contains("<script>x"));
+        assert_eq!(callback.code(), Ok("real"));
+        callback.finish(true).await;
     }
     #[tokio::test]
     async fn an_idle_browser_connection_does_not_hold_up_the_redirect() {
@@ -231,7 +218,8 @@ mod tests {
             tokio::time::timeout(std::time::Duration::from_secs(2), server.next_callback())
                 .await
                 .expect("the idle connection must not delay the real one");
-        assert_eq!(callback, Callback::Code("fast".into()));
+        assert_eq!(callback.code(), Ok("fast"));
+        callback.finish(true).await;
         let mut byte = [0];
         let closed = tokio::time::timeout(std::time::Duration::from_secs(2), idle.read(&mut byte))
             .await.expect("finishing sign-in must close spare connections");
@@ -251,31 +239,44 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(2), probe.read_to_end(&mut reply)).await.unwrap().unwrap();
         assert!(reply.starts_with(b"HTTP/1.1 404"));
         waiting.abort();
-        assert!(waiting.await.unwrap_err().is_cancelled());
+        assert!(matches!(waiting.await, Err(error) if error.is_cancelled()));
         let mut byte = [0];
         let closed = tokio::time::timeout(std::time::Duration::from_secs(2), idle.read(&mut byte))
             .await.expect("cancelling sign-in must drop its request handlers");
         assert!(matches!(closed, Ok(0) | Err(_)));
     }
     #[tokio::test]
-    async fn the_loopback_server_hands_over_the_code_and_answers_the_browser() {
-        let server = Loopback::bind(0).await;
+    async fn the_browser_waits_for_the_sign_in_result_before_opening_the_site() {
         // Port 0 picks a free port, but only the IPv4 socket knows it.
-        let server = server.unwrap();
+        let server = Loopback::bind(0).await.unwrap();
         let port = server.v4.local_addr().unwrap().port();
-        let browser = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            stream
-                .write_all(b"GET /?code=xyz HTTP/1.1\r\nHost: localhost\r\n\r\n")
-                .await
-                .unwrap();
-            let mut reply = String::new();
-            stream.read_to_string(&mut reply).await.unwrap();
-            reply
-        });
-        assert_eq!(server.next_callback().await, Callback::Code("xyz".into()));
-        let reply = browser.await.unwrap();
-        assert!(reply.starts_with("HTTP/1.1 200"));
-        assert!(reply.contains("signed in"));
+        let mut browser = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        browser.write_all(b"GET /?code=one-time-test-code HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+        let callback = server.next_callback().await;
+        assert_eq!(callback.code(), Ok("one-time-test-code"));
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(25), browser.read(&mut [0]))
+            .await.is_err());
+        callback.finish(true).await;
+        let mut reply = String::new();
+        browser.read_to_string(&mut reply).await.unwrap();
+        assert!(reply.starts_with("HTTP/1.1 303"));
+        assert!(reply.contains("Location: https://make-your-life-easier.pages.dev/sign-in/complete/\r\n"));
+        assert!(reply.contains("Referrer-Policy: no-referrer\r\n"));
+        assert!(!reply.contains("one-time-test-code"));
+    }
+
+    #[tokio::test]
+    async fn rejected_sign_in_opens_the_failure_page_without_provider_details() {
+        let server = Loopback::bind(0).await.unwrap();
+        let port = server.v4.local_addr().unwrap().port();
+        let mut browser = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        browser.write_all(b"GET /?error=access_denied&error_description=private-details HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+        let callback = server.next_callback().await;
+        assert_eq!(callback.code(), Err("private-details".into()));
+        callback.finish(false).await;
+        let mut reply = String::new();
+        browser.read_to_string(&mut reply).await.unwrap();
+        assert!(reply.contains("Location: https://make-your-life-easier.pages.dev/sign-in/failed/\r\n"));
+        assert!(!reply.contains("private-details"));
     }
 }

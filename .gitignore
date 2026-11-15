@@ -1,6 +1,11 @@
 node_modules/
 *.local
 
+# Signing keys (scripts/new-release-certificate.ps1): only ever in the release
+# secrets. The public backend/installer/ThomasT.cer is committed.
+*.pfx
+*.p12
+
 # Tauri / Rust
 backend/target/
 backend/gen/

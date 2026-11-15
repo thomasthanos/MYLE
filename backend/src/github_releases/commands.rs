@@ -147,7 +147,8 @@ fn page_state(settings: &Settings) -> PageState {
 /// The page's data. The first time, Github-Build-Release's last project and
 /// DeepSeek key are brought over.
 #[tauri::command]
-pub async fn github_releases_get_state() -> Result<PageState, String> {
+pub async fn github_releases_get_state(app: AppHandle) -> Result<PageState, String> {
+    crate::account::pull_ai_keys_from_cloud(&app).await;
     blocking(|| {
         let settings = store::edit(|settings| {
             if settings.gbr_import.is_none() {
@@ -2115,6 +2116,7 @@ pub async fn github_releases_install_tool(tool: String) -> Result<(), String> {
 /// Checks a key with its provider and keeps it sealed.
 #[tauri::command]
 pub async fn github_releases_ai_set_key(
+    app: AppHandle,
     provider: ProviderId,
     key: String,
 ) -> Result<AiView, String> {
@@ -2125,11 +2127,21 @@ pub async fn github_releases_ai_set_key(
     let settings = blocking(store::load).await??;
     ai::check_key(&settings.ai, provider, Some(&key)).await?;
     secrets::save_ai_key(provider, &key)?;
+    if let Err(err) = crate::account::set_ai_key_in_cloud(&app, provider, Some(&key)).await {
+        eprintln!("Warning: Failed to save AI key to Supabase: {err}");
+        return Err(format!("Key is valid, but failed to save to Supabase: {err}"));
+    }
     Ok(ai_view(&settings))
 }
 #[tauri::command]
-pub async fn github_releases_ai_remove_key(provider: ProviderId) -> Result<AiView, String> {
+pub async fn github_releases_ai_remove_key(
+    app: AppHandle,
+    provider: ProviderId,
+) -> Result<AiView, String> {
     secrets::remove_ai_key(provider);
+    if let Err(err) = crate::account::set_ai_key_in_cloud(&app, provider, None).await {
+        eprintln!("Warning: Failed to remove AI key from Supabase: {err}");
+    }
     let settings = blocking(store::load).await??;
     Ok(ai_view(&settings))
 }

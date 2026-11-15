@@ -804,6 +804,9 @@ pub fn uninstall(
     report(Progress::Stage {
         stage: Stage::Finishing,
     });
+    // The trust the setup's last page gave MYLE's certificate, last: Windows
+    // asks the user before it removes it.
+    crate::publisher::forget();
     Ok(after_exit)
 }
 

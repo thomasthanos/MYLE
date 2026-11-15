@@ -1,0 +1,173 @@
+.signin-site {
+  --outcome: #8ef0c8;
+  --outcome-rgb: 142 240 200;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 100svh;
+  background: radial-gradient(ellipse at 50% 28%, #182744, transparent 62%), #0a0d15;
+}
+
+.signin-site.failed {
+  --outcome: #ffb6a4;
+  --outcome-rgb: 255 182 164;
+}
+
+.signin-header {
+  display: flex;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px clamp(18px, 5vw, 52px);
+  border-bottom: 1px solid var(--line);
+}
+
+.signin-header .brand {
+  font-size: 15px;
+}
+
+.signin-header .brand span {
+  display: inline;
+}
+
+.signin-main {
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 6vh, 64px) 16px;
+}
+
+.signin-card {
+  width: min(100%, 540px);
+  padding: 26px clamp(20px, 6vw, 52px) 29px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(175deg, #151f34, #0e1422 68%);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.signin-art {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 198px;
+  place-items: center;
+  isolation: isolate;
+}
+
+.signin-art::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgb(144 177 226 / 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(144 177 226 / 0.13) 1px, transparent 1px);
+  background-position: center;
+  background-size: 18px 18px;
+  mask-image: radial-gradient(ellipse, #000 13%, transparent 67%);
+  content: "";
+}
+
+.signin-emblem {
+  position: relative;
+  display: grid;
+  width: 156px;
+  height: 156px;
+  place-items: center;
+  border: 1px solid rgb(var(--outcome-rgb) / 0.32);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(var(--outcome-rgb) / 0.16), transparent);
+}
+
+.signin-emblem::before,
+.signin-emblem::after {
+  position: absolute;
+  border-radius: 50%;
+  content: "";
+}
+
+.signin-emblem::before {
+  inset: -9px;
+  border: 1px dashed rgb(165 189 245 / 0.23);
+}
+
+.signin-emblem::after {
+  inset: -1px;
+  border: 1px solid transparent;
+  border-top-color: var(--outcome);
+  transform: rotate(39deg);
+}
+
+.signin-emblem img {
+  width: 112px;
+  height: 112px;
+  filter: drop-shadow(0 10px 14px rgb(0 0 0 / 0.45));
+}
+
+.signin-mark {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgb(var(--outcome-rgb) / 0.65);
+  border-radius: 50%;
+  background: #142436;
+  color: var(--outcome);
+  box-shadow: 0 0 0 5px #141d30;
+}
+
+.signin-mark::before {
+  width: 15px;
+  height: 8px;
+  margin-top: -3px;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: rotate(-45deg);
+  content: "";
+}
+
+.failed .signin-mark::before {
+  width: 2px;
+  height: 17px;
+  margin: 0;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(currentColor 0 62%, transparent 62% 82%, currentColor 82%);
+  transform: none;
+}
+
+.signin-card h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(28px, 6vw, 42px);
+  letter-spacing: -0.04em;
+  line-height: 1.16;
+}
+
+.signin-copy {
+  max-width: 36ch;
+  margin: 12px auto 0;
+  color: var(--text-2);
+  font-size: 15px;
+  text-wrap: pretty;
+}
+
+.signin-note {
+  margin: 25px 0 0;
+  padding-top: 19px;
+  border-top: 1px solid var(--line);
+  color: #a1aec8;
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .signin-card { animation: signin-arrive 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .signin-emblem::after { animation: signin-orbit 900ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .signin-mark { animation: signin-confirm 360ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both; }
+}
+
+@keyframes signin-arrive { from { opacity: 0.5; transform: translateY(9px); } }
+@keyframes signin-orbit { from { transform: rotate(-180deg); } }
+@keyframes signin-confirm { from { opacity: 0; transform: scale(0.65); } }

@@ -14,7 +14,7 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use crate::cleanup::AfterExit;
 use crate::cli::Cli;
 use crate::engine::{self, InstallOptions, Progress, ShortcutChoice, ShortcutMode};
-use crate::{DECLINED, FAILED, payload, processes, product, registry, shell};
+use crate::{DECLINED, FAILED, payload, processes, product, publisher, registry, shell};
 
 pub enum Mode {
     Install {
@@ -116,6 +116,17 @@ struct SetupState {
     /// The browser extension's download page, offered when there is one.
     extension_url: Option<&'static str>,
     notice: Option<NoticeInfo>,
+    /// MYLE's release certificate, which the last page offers to trust
+    /// (`publisher.rs`); installing only.
+    publisher: Option<Publisher>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Publisher {
+    name: &'static str,
+    /// Windows already trusts it here, for this user or every user.
+    trusted: bool,
 }
 
 #[tauri::command(async)]
@@ -148,6 +159,10 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
                 ready: header.is_some(),
                 extension_url: product::extension_url(),
                 notice: None,
+                publisher: Some(Publisher {
+                    name: publisher::NAME,
+                    trusted: publisher::is_trusted(),
+                }),
             }
         }
         Mode::Uninstall { dir } => SetupState {
@@ -162,6 +177,7 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
             ready: true,
             extension_url: None,
             notice: None,
+            publisher: None,
         },
         Mode::Notice {
             title,
@@ -185,6 +201,7 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
                 kind: kind.to_string(),
                 action_label: action_label.clone(),
             }),
+            publisher: None,
         },
     }
 }
@@ -199,6 +216,16 @@ fn setup_running(dir: String) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+/// Trusts MYLE's release certificate for this Windows user (`publisher.rs`),
+/// when the user asks on the last page. Windows shows its own question, so
+/// this waits for their answer; `false` when they said no.
+#[tauri::command]
+async fn setup_trust_publisher() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(publisher::trust)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Rejects a folder before anything happens, with a sentence for the page.
@@ -483,6 +510,7 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
             setup_state,
             setup_running,
             setup_check_folder,
+            setup_trust_publisher,
             setup_install,
             setup_uninstall,
             setup_launch,

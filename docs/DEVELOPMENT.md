@@ -594,6 +594,7 @@ With no network the app opens normally after about 2 seconds (the bar counts dow
 - Main download: `https://downloads.thomast.uk/MakeYourLifeEasier-installer.exe`
 - GitHub fallback: the repository's latest release
 - `/installer.html` redirects to `/` for compatibility with old links
+- Desktop sign-in uses the existing loopback callback for PKCE. The callback sends the browser to `/sign-in/complete/` after the app saves the session, or to `/sign-in/failed/` if sign-in fails. Both URLs are on the Pages site and carry only the outcome. Deploy these pages before releasing an app build that links to them.
 - `scripts/check-site.mjs` checks required files, internal links, security headers, and stale Electron/Portable references (run by `npm run check`)
 - The R2 objects, `latest.json` and the release workflow are independent of the Pages deployment
 

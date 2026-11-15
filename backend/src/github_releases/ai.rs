@@ -30,6 +30,16 @@ impl ProviderId {
             ProviderId::Ollama => "ollama",
         }
     }
+    pub(crate) fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "groq" => Some(ProviderId::Groq),
+            "gemini" => Some(ProviderId::Gemini),
+            "openrouter" => Some(ProviderId::OpenRouter),
+            "deepseek" => Some(ProviderId::DeepSeek),
+            "ollama" => Some(ProviderId::Ollama),
+            _ => None,
+        }
+    }
     pub(crate) fn def(self) -> &'static ProviderDef {
         PROVIDERS
             .iter()

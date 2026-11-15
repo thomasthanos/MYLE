@@ -24,6 +24,8 @@ export interface SetupState {
   /** The browser extension's download page, offered when there is one. */
   extensionUrl: string | null;
   notice?: NoticeInfo | null;
+  /** MYLE's release certificate, offered on the last page; installing only. */
+  publisher?: { name: string; trusted: boolean } | null;
 }
 export type Stage =
   | "closingApp"
@@ -60,6 +62,9 @@ export interface SetupApi {
   launch(): Promise<void>;
   /** Opens the extension's download page in the default browser. */
   openExtension(): Promise<void>;
+  /** Trusts the publisher's certificate for this Windows user, after Windows
+   * asks them; false when they said no. */
+  trustPublisher(): Promise<boolean>;
   exit(): Promise<void>;
   focusExisting?(): Promise<void>;
 }
@@ -77,6 +82,7 @@ const tauriApi: SetupApi = {
     invoke("setup_uninstall", { request: { removeData }, onEvent: channel(onEvent) }),
   launch: () => invoke("setup_launch"),
   openExtension: () => invoke("setup_open_extension"),
+  trustPublisher: () => invoke("setup_trust_publisher"),
   exit: () => invoke("setup_exit"),
   focusExisting: () => invoke("setup_focus_existing"),
 };

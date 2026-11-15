@@ -1,4 +1,4 @@
-// Dev-only stand-in for the setup crate, so the window can be worked on in a browser: `npx vite`, then /installer.html?demo=install (or =update, =uninstall, =running, =error, =shortcut-warning).
+// Dev-only stand-in for the setup crate, so the window can be worked on in a browser: `npx vite`, then /installer.html?demo=install (or =update, =uninstall, =running, =error, =shortcut-warning, =trusted, =trust-declined, =trust-error).
 import type { Progress, SetupApi, SetupState } from "./api";
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export function previewApi(mode: string): SetupApi {
@@ -38,6 +38,7 @@ export function previewApi(mode: string): SetupApi {
     ready: true,
     extensionUrl: uninstall ? null : "https://example.com/myle-passwords",
     notice,
+    publisher: uninstall || notice ? null : { name: "ThomasT", trusted: mode === "trusted" },
   };
   let runningAsked = false;
   return {
@@ -100,6 +101,11 @@ export function previewApi(mode: string): SetupApi {
       await sleep(900); // the real one returns once the app's window is up
     },
     async openExtension() {},
+    async trustPublisher() {
+      await sleep(900); // Windows' own question
+      if (mode === "trust-error") throw "Windows did not add the certificate (0x80070005).";
+      return mode !== "trust-declined";
+    },
     async exit() {},
     async focusExisting() {},
   };

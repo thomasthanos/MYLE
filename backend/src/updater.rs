@@ -54,7 +54,11 @@ const DOWNLOAD_PREFIXES: [&str; 2] = [
 /// the download arrived whole; the signature proves who made it. A new
 /// certificate must be added here, in a release signed with the old one,
 /// before any release is signed with the new one.
-const RELEASE_SIGNERS: &[&str] = &["C997612EEBB8AA08ADAD30BF64F208344B264D50"];
+const RELEASE_SIGNERS: &[&str] = &[
+    "C997612EEBB8AA08ADAD30BF64F208344B264D50",
+    // ThomasT (backend/installer/ThomasT.cer), from 12.0.1 on.
+    "858E7A6EEA4472A1FBA22A6709A5997687BBCA0C",
+];
 const CHECK_TIMEOUT: Duration = Duration::from_secs(8);
 const USER_AGENT: &str = "MYLE-Updater";
 /// Where downloaded installers wait to run. The installer relaunches the app,
@@ -999,6 +1003,34 @@ mod tests {
         assert!(allowed_download("https://github.com/thomasthanos/MYLE/releases/download/v11.0.2/MYLE.exe"));
         assert!(!allowed_download("https://github.com/someone/else/releases/download/v1/MYLE.exe"));
         assert!(!allowed_download("https://github.com/thomasthanos/MYLE.evil/releases/download/v1/MYLE.exe"));
+    }
+    /// Releases signed with ThomasT, the certificate the setup offers to trust
+    /// (`installer/ThomasT.cer`, scripts/new-release-certificate.ps1), are
+    /// taken as updates.
+    #[test]
+    fn the_certificate_the_setup_offers_signs_accepted_updates() {
+        use windows_sys::Win32::Security::Cryptography::{
+            CERT_SHA1_HASH_PROP_ID, CertCreateCertificateContext, CertFreeCertificateContext,
+            CertGetCertificateContextProperty, X509_ASN_ENCODING,
+        };
+        let der = include_bytes!("../installer/ThomasT.cer");
+        let mut hash = [0u8; 20];
+        let mut length = hash.len() as u32;
+        // SAFETY: the context made from `der` is freed after the one read.
+        let read = unsafe {
+            let context = CertCreateCertificateContext(X509_ASN_ENCODING, der.as_ptr(), der.len() as u32);
+            assert!(!context.is_null(), "ThomasT.cer is a certificate");
+            let read = CertGetCertificateContextProperty(context, CERT_SHA1_HASH_PROP_ID, hash.as_mut_ptr().cast(), &mut length);
+            CertFreeCertificateContext(context);
+            read
+        };
+        assert!(read != 0 && length == 20);
+        let thumbprint: String = hash.iter().map(|b| format!("{b:02X}")).collect();
+        assert!(
+            RELEASE_SIGNERS.contains(&thumbprint.as_str()),
+            "add {thumbprint} to RELEASE_SIGNERS, in a release signed with the old certificate"
+        );
+        assert!(release_signature(Ok(thumbprint)).is_ok());
     }
     #[test]
     fn an_update_must_be_signed_by_a_release_certificate() {

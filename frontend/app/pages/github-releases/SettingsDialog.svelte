@@ -203,7 +203,7 @@
     try {
       setAi(await api.aiSetKey(p.id, key));
       keys[p.id] = "";
-      toast.success(`${p.name} is ready.`);
+      toast.success(`${p.name} is ready and saved to your account.`);
     } catch (error) {
       toast.error(messageOf(error));
     } finally {
@@ -462,7 +462,7 @@
             </li>
           {/each}
         </ol>
-        <p class="note"><ShieldCheck size={13} /> Keys are checked with the provider, then kept encrypted for your Windows account; never shown again or synced. Your diffs go only to the provider that writes.</p>
+        <p class="note"><ShieldCheck size={13} /> Keys are checked with the provider, sealed with DPAPI on this PC and securely synced to your Supabase account. Your diffs go only to the provider that writes.</p>
       {/if}
     </div>
   </div>

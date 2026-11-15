@@ -14,6 +14,7 @@
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Rocket from "@lucide/svelte/icons/rocket";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { formatBytes } from "../lib/updater";
   import { loadApi, type Progress, type SetupApi, type SetupState, type Stage } from "./api";
   import Brand from "./Brand.svelte";
@@ -67,6 +68,9 @@
   let launchError = $state<string | null>(null);
   /** Shortcuts that could not be made; the install itself worked. */
   let shortcutWarnings = $state<string[]>([]);
+  /** The last page's offer to trust MYLE's certificate (publisher.rs). */
+  let trust = $state<"idle" | "asking" | "trusted" | "declined">("idle");
+  let trustError = $state<string | null>(null);
   let finishing = $state(false);
   /** Programs to close before going on; set, it shows the question. */
   let running = $state<string[] | null>(null);
@@ -275,6 +279,19 @@
     }
   }
 
+  /** Windows asks the user itself; this waits for their answer. */
+  async function trustPublisher() {
+    if (!api || trust === "asking") return;
+    trust = "asking";
+    trustError = null;
+    try {
+      trust = (await api.trustPublisher()) ? "trusted" : "declined";
+    } catch (e) {
+      trust = "idle";
+      trustError = message(e);
+    }
+  }
+
   async function finish() {
     if (!api || !info || finishing) return;
     finishing = true;
@@ -472,6 +489,35 @@
                   <strong>Installed successfully, but the app did not open.</strong>
                   <span>{launchError}</span>
                 </div>
+              {/if}
+              {#if info.publisher && !info.passive}
+                {#if info.publisher.trusted || trust === "trusted"}
+                  <p class="publisher-trusted" role="status">
+                    <ShieldCheck size={14} />
+                    Windows shows {info.publisher.name} as the publisher of {info.product}.
+                  </p>
+                {:else}
+                  <div class="publisher">
+                    <span>
+                      <strong>Show {info.publisher.name} as the publisher</strong>
+                      <small>
+                        {info.product} is signed with {info.publisher.name}'s own certificate, so Windows calls its
+                        publisher unknown. Trust it for your Windows account and Windows shows
+                        {info.publisher.name} instead. Windows asks you to confirm; no administrator rights are needed,
+                        and uninstalling {info.product} takes it back.
+                      </small>
+                      {#if trust === "declined"}
+                        <small class="publisher-note" role="status">Not trusted: Windows was told no.</small>
+                      {:else if trustError}
+                        <small class="publisher-note" role="alert">{trustError}</small>
+                      {/if}
+                    </span>
+                    <button class="btn" onclick={trustPublisher} disabled={trust === "asking"}>
+                      <ShieldCheck size={14} />
+                      {trust === "asking" ? "Waiting for Windows…" : `Trust ${info.publisher.name}`}
+                    </button>
+                  </div>
+                {/if}
               {/if}
             </div>
             <div class="footer">
@@ -882,6 +928,57 @@
   }
 
   .launch-error strong {
+    font-size: 12px;
+  }
+
+  /* "Show ThomasT as the publisher": MYLE's certificate, trusted for this user. */
+  .publisher {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: min(100%, 440px);
+    margin-top: 16px;
+    padding: 11px 13px;
+    border: 1px solid var(--border, rgb(255 255 255 / 0.1));
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.03);
+    text-align: left;
+  }
+
+  .publisher > span {
+    display: grid;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .publisher strong {
+    font-size: 12px;
+  }
+
+  .publisher small {
+    color: var(--text-2);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  .publisher .publisher-note {
+    color: #ffd6a1;
+  }
+
+  .publisher .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .publisher-trusted {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    color: var(--text-2);
     font-size: 12px;
   }
 

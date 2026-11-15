@@ -256,11 +256,14 @@ pub async fn account_sign_in(
         }
         inner.signing_in = Some(cancel.clone());
     }
-    let result = sign_in(provider, &cancel).await;
-    state.lock().signing_in = None;
-    let session = result?;
-    let profile = session.profile.clone();
-    state.store(&app, Some(session))?;
+    let result = sign_in(&app, &state, provider, &cancel).await;
+    {
+        let mut inner = state.lock();
+        if inner.signing_in.as_ref().is_some_and(|active| Arc::ptr_eq(active, &cancel)) {
+            inner.signing_in = None;
+        }
+    }
+    let profile = result?;
     check_owner(&app, &state, true).await;
     // The browser has the focus now; bring the app back.
     if let Some(window) = app.get_webview_window("main") {
@@ -293,6 +296,9 @@ pub async fn account_pull(
 ) -> Result<Option<Value>, String> {
     let session = fresh_session(&app, &state).await?;
     let row = read_row(&session).await?;
+    if let Some(ref data) = row {
+        sync_ai_keys_from_cloud_data(data);
+    }
     Ok(row.and_then(settings_sync::read))
 }
 /// Saves this app's settings to the cloud, keeping the rest of the row.
@@ -358,8 +364,122 @@ pub async fn account_push(
     }
     Err("The cloud settings kept changing while saving. Try again.".into())
 }
+/// Saves or removes an AI provider key in the cloud (Supabase `user_settings`),
+/// storing it under `data.githubReleases.aiKeys.<provider>`.
+pub(crate) async fn set_ai_key_in_cloud(
+    app: &AppHandle,
+    provider: crate::github_releases::ai::ProviderId,
+    key: Option<&str>,
+) -> Result<(), String> {
+    let state = app.state::<AccountState>();
+    if state.session(app).is_none() {
+        return Ok(());
+    }
+    let session = fresh_session(app, &state).await?;
+    for _ in 0..4 {
+        let seen = read_row_at(&session).await?;
+        let (mut data, seen_at) = match seen {
+            Some((data, at)) => (data.as_object().cloned().unwrap_or_default(), Some(at)),
+            None => (serde_json::Map::new(), None),
+        };
+        let mut gh = data
+            .get("githubReleases")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let mut ai_keys = gh
+            .get("aiKeys")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        match key {
+            Some(k) => {
+                ai_keys.insert(provider.as_str().to_string(), serde_json::json!(k));
+            }
+            None => {
+                ai_keys.remove(provider.as_str());
+            }
+        }
+        gh.insert("aiKeys".to_string(), Value::Object(ai_keys));
+        gh.insert("updatedAt".to_string(), serde_json::json!(iso8601(now())));
+        data.insert("githubReleases".to_string(), Value::Object(gh));
+
+        let mut body = serde_json::json!({
+            "data": Value::Object(data),
+            "updated_at": iso8601(now()),
+        });
+        let request = match seen_at.as_ref().and_then(Value::as_str) {
+            Some(at) => {
+                let url = reqwest::Url::parse_with_params(
+                    &format!("{SUPABASE_URL}/rest/v1/{TABLE}"),
+                    &[("user_id", format!("eq.{}", session.profile.id)), ("updated_at", format!("eq.{at}"))],
+                )
+                .map_err(err)?;
+                client()?.patch(url).header("Prefer", "return=representation")
+            }
+            None => {
+                body["user_id"] = session.profile.id.clone().into();
+                client()?
+                    .post(format!("{SUPABASE_URL}/rest/v1/{TABLE}"))
+                    .header("Prefer", "return=representation")
+            }
+        };
+        let response = request
+            .header("apikey", SUPABASE_ANON_KEY)
+            .bearer_auth(&session.access_token)
+            .json(&body)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(err)?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        if status == reqwest::StatusCode::CONFLICT || (status.is_success() && text.trim() == "[]") {
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("The cloud did not accept the AI key ({status})."));
+        }
+        return Ok(());
+    }
+    Err("The cloud settings kept changing while saving AI key. Try again.".into())
+}
+/// Pulls and restores any AI keys from cloud `user_settings` data into local DPAPI
+/// if they are not already set locally.
+pub(crate) fn sync_ai_keys_from_cloud_data(data: &Value) {
+    if let Some(gh) = data.get("githubReleases") {
+        if let Some(ai_keys) = gh.get("aiKeys").and_then(Value::as_object) {
+            for (provider_name, key_val) in ai_keys {
+                if let Some(key_str) = key_val.as_str() {
+                    if let Some(provider) = crate::github_releases::ai::ProviderId::from_str(provider_name) {
+                        if crate::github_releases::secrets::ai_key(provider).is_none() {
+                            let _ = crate::github_releases::secrets::save_ai_key(provider, key_str);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+/// Pulls AI keys from the cloud if a session exists and restores any missing locally.
+pub(crate) async fn pull_ai_keys_from_cloud(app: &AppHandle) {
+    let state = app.state::<AccountState>();
+    if state.session(app).is_none() {
+        return;
+    }
+    if let Ok(session) = fresh_session(app, &state).await {
+        if let Ok(Some(data)) = read_row(&session).await {
+            sync_ai_keys_from_cloud_data(&data);
+        }
+    }
+}
 // --------------------------------------------------------------------------- Sign-in
-async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String> {
+async fn sign_in(
+    app: &AppHandle,
+    state: &AccountState,
+    provider: Provider,
+    cancel: &Notify,
+) -> Result<Profile, String> {
     // Listen before the browser opens, so the redirect cannot arrive first.
     let loopback = oauth::Loopback::bind(REDIRECT_PORT).await?;
     let (verifier, challenge) = myle_vault::account::pkce_pair();
@@ -372,11 +492,20 @@ async fn sign_in(provider: Provider, cancel: &Notify) -> Result<Session, String>
             return Err("Sign-in timed out. Try again.".into());
         }
     };
-    let code = match callback {
-        oauth::Callback::Code(code) => code,
-        oauth::Callback::Error(message) => return Err(message),
-    };
-    myle_vault::account::exchange_code(&client()?, &code, &verifier).await
+    let result = async {
+        let code = callback.code()?;
+        let client = client()?;
+        let session = tokio::select! {
+            biased;
+            _ = cancel.notified() => return Err("Sign-in was cancelled.".into()),
+            result = myle_vault::account::exchange_code(&client, code, &verifier) => result?,
+        };
+        let profile = session.profile.clone();
+        state.store(app, Some(session))?;
+        Ok(profile)
+    }.await;
+    callback.finish(result.is_ok()).await;
+    result
 }
 /// A session with at least a minute left, refreshed (and saved) if needed.
 async fn fresh_session(app: &AppHandle, state: &AccountState) -> Result<Session, String> {

@@ -13,6 +13,7 @@ mod engine;
 pub mod payload;
 mod processes;
 mod product;
+mod publisher;
 mod registry;
 mod relocate;
 mod shell;

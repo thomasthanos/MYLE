@@ -8,9 +8,12 @@ const required = [
   "changelog.html",
   "readme.html",
   "copyright.html",
+  "sign-in/complete/index.html",
+  "sign-in/failed/index.html",
   "_headers",
   "_redirects",
   "assets/site.css",
+  "assets/sign-in.css",
   "assets/releases.js",
   "assets/app-icon.svg",
 ];
@@ -18,6 +21,7 @@ const htmlFiles = required.filter((file) => file.endsWith(".html"));
 const checkedTextFiles = [
   ...htmlFiles,
   "assets/site.css",
+  "assets/sign-in.css",
   "assets/releases.js",
 ];
 const expectedInstaller = "https://downloads.thomast.uk/MYLE.exe";

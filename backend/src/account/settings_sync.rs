@@ -48,10 +48,14 @@ pub(super) fn write(row: Option<Value>, mut settings: Value) -> Result<Value, St
             .and_then(|section| section.get("updatedAt"))
             .and_then(Value::as_str);
         if !remote_changed.is_some_and(|remote| remote > updated_at) {
-            data.insert(
-                PROJECTS_KEY.into(),
-                json!({ "updatedAt": updated_at, "projects": projects }),
-            );
+            let mut section_obj = data
+                .get(PROJECTS_KEY)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            section_obj.insert("updatedAt".into(), json!(updated_at));
+            section_obj.insert("projects".into(), json!(projects));
+            data.insert(PROJECTS_KEY.into(), Value::Object(section_obj));
         }
     }
     data.insert(super::DATA_KEY.into(), settings);
@@ -134,5 +138,27 @@ mod tests {
         })).unwrap();
         assert_eq!(restored["updatedAt"], "2026-10-27T11:00:00Z");
         assert_eq!(restored["githubReleasesUpdatedAt"], "2026-10-27T12:00:00Z");
+    }
+    #[test]
+    fn writing_synced_projects_preserves_sibling_ai_keys() {
+        let remote = json!({
+            "githubReleases": {
+                "updatedAt": "2026-10-27T08:00:00Z",
+                "projects": { "version": 1, "paths": ["C:\\Code\\Old"] },
+                "aiKeys": { "groq": "gsk_secret_123" }
+            }
+        });
+        let mut local = snapshot();
+        local["githubReleasesUpdatedAt"] = json!("2026-10-27T09:00:00Z");
+        local[PROJECTS_KEY] = json!({ "version": 1, "paths": ["C:\\Code\\New"] });
+        let written = write(Some(remote), local).unwrap();
+        assert_eq!(
+            written[PROJECTS_KEY]["aiKeys"],
+            json!({ "groq": "gsk_secret_123" })
+        );
+        assert_eq!(
+            written[PROJECTS_KEY]["projects"]["paths"],
+            json!(["C:\\Code\\New"])
+        );
     }
 }
