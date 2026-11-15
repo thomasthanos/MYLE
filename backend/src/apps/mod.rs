@@ -55,12 +55,21 @@ impl Cleanup {
     /// MYLE's own download folders go as a whole too, so a file a job did not
     /// put on the list (or one left by a crash) does not stay behind.
     pub fn run(&self) {
+        self.remove_all(RETRIES);
+    }
+    /// `run` as the app closes: each path is tried once. What is still
+    /// locked stays on the list for the next start, rather than holding the
+    /// exit up to a second for each locked file.
+    pub fn run_once(&self) {
+        self.remove_all(1);
+    }
+    fn remove_all(&self, attempts: u64) {
         let mut state = self.lock();
-        state.paths.retain(|path| !remove(path));
+        state.paths.retain(|path| !remove(path, attempts));
         Self::save(&state);
         drop(state);
         for dir in work_dirs() {
-            remove(&dir);
+            remove(&dir, attempts);
         }
     }
     fn save(state: &CleanupState) {
@@ -88,9 +97,11 @@ pub fn work_dirs() -> Vec<PathBuf> {
     }
     dirs
 }
+/// Tries for a locked file while the app runs: an installer just ended may still hold it.
+const RETRIES: u64 = 3;
 /// True when the path is gone (deleted now, or never there).
-fn remove(path: &std::path::Path) -> bool {
-    for attempt in 0..3 {
+fn remove(path: &std::path::Path, attempts: u64) -> bool {
+    for attempt in 0..attempts {
         if !path.exists() {
             return true;
         }
@@ -102,7 +113,9 @@ fn remove(path: &std::path::Path) -> bool {
         if done.is_ok() {
             return true;
         }
-        std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+        if attempt + 1 < attempts {
+            std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+        }
     }
     !path.exists()
 }

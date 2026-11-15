@@ -696,7 +696,7 @@ pub fn run() {
             disk_analyzer_state.cancel();
             autoclicker_state.shutdown();
             jobs.cancel_all();
-            cleanup.run();
+            cleanup.run_once();
             // A password copied in the last half-minute is not left behind.
             passwords::clipboard::clear_pending();
         }
