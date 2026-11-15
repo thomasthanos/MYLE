@@ -162,12 +162,171 @@
   font-size: 13px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .signin-card { animation: signin-arrive 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .signin-emblem::after { animation: signin-orbit 900ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .signin-mark { animation: signin-confirm 360ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both; }
+/* Waves and sparks: only ever seen moving, so still pages (reduced motion) never show them. */
+.signin-ripple {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid rgb(var(--outcome-rgb) / 0.5);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
 }
 
-@keyframes signin-arrive { from { opacity: 0.5; transform: translateY(9px); } }
-@keyframes signin-orbit { from { transform: rotate(-180deg); } }
-@keyframes signin-confirm { from { opacity: 0; transform: scale(0.65); } }
+.signin-sparks {
+  position: absolute;
+  right: 19px;
+  bottom: 19px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.signin-sparks i {
+  position: absolute;
+  top: -2.5px;
+  left: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--outcome);
+  box-shadow: 0 0 8px rgb(var(--outcome-rgb) / 0.8);
+  opacity: 0;
+}
+
+.signin-sparks i:nth-child(1) { --spark: 0deg; }
+.signin-sparks i:nth-child(2) { --spark: 45deg; }
+.signin-sparks i:nth-child(3) { --spark: 90deg; }
+.signin-sparks i:nth-child(4) { --spark: 135deg; }
+.signin-sparks i:nth-child(5) { --spark: 180deg; }
+.signin-sparks i:nth-child(6) { --spark: 225deg; }
+.signin-sparks i:nth-child(7) { --spark: 270deg; }
+.signin-sparks i:nth-child(8) { --spark: 315deg; }
+
+.failed .signin-sparks { display: none; }
+
+/* The light that runs around the card's edge. */
+@property --signin-sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Two soft glows drifting behind everything. */
+  .signin-site::before,
+  .signin-site::after {
+    position: fixed;
+    z-index: -1;
+    width: 62vmax;
+    height: 62vmax;
+    border-radius: 50%;
+    filter: blur(60px);
+    pointer-events: none;
+    content: "";
+  }
+
+  .signin-site { position: relative; isolation: isolate; }
+  .signin-site::before {
+    top: -30vmax;
+    left: -18vmax;
+    background: radial-gradient(closest-side, rgb(74 104 200 / 0.28), transparent);
+    animation: signin-drift-a 18s ease-in-out infinite alternate;
+  }
+  .signin-site::after {
+    right: -24vmax;
+    bottom: -34vmax;
+    background: radial-gradient(closest-side, rgb(var(--outcome-rgb) / 0.13), transparent);
+    animation: signin-drift-b 22s ease-in-out infinite alternate;
+  }
+
+  .signin-header { animation: signin-drop 520ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  .signin-card {
+    position: relative;
+    isolation: isolate;
+    animation: signin-arrive 720ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+  }
+
+  .signin-card::before {
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(from var(--signin-sweep), transparent 0 72%, rgb(var(--outcome-rgb) / 0.85) 86%, transparent 100%);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    animation: signin-fade-in 600ms ease-out 900ms forwards, signin-sweep 5.5s linear 900ms infinite;
+    pointer-events: none;
+    content: "";
+  }
+
+  .signin-art::before { animation: signin-fade-in 900ms ease-out 200ms both, signin-breathe 4.8s ease-in-out 1.1s infinite; }
+
+  .signin-emblem { animation: signin-pop 680ms cubic-bezier(0.34, 1.56, 0.64, 1) 220ms both; }
+  .signin-emblem::before { animation: signin-turn 32s linear infinite; }
+  .signin-emblem::after {
+    animation:
+      signin-orbit 1100ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both,
+      signin-circle 7s linear 1400ms infinite;
+  }
+
+  .signin-emblem img { animation: signin-float 4.6s ease-in-out 1.2s infinite; }
+
+  .signin-ripple { animation: signin-ripple 3.2s cubic-bezier(0.16, 1, 0.3, 1) 1.1s infinite; }
+  .signin-ripple + .signin-ripple { animation-delay: 2.7s; }
+
+  .signin-mark { animation: signin-confirm 520ms cubic-bezier(0.34, 1.56, 0.64, 1) 760ms both; }
+  .signin-mark::before { animation: signin-draw 420ms cubic-bezier(0.65, 0, 0.35, 1) 1050ms both; }
+  .failed .signin-mark::before { animation: signin-drop-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 1000ms both; }
+  .failed .signin-mark { animation: signin-confirm 520ms cubic-bezier(0.34, 1.56, 0.64, 1) 760ms both, signin-shake 520ms ease-in-out 1450ms both; }
+
+  .signin-sparks i { animation: signin-spark 760ms cubic-bezier(0.16, 1, 0.3, 1) 1320ms both; }
+  .signin-sparks i:nth-child(even) { animation-delay: 1380ms; animation-duration: 900ms; }
+
+  .signin-card h1 {
+    background: linear-gradient(100deg, var(--text) 0 38%, rgb(var(--outcome-rgb)) 50%, var(--text) 62% 100%);
+    background-size: 260% 100%;
+    background-position: 100% 0;
+    background-clip: text;
+    color: transparent;
+    animation:
+      signin-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both,
+      signin-shine 1.6s ease-in-out 1.2s both;
+  }
+
+  .signin-copy { animation: signin-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) 520ms both; }
+  .signin-note { animation: signin-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) 640ms both; }
+}
+
+@keyframes signin-drift-a { to { transform: translate(14vmax, 10vmax) scale(1.12); } }
+@keyframes signin-drift-b { to { transform: translate(-12vmax, -9vmax) scale(1.18); } }
+@keyframes signin-drop { from { opacity: 0; transform: translateY(-14px); } }
+@keyframes signin-arrive { from { opacity: 0; filter: blur(6px); transform: translateY(18px) scale(0.965); } }
+@keyframes signin-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes signin-sweep { to { --signin-sweep: 360deg; } }
+@keyframes signin-breathe { 50% { opacity: 0.55; } }
+@keyframes signin-pop { from { opacity: 0; transform: scale(0.6) rotate(-10deg); } }
+@keyframes signin-turn { to { transform: rotate(360deg); } }
+@keyframes signin-orbit { from { transform: rotate(-200deg); opacity: 0; } }
+@keyframes signin-circle { from { transform: rotate(39deg); } to { transform: rotate(399deg); } }
+@keyframes signin-float { 50% { transform: translateY(-5px); } }
+@keyframes signin-ripple {
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.75); }
+}
+@keyframes signin-confirm { from { opacity: 0; transform: scale(0.3); } }
+@keyframes signin-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes signin-drop-in { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes signin-shake {
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+@keyframes signin-spark {
+  0% { opacity: 0; transform: rotate(var(--spark)) translateY(0) scale(0.4); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--spark)) translateY(-30px) scale(1); }
+}
+@keyframes signin-rise { from { opacity: 0; transform: translateY(12px); } }
+@keyframes signin-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
