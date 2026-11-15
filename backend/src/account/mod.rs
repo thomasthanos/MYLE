@@ -447,17 +447,18 @@ pub(crate) async fn set_ai_key_in_cloud(
 /// Pulls and restores any AI keys from cloud `user_settings` data into local DPAPI
 /// if they are not already set locally.
 pub(crate) fn sync_ai_keys_from_cloud_data(data: &Value) {
-    if let Some(gh) = data.get("githubReleases") {
-        if let Some(ai_keys) = gh.get("aiKeys").and_then(Value::as_object) {
-            for (provider_name, key_val) in ai_keys {
-                if let Some(key_str) = key_val.as_str() {
-                    if let Some(provider) = crate::github_releases::ai::ProviderId::from_str(provider_name) {
-                        if crate::github_releases::secrets::ai_key(provider).is_none() {
-                            let _ = crate::github_releases::secrets::save_ai_key(provider, key_str);
-                        }
-                    }
-                }
-            }
+    use crate::github_releases::{ai::ProviderId, secrets};
+    let Some(ai_keys) = data.pointer("/githubReleases/aiKeys").and_then(Value::as_object) else {
+        return;
+    };
+    for (provider_name, key_val) in ai_keys {
+        if let Some(key_str) = key_val.as_str()
+            && let Some(provider) = ProviderId::from_str(provider_name)
+            && secrets::ai_key(provider).is_none()
+            // Only something shaped like a key, as when it is typed in.
+            && let Ok(key) = secrets::check_secret(key_str, "key")
+        {
+            let _ = secrets::save_ai_key(provider, &key);
         }
     }
 }
@@ -467,10 +468,10 @@ pub(crate) async fn pull_ai_keys_from_cloud(app: &AppHandle) {
     if state.session(app).is_none() {
         return;
     }
-    if let Ok(session) = fresh_session(app, &state).await {
-        if let Ok(Some(data)) = read_row(&session).await {
-            sync_ai_keys_from_cloud_data(&data);
-        }
+    if let Ok(session) = fresh_session(app, &state).await
+        && let Ok(Some(data)) = read_row(&session).await
+    {
+        sync_ai_keys_from_cloud_data(&data);
     }
 }
 // --------------------------------------------------------------------------- Sign-in
