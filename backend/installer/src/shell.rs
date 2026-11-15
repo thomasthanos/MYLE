@@ -13,7 +13,8 @@ use windows_sys::Win32::UI::Shell::{
     FOLDERID_Startup, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    IDYES, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO, MessageBoxW, SW_SHOWNORMAL,
+    BringWindowToTop, FindWindowW, IDYES, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO,
+    MessageBoxW, SW_RESTORE, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
 };
 use windows_sys::core::GUID;
 
@@ -463,6 +464,25 @@ pub fn ask(title: &str, text: &str) -> bool {
         )
     };
     answer == IDYES
+}
+
+/// Brings an already-running setup or uninstall window to the foreground.
+pub fn focus_existing_setup() -> bool {
+    let title = wide(format!("{} Setup", product::NAME));
+    let uninstall_title = wide(format!("Uninstall {}", product::NAME));
+    unsafe {
+        let mut hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        if hwnd.is_null() {
+            hwnd = FindWindowW(std::ptr::null(), uninstall_title.as_ptr());
+        }
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_RESTORE);
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            return true;
+        }
+    }
+    false
 }
 
 /// Held for the whole run: one setup or uninstaller at a time, per user.

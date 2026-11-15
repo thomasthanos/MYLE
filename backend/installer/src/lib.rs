@@ -48,11 +48,24 @@ pub fn setup_main(payload: &'static [u8]) -> i32 {
     };
     if payload.is_empty() {
         if !cli.silent {
-            shell::message(
-                product::NAME,
-                "This setup was built without the app inside.",
-                true,
-            );
+            if webview2::installed() {
+                let (_code, after_exit) = ui::run(
+                    ui::Mode::Notice {
+                        title: format!("{} Setup", product::NAME),
+                        message: "This setup was built without the app inside.".into(),
+                        kind: "error",
+                        action_label: Some("OK".into()),
+                    },
+                    Cli::default(),
+                );
+                after_exit.finish();
+            } else {
+                shell::message(
+                    product::NAME,
+                    "This setup was built without the app inside.",
+                    true,
+                );
+            }
         }
         return FAILED;
     }
@@ -135,6 +148,19 @@ fn silent_install(payload: &'static [u8], cli: &Cli) -> i32 {
 pub fn uninstall_main() -> i32 {
     let cli = cli::parse(std::env::args().skip(1));
     let not_installed = || {
+        if webview2::installed() {
+            let (_code, after_exit) = ui::run(
+                ui::Mode::Notice {
+                    title: format!("Uninstall {}", product::NAME),
+                    message: format!("{} is not installed.", product::NAME),
+                    kind: "warning",
+                    action_label: Some("OK".into()),
+                },
+                Cli::default(),
+            );
+            after_exit.finish();
+            return FAILED;
+        }
         shell::message(
             product::NAME,
             &format!("{} is not installed.", product::NAME),
@@ -189,6 +215,20 @@ pub fn uninstall_main() -> i32 {
 
 fn already_running(silent: bool) -> i32 {
     if !silent {
+        shell::focus_existing_setup();
+        if webview2::installed() {
+            let (_code, after_exit) = ui::run(
+                ui::Mode::Notice {
+                    title: format!("{} Setup", product::NAME),
+                    message: "Setup is already running.".into(),
+                    kind: "warning",
+                    action_label: Some("Bring to front".into()),
+                },
+                Cli::default(),
+            );
+            after_exit.finish();
+            return ALREADY_RUNNING;
+        }
         shell::message(product::NAME, "Setup is already running.", false);
     }
     ALREADY_RUNNING

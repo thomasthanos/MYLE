@@ -20,6 +20,7 @@
   import Titlebar from "./Titlebar.svelte";
   import Toggle from "./Toggle.svelte";
   import Uninstall from "./Uninstall.svelte";
+  import Notice from "./Notice.svelte";
   import { compareVersions } from "./versions";
   import Working, { type Step } from "./Working.svelte";
   import { errorMessage as message } from "../lib/errors";
@@ -198,7 +199,7 @@
     }
     const state = await api.state();
     info = state;
-    if (state.mode === "uninstall") return;
+    if (state.mode === "uninstall" || state.mode === "notice") return;
     dir = state.dir;
     desktop = state.shortcuts.desktop;
     startMenu = state.shortcuts.startMenu;
@@ -340,6 +341,8 @@
 
 {#if info?.mode === "uninstall" && api}
   <Uninstall {info} {api} />
+{:else if info?.mode === "notice" && api}
+  <Notice {info} {api} />
 {:else}
 <div class="app-backdrop" aria-hidden="true"></div>
 

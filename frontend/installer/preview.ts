@@ -10,8 +10,24 @@ export function previewApi(mode: string): SetupApi {
       : mode === "update"
         ? { version: "7.0.1", dir: DIR }
         : null;
+  const notice =
+    mode === "already-running"
+      ? {
+          title: "Setup is already running",
+          message: "Another instance of MYLE Setup is already open.",
+          kind: "warning" as const,
+          actionLabel: "Bring to front",
+        }
+      : mode === "notice"
+        ? {
+            title: "MYLE Setup",
+            message: "Setup is already running.",
+            kind: "warning" as const,
+            actionLabel: "Bring to front",
+          }
+        : null;
   const state: SetupState = {
-    mode: uninstall ? "uninstall" : "install",
+    mode: uninstall ? "uninstall" : notice ? "notice" : "install",
     product: "MYLE",
     version: uninstall ? "7.0.1" : "7.1.0",
     installed,
@@ -21,6 +37,7 @@ export function previewApi(mode: string): SetupApi {
     passive: mode === "passive",
     ready: true,
     extensionUrl: uninstall ? null : "https://example.com/myle-passwords",
+    notice,
   };
   let runningAsked = false;
   return {
@@ -84,6 +101,7 @@ export function previewApi(mode: string): SetupApi {
     },
     async openExtension() {},
     async exit() {},
+    async focusExisting() {},
   };
 }
 async function stage(onEvent: (e: Progress) => void, name: Extract<Progress, { event: "stage" }>["data"]["stage"], ms: number) {

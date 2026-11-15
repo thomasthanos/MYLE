@@ -1,7 +1,14 @@
 // Typed bridge to the setup crate (backend/installer/src/ui.rs).
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+export interface NoticeInfo {
+  title: string;
+  message: string;
+  kind: "warning" | "error" | "info";
+  actionLabel?: string | null;
+}
+
 export interface SetupState {
-  mode: "install" | "uninstall";
+  mode: "install" | "uninstall" | "notice";
   product: string;
   /** What this setup installs; the installed version when uninstalling. */
   version: string;
@@ -16,6 +23,7 @@ export interface SetupState {
   ready: boolean;
   /** The browser extension's download page, offered when there is one. */
   extensionUrl: string | null;
+  notice?: NoticeInfo | null;
 }
 export type Stage =
   | "closingApp"
@@ -53,6 +61,7 @@ export interface SetupApi {
   /** Opens the extension's download page in the default browser. */
   openExtension(): Promise<void>;
   exit(): Promise<void>;
+  focusExisting?(): Promise<void>;
 }
 function channel(onEvent: (e: Progress) => void): Channel<Progress> {
   const events = new Channel<Progress>();
@@ -69,6 +78,7 @@ const tauriApi: SetupApi = {
   launch: () => invoke("setup_launch"),
   openExtension: () => invoke("setup_open_extension"),
   exit: () => invoke("setup_exit"),
+  focusExisting: () => invoke("setup_focus_existing"),
 };
 /** The real setup inside the app; in a dev browser, `?demo=` picks a fake. */
 export async function loadApi(): Promise<SetupApi | null> {

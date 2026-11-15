@@ -17,8 +17,18 @@ use crate::engine::{self, InstallOptions, Progress, ShortcutChoice, ShortcutMode
 use crate::{DECLINED, FAILED, payload, processes, product, registry, shell};
 
 pub enum Mode {
-    Install { payload: &'static [u8] },
-    Uninstall { dir: PathBuf },
+    Install {
+        payload: &'static [u8],
+    },
+    Uninstall {
+        dir: PathBuf,
+    },
+    Notice {
+        title: String,
+        message: String,
+        kind: &'static str,
+        action_label: Option<String>,
+    },
 }
 
 struct Context {
@@ -80,6 +90,15 @@ impl From<Shortcuts> for ShortcutChoice {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct NoticeInfo {
+    title: String,
+    message: String,
+    kind: String,
+    action_label: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SetupState {
     mode: &'static str,
     product: &'static str,
@@ -96,6 +115,7 @@ struct SetupState {
     ready: bool,
     /// The browser extension's download page, offered when there is one.
     extension_url: Option<&'static str>,
+    notice: Option<NoticeInfo>,
 }
 
 #[tauri::command(async)]
@@ -127,6 +147,7 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
                 passive: context.cli.passive,
                 ready: header.is_some(),
                 extension_url: product::extension_url(),
+                notice: None,
             }
         }
         Mode::Uninstall { dir } => SetupState {
@@ -140,6 +161,30 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
             passive: false,
             ready: true,
             extension_url: None,
+            notice: None,
+        },
+        Mode::Notice {
+            title,
+            message,
+            kind,
+            action_label,
+        } => SetupState {
+            mode: "notice",
+            product: product::NAME,
+            version: product::VERSION.to_string(),
+            installed: None,
+            dir: String::new(),
+            size: 0,
+            shortcuts: ShortcutChoice::from_array([false; 3]).into(),
+            passive: false,
+            ready: true,
+            extension_url: None,
+            notice: Some(NoticeInfo {
+                title: title.clone(),
+                message: message.clone(),
+                kind: kind.to_string(),
+                action_label: action_label.clone(),
+            }),
         },
     }
 }
@@ -336,6 +381,12 @@ fn setup_exit(app: tauri::AppHandle, context: State<'_, Context>) {
     }
 }
 
+#[tauri::command]
+fn setup_focus_existing(app: tauri::AppHandle) {
+    shell::focus_existing_setup();
+    app.exit(0);
+}
+
 /// Opens the window and runs until it closes. Returns the exit code and
 /// what is left to delete now that the window is gone.
 pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
@@ -351,6 +402,7 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
     after_exit.remove.push(webview_dir.clone());
     let after_exit = Arc::new(Mutex::new(after_exit));
     let uninstalling = matches!(mode, Mode::Uninstall { .. });
+    let is_notice = matches!(mode, Mode::Notice { .. });
     let uninstall_exit = Arc::new(AtomicI32::new(DECLINED));
     let context = Context {
         mode,
@@ -366,6 +418,8 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
         .setup(move |app| {
             let title = if uninstalling {
                 format!("Uninstall {}", product::NAME)
+            } else if let Mode::Notice { title, .. } = &app.state::<Context>().mode {
+                title.clone()
             } else {
                 format!("{} Setup", product::NAME)
             };
@@ -381,6 +435,22 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
                 .data_directory(webview_dir.clone());
             let window = if uninstalling {
                 let size = tauri::LogicalSize::new(420.0, 550.0);
+                let monitor = crate::window_placement::cursor_monitor(app.handle());
+                let window = window.inner_size(size.width, size.height).build()?;
+                if let Some(monitor) = monitor {
+                    let work = monitor.work_area().size;
+                    let size = size.to_physical::<u32>(monitor.scale_factor());
+                    crate::window_placement::place_on_monitor(
+                        &window,
+                        &monitor,
+                        tauri::PhysicalSize::new(size.width.min(work.width), size.height.min(work.height)),
+                    )?;
+                } else {
+                    window.center()?;
+                }
+                window
+            } else if is_notice {
+                let size = tauri::LogicalSize::new(460.0, 210.0);
                 let monitor = crate::window_placement::cursor_monitor(app.handle());
                 let window = window.inner_size(size.width, size.height).build()?;
                 if let Some(monitor) = monitor {
@@ -417,7 +487,8 @@ pub fn run(mode: Mode, cli: Cli) -> (i32, AfterExit) {
             setup_uninstall,
             setup_launch,
             setup_open_extension,
-            setup_exit
+            setup_exit,
+            setup_focus_existing
         ])
         .build(tauri::generate_context!());
     let app = match app {
