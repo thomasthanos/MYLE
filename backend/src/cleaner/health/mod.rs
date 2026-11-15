@@ -3,7 +3,7 @@ mod scans;
 mod sys;
 pub(crate) use scans::install_locations;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -821,10 +821,21 @@ pub async fn cleaner_health_restore(id: String) -> Result<(), String> {
     let rest: Vec<RestoreEntry> = list.into_iter().filter(|e| e.id != id).collect();
     write_journal(&rest)
 }
+/// Whether `path` is a full path on one of this PC's drives (`C:\…`, also
+/// as `\\?\C:\…`): never a network share, a device or a relative path.
+fn on_a_drive(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    path.is_absolute()
+        && matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+}
 /// Opens a file or folder in Windows File Explorer.
 #[tauri::command(async)]
 pub fn cleaner_health_reveal(path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
+    // Before anything touches it: a network path would make Windows connect to (and sign in at) whatever server the page names.
+    if !on_a_drive(&target) {
+        return Err("Only a file or folder on this PC can be shown.".into());
+    }
     if !target.exists() {
         return Err(format!("The path does not exist on disk: {path}"));
     }
@@ -1266,16 +1277,15 @@ async fn undo(undo: &Undo) -> Result<(), String> {
             {
                 site["setting"] = old.clone();
             }
-            std::fs::write(prefs, serde_json::to_vec(&json).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())
+            // Written whole or not at all, as applying it is: a half-written Preferences resets the browser profile.
+            crate::game_saves::atomic::write(Path::new(prefs), &serde_json::to_vec(&json).map_err(|e| e.to_string())?)
         }
         Undo::UserJs { exe, path, old } => {
             closed(exe)?;
             match old {
-                Some(text) => std::fs::write(path, text),
-                None => std::fs::remove_file(path),
+                Some(text) => crate::game_saves::atomic::write(Path::new(path), text.as_bytes()),
+                None => std::fs::remove_file(path).map_err(|e| e.to_string()),
             }
-            .map_err(|e| e.to_string())
         }
         Undo::Task { name } => run_tool("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
             .await
@@ -1285,5 +1295,18 @@ async fn undo(undo: &Undo) -> Result<(), String> {
             "These files are in the Recycle Bin: restore them from there (right-click, Restore)."
                 .into(),
         ),
+    }
+}
+#[cfg(test)]
+mod reveal_tests {
+    use super::on_a_drive;
+    use std::path::Path;
+    #[test]
+    fn only_paths_on_this_pcs_drives_are_shown() {
+        assert!(on_a_drive(Path::new(r"C:\Users\Ann\AppData\Local\Old App")));
+        assert!(on_a_drive(Path::new(r"\\?\D:\Games\x.log")));
+        for refused in [r"\\server\share\x", r"\\?\UNC\server\share", r"\\.\PhysicalDrive0", r"relative\x", r"C:x", "//server/share"] {
+            assert!(!on_a_drive(Path::new(refused)), "{refused}");
+        }
     }
 }

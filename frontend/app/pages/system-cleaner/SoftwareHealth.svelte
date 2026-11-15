@@ -78,7 +78,7 @@
   const lastSucceeded = $derived(health.lastResults.filter((r) => r.ok).length);
   const lastFailed = $derived(health.lastResults.filter((r) => !r.ok).length);
   const categoryError = $derived(health.reports[category]?.error);
-  const permissionIcons: Record<string, typeof Camera> = { "Κάμερα": Camera, "Μικρόφωνο": Mic, "Τοποθεσία": MapPin, Camera, Microphone: Mic, Location: MapPin };
+  const permissionIcons: Record<string, typeof Camera> = { Camera, Microphone: Mic, Location: MapPin };
   const moduleIcons: Record<string, typeof FolderX> = {
     leftovers: FolderX,
     broken: CircleAlert,

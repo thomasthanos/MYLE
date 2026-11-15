@@ -1129,9 +1129,9 @@ fn permissions() -> Vec<(Finding, Target)> {
     let mut out = Vec::new();
     let names = app_names();
     let caps = [
-        ("webcam", "Κάμερα"),
-        ("microphone", "Μικρόφωνο"),
-        ("location", "Τοποθεσία"),
+        ("webcam", "Camera"),
+        ("microphone", "Microphone"),
+        ("location", "Location"),
     ];
     for (cap, label) in caps {
         for scope in ["", r"\NonPackaged"] {
@@ -1159,9 +1159,9 @@ fn permissions() -> Vec<(Finding, Target)> {
                 f.detail = format!(
                     "{label}: {}.",
                     if value == "Allow" {
-                        "η πρόσβαση επιτρέπεται"
+                        "access is allowed"
                     } else {
-                        "η πρόσβαση έχει αποκλειστεί"
+                        "access is blocked"
                     }
                 );
                 f.path = Some(if app.contains('#') {
@@ -1195,14 +1195,14 @@ fn permissions() -> Vec<(Finding, Target)> {
             }
             let mut f = finding("permissions", name);
             f.detail = if disabled {
-                "Η εκτέλεση στο παρασκήνιο έχει αποκλειστεί."
+                "Running in the background is blocked."
             } else {
-                "Μπορεί να εκτελείται στο παρασκήνιο όταν δεν είναι ανοιχτή."
+                "It may run in the background when it is not open."
             }
             .into();
             f.path = Some(app);
             f.enabled = Some(!disabled);
-            f.flags = vec!["Παρασκήνιο".into()];
+            f.flags = vec!["Background".into()];
             f.actions = if disabled {
                 vec!["allow"]
             } else {

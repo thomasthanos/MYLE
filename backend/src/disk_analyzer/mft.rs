@@ -244,7 +244,8 @@ pub fn parse(bytes: &[u8], out: &mut Record, whole: bool, cluster: u64) -> bool 
                 // What a stream takes is the clusters it really has: the header's allocated size counts holes too, and the bad cluster file's stream "allocates" the whole volume that way.
                 let found = attribute.get(runs_at..).and_then(runs);
                 let clusters: u64 = found.iter().flatten().filter(|run| run.lcn.is_some()).map(|run| run.clusters).sum();
-                out.alloc += clusters * cluster;
+                // Sizes come from the disk: a damaged record must not wrap them around.
+                out.alloc = out.alloc.saturating_add(clusters.saturating_mul(cluster));
                 // The size is only in a stream's first piece.
                 if kind == DATA && !named && first_vcn == 0 {
                     out.size = Some(u64_at(attribute, 0x30));
@@ -421,8 +422,13 @@ struct RawLink {
     name_len: u16,
 }
 impl Table {
-    pub fn new(records: usize) -> Self {
-        Self { slots: vec![Slot::default(); records], links: Vec::new(), names: Vec::new() }
+    /// A table for `records` records, a count read from the disk: one too
+    /// large for this PC's memory is an error, not an abort.
+    pub fn try_new(records: usize) -> Result<Self, String> {
+        let mut slots = Vec::new();
+        slots.try_reserve_exact(records).map_err(|_| BAD_TABLE.to_string())?;
+        slots.resize(records, Slot::default());
+        Ok(Self { slots, links: Vec::new(), names: Vec::new() })
     }
     /// Adds a record in use.
     pub fn add(&mut self, number: u32, record: &Record) {
@@ -437,7 +443,7 @@ impl Table {
         if let Some(size) = record.size {
             slot.size = size;
         }
-        slot.alloc += record.alloc;
+        slot.alloc = slot.alloc.saturating_add(record.alloc);
         if let Some(tag) = record.tag {
             slot.tag = tag;
             slot.flags |= REPARSE;
@@ -588,15 +594,19 @@ pub fn read_table(volume: &(impl ReadAt + ?Sized)) -> Result<Snapshot, String> {
             return Err(BAD_TABLE.into());
         }
         for run in runs {
-            extents.push((run.lcn.map(|lcn| lcn * geometry.cluster), run.clusters * geometry.cluster));
-            vcn += run.clusters;
+            let disk = match run.lcn {
+                Some(lcn) => Some(lcn.checked_mul(geometry.cluster).ok_or(BAD_TABLE)?),
+                None => None,
+            };
+            extents.push((disk, run.clusters.checked_mul(geometry.cluster).ok_or(BAD_TABLE)?));
+            vcn = vcn.checked_add(run.clusters).ok_or(BAD_TABLE)?;
         }
     }
     let count = size / geometry.record;
-    if vcn * geometry.cluster < size || count > u32::MAX as u64 {
+    if vcn.checked_mul(geometry.cluster).is_none_or(|covered| covered < size) || count > u32::MAX as u64 {
         return Err(BAD_TABLE.into());
     }
-    let mut table = Table::new(count as usize);
+    let mut table = Table::try_new(count as usize)?;
     let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + record_len);
     let mut buffer = vec![0u8; CHUNK];
     let mut number = 0u64;
@@ -877,6 +887,11 @@ mod tests {
         b[0x30..0x38].copy_from_slice(&mft_lcn.to_le_bytes());
         b[0x40] = (-10i8) as u8;
         b
+    }
+    #[test]
+    fn a_record_count_no_memory_could_hold_is_an_error_not_an_abort() {
+        assert_eq!(Table::try_new(usize::MAX / 4).err().as_deref(), Some(BAD_TABLE));
+        assert_eq!(Table::try_new(3).unwrap().slots.len(), 3);
     }
     #[test]
     fn the_boot_sector_gives_the_volumes_geometry() {
