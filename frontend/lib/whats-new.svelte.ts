@@ -16,9 +16,18 @@ export interface WhatsNew {
   versions: VersionNotes[];
   offline: boolean;
 }
+/** MYLE's release certificate (backend/src/publisher_offer.rs). */
+export interface PublisherOffer {
+  name: string;
+  trusted: boolean;
+  offered: boolean;
+}
 class WhatsNewState {
   shown = $state<WhatsNew | null>(null);
   loading = $state(false);
+  /** "Show ThomasT as the publisher": offered once, with the notes of an update. */
+  publisher = $state<PublisherOffer | null>(null);
+  trusting = $state(false);
   /** Shown because of an update: closing it marks this version seen. */
   #afterUpdate = false;
   #asked = false;
@@ -31,9 +40,37 @@ class WhatsNewState {
       if (pending && !this.shown) {
         this.#afterUpdate = true;
         this.shown = pending;
+        void this.#offerPublisher();
       }
     } catch {
       // Not worth a message: the notes are on GitHub, and Settings can show them.
+    }
+  }
+  /** An update never shows the setup's last page, where the offer is, so it comes here once. */
+  async #offerPublisher() {
+    try {
+      const offer = await invoke<PublisherOffer | null>("publisher_get");
+      if (!offer || offer.trusted || offer.offered || !this.shown) return;
+      this.publisher = offer;
+      await invoke("publisher_offered");
+    } catch {
+      // Settings › About keeps the offer.
+    }
+  }
+  /** Windows asks the user itself; this waits for their answer. */
+  async trustPublisher() {
+    if (!this.publisher || this.trusting) return;
+    this.trusting = true;
+    try {
+      if (await invoke<boolean>("publisher_trust")) {
+        this.publisher = { ...this.publisher, trusted: true };
+      } else {
+        toast.info("Not trusted: Windows was told no. It stays in Settings › About.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.trusting = false;
     }
   }
   /** This version's notes (Settings). */
@@ -53,6 +90,7 @@ class WhatsNewState {
     if (this.#afterUpdate) void invoke("whats_new_seen").catch(() => {});
     this.#afterUpdate = false;
     this.shown = null;
+    this.publisher = null;
   }
 }
 export const whatsNew = new WhatsNewState();

@@ -71,7 +71,12 @@
 {:else if page.dropsLoading}
   <p class="empty" aria-busy="true">Looking for cards…</p>
 {:else if page.dropsError}
-  <div class="empty" role="alert"><p>{page.dropsError}</p><button class="btn small" type="button" onclick={() => void page.loadDrops(true)}>Try again</button></div>
+  <div class="empty" role="alert">
+    <p>{page.dropsError === "Sign in to Steam first." ? "Sign in to Steam to look for card drops." : page.dropsError}</p>
+    <button class="btn small" class:primary={!page.status?.communityOk} type="button" onclick={() => void (page.status?.communityOk ? page.loadDrops(true) : page.signIn())}>
+      {page.status?.communityOk ? "Try again" : "Sign in to Steam"}
+    </button>
+  </div>
 {:else}
   <div class="empty">
     <p>

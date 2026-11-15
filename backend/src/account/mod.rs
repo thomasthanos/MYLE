@@ -265,11 +265,7 @@ pub async fn account_sign_in(
     }
     let profile = result?;
     check_owner(&app, &state, true).await;
-    // The browser has the focus now; bring the app back.
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    // Keep the browser foregrounded on the sign-in completion page.
     Ok(profile)
 }
 /// Stops waiting for the browser (the user closed the tab, changed their mind).

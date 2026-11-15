@@ -15,6 +15,14 @@ pub struct PublisherState {
     name: &'static str,
     /// Windows already trusts it here, for this user or every user.
     trusted: bool,
+    /// "What's new" after an update has offered it once already; Settings
+    /// keeps offering it.
+    offered: bool,
+}
+
+/// Marks that "What's new" offered it, so it does that once.
+fn offered_marker() -> Option<std::path::PathBuf> {
+    Some(crate::storage::local_dir().ok()?.join("internal").join("publisher-offered"))
 }
 
 /// The offer, or `None` when this copy of MYLE isn't signed with ThomasT's
@@ -26,7 +34,18 @@ pub fn publisher_get() -> Option<PublisherState> {
     publisher::signs(&exe).then(|| PublisherState {
         name: publisher::NAME,
         trusted: publisher::is_trusted(),
+        offered: offered_marker().is_some_and(|marker| marker.is_file()),
     })
+}
+
+/// Remembers that "What's new" offered it.
+#[tauri::command(async)]
+pub fn publisher_offered() -> Result<(), String> {
+    let marker = offered_marker().ok_or("No app data folder.")?;
+    if let Some(folder) = marker.parent() {
+        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(&marker, []).map_err(|error| error.to_string())
 }
 
 /// Trusts the certificate for this Windows user. Windows asks first, in a

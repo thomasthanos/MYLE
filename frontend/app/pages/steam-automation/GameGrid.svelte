@@ -43,8 +43,13 @@
   </div>
 {:else if error}
   <div class="empty" role="alert">
-    <p>{error}</p>
-    {#if onretry}<button class="btn small" type="button" onclick={onretry}>Try again</button>{/if}
+    {#if error === "Sign in to Steam first."}
+      <p>Sign in to Steam to load your games.</p>
+      {#if onretry}<button class="btn small primary" type="button" onclick={onretry}>Sign in to Steam</button>{/if}
+    {:else}
+      <p>{error}</p>
+      {#if onretry}<button class="btn small" type="button" onclick={onretry}>Try again</button>{/if}
+    {/if}
   </div>
 {:else}
   <p class="empty">{empty}</p>

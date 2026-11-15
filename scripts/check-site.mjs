@@ -17,6 +17,10 @@ const required = [
   "assets/site-motion.js",
   "assets/sign-in.css",
   "assets/releases.js",
+  "assets/vendor/marked-18.2.0.js",
+  "assets/vendor/marked-LICENSE",
+  "assets/vendor/dompurify-3.4.18.js",
+  "assets/vendor/dompurify-LICENSE",
   "assets/app-icon.svg",
 ];
 const htmlFiles = required.filter((file) => file.endsWith(".html"));

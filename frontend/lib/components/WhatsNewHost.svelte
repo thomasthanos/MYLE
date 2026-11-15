@@ -3,6 +3,7 @@
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { confirmState } from "../confirm.svelte";
@@ -71,6 +72,28 @@
         {/each}
       </div>
 
+      {#if whatsNew.publisher}
+        {@const p = whatsNew.publisher}
+        <div class="publisher" class:done={p.trusted} role="status">
+          <span class="publisher-icon"><ShieldCheck size={16} /></span>
+          {#if p.trusted}
+            <p>Windows now shows <strong>{p.name}</strong> as MYLE's publisher.</p>
+          {:else}
+            <div class="publisher-text">
+              <strong>Show {p.name} as the publisher</strong>
+              <small>
+                Windows calls MYLE's publisher unknown until you trust {p.name}'s certificate for your Windows
+                account. Windows asks you to confirm; no administrator rights are needed, and uninstalling MYLE takes it
+                back. It also stays in Settings › About.
+              </small>
+            </div>
+            <button class="btn small" disabled={whatsNew.trusting} onclick={() => void whatsNew.trustPublisher()}>
+              {whatsNew.trusting ? "Waiting for Windows…" : `Trust ${p.name}`}
+            </button>
+          {/if}
+        </div>
+      {/if}
+
       <footer>
         <button bind:this={closeButton} class="btn primary" onclick={() => whatsNew.close()}>Got it</button>
       </footer>
@@ -81,7 +104,16 @@
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
 
-  .dialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(640px, 100%); max-height: min(78vh, 760px); border-radius: var(--radius-xl); overflow: hidden; }
+  .dialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; width: min(640px, 100%); max-height: min(78vh, 760px); border-radius: var(--radius-xl); overflow: hidden; }
+
+  /* "Show ThomasT as the publisher", once after an update. */
+  .publisher { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-top: 1px solid rgb(255 255 255 / 0.06); background: rgb(var(--accent-rgb) / 0.06); }
+  .publisher-icon { display: grid; place-items: center; flex: none; color: rgb(var(--accent-soft-rgb)); }
+  .publisher-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
+  .publisher-text strong { color: var(--text-1); font-size: 13px; }
+  .publisher-text small { color: var(--text-3); font-size: 12px; line-height: 1.45; }
+  .publisher .btn { flex: none; }
+  .publisher p { margin: 0; color: var(--text-2); font-size: 13px; }
 
   header { display: flex; align-items: center; gap: 12px; padding: 20px 22px 14px; border-bottom: 1px solid rgb(255 255 255 / 0.06); }
 

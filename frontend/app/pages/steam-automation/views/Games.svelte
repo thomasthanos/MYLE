@@ -50,7 +50,7 @@
   </GameTile>
 {/snippet}
 
-<GameGrid {games} bind:query={find.query} bind:sort={find.sort} sorts={GAME_SORTS} {placeholder} {empty} loading={page.libraryLoading} error={page.libraryError} onretry={() => void page.loadLibrary(true)} {chips} {tile}>
+<GameGrid {games} bind:query={find.query} bind:sort={find.sort} sorts={GAME_SORTS} {placeholder} {empty} loading={page.libraryLoading} error={page.libraryError} onretry={() => void (page.status?.communityOk ? page.loadLibrary(true) : page.signIn())} {chips} {tile}>
   {#snippet controls()}
     <button class="icon-btn" type="button" aria-label="Read your library again" title="Read your library again" disabled={page.libraryLoading} onclick={() => void page.loadLibrary(true)}><RefreshCw size={15} /></button>
   {/snippet}

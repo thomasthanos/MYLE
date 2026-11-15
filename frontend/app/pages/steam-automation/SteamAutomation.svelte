@@ -16,6 +16,7 @@
   import Cards from "./views/Cards.svelte";
   import Games from "./views/Games.svelte";
   import Inventory from "./views/Inventory.svelte";
+  import SteamSignIn from "./SteamSignIn.svelte";
 
   const TABS = [
     { id: "games", label: "Games", icon: Gamepad2 },
@@ -114,10 +115,17 @@
       </div>
     {/if}
 
-    {#if page.view === "games"}<Games />
-    {:else if page.view === "cards"}<Cards />
-    {:else if page.view === "achievements"}<Achievements />
-    {:else}<Inventory />{/if}
+    {#if ready && !connected}
+      <SteamSignIn />
+    {:else if page.view === "games"}
+      <Games />
+    {:else if page.view === "cards"}
+      <Cards />
+    {:else if page.view === "achievements"}
+      <Achievements />
+    {:else}
+      <Inventory />
+    {/if}
   </section>
 </div>
 
