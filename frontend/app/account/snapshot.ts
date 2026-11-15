@@ -7,7 +7,6 @@ import type { GameSavesSettings } from "../pages/game-saves/api";
 import { diskState } from "../pages/disk-analyzer/state.svelte";
 import { appsState } from "../pages/install-apps/state.svelte";
 import { cleanerState } from "../pages/system-cleaner/state.svelte";
-import { githubReleases as githubReleasesState } from "../pages/github-releases/state.svelte";
 import type { PageState, SyncedProjects } from "../pages/github-releases/api";
 export const SYNCED_KEYS = [
   "myle.dark",
@@ -71,7 +70,9 @@ export async function collect(updatedAt: string, includeGithubProjects = false):
 }
 export async function applyGithubProjects(projects: SyncedProjects): Promise<void> {
   const page = await invoke<PageState>("github_releases_sync_import", { synced: projects });
-  await githubReleasesState.applySyncedProjects(page);
+  // Loaded here, for the owner only: the page's state stays out of everyone's startup bundle.
+  const { githubReleases } = await import("../pages/github-releases/state.svelte");
+  await githubReleases.applySyncedProjects(page);
 }
 /* Writes a snapshot from another PC into this one and refreshes the pages. Returns a note when part of it could not be applied yet. */
 export async function apply(snapshot: Snapshot, includeGithubProjects = false): Promise<string | null> {
