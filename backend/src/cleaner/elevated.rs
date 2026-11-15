@@ -22,7 +22,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::UI::Shell::FOLDERID_ProgramData;
 use super::targets::{self, Category, Target};
-use crate::elevated_pipe::{self, Helper, Session};
+use crate::elevated_pipe::{self, Helper, KeptHelper};
 /// `\\.\pipe\myle-cleaner-<32 hex digits>`, created by the app.
 const HELPER: Helper = Helper {
     flag: "--cleaner-elevated-helper",
@@ -101,7 +101,7 @@ enum Response {
 }
 /// The running helper: one UAC prompt, then every scan and clean of this app
 /// session goes through it.
-static SESSION: tokio::sync::Mutex<Option<Session>> = tokio::sync::Mutex::const_new(None);
+static KEPT: KeptHelper = KeptHelper::new(&HELPER);
 /// Runs `action` over the admin-only folders of `categories` and returns the
 /// totals per category id. The first call asks for administrator approval;
 /// later ones reuse the running helper without asking again.
@@ -127,25 +127,11 @@ pub async fn run(
     ask(request).await
 }
 async fn ask(request: Request) -> Result<HashMap<String, Totals>, String> {
-    let mut session = SESSION.lock().await;
-    if let Some(open) = session.as_mut() {
-        match open.ask(&request).await {
-            Ok(response) => return answer(response),
-            // The helper has gone: start a new one below.
-            Err(_) => *session = None,
-        }
-    }
-    let mut fresh = Session::start(&HELPER).await?;
-    let response = fresh
-        .ask(&request)
-        .await
-        .map_err(|error| format!("The administrator cleaner stopped: {error}"))?;
-    *session = Some(fresh);
-    answer(response)
+    answer(KEPT.ask(&request).await?)
 }
 /// Whether a helper is running, so the next scan or clean will not ask.
 pub async fn is_running() -> bool {
-    SESSION.lock().await.is_some()
+    KEPT.is_running().await
 }
 fn answer(response: Response) -> Result<HashMap<String, Totals>, String> {
     match response {

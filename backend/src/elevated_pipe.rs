@@ -142,6 +142,46 @@ fn running_version() -> Option<(u16, u16, u16)> {
     let mut parts = env!("CARGO_PKG_VERSION").split(['.', '-', '+']).map(|part| part.parse::<u16>().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
+/// A helper kept for the app session: started, with its approval prompt, on
+/// the first request; asked again after that, until it exits after its idle
+/// half hour (or after one request approved for another account), when the
+/// next request starts a new one.
+pub struct KeptHelper {
+    helper: &'static Helper,
+    session: tokio::sync::Mutex<Option<Session>>,
+}
+impl KeptHelper {
+    pub const fn new(helper: &'static Helper) -> Self {
+        Self { helper, session: tokio::sync::Mutex::const_new(None) }
+    }
+    /// `request`'s answer from the running helper, or from a new one when
+    /// none runs.
+    pub async fn ask<Q: Serialize, R: DeserializeOwned>(&self, request: &Q) -> Result<R, String> {
+        let mut session = self.session.lock().await;
+        if let Some(open) = session.as_mut() {
+            match open.ask(request).await {
+                Ok(answer) => return Ok(answer),
+                // The helper has gone: start a new one below.
+                Err(_) => *session = None,
+            }
+        }
+        let mut fresh = Session::start(self.helper).await?;
+        let answer = fresh
+            .ask(request)
+            .await
+            .map_err(|error| format!("The {} stopped: {error}", self.helper.what))?;
+        *session = Some(fresh);
+        Ok(answer)
+    }
+    /// Whether a helper runs, so the next request will not ask for approval.
+    pub async fn is_running(&self) -> bool {
+        self.session.lock().await.is_some()
+    }
+    /// The same without waiting: `None` while a request has the helper.
+    pub fn running_now(&self) -> Option<bool> {
+        self.session.try_lock().ok().map(|session| session.is_some())
+    }
+}
 /// The most bytes a helper may send after an answer.
 const MAX_PAYLOAD: u64 = 4 << 30;
 /// Creates the pipe open only to this app's account, administrators (the

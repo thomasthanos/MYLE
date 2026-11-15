@@ -13,30 +13,16 @@ use tauri::ipc::Channel;
 use uuid::Uuid;
 use crate::apps::Jobs;
 use crate::download;
-use crate::elevated_pipe::{self, Session};
+use crate::elevated_pipe::{self, KeptHelper};
 use catalog::{Hive, Op, Tweak};
 use helper::{HELPER, Reply, Request, RestorePoint};
 use undo::{Before, Saved, Store};
 pub use helper::run_helper_from_args as run_elevated_helper_from_args;
 /// The running administrator helper: one UAC prompt, then every change of
 /// this app session goes through it.
-static SESSION: tokio::sync::Mutex<Option<Session>> = tokio::sync::Mutex::const_new(None);
+static KEPT: KeptHelper = KeptHelper::new(&HELPER);
 async fn ask(request: &Request) -> Result<Reply, String> {
-    let mut session = SESSION.lock().await;
-    if let Some(open) = session.as_mut() {
-        match open.ask::<_, Reply>(request).await {
-            Ok(reply) => return Ok(reply),
-            // The helper has gone (idle for half an hour): start a new one.
-            Err(_) => *session = None,
-        }
-    }
-    let mut fresh = Session::start(&HELPER).await?;
-    let reply = fresh
-        .ask(request)
-        .await
-        .map_err(|error| format!("The administrator debloater stopped: {error}"))?;
-    *session = Some(fresh);
-    Ok(reply)
+    KEPT.ask(request).await
 }
 // --------------------------------------------------------------------------- Status
 #[derive(Debug, Serialize)]
@@ -52,7 +38,7 @@ pub struct DebloatStatus {
 #[tauri::command]
 pub async fn debloat_status() -> Result<DebloatStatus, String> {
     // A change in progress holds the session: it is running, then.
-    let admin_ready = SESSION.try_lock().map(|session| session.is_some()).unwrap_or(true);
+    let admin_ready = KEPT.running_now().unwrap_or(true);
     tauri::async_runtime::spawn_blocking(move || {
         let windows = system::windows_info();
         let packages = system::installed_packages();
@@ -561,7 +547,7 @@ pub async fn debloat_start_menu_restore_pins() -> Result<start_menu::StartMenuSt
     let left = tauri::async_runtime::spawn_blocking(start_menu::pins_policy_left)
         .await
         .map_err(download::err)?;
-    if left || SESSION.try_lock().map(|s| s.is_some()).unwrap_or(false) {
+    if left || KEPT.running_now().unwrap_or(false) {
         let cleared = clear_pins_policy().await;
         if left {
             cleared?;
