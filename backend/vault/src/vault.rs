@@ -849,24 +849,24 @@ impl Vault {
         Ok(unlocked
             .entries
             .iter()
-            .map(|(id, e)| Summary {
-                id: id.clone(),
-                title: e.title.clone(),
-                username: e.username.clone(),
-                urls: e.urls.clone(),
-                apps: e.apps.clone(),
-                notes: e.notes.clone(),
-                favorite: e.favorite,
-                folder: e.folder.clone(),
-                updated_at: e.updated_at,
-                has_password: !e.password.is_empty(),
-                strength: super::generator::strength(&e.password),
-                reused: uses.get(e.password.as_str()).is_some_and(|n| *n > 1),
-                history_count: e.history.len(),
-                has_totp: !e.totp.is_empty(),
-                passkeys: e.passkeys.iter().map(super::passkeys::Passkey::info).collect(),
-            })
+            .map(|(id, e)| summary_of(id, e, uses.get(e.password.as_str()).is_some_and(|n| *n > 1)))
             .collect())
+    }
+
+    /// One login's summary, as `summaries` gives it, without copying every
+    /// other login (a browser's request names one by its id). `None` when
+    /// there is no such login.
+    pub fn summary(&mut self, id: &str) -> Result<Option<Summary>, String> {
+        let unlocked = self.unlocked()?;
+        let Some(entry) = unlocked.entries.get(id) else {
+            return Ok(None);
+        };
+        let reused = !entry.password.is_empty()
+            && unlocked
+                .entries
+                .iter()
+                .any(|(other, e)| other != id && e.password == entry.password);
+        Ok(Some(summary_of(id, entry, reused)))
     }
 
     pub fn password(&mut self, id: &str) -> Result<Zeroizing<String>, String> {
@@ -1611,6 +1611,27 @@ impl Vault {
             // Compact: the file is read by MYLE only, and a large vault is written on every save.
             &serde_json::to_vec(file).map_err(|e| e.to_string())?,
         )
+    }
+}
+
+/// What the page and the browsers see of a login: everything but its secrets.
+fn summary_of(id: &str, e: &Entry, reused: bool) -> Summary {
+    Summary {
+        id: id.to_string(),
+        title: e.title.clone(),
+        username: e.username.clone(),
+        urls: e.urls.clone(),
+        apps: e.apps.clone(),
+        notes: e.notes.clone(),
+        favorite: e.favorite,
+        folder: e.folder.clone(),
+        updated_at: e.updated_at,
+        has_password: !e.password.is_empty(),
+        strength: super::generator::strength(&e.password),
+        reused,
+        history_count: e.history.len(),
+        has_totp: !e.totp.is_empty(),
+        passkeys: e.passkeys.iter().map(super::passkeys::Passkey::info).collect(),
     }
 }
 
@@ -2497,6 +2518,24 @@ mod tests {
             .unwrap();
         assert!(record.deleted && !record.ciphertext.is_empty() && record.revision == 2, "a sealed deletion");
         assert_eq!(vault.summaries().unwrap().len(), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn one_logins_summary_is_the_same_as_in_the_whole_list() {
+        let (path, mut vault) = temp_vault();
+        vault.create("m", KdfParams::cheap_for_tests()).unwrap();
+        let a = vault.save(&input("A", "same")).unwrap();
+        vault.save(&input("B", "same")).unwrap();
+        let c = vault.save(&input("C", "only")).unwrap();
+        for summary in vault.summaries().unwrap() {
+            // As the page receives it.
+            let one = vault.summary(&summary.id).unwrap().unwrap();
+            assert_eq!(serde_json::to_value(one).unwrap(), serde_json::to_value(&summary).unwrap());
+        }
+        assert!(vault.summary(&a).unwrap().unwrap().reused);
+        assert!(!vault.summary(&c).unwrap().unwrap().reused);
+        assert!(vault.summary("missing").unwrap().is_none());
         let _ = std::fs::remove_file(path);
     }
 

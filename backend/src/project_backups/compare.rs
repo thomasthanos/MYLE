@@ -773,7 +773,12 @@ pub(crate) fn text_diff(old: &str, new: &str) -> FileDiff {
     let old_lf = old.replace("\r\n", "\n");
     let new_lf = new.replace("\r\n", "\n");
     let line_endings_differ = old != new && old_lf == new_lf;
-    let diff = TextDiff::from_lines(&old_lf, &new_lf);
+    // Myers' diff grows with the number of changes: a regenerated lockfile or
+    // JSON (up to 2 MB a side) could keep it busy for tens of seconds. Past
+    // two seconds it settles for a coarser, still correct, diff.
+    let diff = TextDiff::configure()
+        .timeout(std::time::Duration::from_secs(2))
+        .diff_lines(&old_lf, &new_lf);
     let old_lines: Vec<&str> = diff.old_slices().to_vec();
     let new_lines: Vec<&str> = diff.new_slices().to_vec();
     let groups = diff.grouped_ops(3);

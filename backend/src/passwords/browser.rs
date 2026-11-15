@@ -1259,11 +1259,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         }
         Request::Fill { id, url } => {
             let host = page_host(url).ok_or("insecure")?;
-            let entry = vault
-                .summaries()?
-                .into_iter()
-                .find(|e| e.id == *id)
-                .ok_or("notFound")?;
+            let entry = vault.summary(id)?.ok_or("notFound")?;
             // Only for the site it was saved for, whatever the page asks.
             if !entry.urls.iter().any(|u| fits(u, &host).is_some()) {
                 return Err("wrongSite".to_string());
@@ -1294,11 +1290,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
             let key = super::totp::Totp::parse(secret).map_err(|_| "badKey".to_string())?;
             let saved = match id {
                 Some(id) => {
-                    let entry = vault
-                        .summaries()?
-                        .into_iter()
-                        .find(|e| e.id == *id)
-                        .ok_or("notFound")?;
+                    let entry = vault.summary(id)?.ok_or("notFound")?;
                     // A login of this site; one that has a key already is changed only from its own host, as with a password.
                     let fit = entry.urls.iter().filter_map(|u| fits(u, &host)).max().ok_or("wrongSite")?;
                     if entry.has_totp && !fit {
@@ -1318,11 +1310,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
         }
         Request::Totp { id, url } => {
             let host = page_host(url).ok_or("insecure")?;
-            let entry = vault
-                .summaries()?
-                .into_iter()
-                .find(|e| e.id == *id)
-                .ok_or("notFound")?;
+            let entry = vault.summary(id)?.ok_or("notFound")?;
             // The same rule as a password: only on the site it is saved for.
             if !entry.urls.iter().any(|u| fits(u, &host).is_some()) {
                 return Err("wrongSite".to_string());
@@ -1351,7 +1339,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
             let existing = same_login(vault, &host, username)?.exact;
             let input = match &existing {
                 Some(id) => {
-                    let e = vault.summaries()?.into_iter().find(|s| s.id == *id).ok_or("notFound")?;
+                    let e = vault.summary(id)?.ok_or("notFound")?;
                     EntryInput {
                         id: Some(id.clone()),
                         title: e.title,
@@ -1401,11 +1389,7 @@ fn answer(app: &AppHandle, state: &PasswordsState, request: Request) -> Value {
 /// the page's site, by the same rule as filling it.
 fn copy_text(vault: &mut super::vault::Vault, id: &str, url: &str, field: &str) -> Result<Zeroizing<String>, String> {
     let host = page_host(url).ok_or("insecure")?;
-    let entry = vault
-        .summaries()?
-        .into_iter()
-        .find(|e| e.id == id)
-        .ok_or("notFound")?;
+    let entry = vault.summary(id)?.ok_or("notFound")?;
     if !entry.urls.iter().any(|u| fits(u, &host).is_some()) {
         return Err("wrongSite".to_string());
     }
