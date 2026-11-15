@@ -60,7 +60,10 @@ pub(crate) fn list_files(
                 let entry = archive
                     .by_index_raw(index)
                     .map_err(|error| format!("Can't read \"{}\": {error}", path.display()))?;
-                let stored = entry.name().to_string();
+                let stored = entry
+                    .name()
+                    .map_err(|error| format!("Can't read \"{}\": {error}", path.display()))?
+                    .into_owned();
                 if stored.ends_with('/') || stored.ends_with('\\') {
                     continue;
                 }

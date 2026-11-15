@@ -568,11 +568,14 @@ fn base_dirs(path: &Path) -> Result<Vec<String>, String> {
     let file = File::open(path).map_err(|error| format!("Can't open \"{}\": {error}", path.display()))?;
     let archive = ZipArchive::new(BufReader::new(file))
         .map_err(|error| format!("\"{}\" is not a readable zip: {error}", path.display()))?;
-    Ok(archive
-        .file_names()
-        .filter(|name| name.ends_with('/'))
-        .map(|name| name.trim_end_matches('/').to_string())
-        .collect())
+    let mut dirs = Vec::new();
+    for name in archive.file_names() {
+        let name = name.map_err(|error| format!("\"{}\" has a name that cannot be read: {error}", path.display()))?;
+        if name.ends_with('/') {
+            dirs.push(name.trim_end_matches('/').to_string());
+        }
+    }
+    Ok(dirs)
 }
 fn put_together(
     target: &Path,
@@ -709,7 +712,7 @@ mod tests {
     }
     fn names_in(zip: &str) -> Vec<String> {
         let archive = ZipArchive::new(BufReader::new(File::open(zip).unwrap())).unwrap();
-        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let mut names: Vec<String> = archive.file_names().map(|name| name.unwrap().into_owned()).collect();
         names.sort();
         names
     }

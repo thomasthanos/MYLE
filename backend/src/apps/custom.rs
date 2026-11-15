@@ -796,7 +796,8 @@ pub(super) fn extract_zip_entry(
         .find(|i| {
             archive
                 .name_for_index(*i)
-                .is_some_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted))
+                // A name that cannot be read is not the one wanted.
+                .is_some_and(|n| n.is_ok_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted)))
         })
         .ok_or_else(|| not_in_package(&mut archive, entry_name))?;
     let mut entry = match password {
@@ -824,7 +825,7 @@ fn not_in_package<R: std::io::Read + std::io::Seek>(
     wanted: &str,
 ) -> String {
     let mut runnable: Vec<String> = (0..archive.len())
-        .filter_map(|i| archive.name_for_index(i).map(str::to_string))
+        .filter_map(|i| archive.name_for_index(i).and_then(Result::ok).map(|name| name.into_owned()))
         .filter(|n| {
             n.to_ascii_lowercase().ends_with(".exe") || n.to_ascii_lowercase().ends_with(".msi")
         })

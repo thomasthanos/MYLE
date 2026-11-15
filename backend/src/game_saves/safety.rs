@@ -432,7 +432,7 @@ pub(crate) fn verify_snapshot(path: &Path) -> Result<(), String> {
         let mut entry = archive
             .by_index(index)
             .map_err(|error| format!("{shown} is damaged: {error}"))?;
-        let name = entry.name().to_string();
+        let name = entry.name().map_err(|error| format!("{shown} is damaged: {error}"))?.into_owned();
         io::copy(&mut entry, &mut io::sink()).map_err(|error| format!("{shown} is damaged ({name}): {error}"))?;
     }
     Ok(())

@@ -218,7 +218,7 @@ pub(crate) fn verify_zip(
         let mut entry = archive
             .by_index(index)
             .map_err(|error| format!("Can't read the zip: {error}"))?;
-        let name = entry.name().to_string();
+        let name = entry.name().map_err(|error| format!("Can't read the zip: {error}"))?.into_owned();
         if !seen.insert(name.clone()) {
             return Err(format!("\"{name}\" is in the zip twice"));
         }

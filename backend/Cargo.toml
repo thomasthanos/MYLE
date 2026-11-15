@@ -37,7 +37,7 @@ tokio = { version = "1", features = ["fs", "io-util", "time", "process", "macros
 regex-lite = "0.1"
 unicode-width = "0.2"
 winreg = "0.56"
-zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs", "aes-crypto"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "aes-crypto"] }
 mslnk = "0.1"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

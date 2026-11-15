@@ -632,7 +632,7 @@ mod tests {
     fn zip_names(path: &Path) -> Vec<String> {
         let mut archive = zip::ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
         (0..archive.len())
-            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
             .collect()
     }
     #[test]

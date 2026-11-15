@@ -386,7 +386,7 @@ fn backup_started(side: &Side) -> Option<SystemTime> {
     let text = match side {
         Side::Zip(path) => {
             let mut archive = ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
-            let name = archive.file_names().find(|name| is_info_name(name))?.to_string();
+            let name = archive.file_names().filter_map(Result::ok).find(|name| is_info_name(name))?.into_owned();
             let entry = archive.by_name(&name).ok()?;
             let mut text = String::new();
             entry.take(1 << 20).read_to_string(&mut text).ok()?;
