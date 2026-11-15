@@ -91,7 +91,7 @@ fn create_main(app: &AppHandle) -> tauri::Result<()> {
     let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("MYLE")
         .inner_size(1280.0, 720.0)
-        .min_inner_size(800.0, 500.0)
+        .min_inner_size(window_sizing::MIN_WIDTH, window_sizing::MIN_HEIGHT)
         .center()
         .decorations(false)
         .transparent(true)
