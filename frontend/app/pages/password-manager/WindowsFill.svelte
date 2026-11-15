@@ -26,7 +26,19 @@
       linking = false;
       return;
     }
-    void api.windowsMatches().then((found) => (matches = found)).catch(() => (matches = []));
+    // Only the newest question's answer counts: an older one may come back last.
+    let live = true;
+    void api.windowsMatches().then(
+      (found) => {
+        if (live) matches = found;
+      },
+      () => {
+        if (live) matches = [];
+      },
+    );
+    return () => {
+      live = false;
+    };
   });
 
   const rows = $derived(

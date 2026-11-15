@@ -484,17 +484,28 @@ class DiskAnalyzerState {
       void this.loadTopFiles();
     }, FILTER_DELAY_MS);
   }
-  async loadExtensions() {
+  /* The same count asked again while it is on its way (the treemap and the page both ask on a zoom) waits for that one. */
+  #extensionsInFlight: { key: string; promise: Promise<void> } | null = null;
+  loadExtensions(): Promise<void> {
     const scanId = this.scanId;
-    if (scanId === null) return;
-    const request = ++this.#typesRequest;
+    if (scanId === null) return Promise.resolve();
     const folder = this.current;
-    try {
-      const stats = await diskApi.extensions(scanId, folder, this.sizeMode);
-      if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) this.extensions = stats;
-    } catch (err) {
-      if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) toast.error(`File types could not be counted: ${message(err)}`);
-    }
+    const sizeMode = this.sizeMode;
+    const key = `${scanId}:${folder}:${sizeMode}:${this.#generation}`;
+    if (this.#extensionsInFlight?.key === key) return this.#extensionsInFlight.promise;
+    const request = ++this.#typesRequest;
+    const promise = (async () => {
+      try {
+        const stats = await diskApi.extensions(scanId, folder, sizeMode);
+        if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) this.extensions = stats;
+      } catch (err) {
+        if (request === this.#typesRequest && this.scanId === scanId && this.current === folder) toast.error(`File types could not be counted: ${message(err)}`);
+      } finally {
+        if (this.#extensionsInFlight?.key === key) this.#extensionsInFlight = null;
+      }
+    })();
+    this.#extensionsInFlight = { key, promise };
+    return promise;
   }
   // ------------------------------------------------------------------ Explorer, the path, the Recycle Bin
   async reveal(id: number) {

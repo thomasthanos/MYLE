@@ -2,7 +2,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { SvelteSet } from "svelte/reactivity";
 import { badges } from "../../../lib/badges.svelte";
-import { confirm } from "../../../lib/confirm.svelte";
+import { confirm, confirmState } from "../../../lib/confirm.svelte";
 import { nav } from "../../../lib/nav.svelte";
 import { notifyChange, readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
@@ -508,8 +508,15 @@ class GameSavesState {
     this.#stopWatching = null;
   }
   #stopWatching: (() => void) | null = null;
+  /** After the user said yes: busy then is told, not a click that silently does nothing. */
+  #lockedAfterAnswer(): boolean {
+    if (!this.locked) return false;
+    toast.info("Game Saves is busy for a moment. Try again when it finishes.");
+    return true;
+  }
   async #backgroundCheck() {
-    if (this.busy || this.discovering || this.settingsBusy) return;
+    // Never while the user is choosing: a check that started under an open question would make its answer do nothing.
+    if (this.busy || this.discovering || this.settingsBusy || confirmState.current || this.restoreDialogOpen || this.customDialogOpen) return;
     try {
       if (!this.scanResult) {
         // The page has not been opened yet: start from the saved list. With none, the user has not set Game Saves up, and nothing is scanned.
@@ -607,9 +614,9 @@ class GameSavesState {
       message: "New and changed save files will be copied to your backup folder. Existing snapshots are kept according to the retention policy.",
       confirmLabel: "Back up now",
     });
-    if (!ok || this.locked) return;
+    if (!ok || this.#lockedAfterAnswer()) return;
     await this.#stopDiscovery();
-    if (this.locked) return;
+    if (this.#lockedAfterAnswer()) return;
     this.beginOperation("backup", "preparing");
     try {
       const result = await gameSavesApi.backup(gameIds, this.onEvent);
@@ -644,9 +651,9 @@ class GameSavesState {
       confirmLabel: "Restore saves",
       danger: true,
     });
-    if (!ok || this.locked) return;
+    if (!ok || this.#lockedAfterAnswer()) return;
     await this.#stopDiscovery();
-    if (this.locked) return;
+    if (this.#lockedAfterAnswer()) return;
     this.beginOperation("restore", "creatingSafetyBackup");
     try {
       const result = await gameSavesApi.restore(selections, this.onEvent);
@@ -672,9 +679,9 @@ class GameSavesState {
       confirmLabel: "Undo restore",
       danger: true,
     });
-    if (!ok || this.locked) return;
+    if (!ok || this.#lockedAfterAnswer()) return;
     await this.#stopDiscovery();
-    if (this.locked) return;
+    if (this.#lockedAfterAnswer()) return;
     this.beginOperation("restore", "preparing");
     try {
       const result = await gameSavesApi.undoLastRestore(this.onEvent);

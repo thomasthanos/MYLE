@@ -24,11 +24,15 @@
   let maximized = $state(false);
 
   // Notices changed project folders for the owner, whichever page is open. Only the page's state is loaded here; the page itself stays lazy.
+  // It stops again when the owner signs out.
   let projectBackupsStarted = false;
   $effect(() => {
-    if (!account.owner || projectBackupsStarted || !isTauri()) return;
-    projectBackupsStarted = true;
-    void import("./pages/project-backups/state.svelte").then(({ projectBackupsState }) => projectBackupsState.startDetection());
+    if (!isTauri() || account.owner === projectBackupsStarted) return;
+    projectBackupsStarted = account.owner;
+    const start = projectBackupsStarted;
+    void import("./pages/project-backups/state.svelte").then(({ projectBackupsState }) =>
+      start ? projectBackupsState.startDetection() : projectBackupsState.stopDetection(),
+    );
   });
 
   onMount(() => {

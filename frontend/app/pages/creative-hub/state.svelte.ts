@@ -109,15 +109,16 @@ class CreativeState {
     } finally {
       delete this.jobs[app.id];
       // Re-check immediately after any install — no polling, no delay.
+      // A failed check reads as "not ready": thrown here, in `finally`, it would end up unhandled.
       if (app.id === CLIP_STUDIO_ID) {
         this.clipStudioRestoreReady = await invoke<boolean>(
           "creative_clip_studio_restore_available",
-        );
+        ).catch(() => false);
       }
       if (app.id === WAND_ENHANCER_ID) {
         this.wandEnhancerReady = await invoke<boolean>(
           "creative_wand_enhancer_available",
-        );
+        ).catch(() => false);
       }
     }
   }

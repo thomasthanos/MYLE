@@ -219,13 +219,26 @@ class ProjectBackupsState {
     let stop: (() => void) | undefined;
     try {
       stop = await listen<ProjectChanges[]>(CHANGES_EVENT, (event) => this.applyChanges(event.payload));
+      // Stopped meanwhile (signed out while the listener was being set up).
+      if (!this.#detecting) return stop();
+      this.#stopListening = stop;
       await api.watch();
       this.applyChanges(await api.latestChanges());
     } catch {
       stop?.();
+      this.#stopListening = null;
       this.#detecting = false;
       // The page checks by itself when opened.
     }
+  }
+  #stopListening: (() => void) | null = null;
+  /* Signed out, or no longer the owner: the reminder timer and the listener end, and the next sign-in starts them again. */
+  stopDetection() {
+    if (this.#scheduledTimer) clearInterval(this.#scheduledTimer);
+    this.#scheduledTimer = null;
+    this.#stopListening?.();
+    this.#stopListening = null;
+    this.#detecting = false;
   }
   /* Opening the page: detection runs, and projects it has no answer for yet (it just started) are checked now. */
   async showChanges() {

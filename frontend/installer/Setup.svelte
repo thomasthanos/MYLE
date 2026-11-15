@@ -244,24 +244,31 @@
     }
   }
 
+  /* A second click while the folder is checked would start a second install, which the setup refuses with an error. */
+  let starting = $state(false);
   async function start() {
-    if (!api || !info || busy) return;
-    folderError = null;
-    if (!uninstalling) {
-      try {
-        await api.checkFolder(dir);
-      } catch (err) {
-        folderError = message(err);
+    if (!api || !info || busy || starting) return;
+    starting = true;
+    try {
+      folderError = null;
+      if (!uninstalling) {
+        try {
+          await api.checkFolder(dir);
+        } catch (err) {
+          folderError = message(err);
+          return;
+        }
+      }
+      const apps = await api.running(uninstalling ? info.dir : dir).catch(() => []);
+      // The uninstaller already said the app will be closed; passive asks nothing.
+      if (apps.length && !uninstalling && !info.passive) {
+        running = apps;
         return;
       }
+      await run();
+    } finally {
+      starting = false;
     }
-    const apps = await api.running(uninstalling ? info.dir : dir).catch(() => []);
-    // The uninstaller already said the app will be closed; passive asks nothing.
-    if (apps.length && !uninstalling && !info.passive) {
-      running = apps;
-      return;
-    }
-    await run();
   }
 
   async function run() {
@@ -475,7 +482,7 @@
               {/if}
               <span class="spacer"></span>
               <button class="btn" onclick={close}>Cancel</button>
-              <button class="btn primary big" class:danger={uninstalling} onclick={start}>
+              <button class="btn primary big" class:danger={uninstalling} onclick={start} disabled={starting}>
                 {uninstalling ? "Uninstall" : copy.action}
               </button>
             </div>

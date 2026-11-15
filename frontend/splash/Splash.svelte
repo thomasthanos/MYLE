@@ -94,7 +94,21 @@
     rate = "";
     // Just updated: the previous version was on screen until now, so only long enough to read the line.
     if (justUpdated) await sleep(Math.max(JUST_UPDATED_MS - (performance.now() - startedAt), 0));
-    await updater.finishStartup();
+    // A failure here would leave "Starting…" on screen for good: it is shown, and tried twice more.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await updater.finishStartup();
+        return;
+      } catch (err) {
+        showError("Couldn't open MYLE", err);
+        if (attempt === 3) {
+          transfer = "Close this window and start MYLE again.";
+          return;
+        }
+        transfer = "Trying again…";
+        await sleep(ERROR_HOLD_MS);
+      }
+    }
   }
 
   // In a real update the app exits once the installer launches, so this only returns in demo mode.

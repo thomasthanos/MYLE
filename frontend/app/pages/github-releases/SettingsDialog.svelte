@@ -63,19 +63,24 @@
       waitingForLogin = true;
       const started = Date.now();
       clearInterval(poll);
+      // One check at a time: a slow answer must not let the next one connect a second time.
+      let checking = false;
       poll = setInterval(async () => {
+        if (checking) return;
         if (Date.now() - started > 5 * 60_000) {
           clearInterval(poll);
           waitingForLogin = false;
           return;
         }
+        checking = true;
         const status = await api.ghStatus().catch(() => null);
-        if (status?.signedIn) {
+        if (status?.signedIn && waitingForLogin) {
           clearInterval(poll);
           waitingForLogin = false;
           gh = status;
           await connectGh();
         }
+        checking = false;
       }, 3000);
     } catch (error) {
       toast.error(messageOf(error));

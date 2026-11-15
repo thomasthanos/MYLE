@@ -1,6 +1,6 @@
 <script lang="ts">
   // The treemap, drawn on a canvas: thousands of rectangles are too many for the DOM. The map itself is drawn on one canvas, only when the data or the size changes; hover, selection and the kind in focus go on a second canvas above it, so moving the pointer never redraws the map. The tooltip and the right-click menu find the item under the pointer in the layout's flat arrays. The look follows the rest of the app: flat rounded tiles in one calm colour per kind of file, folders as quiet panels with their name on top, and the accent colour for hover and selection.
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Type from "@lucide/svelte/icons/type";
   import { contextActions } from "../../../lib/context-menu";
@@ -399,8 +399,9 @@
   });
 
   // The legend counts the kinds of files in the folder shown.
+  // Only these two decide it: what the request reads (the folder, the size mode) must not run it again.
   $effect(() => {
-    if (d.treemap && d.extensions === null) void d.loadExtensions();
+    if (d.treemap && d.extensions === null) untrack(() => void d.loadExtensions());
   });
 
   // The selection changed: only the marks are drawn again.
