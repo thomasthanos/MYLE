@@ -152,8 +152,15 @@ pub async fn mobile_update_download(app: AppHandle, update: Update) -> Result<St
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let destination = dir.join(apk_name(&version.to_string()));
 
-    // Downloaded before (the user stepped away from the installer).
-    if destination.is_file() && expected.is_some() && sha256_of(&destination) == expected {
+    // Downloaded before (the user stepped away from the installer). The whole
+    // APK is read to check it: on a thread of its own, not an async worker.
+    let downloaded_before = {
+        let (path, expected) = (destination.clone(), expected.clone());
+        tauri::async_runtime::spawn_blocking(move || path.is_file() && expected.is_some() && sha256_of(&path) == expected)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    if downloaded_before {
         return Ok(destination.to_string_lossy().into_owned());
     }
     // Only this update's file stays.

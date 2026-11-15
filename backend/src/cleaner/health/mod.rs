@@ -923,6 +923,18 @@ async fn recycle_and_remember(module: &str, title: &str, paths: Vec<PathBuf>) ->
     }
     result
 }
+/// Runs a Windows tool (reg.exe, schtasks.exe) on a blocking thread: each
+/// takes up to seconds, and the async workers stay free for the app.
+async fn run_tool(program: &str, args: &[&str]) -> Result<String, String> {
+    let program = crate::apps::process::system32_str(program);
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        sys::run(&program, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(), String> {
     let module = finding.module;
     let title = &finding.title;
@@ -940,7 +952,12 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 sys::norm(title),
                 now_ms()
             ));
-            sys::export_key(hive, path, &file)?;
+            {
+                let (hive, path, file) = ((*hive).to_string(), path.clone(), file.clone());
+                tauri::async_runtime::spawn_blocking(move || sys::export_key(&hive, &path, &file))
+                    .await
+                    .map_err(|e| e.to_string())??;
+            }
             // Persist the backup before any removal, including a partially completed force-clean. A failed journal write leaves data intact.
             remember(
                 module,
@@ -1117,12 +1134,14 @@ async fn apply_one(finding: &Finding, target: &Target, action: &str) -> Result<(
                 &format!("{title} (disabled)"),
                 Undo::Task { name: name.clone() },
             )?;
-            sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Disable"])
+            run_tool("schtasks.exe", &["/Change", "/TN", name, "/Disable"])
+                .await
                 .map(|_| ())
                 .map_err(|e| task_error(&e))
         }
         (Target::Task { name }, "enable") => {
-            sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Enable"])
+            run_tool("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
+                .await
                 .map(|_| ())
                 .map_err(|e| task_error(&e))
         }
@@ -1181,7 +1200,7 @@ async fn undo(undo: &Undo) -> Result<(), String> {
     match undo {
         Undo::RegImport { file } => {
             // HKCU imports work as is; HKLM ones need the administrator prompt.
-            if sys::run(&crate::apps::process::system32_str("reg.exe"), &["import", file, "/reg:64"]).is_ok() {
+            if run_tool("reg.exe", &["import", file, "/reg:64"]).await.is_ok() {
                 return Ok(());
             }
             let args = ["import".to_string(), file.clone(), "/reg:64".to_string()];
@@ -1274,7 +1293,8 @@ async fn undo(undo: &Undo) -> Result<(), String> {
             }
             .map_err(|e| e.to_string())
         }
-        Undo::Task { name } => sys::run(&crate::apps::process::system32_str("schtasks.exe"), &["/Change", "/TN", name, "/Enable"])
+        Undo::Task { name } => run_tool("schtasks.exe", &["/Change", "/TN", name, "/Enable"])
+            .await
             .map(|_| ())
             .map_err(|e| task_error(&e)),
         Undo::Recycled { .. } => Err(

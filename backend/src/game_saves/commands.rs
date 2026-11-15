@@ -567,7 +567,14 @@ pub async fn game_saves_scan(
         fingerprint,
         scan: scan.clone(),
     };
-    scan_cache::save(&root, &cached);
+    let cached = {
+        let root = root.clone();
+        off_runtime(move || {
+            scan_cache::save(&root, &cached);
+            cached
+        })
+        .await?
+    };
     scan.discovery_due = scan.quick && scan_cache::discovery_due(&cached, &value, now);
     send_stage(&on_event, OperationStage::Finishing);
     state.cache_scan(scan.clone());
@@ -864,31 +871,46 @@ pub async fn game_saves_restore(
     // Each snapshot is read through (every file's CRC) before anything is touched: a damaged backup must not be half written over a good save.
     let titles: Vec<String> = games.iter().map(|(game, _)| game.title.clone()).collect();
     let folders = backup_folders(&engine, &backup, &titles, &operation).await?;
-    for (game, snapshot) in &games {
-        let folder = folders.get(&game.title).ok_or_else(|| {
-            format!("The backup of {} was not found. Scan again, then try the restore again.", game.title)
-        })?;
-        safety::verify_snapshot(&folder.join(snapshot)).map_err(|error| {
-            format!("{} was not restored, and nothing was changed: its backup is damaged. {error}", game.title)
-        })?;
-    }
+    let snapshots = games
+        .iter()
+        .map(|(game, snapshot)| {
+            let folder = folders.get(&game.title).ok_or_else(|| {
+                format!("The backup of {} was not found. Scan again, then try the restore again.", game.title)
+            })?;
+            Ok((game.title.clone(), folder.join(snapshot)))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    off_runtime(move || {
+        snapshots.iter().try_for_each(|(title, path)| {
+            safety::verify_snapshot(path)
+                .map_err(|error| format!("{title} was not restored, and nothing was changed: its backup is damaged. {error}"))
+        })
+    })
+    .await??;
     ensure_not_cancelled(&operation)?;
-    // A save the game (or its launcher) holds open cannot be written whole, and would be overwritten again when the game saves on exit.
-    let locked = safety::locked(&targets);
-    if !locked.is_empty() {
-        return Err(format!(
-            "Close the game first: these saves are in use, so nothing was restored: {}",
-            locked.join(", ")
-        ));
-    }
     let safety_root = settings::safety_root(&app)?;
-    let existing_bytes: u64 = targets.iter().filter_map(|target| fs::metadata(&target.path).ok()).map(|meta| meta.len()).sum();
-    safety::ensure_room(&safety_root, existing_bytes, "the restore's safety copy")?;
-    for target in &targets {
-        if let Some(folder) = target.path.parent() {
-            let needed: u64 = targets.iter().filter(|other| other.path.parent() == Some(folder)).map(|other| other.bytes).sum();
-            safety::ensure_room(folder, needed, "the restored saves")?;
-        }
+    {
+        let (targets, safety_root) = (targets.clone(), safety_root.clone());
+        off_runtime(move || {
+            // A save the game (or its launcher) holds open cannot be written whole, and would be overwritten again when the game saves on exit.
+            let locked = safety::locked(&targets);
+            if !locked.is_empty() {
+                return Err(format!(
+                    "Close the game first: these saves are in use, so nothing was restored: {}",
+                    locked.join(", ")
+                ));
+            }
+            let existing_bytes: u64 = targets.iter().filter_map(|target| fs::metadata(&target.path).ok()).map(|meta| meta.len()).sum();
+            safety::ensure_room(&safety_root, existing_bytes, "the restore's safety copy")?;
+            for target in &targets {
+                if let Some(folder) = target.path.parent() {
+                    let needed: u64 = targets.iter().filter(|other| other.path.parent() == Some(folder)).map(|other| other.bytes).sum();
+                    safety::ensure_room(folder, needed, "the restored saves")?;
+                }
+            }
+            Ok(())
+        })
+        .await??;
     }
     // Every file the restore writes is copied first (and each copy checked), so any game whose restore does not finish cleanly is put back at once, and "Undo last restore" can put the whole restore back. From here on, Cancel stops only between games: a save is never cut off half-written.
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
@@ -899,7 +921,11 @@ pub async fn game_saves_restore(
         None
     } else {
         let (undo_record, slot) = undo::create_slot(&safety_root)?;
-        match safety::take(&slot, &targets, &keys, parser::now()) {
+        let copied = {
+            let (slot, targets, keys) = (slot.clone(), targets.clone(), keys.clone());
+            off_runtime(move || safety::take(&slot, &targets, &keys, parser::now())).await?
+        };
+        match copied {
             Ok(manifest) => {
                 if let Err(error) = undo::commit(&safety_root, undo_record.clone(), manifest.games()) {
                     undo::discard_slot(&safety_root, &undo_record.id);
@@ -930,7 +956,7 @@ pub async fn game_saves_restore(
         send_progress(&on_event, index, total, Some(game.title.clone()));
         // The game may have been started meanwhile.
         let game_targets: Vec<_> = targets.iter().filter(|target| target.game == game.title).cloned().collect();
-        let in_use = safety::locked(&game_targets);
+        let in_use = off_runtime(move || safety::locked(&game_targets)).await?;
         if !in_use.is_empty() {
             failures.push(game.title.clone());
             reasons.push(GameFailure {
@@ -973,7 +999,8 @@ pub async fn game_saves_restore(
         } else if let Some((slot, manifest)) = &slot {
             // Not a mix of old and new saves: the game goes back to how it was.
             let only: HashSet<String> = [game.title.clone()].into();
-            let left = safety::put_back(slot, manifest, Some(&only));
+            let (slot, manifest) = (slot.clone(), manifest.clone());
+            let left = off_runtime(move || safety::put_back(&slot, &manifest, Some(&only))).await?;
             if left.is_empty() {
                 rolled_back.push(game.title.clone());
             } else {
@@ -1016,6 +1043,12 @@ pub async fn game_saves_restore(
         safety_backup_path: slot.map(|(slot, _)| slot.to_string_lossy().into_owned()),
         rolled_back,
     })
+}
+/// Runs `work` on a blocking thread: scans, zip checks and the safety copy
+/// read and write whole folders (in a cloud folder, for minutes), and the
+/// async workers stay free for the rest of the app meanwhile.
+async fn off_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|error| error.to_string())
 }
 /// Each game's folder in the backup, as the engine lists them.
 async fn backup_folders(
@@ -1075,7 +1108,10 @@ pub async fn game_saves_undo_last_restore(
             (safety::targets(&api), safety::key_targets(&api))
         }
     };
-    let locked = safety::locked(&targets);
+    let locked = {
+        let targets = targets.clone();
+        off_runtime(move || safety::locked(&targets)).await?
+    };
     if !locked.is_empty() {
         return Err(format!("Close the game first: these saves are in use, so nothing was undone: {}", locked.join(", ")));
     }
@@ -1083,7 +1119,11 @@ pub async fn game_saves_undo_last_restore(
     send_stage(&on_event, OperationStage::CreatingSafetyBackup);
     operation.set_killable(false);
     let (now_record, now_slot) = undo::create_slot(&safety_root)?;
-    let now_manifest = match safety::take(&now_slot, &targets, &keys, parser::now()) {
+    let copied = {
+        let (now_slot, targets) = (now_slot.clone(), targets.clone());
+        off_runtime(move || safety::take(&now_slot, &targets, &keys, parser::now())).await?
+    };
+    let now_manifest = match copied {
         Ok(taken) => taken,
         Err(error) => {
             undo::discard_slot(&safety_root, &now_record.id);
@@ -1092,7 +1132,10 @@ pub async fn game_saves_undo_last_restore(
     };
     send_stage(&on_event, OperationStage::Restoring);
     let failed = match &manifest {
-        Some(manifest) => safety::put_back(&slot, manifest, None),
+        Some(manifest) => {
+            let (slot, manifest) = (slot.clone(), manifest.clone());
+            off_runtime(move || safety::put_back(&slot, &manifest, None)).await?
+        }
         None => {
             let input = stdin_titles(&undo_record.games);
             match run_engine_to_end(&engine, &Engine::restore_args(&slot.to_string_lossy(), None), Some(&input), &operation)
@@ -1107,7 +1150,10 @@ pub async fn game_saves_undo_last_restore(
     send_stage(&on_event, OperationStage::Finishing);
     if !failed.is_empty() {
         // Not a mix: the saves go back to how they were before this undo.
-        let left = safety::put_back(&now_slot, &now_manifest, None);
+        let left = {
+            let (now_slot, now_manifest) = (now_slot.clone(), now_manifest.clone());
+            off_runtime(move || safety::put_back(&now_slot, &now_manifest, None)).await?
+        };
         if left.is_empty() {
             undo::discard_slot(&safety_root, &now_record.id);
         }
@@ -1255,10 +1301,8 @@ pub(crate) async fn scan_with_engine(
     let local = local?;
     let (restore, inventory) = history?;
     let metadata = load_manifest_metadata(engine).await?;
-    Ok((
-        parser::build_scan(local, restore, inventory, &metadata, value),
-        metadata,
-    ))
+    let settings = value.clone();
+    off_runtime(move || (parser::build_scan(local, restore, inventory, &metadata, &settings), metadata)).await
 }
 /// The "on this PC" pass limited to known games. A name the database no
 /// longer has (a removed custom game, a renamed entry) makes the engine

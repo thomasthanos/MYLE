@@ -127,7 +127,8 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
             let locked_now = {
-                let mut slot = state.cell.lock();
+                // Busy (an unlock or a save): checked at the next tick.
+                let Some(mut slot) = state.cell.try_lock() else { continue };
                 let Some(vault) = slot.as_mut() else { continue };
                 if vault.status() != Status::Unlocked {
                     continue;

@@ -14,7 +14,7 @@ pub fn start_windows_fill(app: AppHandle, target: WindowsFillState) {
     windows_fill::start(app, target);
 }
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -56,9 +56,6 @@ impl Default for PasswordsState {
     }
 }
 impl PasswordsState {
-    fn lock(&self) -> MutexGuard<'_, Option<Vault>> {
-        self.cell.lock()
-    }
     /// Runs `f` on the vault for something the user did on the vault page:
     /// the vault counts as in use and stays open longer.
     fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, String>) -> Result<T, String> {
@@ -103,23 +100,27 @@ pub fn watch(app: AppHandle, state: PasswordsState) {
     });
     tauri::async_runtime::spawn(async move {
         let mut last_tick = SystemTime::now();
+        let mut woke = false;
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
             // A tick that took far longer than 10 seconds: the PC slept.
             let now = SystemTime::now();
-            let woke = now
+            woke |= now
                 .duration_since(last_tick)
                 .is_ok_and(|gap| gap > Duration::from_secs(60));
             last_tick = now;
             let locked_now = {
-                let mut slot = state.lock();
+                // Busy (an unlock or a save): checked at the next tick, the
+                // wake from sleep kept for it, and no thread waits here.
+                let Some(mut slot) = state.cell.try_lock() else { continue };
+                let wake = std::mem::take(&mut woke);
                 let Some(vault) = slot.as_mut() else { continue };
                 if vault.status() != Status::Unlocked {
                     continue;
                 }
                 let minutes = vault.prefs().auto_lock_minutes;
                 let idle = minutes > 0 && vault.idle_for() >= Duration::from_secs(u64::from(minutes) * 60);
-                if idle || woke || session::windows_is_locked() {
+                if idle || wake || session::windows_is_locked() {
                     vault.lock();
                     true
                 } else {

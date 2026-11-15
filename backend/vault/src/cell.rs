@@ -2,7 +2,7 @@
 //! used, and shared by the app's commands, the sync and the website icons.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use crate::vault::Vault;
 
@@ -26,6 +26,17 @@ impl VaultCell {
     /// The vault as it is now, `None` until first used.
     pub fn lock(&self) -> MutexGuard<'_, Option<Vault>> {
         self.vault.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The vault when nobody holds it now; `None` while an unlock (Argon2,
+    /// half a second or more) or a save has it. For background checks that
+    /// can wait for their next turn without holding up a thread.
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, Option<Vault>>> {
+        match self.vault.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        }
     }
 
     /// Runs `f` on the vault, opening its file the first time. It does not
