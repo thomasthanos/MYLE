@@ -601,12 +601,10 @@ pub(crate) fn format_commit_message(raw: &str) -> String {
             text = text[..last_fence].trim();
         }
     }
-    if (text.starts_with('"') && text.ends_with('"'))
-        || (text.starts_with('\'') && text.ends_with('\''))
+    if text.len() >= 2
+        && ((text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')))
     {
-        if text.len() >= 2 {
-            text = text[1..text.len() - 1].trim();
-        }
+        text = text[1..text.len() - 1].trim();
     }
 
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
