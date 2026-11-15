@@ -35,7 +35,8 @@ const hooks = registerHooks({
 const snapshot = await import("../../frontend/app/account/snapshot.ts");
 const accountModule = await import("../../frontend/app/account/account.svelte.ts");
 const { accountApi } = await import("../../frontend/app/account/api.ts");
-hooks.deregister();
+// Kept until the tests end: the GitHub Releases state is imported when projects are applied, not when the module loads.
+test.after(() => hooks.deregister());
 const paths = { version: 1, paths: ["H:\\Projects\\MYLE"] };
 let localProjects;
 const cloud = (extra = {}) => ({ version: 1, updatedAt: "2026-10-27T10:00:00.000Z", storage: {}, gameSaves: null, ...extra });
