@@ -38,12 +38,20 @@ fn empty(app: &AppHandle) {
 
 pub fn copy_secret(app: &AppHandle, text: &str) -> Result<(), String> {
     // Sensitive on Android, this device only and self-expiring on iOS; the plain clipboard where neither is (Windows).
-    if app.myle_mobile().copy_secret(text, CLEAR_AFTER.as_secs() as u32).is_err() {
+    let phone = app.myle_mobile().copy_secret(text, CLEAR_AFTER.as_secs() as u32).is_ok();
+    if !phone {
         app.clipboard()
             .write_text(text.to_string())
             .map_err(|_| "Could not copy to the clipboard.".to_string())?;
     }
     let copy = COPIES.fetch_add(1, Ordering::SeqCst) + 1;
+    // iOS empties it itself when it expires, and only if it still holds this
+    // copy: emptying it here too would also take whatever the user copied in
+    // another app since.
+    if phone && cfg!(target_os = "ios") {
+        *LAST.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        return Ok(());
+    }
     *LAST.lock().unwrap_or_else(|p| p.into_inner()) = Some((copy, SystemTime::now()));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
