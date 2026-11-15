@@ -1,6 +1,7 @@
 // A newer MYLE Passwords on Android (backend/mobile/src/update.rs): found in the feed, downloaded into the app's own folder with its progress shown, checked, and handed to Android's installer, all without leaving the app.
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { passwordsApi as api, type MobileUpdate } from "../app/pages/password-manager/api";
+import { errorMessage as message } from "../lib/errors";
 export type UpdateStep =
   | { kind: "available" }
   | { kind: "downloading"; percent: number | null }
@@ -9,9 +10,6 @@ export type UpdateStep =
   /** Android first needs the user to allow this app to install updates. */
   | { kind: "allow" }
   | { kind: "error"; message: string };
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 class Updater {
   update = $state<MobileUpdate | null>(null);
   step = $state<UpdateStep>({ kind: "available" });

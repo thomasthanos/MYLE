@@ -5,6 +5,7 @@ import { confirm } from "../../../lib/confirm.svelte";
 import { toast } from "../../../lib/toast.svelte";
 import { maintenanceApi, type MaintenanceAction, type MaintenanceCard, type TaskOutcome } from "./api";
 import { appendOutput } from "./output";
+import { errorMessage as message } from "../../../lib/errors";
 /** Kept per console; older lines are dropped so a long run stays responsive. */
 const MAX_LINES = 1200;
 const TRIM_TO = 1000;
@@ -30,9 +31,6 @@ interface ConsoleBuffer {
 interface PendingLine {
   text: string;
   replace: boolean;
-}
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 class MaintenanceState {
   cards = $state<MaintenanceCard[]>([]);

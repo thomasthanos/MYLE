@@ -1,5 +1,6 @@
 // Typed bridge to the Disk Analyzer commands in backend/src/disk_analyzer/. The page sends one folder to scan, then only ids the backend gave it.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export { formatSize } from "../system-cleaner/api";
 /** "size" is the files' length, "alloc" what they take on the disk. */
 export type SizeMode = "size" | "alloc";
@@ -142,11 +143,6 @@ export interface DeleteOutcome {
   freedBytes: number;
   freedSize: number;
   skipped: Skipped[];
-}
-function channel<T>(onEvent: (e: T) => void): Channel<T> {
-  const ch = new Channel<T>();
-  ch.onmessage = onEvent;
-  return ch;
 }
 export const diskApi = {
   drives: () => invoke<Drive[]>("disk_analyzer_drives"),

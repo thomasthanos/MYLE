@@ -9,6 +9,7 @@ import { formatRelative } from "../game-saves/state.svelte";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import type { ProjectChanges } from "./api";
+import { errorMessage as message } from "../../../lib/errors";
 /** 30 days old is called old, a backup within 7 days counts as up to date. */
 const STALE_DAYS = 30;
 const FRESH_DAYS = 7;
@@ -56,7 +57,6 @@ export interface Summary {
 }
 /** A group of projects under one heading of the list. */
 export interface Group { key: "attention" | "never" | "stale" | "ok" | "missing" | "unknown"; title: string; note: string; projects: Project[] }
-const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const emptyPage: PageState = {
   settings: { version: 2, provider: null, cloudFolder: null, projects: [], exclusions: [], smartBuild: true, followGitignore: false, imported: true },
   clouds: [], backupRoot: null, running: false, defaultExclusions: [], missingSources: [], imported: null,

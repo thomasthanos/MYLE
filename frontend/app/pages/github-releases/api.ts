@@ -1,6 +1,7 @@
 // Typed bridge to the GitHub Releases commands in backend/src/github_releases/. Projects are addressed by id (`<repo id>` or `<repo id>/<app folder>`), files by their path in the repository's status; the backend checks every path. The GitHub token and AI keys never come back here.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { FileDiff } from "../project-backups/api";
+import { channel } from "../../../lib/ipc";
 export type { FileDiff };
 // ─── Shared ────────────────────────────────────────────────────────────────
 /** A failure the page can act on: `code` says what, `message` is for people. */
@@ -484,11 +485,6 @@ export interface AiChanges {
   ollamaEnabled?: boolean;
 }
 // ─── Commands ──────────────────────────────────────────────────────────────
-function channel<T>(on: (event: T) => void): Channel<T> {
-  const c = new Channel<T>();
-  c.onmessage = on;
-  return c;
-}
 export const githubReleasesApi = {
   getState: () => invoke<PageState>("github_releases_get_state"),
   dismissImport: () => invoke<void>("github_releases_dismiss_import"),

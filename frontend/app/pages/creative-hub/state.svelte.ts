@@ -2,6 +2,7 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { toast } from "../../../lib/toast.svelte";
 import type { JobEvent, JobOutcome, Stage } from "../install-apps/api";
+import { errorMessage as message } from "../../../lib/errors";
 export const CLIP_STUDIO_ID = "creative.clipstudiopaint.5.1.4";
 export const WAND_ENHANCER_ID = "creative.wandenhancer";
 export interface CreativeApp {
@@ -29,9 +30,6 @@ export interface Job {
 }
 /** Speed samples at most this often, averaged so the number does not jump. */
 const SPEED_SAMPLE_MS = 500;
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 class CreativeState {
   apps = $state<CreativeApp[]>([]);
   loading = $state(false);

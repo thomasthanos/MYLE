@@ -21,6 +21,7 @@
   import Toggle from "./Toggle.svelte";
   import { compareVersions } from "./versions";
   import Working, { type Step } from "./Working.svelte";
+  import { errorMessage as message } from "../lib/errors";
 
   type Screen = "loading" | "options" | "working" | "done" | "error" | "unavailable";
 
@@ -186,9 +187,6 @@
     }
   }
 
-  function message(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
 
   onMount(() => {
     if (isTauri()) {

@@ -25,6 +25,7 @@ function harness(icons) {
     lock: async () => {}, setWebsiteIcons: async () => {},
   };
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require: createRequire(import.meta.url), exports: {}, URL,
     Date: class extends Date { static now() { return now; } },
     readJson: (_key, fallback) => fallback, readFlag: () => false,

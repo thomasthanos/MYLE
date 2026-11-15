@@ -45,6 +45,7 @@ function harness(initial = report()) {
   const current = { report: initial };
   const installs = [];
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require, exports: {}, console,
     isTauri: () => true,
     catalog,

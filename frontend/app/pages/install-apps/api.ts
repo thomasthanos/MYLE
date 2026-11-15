@@ -1,5 +1,6 @@
 // Typed bridge to the Rust commands in backend/src/apps/.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export interface InstalledPackage {
   id: string;
   name: string;
@@ -62,11 +63,6 @@ export type JobOutcome =
   | { result: "hashMismatch" }
   | { result: "cancelled" };
 export type Mode = "install" | "upgrade";
-function channel(onEvent: (e: JobEvent) => void): Channel<JobEvent> {
-  const ch = new Channel<JobEvent>();
-  ch.onmessage = onEvent;
-  return ch;
-}
 export const api = {
   installed: () => invoke<InstalledReport>("apps_installed"),
   customCatalog: () => invoke<CustomAppInfo[]>("apps_custom_catalog"),

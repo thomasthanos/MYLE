@@ -1,5 +1,6 @@
 import { checkForUpdate, formatBytes, installUpdate, type UpdateAsset } from "./updater";
 import { toast } from "./toast.svelte";
+import { errorMessage as message } from "./errors";
 type UpdateView =
   | { state: "idle" }
   | { state: "checking" }
@@ -10,7 +11,6 @@ type UpdateView =
   | { state: "installing" }
   | { state: "restarting"; version: string }
   | { state: "error"; message: string };
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 class SettingsUpdater {
   view = $state<UpdateView>({ state: "idle" });
   #busy = false;

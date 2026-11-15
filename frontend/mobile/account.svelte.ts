@@ -6,10 +6,8 @@ import { passwords } from "../app/pages/password-manager/state.svelte";
 import { confirm } from "../lib/confirm.svelte";
 import { toast } from "../lib/toast.svelte";
 import { shell } from "./shell.svelte";
+import { errorMessage as message } from "../lib/errors";
 const PROVIDER_NAMES: Record<Provider, string> = { discord: "Discord", google: "Google" };
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 /** In a plain browser (`npx vite --mode mobile`): a pretend account. */
 const preview = !isTauri();
 /* Android shows the sign-in page in a Custom Tab over the app; iOS in a sheet that answers by itself. */

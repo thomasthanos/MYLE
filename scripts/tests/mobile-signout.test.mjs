@@ -17,6 +17,7 @@ function harness({ accept = true, fail = false, signIn, profile = async () => nu
   const calls = [], questions = [], errors = [], timers = [];
   const listeners = [];
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require: createRequire(import.meta.url), exports: {}, URLSearchParams, navigator: { userAgent: "Android" },
     isTauri: () => true, shell: { settingsOpen: true }, document: { visibilityState: "visible" },
     setTimeout: (run) => { timers.push(run); return timers.length; },

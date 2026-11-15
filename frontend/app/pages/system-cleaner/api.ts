@@ -1,5 +1,6 @@
 // Typed bridge to the cleaner commands in backend/src/cleaner/.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export interface CleanerCategory {
   id: string;
   title: string;
@@ -49,11 +50,6 @@ export interface CleanSummary {
   /** Of `skippedBytes`, the part the administrator pass tries again. */
   adminSkippedBytes: number;
   locked: string[];
-}
-function channel<T>(onEvent: (e: T) => void): Channel<T> {
-  const ch = new Channel<T>();
-  ch.onmessage = onEvent;
-  return ch;
 }
 export const cleanerApi = {
   downloadsPreview: () => invoke<import("./downloads").Preview>("cleaner_downloads_preview"),

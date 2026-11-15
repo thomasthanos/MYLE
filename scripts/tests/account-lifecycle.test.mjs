@@ -29,6 +29,7 @@ function harness(overrides = {}) {
     signIn: async () => profile, pull: async () => cloud, push: async () => {}, ...overrides,
   };
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require: createRequire(import.meta.url), exports: {}, setTimeout, clearTimeout,
     isTauri: () => true, window: { addEventListener() {} },
     listen: async (_event, callback) => { listeners.push(callback); return () => {}; }, ACCESS_EVENT: "account-access", onStorageChange() {},

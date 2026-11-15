@@ -23,6 +23,7 @@ import {
   type TreemapPayload,
 } from "./api";
 import { flatten, type ChildPage, type Row } from "./rows";
+import { errorMessage as message } from "../../../lib/errors";
 export const KEY = { sizeMode: "myle.diskAnalyzer.sizeMode", view: "myle.diskAnalyzer.view", fast: "myle.diskAnalyzer.fast" };
 export type Phase = "idle" | "scanning" | "ready" | "deleting";
 export type View = "folders" | "files" | "types";
@@ -38,7 +39,6 @@ const TEN_GB = 10 * 1024 ** 3;
 const MANY_FILES = 1000;
 /** The most warnings the Recycle Bin question lists one by one. */
 const CAUTIONS_SHOWN = 4;
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const isSizeMode = (v: unknown) => v === "size" || v === "alloc";
 const isView = (v: unknown) => v === "folders" || v === "files" || v === "types";
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;

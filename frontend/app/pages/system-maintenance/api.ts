@@ -1,5 +1,6 @@
 // Typed bridge to the maintenance commands in backend/src/maintenance/.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export type SectionId = "network" | "health";
 export interface MaintenanceAction {
   id: string;
@@ -32,11 +33,6 @@ export type TaskOutcome =
   | { result: "rebootRequired" }
   | { result: "cancelled" }
   | { result: "needsAdmin" };
-function channel<T>(onEvent: (e: T) => void): Channel<T> {
-  const ch = new Channel<T>();
-  ch.onmessage = onEvent;
-  return ch;
-}
 export const maintenanceApi = {
   cards: () => invoke<MaintenanceCard[]>("maintenance_cards"),
   run: (id: string, elevated: boolean, onEvent: (e: TaskEvent) => void) =>

@@ -6,13 +6,11 @@ import { toast } from "../../../../lib/toast.svelte";
 import { debloatApi as api, type AppStatus, type DebloatEvent, type DebloatOutcome, type DebloatStatus, type StartMenuUpdate, type Step, type TweakStatus } from "./api";
 import { pinCatalog } from "./catalog";
 import { appPresetIds, fromLegacy, inProfile, isApplied, matchingProfile, pendingOf, prune, withProfile, type Profile } from "./selection";
+import { errorMessage as message } from "../../../../lib/errors";
 const PENDING_KEY = "myle.debloat.pending";
 /** Kept by older versions: the apps ticked for the one-click run, and the tweaks left out of it. */
 const LEGACY_APPS_KEY = "myle.debloat.apps";
 const LEGACY_SKIPPED_KEY = "myle.debloat.skipped";
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 interface SavedChoices {
   tweaks: Record<string, boolean>;
   apps: string[];

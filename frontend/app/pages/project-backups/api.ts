@@ -1,5 +1,6 @@
 // Typed bridge to the Project Backups commands in backend/src/project_backups/. Projects are addressed by id and backups by the id from their list; every path is resolved and checked by the backend.
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export type BackupProvider = "googleDrive" | "dropbox";
 export interface LastBackup {
   name: string;
@@ -307,11 +308,6 @@ export interface DriveInfo {
   free: number;
 }
 export type OpenTarget = "root" | "backups" | "source";
-function channel(onEvent: (event: ProjectBackupsEvent) => void): Channel<ProjectBackupsEvent> {
-  const value = new Channel<ProjectBackupsEvent>();
-  value.onmessage = onEvent;
-  return value;
-}
 export const projectBackupsApi = {
   /** On the first start this also imports backup_projects' projects. */
   getState: () => invoke<PageState>("project_backups_get_state"),

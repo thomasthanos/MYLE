@@ -35,6 +35,7 @@ async function settingsHarness() {
     resolve(specifier, context, next) {
       if (context.parentURL?.includes("updater-state.svelte.ts")) {
         if (specifier === "./updater") return { url: "data:text/javascript," + encodeURIComponent("export const checkForUpdate=()=>globalThis.__updaterNative.check(); export const installUpdate=(a,e)=>globalThis.__updaterNative.install(a,e); export const formatBytes=b=>`${b} B`;"), shortCircuit: true };
+        if (specifier === "./errors") return { url: new URL("../../frontend/lib/errors.ts", import.meta.url).href, shortCircuit: true };
         if (specifier === "./toast.svelte") return { url: "data:text/javascript," + encodeURIComponent("export const toast={error:m=>globalThis.__updaterErrors.push(m)};"), shortCircuit: true };
       }
       return next(specifier, context);
@@ -55,7 +56,7 @@ async function settingsHarness() {
   const compiled = compileModule(`${script}\nglobalThis.page={get view(){return update},check,install};`, { filename: "settings-test.svelte.js", generate: "client" }).js.code;
   const executable = transpileModule(compiled, { compilerOptions: { target: ScriptTarget.ESNext, module: ModuleKind.CommonJS } }).outputText;
   const mount = () => {
-    const context = { onMount: () => {}, settingsUpdater, require, exports: {} };
+    const context = { onMount: () => {}, settingsUpdater, require, exports: {}, message: (error) => (error instanceof Error ? error.message : String(error)) };
     vm.createContext(context);
     vm.runInContext(executable, context);
     return context.page;

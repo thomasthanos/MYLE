@@ -27,6 +27,7 @@ const latest = { cli: "2.45.3", marketplace: "1.0.11" };
 function harness(api = {}, { setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   let runs = 0, checks = 0, locked = false;
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require, exports: {}, Date, setTimeout: setTimer, clearTimeout: clearTimer, isTauri: () => true,
     compareVersions,
     appsState: { busy: false }, confirm: async () => true, nav: {},

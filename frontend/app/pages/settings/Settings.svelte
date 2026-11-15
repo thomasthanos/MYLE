@@ -32,6 +32,7 @@
   import { passwordsApi, type BrowserSetup } from "../password-manager/api";
   import { EXTENSION_URL } from "../../../lib/extension";
   import { FIREFOX_EXTENSION_URL } from "../../../lib/extension";
+  import { errorMessage as message } from "../../../lib/errors";
 
   const REPO_URL = "https://github.com/thomasthanos/MYLE";
 
@@ -94,9 +95,6 @@
     }
   }
 
-  function message(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
-  }
 
   function check() {
     return settingsUpdater.check();

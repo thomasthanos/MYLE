@@ -77,6 +77,7 @@ const KINDS: Record<string, string> = {
   booster: "Booster pack",
 };
 
+// Kept here rather than imported from lib/errors: the tests load this module straight into Node, which needs file extensions on imports.
 export const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function waitingText(waiting: WaitingView | null): string {

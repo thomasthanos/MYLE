@@ -12,6 +12,7 @@ import { api, type JobEvent, type JobOutcome, type Mode, type PackageLinks, type
 import { CATEGORIES, categorize, isCategory, type Category } from "./categories";
 import catalog from "./data/apps.json";
 import { autoUpdateCards, type WingetUpgrade } from "./updates";
+import { errorMessage as message } from "../../../lib/errors";
 export type Source = "winget" | "custom" | "catalog" | "update";
 export interface AppEntry {
   id: string;
@@ -90,9 +91,6 @@ function fromCatalog(a: (typeof catalog.apps)[number]): AppEntry {
     iconDomain: "iconDomain" in a ? a.iconDomain : undefined,
     selfUpdating: "selfUpdating" in a ? a.selfUpdating : undefined,
   };
-}
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 class InstallAppsState {
   readonly packs: Pack[] = catalog.packs;

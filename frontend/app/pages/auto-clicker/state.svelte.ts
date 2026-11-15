@@ -1,7 +1,7 @@
 import { clickerApi, type Config, type Profiles, type Status, type Step } from "./api";
 import { isBusy, moveStep, newProfile, newStep, validateConfig } from "./model";
+import { errorMessage as message } from "../../../lib/errors";
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 export class AutoClickerState {
   profiles = $state.raw<Profiles | null>(null);
   status = $state.raw<Status | null>(null);

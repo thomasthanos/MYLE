@@ -4,6 +4,7 @@ import { ANDROID, DEVICE, MOBILE, QUICK_UNLOCK } from "../../../lib/platform";
 import { readFlag, readJson, writeFlag, writeJson } from "../../../lib/storage";
 import { toast } from "../../../lib/toast.svelte";
 import { passwordsApi as api, type EntryInput, type Summary, type SyncResult, type VaultStatus, type AppLink } from "./api";
+import { errorMessage as message } from "../../../lib/errors";
 export type Filter = "all" | "favorites" | "weak" | "reused" | "totp";
 /** The list's order: by name, or the most recently changed first. */
 export type Sort = "name" | "recent";
@@ -77,9 +78,6 @@ export interface WindowsTarget {
   path: string;
   /** It runs as administrator: MYLE cannot type into it. */
   elevated: boolean;
-}
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }
 class PasswordsState {
   status = $state<VaultStatus | null>(null);

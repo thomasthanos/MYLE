@@ -21,6 +21,7 @@ const card = {
 };
 function harness(events, api = {}, confirm = async () => true) {
   const context = vm.createContext({
+    message: (error) => (error instanceof Error ? error.message : String(error)),
     require, exports: {}, setTimeout, SvelteSet: Set, appendOutput, confirm,
     readJson: (_key, fallback) => fallback,
     toast: { error() {}, info() {}, success() {} },

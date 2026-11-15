@@ -1,5 +1,5 @@
 import { cloudStorageApi as api, PROVIDERS, type CloudOutcome, type CloudProgress, type CloudStatus } from "./api";
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+import { errorMessage as message } from "../../../../lib/errors";
 const initial = (): CloudProgress => ({ visited: 0, requested: 0, alreadyOnline: 0, pendingUploads: 0, skipped: 0, failed: 0, foldersRequested: 0, foldersAlreadyOnline: 0, current: null, waitingForDrive: false });
 class CloudStorageState {
   providers = $state.raw<CloudStatus[]>(PROVIDERS.map((provider) => ({ ...provider, folders: [], mode: "unavailable", detail: "Cloud folders have not been checked yet." })));

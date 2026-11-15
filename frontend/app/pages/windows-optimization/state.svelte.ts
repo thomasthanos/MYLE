@@ -12,12 +12,10 @@ import {
   type FirmwareRestartOutcome,
   type WindowsOptimizationSnapshot,
 } from "./api";
+import { errorMessage as message } from "../../../lib/errors";
 const POLL_MS = 1500;
 /** The gate keys of this tab (Auto-Logon, the firmware restart, an operation the backend reports). */
 export const TOOLS_KEYS = ["autologon", "firmware", "backend"] as const;
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 class WindowsOptimizationState {
   snapshot = $state<WindowsOptimizationSnapshot | null>(null);
   loading = $state(false);

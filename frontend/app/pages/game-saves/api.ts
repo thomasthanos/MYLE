@@ -1,5 +1,6 @@
 // Typed bridge to the Game Saves commands in backend/src/game_saves/. Filesystem paths are discovered and validated by the backend; destructive actions are addressed by stable game/root/snapshot ids.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export type GameSavesTab = "pc" | "backup";
 export type GameSaveStatus =
   | "notBackedUp"
@@ -182,11 +183,6 @@ export type GameSavesEvent =
   | { event: "stage"; data: { stage: OperationStage } }
   | { event: "progress"; data: { done: number; total: number; current: string | null } }
   | { event: "message"; data: { text: string } };
-function channel(onEvent: (event: GameSavesEvent) => void): Channel<GameSavesEvent> {
-  const value = new Channel<GameSavesEvent>();
-  value.onmessage = onEvent;
-  return value;
-}
 export const gameSavesApi = {
   getState: () => invoke<GameSavesPageState>("game_saves_get_state"),
   pickBackupFolder: () => invoke<GameSavesSettings | null>("game_saves_pick_backup_folder"),

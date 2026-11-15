@@ -4,6 +4,7 @@ import { toast } from "../../../lib/toast.svelte";
 import { account } from "../../account/account.svelte";
 import { steamHelperApi, type FreeOffer, type Game, type RowKind, type Section } from "./api";
 import { appendUnique, createLatest, debounce, DEFAULT_FILTERS, validFilters, type Filters } from "./model";
+import { errorMessage as messageOf } from "../../../lib/errors";
 
 const FILTERS_KEY = "myle.steamHelper.filters";
 /** Quick clicks on several chips ask Steam once, for the last combination. */
@@ -16,7 +17,6 @@ export interface SectionState<T> extends Section<T> {
 }
 
 const notLoaded = <T>(): SectionState<T> => ({ items: [], updatedAt: null, stale: false, error: null, fresh: false, loading: true });
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Survives navigation: the page component is destroyed when you leave it. */
 class SteamHelperState {

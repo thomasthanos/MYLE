@@ -16,6 +16,7 @@ import {
   type SpotifyHubStage,
   type SpotifyHubReleases,
 } from "./api";
+import { errorMessage as message } from "../../../lib/errors";
 export type HubCardStatus = "Ready" | "Running" | "Completed" | "Partial" | "Error";
 export interface ConsoleBuffer {
   lines: string[];
@@ -37,9 +38,6 @@ const STAGE_LABELS: Record<SpotifyHubStage, string> = {
   cleaning: "Cleaning",
   finalizing: "Finalizing",
 };
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 class SpotifyHubState {
   snapshot = $state<SpotifyHubSnapshot | null>(null);
   loading = $state(false);

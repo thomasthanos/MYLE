@@ -29,6 +29,7 @@ import {
   type RootStore,
   type ScheduleWeekday,
 } from "./api";
+import { errorMessage as message } from "../../../lib/errors";
 /** Windows paths, compared as Windows does: case and a trailing slash aside. */
 export function samePath(a: string, b: string) {
   const normal = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -84,9 +85,6 @@ const emptyPage = (): GameSavesPageState => ({
   undoRestore: null,
   cachedScan: null,
 });
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 function matchesStatus(status: GameSaveStatus, filter: GameSavesFilter): boolean {
   switch (filter) {
     case "changed":

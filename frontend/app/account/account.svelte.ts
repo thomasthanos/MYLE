@@ -6,13 +6,11 @@ import { onStorageChange, readJson } from "../../lib/storage";
 import { toast } from "../../lib/toast.svelte";
 import { ACCESS_EVENT, accountApi, type Profile, type Provider } from "./api";
 import { apply, applyGithubProjects, collect, GITHUB_PROJECTS_CHANGE, isSnapshot, isSynced, PROJECTS_UPDATED_AT_KEY } from "./snapshot";
+import { errorMessage as message } from "../../lib/errors";
 const UPDATED_AT_KEY = "myle.sync.updatedAt";
 const SYNCED_AT_KEY = "myle.sync.lastSyncedAt";
 const PUSH_DELAY_MS = 2000;
 const PROVIDER_NAMES: Record<Provider, string> = { discord: "Discord", google: "Google" };
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 /** Written with localStorage directly: these must not count as a change. */
 function writeRaw(key: string, value: string) {
   try {

@@ -7,6 +7,7 @@ import { toast } from "../../../lib/toast.svelte";
 import { cleanerApi, formatSize, type CleanerCategory, type CleanEvent } from "./api";
 import { playCleanComplete, prepareCleanAudio, stopCleanAudio } from "./clean-sound";
 import { DOWNLOADS, DOWNLOADS_CATEGORY, type Preview } from "./downloads";
+import { errorMessage as message } from "../../../lib/errors";
 const KEY = { selected: "cleaner.selected", lastCleaned: "cleaner.lastCleaned", sound: "cleaner.sound" };
 /** The backend's answer when the UAC prompt is declined. */
 const DECLINED = "Administrator approval was declined.";
@@ -51,7 +52,6 @@ export interface CelebrationSummary {
 }
 type Phase = "idle" | "scanning" | "scanning-all" | "scanning-admin" | "cleaning";
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 class CleanerState {
   categories = $state<CleanerCategory[]>([]);
   sizes = $state<Record<string, Measured>>({});

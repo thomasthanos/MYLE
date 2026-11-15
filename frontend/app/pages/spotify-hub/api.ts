@@ -1,4 +1,5 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { channel } from "../../../lib/ipc";
 export type SpotifyHubAction = "installSpicetify" | "restoreSpotify" | "purgeAll";
 export type SpotifyHubStage =
   | "preparing"
@@ -64,11 +65,6 @@ export type SpotifyHubEvent =
   | { event: "stage"; data: { jobId: string; stage: SpotifyHubStage } }
   | { event: "progress"; data: { jobId: string; fraction: number } }
   | { event: "line"; data: { jobId: string; text: string; replace: boolean } };
-function channel(onEvent: (event: SpotifyHubEvent) => void): Channel<SpotifyHubEvent> {
-  const value = new Channel<SpotifyHubEvent>();
-  value.onmessage = onEvent;
-  return value;
-}
 export const spotifyHubApi = {
   getState: () => invoke<SpotifyHubSnapshot>("spotify_hub_get_state"),
   checkUpdates: () => invoke<SpotifyHubReleases>("spotify_hub_check_updates"),
