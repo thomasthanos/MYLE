@@ -12,11 +12,16 @@ pub const ERROR_CANCELLED: i32 = 1223;
 /// turned into an error, never taken for the program's own exit code.
 const START_FAILED: i32 = 0x4D59_4C45;
 /// The `catch` of the elevation scripts: a declined prompt (Win32 error
-/// 1223, inside Start-Process's exception) is `ERROR_CANCELLED`, anything
-/// else `START_FAILED`, so a missing file is never reported as "declined".
+/// 1223) is `ERROR_CANCELLED`, anything else `START_FAILED`, so a missing
+/// file is never reported as "declined". `Process.Start` throws Windows'
+/// error itself (inside PowerShell's wrapper); Start-Process keeps only its
+/// text, which is told by Windows' own text for 1223, in this PC's language.
 fn start_failure() -> String {
     format!(
-        "catch {{ $e = $_.Exception; while ($e -and $e -isnot [ComponentModel.Win32Exception]) {{ $e = $e.InnerException }}; if ($e -and $e.NativeErrorCode -eq {ERROR_CANCELLED}) {{ exit {ERROR_CANCELLED} }}; exit {START_FAILED} }}"
+        "catch {{ $w = $_.Exception; while ($w -and $w -isnot [ComponentModel.Win32Exception]) {{ $w = $w.InnerException }}; \
+         if ($w) {{ if ($w.NativeErrorCode -eq {ERROR_CANCELLED}) {{ exit {ERROR_CANCELLED} }}; exit {START_FAILED} }}; \
+         if ($_.Exception.Message.Contains((New-Object ComponentModel.Win32Exception {ERROR_CANCELLED}).Message)) {{ exit {ERROR_CANCELLED} }}; \
+         exit {START_FAILED} }}"
     )
 }
 /// `Err` for `START_FAILED`; the exit code otherwise.
@@ -79,6 +84,7 @@ pub async fn run_elevated(
     args: &[String],
     hide_window: bool,
 ) -> Result<i32, String> {
+    // Start-Process -Wait, not Process.WaitForExit: it waits for what the program starts too (a setup handing over to msiexec), through a job object.
     let mut script = format!(
         "$p = Start-Process -FilePath {} -Verb RunAs -Wait -PassThru",
         ps_quote(program)
@@ -96,19 +102,31 @@ pub async fn run_elevated(
 /// (0), or `ERROR_CANCELLED` if the user declined the prompt. Does not wait
 /// for the program: for a helper that keeps running and is talked to.
 pub async fn start_elevated(program: &str, args: &[String]) -> Result<i32, String> {
+    let script = format!("try {{ {}; exit 0 }} {}", runas(program, args, true), start_failure());
+    started(powershell_via_stdin(&script).await?)
+}
+/// The script that starts `program` through a UAC prompt as `$p`. Through
+/// `Process.Start` rather than Start-Process: Start-Process replaces Windows'
+/// error with one of its own, so a declined prompt (Win32 error 1223) could
+/// not be told from any other failure.
+fn runas(program: &str, args: &[String], hide_window: bool) -> String {
+    // A helper keeps running and is not waited for: what it starts does not matter here.
     let mut script = format!(
-        "Start-Process -FilePath {} -Verb RunAs -WindowStyle Hidden",
+        "$i = New-Object Diagnostics.ProcessStartInfo; $i.FileName = {}; $i.Verb = 'runas'; $i.UseShellExecute = $true",
         ps_quote(program)
     );
     if !args.is_empty() {
-        script.push_str(&format!(" -ArgumentList {}", ps_quote(&command_line(args))));
+        script.push_str(&format!("; $i.Arguments = {}", ps_quote(&command_line(args))));
     }
-    let script = format!("try {{ {script}; exit 0 }} {}", start_failure());
-    started(powershell_via_stdin(&script).await?)
+    if hide_window {
+        script.push_str("; $i.WindowStyle = 'Hidden'");
+    }
+    script.push_str(&format!("; $p = [Diagnostics.Process]::Start($i); if (-not $p) {{ exit {START_FAILED} }}"));
+    script
 }
 /// `args` as one command line that the program reads back as the same
-/// arguments (`CommandLineToArgvW`'s rules). Given as a list, Start-Process
-/// joins them with plain spaces, and a path with a space becomes two.
+/// arguments (`CommandLineToArgvW`'s rules): joined with plain spaces, a
+/// path with a space would become two.
 pub fn command_line(args: &[String]) -> String {
     args.iter().map(|arg| windows_quote(arg)).collect::<Vec<_>>().join(" ")
 }
@@ -335,6 +353,24 @@ mod tests {
             parsed
         };
         assert_eq!(parsed, args);
+    }
+    #[test]
+    fn a_declined_prompt_is_told_apart_from_other_failures() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        // What Process.Start throws when the user declines: Windows' error 1223 inside PowerShell's wrapper.
+        let declined = format!(
+            "try {{ throw (New-Object Management.Automation.MethodInvocationException 'Start', (New-Object ComponentModel.Win32Exception 1223)) }} {}",
+            start_failure()
+        );
+        assert_eq!(runtime.block_on(powershell_via_stdin(&declined)), Ok(ERROR_CANCELLED));
+        let other = format!("try {{ throw (New-Object ComponentModel.Win32Exception 5) }} {}", start_failure());
+        assert_eq!(runtime.block_on(powershell_via_stdin(&other)).map(started), Ok(Err("Windows could not start it with administrator rights.".into())));
+        // Start-Process's own error: only the text of Windows' error, in this PC's language.
+        let worded = format!(
+            "try {{ throw (New-Object InvalidOperationException ('This command cannot be run due to the error: ' + (New-Object ComponentModel.Win32Exception 1223).Message)) }} {}",
+            start_failure()
+        );
+        assert_eq!(runtime.block_on(powershell_via_stdin(&worded)), Ok(ERROR_CANCELLED));
     }
     #[test]
     fn a_program_windows_cannot_start_is_an_error_not_a_declined_prompt() {
