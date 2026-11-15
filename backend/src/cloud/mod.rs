@@ -4,7 +4,7 @@ mod google_drive;
 pub(crate) mod launch;
 pub(crate) mod onedrive;
 pub(crate) mod online_only;
-mod sync_roots;
+pub(crate) mod sync_roots;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 /// Cloud storage whose desktop app syncs a local folder.

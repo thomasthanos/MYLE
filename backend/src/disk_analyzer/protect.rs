@@ -89,6 +89,9 @@ pub struct Places {
     pub running: Vec<PathBuf>,
     /// The save folders Game Saves found, and each game's title.
     pub saves: Vec<(PathBuf, String)>,
+    /// The folders cloud apps sync (OneDrive, Dropbox, iCloud…), and what
+    /// Explorer calls each.
+    pub cloud: Vec<(PathBuf, String)>,
 }
 impl Places {
     pub fn of_this_pc() -> Self {
@@ -138,6 +141,7 @@ impl Places {
             installed: crate::cleaner::health::install_locations().into_iter().map(|(name, path)| (path, name)).collect(),
             running: running_programs(),
             saves: crate::game_saves::known_save_folders(),
+            cloud: crate::cloud::sync_roots::sync_roots().into_iter().map(|root| (root.path, root.name)).collect(),
         };
         if let Some(profile) = places.profiles.first().cloned() {
             places.known.push(profile.join("AppData"));
@@ -288,6 +292,17 @@ impl Guard {
                     parts: p,
                     why: format!("Save games of {title}. Back them up in Game Saves first."),
                     holds: format!("It holds save games of {title}. Back them up in Game Saves first."),
+                });
+            }
+        }
+        // Recycling in a synced folder deletes it in the cloud and on the user's other devices too.
+        for (path, name) in &places.cloud {
+            let p = parts(path);
+            if !general(&p) {
+                careful.push(Careful {
+                    parts: p,
+                    why: format!("In {name}: it is deleted from the cloud and your other devices too, not only from this PC."),
+                    holds: format!("It holds {name}, a folder synced to the cloud: what is inside is deleted there and on your other devices too."),
                 });
             }
         }
@@ -576,6 +591,21 @@ mod tests {
         assert_eq!(says(&guard, r"C:\Users\Ann\Downloads\setup.exe"), "setup.exe is running. Close it first.");
         assert_eq!(guard.check(Path::new(r"C:\Users\Ann\Downloads\movie.mkv"), false), Verdict::Allowed);
         assert_eq!(says(&guard, r"C:\Windows\explorer.exe"), WINDOWS);
+    }
+    #[test]
+    fn what_a_cloud_app_syncs_goes_only_with_a_warning() {
+        let places = Places {
+            cloud: vec![
+                (r"C:\Users\Ann\OneDrive".into(), "OneDrive - Personal".into()),
+                // A cloud folder that is a whole profile keeps the profile's rule.
+                (r"C:\Users\Ann".into(), "Odd Cloud".into()),
+            ],
+            ..places()
+        };
+        let guard = Guard::new(Path::new(r"C:\"), &places);
+        assert!(says(&guard, r"C:\Users\Ann\OneDrive\Pictures\a.jpg").starts_with("In OneDrive - Personal: it is deleted from the cloud"));
+        assert!(matches!(guard.check(Path::new(r"C:\Users\Ann\OneDrive\Pictures"), false), Verdict::Caution(_)));
+        assert!(says(&guard, r"C:\Users\Ann\Stuff").is_empty(), "outside it, nothing to say");
     }
     #[test]
     fn browser_data_and_save_games_go_only_with_a_warning() {
