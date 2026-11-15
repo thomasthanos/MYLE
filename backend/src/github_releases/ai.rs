@@ -111,6 +111,44 @@ pub(crate) struct ChatRequest {
     pub url: String,
     pub body: Value,
 }
+/// What happens to what is sent, for the address in use: Ollama at
+/// another computer's address is not "this PC".
+pub(crate) fn privacy(settings: &AiSettings, def: &ProviderDef) -> &'static str {
+    if def.id != ProviderId::Ollama {
+        return def.privacy;
+    }
+    let local = reqwest::Url::parse(&base_url(settings, def.id))
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]"));
+    if local { def.privacy } else { "Sent to the computer your Ollama address names, not only this PC." }
+}
+/// Token-shaped text (GitHub, OpenAI-style, AWS, Slack and Google keys) is
+/// replaced before anything goes to a provider: a diff or a commit may hold
+/// one by mistake.
+pub(crate) fn redact_secrets(text: &str) -> String {
+    const PREFIXES: [&str; 10] = ["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "sk-", "AKIA", "xoxb-", "AIza"];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    'scan: while let Some(c) = rest.chars().next() {
+        let at_word_start = out.chars().next_back().is_none_or(|before| !before.is_ascii_alphanumeric() && before != '_' && before != '-');
+        if at_word_start {
+            for prefix in PREFIXES {
+                if let Some(after) = rest.strip_prefix(prefix) {
+                    let tail = after.bytes().take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')).count();
+                    if tail >= 16 {
+                        out.push_str("[redacted]");
+                        rest = &after[tail..];
+                        continue 'scan;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out
+}
 pub(crate) fn base_url(settings: &AiSettings, provider: ProviderId) -> String {
     match (provider, settings.ollama_url.as_deref()) {
         (ProviderId::Ollama, Some(url)) if !url.trim().is_empty() => {
@@ -363,6 +401,7 @@ pub(crate) async fn complete(
     user: &str,
     max_tokens: u32,
 ) -> Result<Answer, String> {
+    let user = &redact_secrets(user);
     let order = ready_order(settings, |p| ready(settings, p));
     let Some(provider) = provider.or_else(|| order.first().copied()) else {
         return Err(Problem::new(
@@ -572,6 +611,26 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    #[test]
+    fn token_shaped_text_never_reaches_a_provider() {
+        let diff = "+GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n+key = \"sk-proj-ABCDEFGHIJKLMNOP1234\"\n+aws AKIAIOSFODNN7EXAMPLE";
+        let sent = redact_secrets(diff);
+        assert_eq!(sent, "+GITHUB_TOKEN=[redacted]\n+key = \"[redacted]\"\n+aws [redacted]");
+        // Words that only contain such letters are left alone, and so are short ones.
+        assert_eq!(redact_secrets("task-1234567890abcdefgh, sk-short, ghp_"), "task-1234567890abcdefgh, sk-short, ghp_");
+        assert_eq!(redact_secrets("Ελληνικά ghp_aaaaaaaaaaaaaaaaaaaaaaaa."), "Ελληνικά [redacted].");
+    }
+    #[test]
+    fn ollama_says_this_pc_only_for_this_pcs_address() {
+        let ollama = ProviderId::Ollama.def();
+        let mut settings = AiSettings::default();
+        assert_eq!(privacy(&settings, ollama), "Nothing leaves this PC.");
+        settings.ollama_url = Some("http://127.0.0.1:11434".into());
+        assert_eq!(privacy(&settings, ollama), "Nothing leaves this PC.");
+        settings.ollama_url = Some("http://192.168.1.20:11434".into());
+        assert!(privacy(&settings, ollama).contains("not only this PC"));
+        assert_eq!(privacy(&settings, ProviderId::Groq.def()), ProviderId::Groq.def().privacy);
+    }
     #[test]
     fn requests_are_built_alike_for_every_provider() {
         let settings = AiSettings::default();

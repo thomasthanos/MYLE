@@ -152,8 +152,12 @@ fn command(git: &Path, repo: &Path, args: &[&str], env: &GitEnv) -> tokio::proce
             "color.ui=false",
             "-c",
             "advice.detachedHead=false",
-        ])
-        .args(args)
+        ]);
+    if env.quiet {
+        // A run the user did not start runs none of the repository's hooks (husky points core.hooksPath at the repository's own scripts): nothing of the repository's runs with the token in its environment unasked.
+        cmd.args(["-c", "core.hooksPath=NUL"]);
+    }
+    cmd.args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
         .env("LANG", "C")

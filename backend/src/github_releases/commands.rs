@@ -113,7 +113,7 @@ fn ai_view(settings: &Settings) -> AiView {
                 None
             };
             ProviderView {
-                def: def.clone(),
+                def: ai::ProviderDef { privacy: ai::privacy(&settings.ai, def), ..def.clone() },
                 model: ai::model(&settings.ai, def.id),
                 ready: if def.needs_key {
                     key.is_some()
@@ -867,6 +867,15 @@ const LOCK_EXCLUDES: &[&str] = &[
     ":(exclude)**/pnpm-lock.yaml",
     ":(exclude)*.min.js",
     ":(exclude)*.map",
+    // Files that hold secrets never go to an AI provider, whatever they changed.
+    ":(exclude).env*",
+    ":(exclude)**/.env*",
+    ":(exclude)*.pem",
+    ":(exclude)*.key",
+    ":(exclude)*.pfx",
+    ":(exclude)*.p12",
+    ":(exclude)*id_rsa*",
+    ":(exclude)*id_ed25519*",
 ];
 /// A commit message for what is staged (everything changed when nothing is).
 #[tauri::command]
