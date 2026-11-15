@@ -1,6 +1,7 @@
 // Typed bridge to the cleaner commands in backend/src/cleaner/.
 import { invoke } from "@tauri-apps/api/core";
 import { channel } from "../../../lib/ipc";
+import { formatBytes as formatSize } from "../../../lib/format";
 export interface CleanerCategory {
   id: string;
   title: string;
@@ -68,15 +69,4 @@ export const cleanerApi = {
     invoke<CleanSummary>("cleaner_clean_elevated", { ids, onEvent: channel(onEvent) }),
 };
 /** "647.3 MB", "7.3 GB", "0 B" */
-export function formatSize(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  const decimals = unit === 0 ? 0 : value >= 100 ? 0 : 1;
-  return `${value.toFixed(decimals)} ${units[unit]}`;
-}
+export { formatSize };

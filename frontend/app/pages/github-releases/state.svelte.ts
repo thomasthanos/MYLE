@@ -32,7 +32,7 @@ import {
   type StepState,
   type WorkflowJob,
 } from "./api";
-export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
+export { formatBytes, formatDate, formatRelative } from "../../../lib/format";
 export { stageIsStep, stepReached } from "./pipeline";
 export type Tab = "changes" | "build" | "release" | "history";
 const SELECTED_KEY = "myle.githubReleases.selected";

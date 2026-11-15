@@ -16,7 +16,7 @@ const FRESH_DAYS = 7;
 /** The full change check and reminder, independently of live folder watching. */
 const CHANGE_CHECK_EVERY = 3 * 24 * 60 * 60 * 1000;
 const LAST_CHANGE_CHECK_KEY = "myle.projectBackups.lastChangeCheck";
-export { formatBytes, formatDate, formatRelative } from "../game-saves/state.svelte";
+export { formatBytes, formatDate, formatRelative } from "../../../lib/format";
 export const stageLabels: Record<Stage, string> = {
   preparing: "Preparing", startingCloud: "Starting the cloud app", closingApp: "Closing the app", scanning: "Reading the project",
   zipping: "Zipping", verifying: "Checking the zip", checkingCompleteness: "Checking nothing is missing", copying: "Copying to the cloud folder",
