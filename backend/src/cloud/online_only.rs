@@ -674,7 +674,7 @@ fn current_clouds() -> Vec<Cloud> {
     clouds(
         &super::detection::detect_folders(),
         &sync_roots::sync_roots(),
-        &mut native::WindowsFiles,
+        &mut native::WindowsFiles::new(),
         &mut DriveShell,
     )
 }
@@ -706,7 +706,7 @@ pub async fn cloud_storage_online_only(
         let plan = plan(&current_clouds(), &clouds, &expected_folders)?;
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
         execute_with(
-            &mut native::WindowsFiles,
+            &mut native::WindowsFiles::new(),
             &mut DriveShell,
             &plan,
             &job.cancel,
@@ -737,7 +737,17 @@ mod native {
     use std::fs::{File, OpenOptions};
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::Storage::{CloudFilters::*, FileSystem::*};
-    pub(super) struct WindowsFiles;
+    /// The Windows side of the walk. One 64 KB answer buffer serves every
+    /// Cloud Files query of a walk, about four per file, instead of a new
+    /// zeroed one each time.
+    pub(super) struct WindowsFiles {
+        answer: Vec<u64>,
+    }
+    impl WindowsFiles {
+        pub(super) fn new() -> Self {
+            Self { answer: vec![0u64; 8192] }
+        }
+    }
     pub(super) struct HeldFile {
         file: File,
         // Deny rename/delete of each ancestor while any child is inspected.
@@ -782,9 +792,8 @@ mod native {
             Ok(())
         }
     }
-    fn placeholder(file: &File) -> Option<Placeholder> {
+    fn placeholder(file: &File, buffer: &mut [u64]) -> Option<Placeholder> {
         // Aligned storage for the fixed prefix and bounded variable identity. Query errors mean "unverified", never permission to change a file.
-        let mut buffer = vec![0u64; 8192];
         let mut returned = 0;
         // SAFETY: owned, aligned output, explicit buffer length, valid handle.
         let result = unsafe {
@@ -857,11 +866,11 @@ mod native {
                 directory: info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0,
                 unsafe_reparse: unsafe_reparse(&tag),
                 links: info.nNumberOfLinks,
-                cloud: placeholder(&handle.file),
+                cloud: placeholder(&handle.file, &mut self.answer),
             })
         }
         fn registration(&mut self, handle: &HeldFile) -> Result<Registration, String> {
-            let mut buffer = vec![0u64; 8192];
+            let buffer = &mut self.answer;
             let mut returned = 0;
             // SAFETY: live attribute handle and aligned output buffer.
             hresult(unsafe {
@@ -1423,7 +1432,7 @@ mod tests {
         let path = root.join("pending.txt");
         std::fs::write(&path, b"not uploaded").unwrap();
         {
-            let mut files = native::WindowsFiles;
+            let mut files = native::WindowsFiles::new();
             let handle = files.open_root(&root).unwrap();
             assert!(files.metadata(&handle).unwrap().directory);
             let child = files.open_child(&path).unwrap();

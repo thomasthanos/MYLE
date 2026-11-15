@@ -159,6 +159,22 @@ impl Allowed {
         }
         self.holds(&normalize(parent).join(name.to_string_lossy().to_ascii_lowercase()))
     }
+    /// `contains` for a file (not a link) a walk found: its folder is
+    /// resolved once for every file in it (`folders` keeps them), not once
+    /// per file, which in a `%TEMP%` of 100,000 files is most of the run.
+    pub fn contains_file(&self, path: &Path, folders: &mut std::collections::HashMap<PathBuf, PathBuf>) -> bool {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return false;
+        };
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return false;
+        }
+        let folder = folders.entry(parent.to_path_buf()).or_insert_with(|| normalize(parent));
+        self.holds(&folder.join(name.to_string_lossy().to_ascii_lowercase()))
+    }
     fn holds(&self, candidate: &Path) -> bool {
         // A root itself is not a target: only what is inside it.
         self.0
@@ -264,6 +280,7 @@ pub fn clean(target: &Target) -> Cleaned {
         return out;
     }
     let allowed = Allowed::new();
+    let mut folders = std::collections::HashMap::new();
     let mut files = Vec::new();
     walk(
         &dir,
@@ -278,7 +295,7 @@ pub fn clean(target: &Target) -> Cleaned {
             .filter(|meta| meta.file_type().is_symlink());
         let inside = match link {
             Some(_) => allowed.contains_link(&path),
-            None => allowed.contains(&path),
+            None => allowed.contains_file(&path, &mut folders),
         };
         if !inside {
             out.skipped += 1;
@@ -420,6 +437,18 @@ mod tests {
             r"%USERPROFILE%\Downloads"
         ))));
         assert!(!is_allowed(&temp.join("..").join("..").join("Documents")));
+        // Resolving each folder once answers the same as each file on its own.
+        let mut folders = std::collections::HashMap::new();
+        for path in [
+            temp.join("some-file.tmp"),
+            temp.join("deep").join("nested.log"),
+            temp.join("deep").join("other.log"),
+            temp.clone(),
+            PathBuf::from(r"C:\Windows\System32\kernel32.dll"),
+            temp.join("..").join("..").join("Documents").join("notes.txt"),
+        ] {
+            assert_eq!(allowed.contains_file(&path, &mut folders), allowed.contains(&path), "{}", path.display());
+        }
     }
     /// A junction is removed itself, wherever it points, and what it points
     /// to is left as it was.
