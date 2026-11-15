@@ -23,6 +23,10 @@
 
   let maximized = $state(false);
   const modules = new PageModules();
+  // Modals cover the frame, or the whole window while it is maximized (tokens.css, lib/portal.ts).
+  $effect(() => {
+    document.documentElement.classList.toggle("maximized", maximized);
+  });
 
   // Notices changed project folders for the owner, whichever page is open. Only the page's state is loaded here; the page itself stays lazy.
   // It stops again when the owner signs out.

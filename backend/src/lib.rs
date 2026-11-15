@@ -517,6 +517,7 @@ pub fn run() {
             publisher_offer::publisher_get,
             publisher_offer::publisher_offered,
             publisher_offer::publisher_trust,
+            publisher_offer::publisher_trust_machine,
             updater::check_for_update,
             whats_new::whats_new_pending,
             whats_new::whats_new_seen,

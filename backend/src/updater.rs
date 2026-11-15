@@ -1048,13 +1048,15 @@ mod tests {
         let unsigned = scratch.join("unsigned.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &unsigned).unwrap();
         assert!(authenticode_signer(&unsigned).is_err());
-        // An installed MYLE (on a developer's PC): its own signer, and an
-        // altered copy of it refused. Not present on CI runners.
+        // An installed MYLE (on a developer's PC): signed with one of the
+        // release certificates (whichever its version was), and an altered
+        // copy of it refused. Not present on CI runners.
         let installed = std::env::var_os("LOCALAPPDATA")
             .map(|local| std::path::PathBuf::from(local).join(r"ThomasThanos\MakeYourLifeEasier\uninstall.exe"))
             .filter(|path| path.is_file());
         if let Some(installed) = installed {
-            assert_eq!(authenticode_signer(&installed).as_deref(), Ok(RELEASE_SIGNERS[0]));
+            let signer = authenticode_signer(&installed).expect("an installed MYLE is signed");
+            assert!(RELEASE_SIGNERS.contains(&signer.as_str()), "{signer} is not a release certificate");
             let mut bytes = std::fs::read(&installed).unwrap();
             bytes[600] ^= 0xFF;
             let altered = scratch.join("altered.exe");

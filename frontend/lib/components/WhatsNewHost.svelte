@@ -7,6 +7,7 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { confirmState } from "../confirm.svelte";
+  import { portal } from "../portal";
   import { toast } from "../toast.svelte";
   import { whatsNew } from "../whats-new.svelte";
   import Markdown from "./Markdown.svelte";
@@ -37,7 +38,7 @@
 
 {#if whatsNew.shown}
   {@const w = whatsNew.shown}
-  <div class="backdrop" transition:fade={{ duration: 150 }}>
+  <div class="backdrop" transition:fade={{ duration: 150 }} {@attach portal}>
     <div class="dialog glass glass--3" role="dialog" aria-modal="true" aria-labelledby="whats-new-title" transition:scale={{ start: 0.96, duration: 180, easing: cubicOut }}>
       <header>
         <span class="icon"><Sparkles size={18} /></span>

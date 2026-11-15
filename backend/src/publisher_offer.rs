@@ -18,6 +18,9 @@ pub struct PublisherState {
     /// "What's new" after an update has offered it once already; Settings
     /// keeps offering it.
     offered: bool,
+    /// Trusted for every account on this PC, which Windows' administrator
+    /// prompt needs to name the publisher.
+    machine: bool,
 }
 
 /// Marks that "What's new" offered it, so it does that once.
@@ -35,7 +38,18 @@ pub fn publisher_get() -> Option<PublisherState> {
         name: publisher::NAME,
         trusted: publisher::is_trusted(),
         offered: offered_marker().is_some_and(|marker| marker.is_file()),
+        machine: publisher::machine_trusted(),
     })
+}
+
+/// Trusts the certificate for every account on this PC, so the administrator
+/// prompt names the publisher too. Windows asks for administrator rights;
+/// `false` when the user said no.
+#[tauri::command]
+pub async fn publisher_trust_machine() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(publisher::trust_machine)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Remembers that "What's new" offered it.

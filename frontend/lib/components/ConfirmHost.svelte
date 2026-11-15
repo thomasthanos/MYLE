@@ -3,6 +3,7 @@
   import { cubicOut } from "svelte/easing";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { confirmState } from "../confirm.svelte";
+  import { portal } from "../portal";
 
   let confirmButton = $state<HTMLButtonElement>();
 
@@ -19,7 +20,7 @@
 
 {#if confirmState.current}
   {@const c = confirmState.current}
-  <div class="backdrop" transition:fade={{ duration: 150 }}>
+  <div class="backdrop" transition:fade={{ duration: 150 }} {@attach portal}>
     <div
       class="dialog glass glass--3"
       role="alertdialog"

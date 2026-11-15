@@ -10,6 +10,11 @@
 //! The app includes this same file (`backend/src/publisher_offer.rs`), so a
 //! copy that came by update, which never shows the setup's last page, offers
 //! it in Settings; it therefore uses nothing else of the setup.
+//!
+//! Windows' administrator prompt (UAC) reads only the machine's trusted roots,
+//! so Settings also offers trusting it for every account on this PC: with
+//! administrator rights, asked for by Windows, and taken back by the
+//! uninstaller the same way.
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CRYPT_E_EXISTS, ERROR_CANCELLED, GetLastError};
@@ -40,6 +45,27 @@ impl Roots {
         let name = wide("ROOT");
         // SAFETY: `name` is NUL-terminated; the store is closed on drop.
         let store = unsafe { CertOpenSystemStoreW(0, name.as_ptr()) };
+        (!store.is_null()).then_some(Self(store))
+    }
+
+    /// The machine's own trusted roots, read only (changing them takes an
+    /// administrator: `trust_machine`).
+    fn machine() -> Option<Self> {
+        use windows_sys::Win32::Security::Cryptography::{
+            CERT_STORE_OPEN_EXISTING_FLAG, CERT_STORE_PROV_SYSTEM_W, CERT_STORE_READONLY_FLAG,
+            CERT_SYSTEM_STORE_LOCAL_MACHINE, CertOpenStore,
+        };
+        let name = wide("ROOT");
+        // SAFETY: `name` is NUL-terminated; the store is closed on drop.
+        let store = unsafe {
+            CertOpenStore(
+                CERT_STORE_PROV_SYSTEM_W,
+                0,
+                0,
+                CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG,
+                name.as_ptr().cast(),
+            )
+        };
         (!store.is_null()).then_some(Self(store))
     }
 
@@ -146,15 +172,77 @@ pub fn is_trusted() -> bool {
     roots.find(&ours).is_some()
 }
 
+/// The visible dialogs (`#32770`) on the desktop, as numbers.
+fn dialogs() -> Vec<isize> {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, IsWindowVisible};
+    unsafe extern "system" fn visit(window: HWND, found: LPARAM) -> i32 {
+        // SAFETY: `window` comes from EnumWindows; `found` is the Vec passed below.
+        unsafe {
+            let mut class = [0u16; 16];
+            let length = GetClassNameW(window, class.as_mut_ptr(), class.len() as i32).max(0) as usize;
+            if IsWindowVisible(window) != 0 && class[..length] == *wide("#32770").split_last().unwrap().1 {
+                (*(found as *mut Vec<isize>)).push(window as isize);
+            }
+        }
+        1
+    }
+    let mut found = Vec::new();
+    // SAFETY: `found` outlives the enumeration, which is synchronous.
+    unsafe { EnumWindows(Some(visit), (&raw mut found) as LPARAM) };
+    found
+}
+
+/// Runs `ask`, which makes Windows put a question about a root certificate on
+/// screen. That dialog has no owner window, so it can open behind MYLE's
+/// (or the setup's): while `ask` waits for the answer, the dialog that
+/// appeared is put on top and given the focus.
+fn question_on_top<T>(ask: impl FnOnce() -> T) -> T {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        ASFW_ANY, AllowSetForegroundWindow, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow,
+        SetWindowPos,
+    };
+    let before = dialogs();
+    let answered = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let until = Instant::now() + Duration::from_secs(30);
+            while !answered.load(Ordering::SeqCst) && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(100));
+                if let Some(window) = dialogs().into_iter().find(|window| !before.contains(window)) {
+                    let window = window as HWND;
+                    // SAFETY: a window handle just listed; at worst it has closed since.
+                    unsafe {
+                        SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                        SetForegroundWindow(window);
+                    }
+                    return;
+                }
+            }
+        });
+        // Should Windows show it from a process of its own, that one may take the focus too.
+        // SAFETY: no pointers.
+        unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+        let answer = ask();
+        answered.store(true, Ordering::SeqCst);
+        answer
+    })
+}
+
 /// Trusts the certificate for this user. Windows asks the user first, with a
 /// window of its own; `Ok(false)` when they said no. Blocks until they answer.
 pub fn trust() -> Result<bool, String> {
     let roots = Roots::open().ok_or("Windows did not open the trusted certificates.")?;
     let ours = Certificate::ours().ok_or("The certificate in this setup is damaged.")?;
-    // SAFETY: both are open; no copy is asked back.
-    let added = unsafe { CertAddCertificateContextToStore(roots.0, ours.0, CERT_STORE_ADD_NEW, null_mut()) } != 0;
-    // SAFETY: read right after the call it describes.
-    let code = unsafe { GetLastError() };
+    let (added, code) = question_on_top(|| {
+        // SAFETY: both are open; no copy is asked back.
+        let added = unsafe { CertAddCertificateContextToStore(roots.0, ours.0, CERT_STORE_ADD_NEW, null_mut()) } != 0;
+        // SAFETY: read right after the call it describes, on the same thread.
+        (added, unsafe { GetLastError() })
+    });
     if added || code == CRYPT_E_EXISTS as u32 {
         Ok(true)
     } else if code == ERROR_CANCELLED {
@@ -173,9 +261,124 @@ pub fn forget() {
     if let Some(found) = roots.find(&ours) {
         // SAFETY: deleting frees the context, whether or not it succeeds, so
         // `found` must not be freed again.
-        unsafe { CertDeleteCertificateFromStore(found.0) };
+        question_on_top(|| unsafe { CertDeleteCertificateFromStore(found.0) });
         std::mem::forget(found);
     }
+}
+
+/// Whether every account on this PC trusts the certificate: the machine's
+/// roots, the only ones Windows' administrator prompt reads.
+pub fn machine_trusted() -> bool {
+    let (Some(roots), Some(ours)) = (Roots::machine(), Certificate::ours()) else {
+        return false;
+    };
+    roots.find(&ours).is_some()
+}
+
+/// Trusts the certificate for every account on this PC. Windows asks for
+/// administrator rights first; `Ok(false)` when the user said no.
+#[allow(dead_code, reason = "offered by the app's Settings; the setup only takes it back")]
+pub fn trust_machine() -> Result<bool, String> {
+    match run_elevated_powershell(&machine_script("Add"))? {
+        None => Ok(false),
+        Some(0) if machine_trusted() => Ok(true),
+        Some(code) => Err(format!("Windows did not trust the certificate for every account (code {code}).")),
+    }
+}
+
+/// Takes back the trust `trust_machine` gave, when there is any; Windows asks
+/// for administrator rights first.
+pub fn forget_machine() {
+    if machine_trusted() {
+        let _ = run_elevated_powershell(&machine_script("Remove"));
+    }
+}
+
+/// A PowerShell script that adds the certificate to, or removes it from
+/// (`action`: `Add` or `Remove`), the machine's trusted roots. The certificate
+/// is written into the script itself, so nothing on disk can be swapped for
+/// another between the user's approval and the change.
+fn machine_script(action: &str) -> String {
+    format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String('{}'))\n\
+         $roots = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')\n\
+         $roots.Open('ReadWrite')\n\
+         try {{ $roots.{action}($certificate) }} finally {{ $roots.Close() }}\n",
+        base64(CERTIFICATE)
+    )
+}
+
+/// Runs `script` in Windows PowerShell as administrator, hidden, and waits for
+/// it: its exit code, or `None` when the user declined the prompt.
+fn run_elevated_powershell(script: &str) -> Result<Option<u32>, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+    use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    let parameters = wide(format!(
+        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {}",
+        encoded_command(script)
+    ));
+    let program = wide(windows_powershell());
+    let verb = wide("runas");
+    // SAFETY: zero is a valid empty value for every field of this plain struct.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = program.as_ptr();
+    info.lpParameters = parameters.as_ptr();
+    info.nShow = SW_HIDE;
+    // SAFETY: every string pointed to outlives the call.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        // SAFETY: read right after the call it describes.
+        return match unsafe { GetLastError() } {
+            ERROR_CANCELLED => Ok(None),
+            code => Err(format!("Windows could not start it with administrator rights (0x{code:08X}).")),
+        };
+    }
+    if info.hProcess.is_null() {
+        return Err("Windows started nothing to wait for.".into());
+    }
+    // SAFETY: the process handle is ours (SEE_MASK_NOCLOSEPROCESS) and closed below.
+    unsafe {
+        let finished = WaitForSingleObject(info.hProcess, 120_000) == WAIT_OBJECT_0;
+        let mut code = 0u32;
+        let read = GetExitCodeProcess(info.hProcess, &mut code) != 0;
+        CloseHandle(info.hProcess);
+        if !finished || !read {
+            return Err("Changing the trusted certificates took too long.".into());
+        }
+        Ok(Some(code))
+    }
+}
+
+/// `script` as PowerShell's `-EncodedCommand` takes it: UTF-16 in base64, so
+/// no quoting can change it on the way.
+fn encoded_command(script: &str) -> String {
+    base64(&script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())
+}
+
+/// Windows PowerShell 5.1, by its full path.
+fn windows_powershell() -> std::path::PathBuf {
+    let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    std::path::Path::new(&windows).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+}
+
+/// Standard base64, with padding.
+fn base64(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            out.push(if i <= chunk.len() { DIGITS[(n >> shift & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -189,6 +392,48 @@ mod tests {
 
     // `trust` and `forget` are never called here: they would change this
     // PC's trusted certificates (after Windows' question).
+
+    /// `trust_machine` and `forget_machine` are never called here either:
+    /// they would ask for administrator rights and change the machine.
+    #[test]
+    fn the_machine_script_carries_this_certificate_and_nothing_else() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        let add = machine_script("Add");
+        assert!(add.contains(&format!("FromBase64String('{}')", base64(CERTIFICATE))));
+        assert!(add.contains("'Root', 'LocalMachine'") && add.contains("$roots.Add($certificate)"));
+        assert!(machine_script("Remove").contains("$roots.Remove($certificate)"));
+        // Read only: whatever the answer on this PC, it changes nothing.
+        let _ = machine_trusted();
+    }
+
+    /// The script reaches PowerShell whole, and the certificate in it opens
+    /// there as ThomasT's: the same first lines, run without administrator
+    /// rights and touching no store.
+    #[test]
+    fn powershell_reads_the_certificate_the_script_carries() {
+        let script = machine_script("Add");
+        let reading = script.split("$roots").next().unwrap().to_string() + "[Console]::Out.Write($certificate.Subject)\n";
+        let output = std::process::Command::new(windows_powershell())
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &encoded_command(&reading)])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "CN=ThomasT");
+    }
+
+    /// Waiting for Windows' question hands back the answer and stops looking
+    /// for the dialog as soon as it is answered.
+    #[test]
+    fn the_question_watch_ends_with_the_answer() {
+        let started = std::time::Instant::now();
+        assert_eq!(question_on_top(|| 7), 7);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert!(dialogs().iter().all(|window| *window != 0));
+    }
 
     /// A program not signed with ThomasT's certificate offers nothing: this
     /// unsigned test, and Windows' own, catalog-signed programs.

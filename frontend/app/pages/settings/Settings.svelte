@@ -52,8 +52,26 @@
   let keepInTray = $state(false);
 
   /** "Show ThomasT as the publisher": only offered by a copy signed with that certificate. */
-  let publisher = $state<{ name: string; trusted: boolean } | null>(null);
+  let publisher = $state<{ name: string; trusted: boolean; machine: boolean } | null>(null);
   let trusting = $state(false);
+
+  /** For every account on this PC, which the administrator prompt needs: Windows asks for administrator rights. */
+  async function trustMachine() {
+    if (!publisher || trusting) return;
+    trusting = true;
+    try {
+      if (await invoke<boolean>("publisher_trust_machine")) {
+        publisher = { ...publisher, trusted: true, machine: true };
+        toast.success(`Windows now shows ${publisher.name} as MYLE's publisher in administrator prompts too.`);
+      } else {
+        toast.info("Nothing changed: administrator rights were declined.");
+      }
+    } catch (error) {
+      toast.error(message(error));
+    } finally {
+      trusting = false;
+    }
+  }
 
   /** Windows asks the user itself; this waits for their answer. */
   async function trustPublisher() {
@@ -316,8 +334,24 @@
             </button>
           </div>
           {#if publisher}
-            {#if publisher.trusted}
+            {#if publisher.machine}
+              <p class="publisher-note"><ShieldCheck size={13} /> Windows shows {publisher.name} as MYLE's publisher, in administrator prompts too.</p>
+            {:else if publisher.trusted}
               <p class="publisher-note"><ShieldCheck size={13} /> Windows shows {publisher.name} as MYLE's publisher.</p>
+              <div class="publisher-offer">
+                <span class="text">
+                  <strong>In administrator prompts too</strong>
+                  <small>
+                    Windows' administrator prompt only reads what every account on this PC trusts. Trusting
+                    {publisher.name} for every account needs administrator rights once; uninstalling MYLE takes it back
+                    the same way.
+                  </small>
+                </span>
+                <button class="btn small" disabled={trusting} onclick={() => void trustMachine()}>
+                  {#if trusting}<LoaderCircle size={12} class="spin" />{:else}<ShieldCheck size={12} />{/if}
+                  {trusting ? "Waiting for Windows…" : "Trust for every account"}
+                </button>
+              </div>
             {:else}
               <div class="publisher-offer">
                 <span class="text">
