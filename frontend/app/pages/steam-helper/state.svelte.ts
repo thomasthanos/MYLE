@@ -144,6 +144,18 @@ class SteamHelperState {
     void this.loadMore();
   }
 
+  /** The first covers of each list as saved on this PC (Steam is not asked), so the preload can decode them before the page opens. Empty until the page has been opened once. */
+  async savedCovers(each = 8): Promise<string[]> {
+    const filters = this.filters;
+    const lists = await Promise.all([
+      steamHelperApi.free(false, true).then((section) => section.items.map((offer) => offer.game.coverUrl)),
+      steamHelperApi.picks(filters, false, true).then((section) => section.items.map((game) => game.coverUrl)),
+      steamHelperApi.row("deals", filters, false, true).then((section) => section.items.map((game) => game.coverUrl)),
+      steamHelperApi.row("freeToPlay", filters, false, true).then((section) => section.items.map((game) => game.coverUrl)),
+    ].map((list) => list.catch((): (string | null)[] => [])));
+    return lists.flatMap((list) => list.slice(0, each)).filter((url): url is string => !!url);
+  }
+
   async #loadFree(force: boolean) {
     const latest = this.#latest.free;
     const request = latest.next();

@@ -578,9 +578,20 @@ pub fn run_hidden(program: &Path, args: &[&str]) -> Option<i32> {
         .and_then(|status| status.code())
 }
 
+/// `System32\<program>` where Windows says it is. Not from `%SystemRoot%`:
+/// the environment is the user's to change; a fixed path if Windows won't say.
 pub fn system32(program: &str) -> PathBuf {
-    let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    PathBuf::from(windows).join("System32").join(program)
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = [0u16; 260];
+    // SAFETY: the buffer and its length match.
+    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    let system = if length == 0 || length >= buffer.len() {
+        PathBuf::from(r"C:\Windows\System32")
+    } else {
+        PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]))
+    };
+    system.join(program)
 }
 
 #[cfg(test)]

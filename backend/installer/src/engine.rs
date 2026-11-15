@@ -255,6 +255,7 @@ pub fn install(
         remove_empty_dirs(dir, &previous.files);
     }
     write_installed(dir, &header.version, &current)?;
+    hide_extras(dir);
 
     report(Progress::Stage {
         stage: Stage::Registering,
@@ -493,7 +494,48 @@ fn write_installed(dir: &Path, version: &str, files: &[String]) -> Result<(), St
         files: files.to_vec(),
     };
     let json = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(product::INSTALL_MANIFEST), json).map_err(|e| e.to_string())
+    let path = dir.join(product::INSTALL_MANIFEST);
+    // Windows refuses to overwrite a hidden file this way (`hide_extras`
+    // hid the last one): it is shown for the write, and hidden again after.
+    set_hidden(&path, false);
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Hides everything at the top of the install folder except the programs a
+/// user opens: MYLE and its uninstaller. Done after every install and
+/// update, so files an update put back, and the app's `data` folder, stay
+/// hidden; the app hides `data` itself too, as it appears only on its first
+/// start.
+fn hide_extras(dir: &Path) {
+    let shown = [product::exe_name(), product::legacy_exe_name(), product::UNINSTALLER.to_string()];
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !shown.iter().any(|program| name.to_string_lossy().eq_ignore_ascii_case(program)) {
+            set_hidden(&entry.path(), true);
+        }
+    }
+}
+
+/// Sets or clears `path`'s hidden attribute, keeping its others.
+fn set_hidden(path: &Path, hidden: bool) {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    let attributes = if hidden {
+        metadata.file_attributes() | FILE_ATTRIBUTE_HIDDEN
+    } else {
+        metadata.file_attributes() & !FILE_ATTRIBUTE_HIDDEN
+    };
+    if attributes != metadata.file_attributes() {
+        let wide = shell::wide(path);
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+        unsafe { SetFileAttributesW(wide.as_ptr(), attributes) };
+    }
 }
 
 /// Removes folders that held `files` once they are empty, deepest first.
@@ -869,6 +911,35 @@ mod tests {
         let app = include_str!("../../src/passwords/hello.rs");
         assert!(app.contains(&format!("const CREDENTIAL: &str = \"{HELLO_CREDENTIAL}\";")));
         // Never called here: it would remove this PC's real key.
+    }
+
+    /// Only MYLE and its uninstaller stay in sight; the next update can still
+    /// write the hidden install record, which is hidden again after it.
+    #[test]
+    fn only_the_programs_stay_visible_and_updates_still_write() {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+        let hidden = |path: &Path| std::fs::metadata(path).unwrap().file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0;
+        let dir = std::env::temp_dir().join(format!("myle-hidden-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for folder in ["data", "extension", "ludusavi"] {
+            std::fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        for file in [product::exe_name(), product::UNINSTALLER.to_string(), "MYLE.ico".to_string()] {
+            std::fs::write(dir.join(file), b"x").unwrap();
+        }
+        write_installed(&dir, "1.0.0", &[]).unwrap();
+        hide_extras(&dir);
+        assert!(!hidden(&dir.join(product::exe_name())) && !hidden(&dir.join(product::UNINSTALLER)));
+        for item in ["data", "extension", "ludusavi", "MYLE.ico", product::INSTALL_MANIFEST] {
+            assert!(hidden(&dir.join(item)), "{item} is hidden");
+        }
+        // The next update: a plain write of a hidden file is refused by Windows.
+        write_installed(&dir, "1.0.1", &[]).unwrap();
+        assert_eq!(read_installed(&dir).unwrap().version, "1.0.1");
+        hide_extras(&dir);
+        assert!(hidden(&dir.join(product::INSTALL_MANIFEST)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

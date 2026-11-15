@@ -38,8 +38,22 @@ fn started(code: i32) -> Result<i32, String> {
 /// which is per user and writable, so a planted `powershell.exe` there would
 /// run in place of the real one.
 pub fn system32(relative: &str) -> std::path::PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    std::path::PathBuf::from(root).join("System32").join(relative)
+    system_folder().join(relative)
+}
+/// `System32`, where Windows says it is. Not from `%SystemRoot%`: the
+/// environment is the user's to change, and these paths are also run as
+/// administrator, so a changed one would have the user approve another
+/// program. A fixed path if Windows won't say.
+fn system_folder() -> std::path::PathBuf {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = [0u16; 260];
+    // SAFETY: the buffer and its length match.
+    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return std::path::PathBuf::from(r"C:\Windows\System32");
+    }
+    std::path::PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]))
 }
 /// Windows PowerShell 5.1, by its full path (see `system32`).
 pub fn powershell() -> std::path::PathBuf {
@@ -70,8 +84,8 @@ pub fn winget() -> std::path::PathBuf {
 }
 /// File Explorer, by its full path (see `system32`).
 pub fn explorer() -> std::path::PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    std::path::PathBuf::from(root).join("explorer.exe")
+    let system = system_folder();
+    system.parent().unwrap_or(&system).join("explorer.exe")
 }
 pub fn hidden(program: impl AsRef<OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(program);

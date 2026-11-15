@@ -55,5 +55,10 @@ export async function preloadApp() {
   await step("Game Saves covers", () => gameSavesState.loadCovers());
   await step("Windows Optimization icons", () => warmAll(["/icons/Windows-AutoLogon.svg", "/icons/Restart-to-BIOS.svg"]));
   await step("Creative Suite icons", () => warmAll(creativeState.apps.map((app) => app.icon)));
+  // The first covers of Steam Game Helper's saved lists: only once the page has been opened (nothing is saved before), and its code loads only now, not with the app.
+  await step("Steam Game Helper covers", async () => {
+    const { steamHelperState } = await import("./pages/steam-helper/state.svelte");
+    await warmAll(await steamHelperState.savedCovers());
+  });
   await step("Spotify Hub updates", () => spotifyHubState.checkUpdates());
 }

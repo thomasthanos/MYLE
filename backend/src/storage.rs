@@ -49,6 +49,12 @@ pub fn local_item(name: &str) -> Result<PathBuf, String> {
 pub fn prepare() -> Result<(), String> {
     let roaming = settle(&roaming_target()?, &legacy_in(&base("APPDATA")?))?;
     let local = settle(&local_target()?, &legacy_in(&base("LOCALAPPDATA")?))?;
+    // `data` sits in the install folder next to MYLE.exe, where everything but
+    // the programs is hidden (the setup's `hide_extras`); it appears only on
+    // the first start, after the setup has finished, so it is hidden here.
+    if local == local_target()? {
+        hide(&local);
+    }
     tidy(&local);
     clear_web_caches(&local);
     let _ = DIRS.set(Dirs { roaming, local });

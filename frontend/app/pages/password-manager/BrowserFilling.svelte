@@ -383,7 +383,7 @@
                 <div class="step-item">
                   <span class="step-num">3</span>
                   <div class="step-content">
-                    <span>Click <b>Load unpacked</b>, and choose the folder above.</span>
+                    <span>Click <b>Load unpacked</b>, then paste the folder path above into the window's address bar. MYLE keeps its folders hidden, so they don't show in the list.</span>
                   </div>
                 </div>
               </div>

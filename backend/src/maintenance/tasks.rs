@@ -284,11 +284,11 @@ pub fn find(id: &str) -> Option<(&'static Card, &'static Action)> {
         .flat_map(|card| card.actions.iter().map(move |action| (card, action)))
         .find(|(_, action)| action.id == id)
 }
-/// `%SystemRoot%\System32\<exe>`, never resolved through `PATH`.
+/// `System32\<exe>` where Windows says it is (`apps::process::system32`), never
+/// resolved through `PATH` or `%SystemRoot%`: these tools run as administrator.
 pub fn system32(exe: &str) -> PathBuf {
-    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     // A 32-bit build would be redirected to SysWOW64, where sfc and chkdsk do not exist; `Sysnative` would be the escape hatch. We only ship x64.
-    PathBuf::from(root).join("System32").join(exe)
+    crate::apps::process::system32(exe)
 }
 #[cfg(test)]
 mod tests {

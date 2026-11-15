@@ -556,8 +556,7 @@ fn open_link() -> bool {
     if register_protocol().is_err() {
         return false;
     }
-    let windows = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-    Command::new(windows.join("explorer.exe"))
+    Command::new(crate::apps::process::explorer())
         .arg(format!("{PROTOCOL}://passwords"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -565,7 +564,7 @@ fn open_link() -> bool {
         .creation_flags(0x0100_0000 | 0x0000_0008)
         .spawn()
         .or_else(|_| {
-            Command::new(windows.join("explorer.exe"))
+            Command::new(crate::apps::process::explorer())
                 .arg(format!("{PROTOCOL}://passwords"))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

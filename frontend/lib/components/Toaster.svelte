@@ -5,12 +5,14 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Info from "@lucide/svelte/icons/info";
   import X from "@lucide/svelte/icons/x";
+  import { portal } from "../portal";
   import { toast } from "../toast.svelte";
 
   const icons = { success: CircleCheck, error: CircleAlert, info: Info };
 </script>
 
-<div class="toaster" aria-live="polite">
+<!-- On <body>, above dialogs: a notice about something done inside a dialog (a key refused, a password copied) shows over its backdrop, not dimmed behind it. -->
+<div class="toaster" aria-live="polite" {@attach portal}>
   {#each toast.visible as t (t.id)}
     {@const Icon = icons[t.kind]}
     <div
@@ -53,15 +55,17 @@
 </div>
 
 <style>
+  /* The content panel's bottom-right corner, measured from the window: above dialogs (90-92), below context menus and tooltips. */
   .toaster {
-    position: absolute;
-    bottom: 20px;
-    right: 22px;
+    --toast-edge: calc(var(--modal-inset, 0px) + var(--gap, 10px));
+    position: fixed;
+    bottom: calc(var(--toast-edge) + 20px);
+    right: calc(var(--toast-edge) + 22px);
     z-index: 120;
     display: flex;
     flex-direction: column-reverse;
     gap: 10px;
-    width: min(390px, calc(100% - 44px));
+    width: min(390px, calc(100vw - var(--toast-edge) * 2 - 44px));
     pointer-events: none;
   }
 
