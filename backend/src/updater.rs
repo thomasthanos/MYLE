@@ -536,7 +536,9 @@ async fn hand_over(app: &AppHandle, exe: &std::path::Path) -> Result<(), String>
         .unwrap_or(shown_window::Wait::TimedOut);
     log(&format!("hand-over: {waited:?} after {} ms", started.elapsed().as_millis()));
     if waited == shown_window::Wait::Exited {
-        return Err("the new version closed before its window opened. Restart MYLE to use it.".into());
+        // This copy stays open: it takes the lock back, so a launch meanwhile does not start a second MYLE.
+        crate::hold_instance_lock();
+        return Err("the new version closed before its window opened. Close MYLE and open it again to use it.".into());
     }
     app.exit(0);
     Ok(())

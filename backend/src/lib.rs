@@ -189,6 +189,24 @@ fn already_running() -> bool {
     }
     true
 }
+/// Whether the running MYLE takes this launch's arguments: the single-
+/// instance plugin's window (`<identifier>-sic`) is there.
+fn running_copy_listens() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let class: Vec<u16> = format!("{IDENTIFIER}-sic").encode_utf16().chain(Some(0)).collect();
+    let title: Vec<u16> = format!("{IDENTIFIER}-siw").encode_utf16().chain(Some(0)).collect();
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    !unsafe { FindWindowW(class.as_ptr(), title.as_ptr()) }.is_null()
+}
+/// Takes the single-instance lock back, for the rest of this process, after
+/// the plugin let it go for an update whose new version then closed: a
+/// later launch sees this copy and does not start a second one.
+pub(crate) fn hold_instance_lock() {
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name: Vec<u16> = format!("{IDENTIFIER}-sim").encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `name` is NUL-terminated; the handle is kept open until the process ends, which is the point.
+    let _ = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+}
 /// Everything the app is built from, for its normal run and for a notice.
 fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
@@ -268,7 +286,14 @@ pub fn run() {
     // A second launch only hands its arguments to the running copy (the
     // single-instance plugin, below): it must not move, tidy or clear the
     // data and web caches that copy is using.
-    if !already_running() {
+    let running = already_running();
+    // A MYLE that stayed open after an update it could not hand over holds
+    // the lock without listening for launches: this one would be a second
+    // copy on the same data and web view profile.
+    if running && !running_copy_listens() {
+        return;
+    }
+    if !running {
         if let Err(error) = storage::prepare() {
             eprintln!("Application-data migration failed: {error}");
         }
