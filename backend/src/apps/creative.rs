@@ -573,8 +573,6 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
         c => Err(format!("PowerShell exited with code {c}.")),
     }
 }
-#[allow(dead_code)]
-pub const WAND_ENHANCER_ID: &str = "creative.wandenhancer";
 pub const WAND_ENHANCER_EXE: &str = "WandEnhancer.exe";
 /// Location where WandEnhancer.exe is saved: %APPDATA%\ThomasThanos\MakeYourLifeEasier\WandEnhancer.exe
 pub fn wand_enhancer_exe_path() -> Result<PathBuf, String> {

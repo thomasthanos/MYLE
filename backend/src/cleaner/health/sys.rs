@@ -324,15 +324,9 @@ pub fn dir_size(path: &Path, limit: usize) -> u64 {
     }
     total
 }
-/// What a folder holds, for a person deciding about it: how many files (up
-/// to `limit` entries looked at; links not followed) and the names of the
-/// first few, shallowest first.
-#[allow(dead_code)]
-pub fn folder_contents(path: &Path, limit: usize, names: usize) -> (usize, Vec<String>) {
-    let (_, files, sample) = folder_stats(path, limit, names);
-    (files, sample)
-}
-/// Returns (total_bytes, file_count, sample_names) in a single directory pass.
+/// What a folder holds, for a person deciding about it, in one pass: its
+/// bytes, how many files (up to `limit` entries looked at; links not
+/// followed) and the names of the first few, shallowest first.
 pub fn folder_stats(path: &Path, limit: usize, names: usize) -> (u64, usize, Vec<String>) {
     let mut total = 0;
     let mut files = 0;

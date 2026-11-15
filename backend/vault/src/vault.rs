@@ -1337,27 +1337,6 @@ impl Vault {
             .collect())
     }
 
-    /// Entries whose linked programs include `exe`, or whose name matches
-    /// it; linked ones first. For filling in from Windows programs, which
-    /// comes in a later step.
-    #[allow(dead_code)]
-    pub fn for_app(&mut self, exe: &str, name: &str) -> Result<Vec<(String, bool)>, String> {
-        let unlocked = self.unlocked()?;
-        let exe = exe.to_lowercase();
-        let name = name.to_lowercase();
-        let mut linked = Vec::new();
-        let mut guessed = Vec::new();
-        for (id, entry) in &unlocked.entries {
-            if entry.apps.iter().any(|app| app.exe == exe) {
-                linked.push((id.clone(), true));
-            } else if !name.is_empty() && matches_name(&entry.title.to_lowercase(), &name) {
-                guessed.push((id.clone(), false));
-            }
-        }
-        linked.extend(guessed);
-        Ok(linked)
-    }
-
     // -------------------------------------------------------------------
     // Sync (see sync.rs): the account holds the same header and records.
 
@@ -1792,23 +1771,6 @@ fn resolve(ours: Option<Entry>, ours_at: u64, theirs: Option<Entry>, theirs_at: 
     }
 }
 
-#[allow(dead_code)]
-/// "Riot Client" for "riot client", "riot", "riotclient": a title and a
-/// program name that share a word of at least four letters.
-fn matches_name(title: &str, name: &str) -> bool {
-    let words = |s: &str| {
-        s.split(|c: char| !c.is_alphanumeric())
-            .filter(|w| w.len() >= 4)
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    let title_words = words(title);
-    let squashed_name: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
-    words(name).iter().any(|w| title_words.contains(w))
-        || title_words
-            .iter()
-            .any(|w| squashed_name.contains(w.as_str()))
-}
 
 /// Trimmed, without empty values, each value once (first one kept). The same
 /// website twice crashed the page that lists them, which keys rows by value.
@@ -2850,28 +2812,5 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn programs_find_their_linked_entries_first() {
-        let (path, mut vault) = temp_vault();
-        vault.create("m", KdfParams::cheap_for_tests()).unwrap();
-        let mut riot = input("Riot Games", "x");
-        riot.apps = vec![AppLink {
-            exe: "riotclientux.exe".into(),
-            name: "Riot Client".into(),
-        }];
-        let linked = vault.save(&riot).unwrap();
-        let guessed = vault.save(&input("Steam account", "y")).unwrap();
-        assert_eq!(
-            vault.for_app("RiotClientUx.exe", "Riot Client").unwrap(),
-            vec![(linked, true)]
-        );
-        // Not linked yet: offered by name, marked as a guess.
-        assert_eq!(
-            vault.for_app("steam.exe", "Steam").unwrap(),
-            vec![(guessed, false)]
-        );
-        assert!(vault.for_app("notepad.exe", "Notepad").unwrap().is_empty());
-        let _ = std::fs::remove_file(path);
-    }
 }
 

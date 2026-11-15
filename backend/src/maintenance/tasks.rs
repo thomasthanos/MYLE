@@ -9,8 +9,6 @@ pub enum Section {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Elevation {
-    #[allow(dead_code)]
-    No,
     /// Try without a prompt first; ask only if Windows refuses.
     IfNeeded,
     Yes,

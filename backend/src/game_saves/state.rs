@@ -31,7 +31,7 @@ pub(crate) struct OperationHandle {
 }
 pub(crate) struct OperationFileLock {
     path: PathBuf,
-    #[allow(dead_code)]
+    /// The open file is the lock; closed (in `drop`) before its name is removed.
     file: Option<File>,
 }
 /// Why an operation cannot begin while another process (the scheduled

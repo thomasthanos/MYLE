@@ -2031,7 +2031,7 @@ mod tests {
         std::fs::create_dir_all(dir.join(r"deep\er")).unwrap();
         std::fs::write(dir.join("top.ini"), b"x").unwrap();
         std::fs::write(dir.join(r"deep\er\inner.dat"), b"x").unwrap();
-        assert_eq!(sys::folder_contents(&dir, 100, 1), (2, vec!["top.ini".to_string()]), "shallowest first");
+        assert_eq!(sys::folder_stats(&dir, 100, 1), (2, 2, vec!["top.ini".to_string()]), "shallowest first");
         std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
