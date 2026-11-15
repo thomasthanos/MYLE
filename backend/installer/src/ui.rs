@@ -117,7 +117,7 @@ struct SetupState {
     extension_url: Option<&'static str>,
     notice: Option<NoticeInfo>,
     /// MYLE's release certificate, which the last page offers to trust
-    /// (`publisher.rs`); installing only.
+    /// (`publisher.rs`); installing only, with a setup signed with it.
     publisher: Option<Publisher>,
 }
 
@@ -159,10 +159,14 @@ fn setup_state(context: State<'_, Context>) -> SetupState {
                 ready: header.is_some(),
                 extension_url: product::extension_url(),
                 notice: None,
-                publisher: Some(Publisher {
-                    name: publisher::NAME,
-                    trusted: publisher::is_trusted(),
-                }),
+                // Offered only by a setup signed with the certificate itself:
+                // for an older release or an unsigned build it changes nothing.
+                publisher: std::env::current_exe()
+                    .is_ok_and(|exe| publisher::signs(&exe))
+                    .then(|| Publisher {
+                        name: publisher::NAME,
+                        trusted: publisher::is_trusted(),
+                    }),
             }
         }
         Mode::Uninstall { dir } => SetupState {

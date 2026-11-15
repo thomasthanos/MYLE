@@ -71,6 +71,64 @@ impl Drop for Certificate {
     }
 }
 
+/// Whether `path` carries an intact signature made with this certificate.
+/// Only then does trusting it change what Windows shows, so a release still
+/// signed with the earlier certificate, or a build that isn't signed, offers
+/// nothing.
+pub fn signs(path: &std::path::Path) -> bool {
+    signer(path).is_some_and(|der| der == CERTIFICATE)
+}
+
+/// The certificate whose embedded signature covers `path` unaltered, whether
+/// or not Windows trusts it yet; never fetched over the network.
+fn signer(path: &std::path::Path) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Security::WinTrust::{
+        WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
+        WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY,
+        WTD_UI_NONE, WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
+    };
+    const CERT_E_UNTRUSTEDROOT: i32 = 0x800B_0109_u32 as i32;
+    let wide = shell::wide(path.as_os_str());
+    let mut file = WINTRUST_FILE_INFO {
+        cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: wide.as_ptr(),
+        ..Default::default()
+    };
+    let mut data = WINTRUST_DATA {
+        cbStruct: size_of::<WINTRUST_DATA>() as u32,
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_NONE,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 { pFile: &mut file },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+        ..Default::default()
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    // SAFETY: `data`, `file` and `wide` outlive both calls; the state the
+    // first call opens is read only in between and closed by the second.
+    let status = unsafe { WinVerifyTrust(null_mut(), &mut action, (&raw mut data).cast()) };
+    let der = (status == 0 || status == CERT_E_UNTRUSTEDROOT)
+        .then(|| unsafe {
+            // SAFETY: provider data of the verification just made, still open.
+            let provider = WTHelperProvDataFromStateData(data.hWVTStateData);
+            let signer = if provider.is_null() { null_mut() } else { WTHelperGetProvSignerFromChain(provider, 0, 0, 0) };
+            if signer.is_null() || (*signer).csCertChain == 0 || (*signer).pasCertChain.is_null() {
+                return None;
+            }
+            let certificate = (*(*signer).pasCertChain).pCert;
+            if certificate.is_null() {
+                return None;
+            }
+            Some(std::slice::from_raw_parts((*certificate).pbCertEncoded, (*certificate).cbCertEncoded as usize).to_vec())
+        })
+        .flatten();
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    // SAFETY: closes the state the first call opened.
+    unsafe { WinVerifyTrust(null_mut(), &mut action, (&raw mut data).cast()) };
+    der
+}
+
 /// Whether Windows already trusts the certificate on this PC, for this user
 /// or for every user.
 pub fn is_trusted() -> bool {
@@ -123,6 +181,15 @@ mod tests {
 
     // `trust` and `forget` are never called here: they would change this
     // PC's trusted certificates (after Windows' question).
+
+    /// A program not signed with ThomasT's certificate offers nothing: this
+    /// unsigned test, and Windows' own, catalog-signed programs.
+    #[test]
+    fn only_a_program_signed_with_it_counts() {
+        assert!(!signs(&std::env::current_exe().unwrap()));
+        assert!(!signs(&shell::system32("cmd.exe")));
+        assert!(!signs(std::path::Path::new(r"C:\no\such\file.exe")));
+    }
 
     /// What the setup offers to trust is ThomasT's certificate, made for
     /// signing programs and nothing else, and not a certificate authority.
