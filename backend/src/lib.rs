@@ -147,6 +147,8 @@ fn page_asked(args: &[String]) -> Option<&'static str> {
         Some("game-saves")
     } else if args.iter().any(|a| a == game_saves::notice::OPEN_STEAM_HELPER_FLAG) {
         Some("steam-helper")
+    } else if args.iter().any(|a| a == "--open-system-cleaner") {
+        Some("system-cleaner")
     } else {
         None
     }
@@ -336,6 +338,9 @@ pub fn run() {
             // Something became free on Steam and its notice was clicked.
             if args.iter().any(|a| a == game_saves::notice::OPEN_STEAM_HELPER_FLAG) {
                 let _ = app.emit("myle-navigate", "steam-helper");
+            }
+            if args.iter().any(|a| a == "--open-system-cleaner") {
+                let _ = app.emit("myle-navigate", "system-cleaner");
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -535,6 +540,7 @@ pub fn run() {
             cleaner::cleaner_is_elevated,
             cleaner::cleaner_clean,
             cleaner::cleaner_clean_elevated,
+            cleaner::cleaner_relaunch_elevated,
             cleaner::downloads::cleaner_downloads_preview,
             cleaner::downloads::cleaner_downloads_delete,
             cleaner::health::cleaner_health_scan,

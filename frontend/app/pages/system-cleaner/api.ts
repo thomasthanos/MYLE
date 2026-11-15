@@ -67,6 +67,7 @@ export const cleanerApi = {
     invoke<CleanSummary>("cleaner_clean", { ids, onEvent: channel(onEvent) }),
   cleanElevated: (ids: string[], onEvent: (e: CleanEvent) => void) =>
     invoke<CleanSummary>("cleaner_clean_elevated", { ids, onEvent: channel(onEvent) }),
+  relaunchElevated: () => invoke<void>("cleaner_relaunch_elevated"),
 };
 /** "647.3 MB", "7.3 GB", "0 B" */
 export { formatSize };

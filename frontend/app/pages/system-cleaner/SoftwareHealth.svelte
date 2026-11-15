@@ -27,6 +27,7 @@
   import Recycle from "@lucide/svelte/icons/recycle";
   import Bell from "@lucide/svelte/icons/bell";
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import ProgressBar from "../../../lib/components/ProgressBar.svelte";
   import Select, { type SelectOption } from "../../../lib/components/Select.svelte";
@@ -143,6 +144,10 @@
   function isEmptyFolder(detail: string): boolean {
     return /is empty/i.test(detail);
   }
+
+  onMount(() => {
+    void health.checkElevated();
+  });
 </script>
 
 <section class="health" aria-label="Software Health">
@@ -152,6 +157,21 @@
       <p>Clean leftover files or manage what your apps can do. Review changes before applying them.</p>
     </div>
     <div class="actions">
+      {#if health.appElevated === false}
+        <button
+          class="btn admin-btn"
+          type="button"
+          disabled={disabled}
+          title="Run MYLE as Administrator for full access to clean protected leftover folders and registry keys"
+          onclick={() => health.relaunchElevated()}
+        >
+          <ShieldAlert size={15} /> Run as Administrator
+        </button>
+      {:else if health.appElevated === true}
+        <span class="admin-badge" title="Running with Administrator privileges (Full access to all system files and registry)">
+          <ShieldCheck size={14} /> Administrator Mode
+        </span>
+      {/if}
       {#if health.restore.length}
         <button class="btn" disabled={disabled} aria-expanded={showRestore} onclick={() => showRestore = !showRestore}><History size={15} /> History ({health.restore.length})</button>
       {/if}
@@ -181,7 +201,18 @@
   {/if}
 
   {#if health.lastResults.length && !disabled}
-    <div class="outcome" role="status"><CheckCheck size={16} /><span>{lastSucceeded} completed{lastFailed ? ` · ${lastFailed} need attention` : " · Changes applied"}</span>{#if failedCount}<button class="btn small" onclick={() => health.retryFailed()}>Retry failed ({failedCount})</button>{/if}</div>
+    <div class="outcome" role="status">
+      <CheckCheck size={16} />
+      <span>{lastSucceeded} completed{lastFailed ? ` · ${lastFailed} need attention` : " · Changes applied"}</span>
+      {#if failedCount}
+        <button class="btn small" onclick={() => health.retryFailed()}>Retry failed ({failedCount})</button>
+        {#if health.appElevated === false}
+          <button class="btn small primary admin-retry-btn" onclick={() => health.relaunchElevated()}>
+            <ShieldCheck size={13} /> Restart as Administrator
+          </button>
+        {/if}
+      {/if}
+    </div>
   {/if}
 
   {#if showRestore}
@@ -253,6 +284,21 @@
       {#if categoryError}<p class="error" role="alert">{categoryError}</p>{/if}
       {#if category === "cleanup" || category === "controls"}
         {#each MODULES.filter((m) => CLEANUP_MODULES.has(m.id) === (category === "cleanup") && health.reports[m.id]?.error) as m}<p class="error" role="alert">{m.title}: {health.reports[m.id].error}</p>{/each}
+      {/if}
+
+      {#if health.appElevated === false && rows.some((f) => f.flags.some((fl) => fl.toLowerCase().includes("admin")))}
+        <div class="admin-callout surface">
+          <div class="admin-callout-info">
+            <ShieldAlert size={18} class="admin-callout-icon" />
+            <div>
+              <strong>Some leftovers require Administrator privileges</strong>
+              <p>Protected folders in ProgramData, Program Files, or system registry entries need administrator rights to be removed.</p>
+            </div>
+          </div>
+          <button class="btn primary small" disabled={disabled} onclick={() => health.relaunchElevated()}>
+            <ShieldCheck size={14} /> Restart as Administrator
+          </button>
+        </div>
       {/if}
 
       {#if !rows.length}
@@ -336,8 +382,13 @@
                       <CircleAlert size={15} class="failure-icon" />
                       <div class="failure-body">
                         <strong class="failure-title">{health.failures[f.id]}</strong>
-                        {#if health.failures[f.id].includes("code 120") || health.failures[f.id].toLowerCase().includes("in use")}
-                          <p class="failure-sub">This folder may require Administrator privileges, or some of its files are locked by a Windows service.</p>
+                        {#if health.failures[f.id].includes("code 120") || health.failures[f.id].toLowerCase().includes("in use") || health.failures[f.id].toLowerCase().includes("administrator")}
+                          <p class="failure-sub">
+                            This folder may require Administrator privileges.
+                            {#if health.appElevated === false}
+                              <button type="button" class="link-btn" onclick={() => health.relaunchElevated()}>Restart MYLE as Administrator</button> to clean it.
+                            {/if}
+                          </p>
                         {/if}
                       </div>
                     </div>
@@ -593,5 +644,79 @@
     .search { flex-basis: 100%; }
     .selection .actions { width: 100%; justify-content: flex-start; }
     .tools-actions { width: 100%; margin-left: 0; }
+  }
+  .admin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.28);
+  }
+  .admin-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    transition: all 150ms ease;
+  }
+  .admin-btn:hover {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #fef08a;
+  }
+  .admin-callout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+  }
+  .admin-callout-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  :global(.admin-callout-icon) {
+    color: #fbbf24;
+    flex-shrink: 0;
+  }
+  .admin-callout-info strong {
+    display: block;
+    font-size: 0.88rem;
+    color: #fef3c7;
+  }
+  .admin-callout-info p {
+    margin: 2px 0 0;
+    font-size: 0.8rem;
+    color: #cbd5e1;
+  }
+  .admin-retry-btn {
+    background: #eab308;
+    color: #000;
+    font-weight: 600;
+  }
+  .link-btn {
+    background: none;
+    border: none;
+    color: #38bdf8;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    margin: 0;
+  }
+  .link-btn:hover {
+    color: #7dd3fc;
   }
 </style>

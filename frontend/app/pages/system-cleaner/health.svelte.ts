@@ -2,7 +2,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { confirm } from "../../../lib/confirm.svelte";
 import { toast } from "../../../lib/toast.svelte";
-import { formatSize } from "./api";
+import { formatSize, cleanerApi } from "./api";
 import type { BatchItem } from "./health-model";
 export type HealthModule =
   | "leftovers" | "broken" | "redundant" | "hibernation"
@@ -100,11 +100,28 @@ export class HealthState {
     if (!ids.length) return 0;
     return ids.reduce((n, id) => n + this.progress[id], 0) / ids.length;
   }
+  appElevated = $state<boolean | null>(null);
+
+  async checkElevated() {
+    this.appElevated = await cleanerApi.isElevated().catch(() => false);
+  }
+
+  async relaunchElevated() {
+    try {
+      await cleanerApi.relaunchElevated();
+    } catch (e) {
+      const err = String(e);
+      if (err.includes("declined")) toast.info("Administrator approval was declined.");
+      else toast.error(`Could not restart as administrator: ${err}`);
+    }
+  }
+
   async scan(modules: HealthModule[] = []) {
     if (this.scanning || this.busy) return;
     await this.#scan(modules, true);
   }
   async #scan(modules: HealthModule[], recommend: boolean) {
+    void this.checkElevated();
     const ids = modules.length ? modules : MODULES.map((m) => m.id);
     this.scanning = true;
     this.total = ids.length;
@@ -178,8 +195,10 @@ export class HealthState {
         const groups = new Map<HealthAction, Finding[]>();
         for (const i of items) groups.set(i.action, [...groups.get(i.action) ?? [], byId.get(i.id)!]);
         const bytes = items.reduce((n, i) => n + (byId.get(i.id)?.size ?? 0), 0);
+        const hasAdminItems = items.some((i) => byId.get(i.id)?.flags.some((fl) => fl.toLowerCase().includes("admin")));
+        const adminWarning = this.appElevated === false && hasAdminItems ? "\n\n⚠️ Notice: Some items require Administrator privileges. If cleaning fails, you can restart MYLE as Administrator." : "";
         const message = [...groups].map(([action, rows]) => `${ACTION_LABELS[action]} (${rows.length})\n${ACTION_NOTES[action] ?? "Changes are recorded for restore."}\n${rows.map((f) => `• ${f.title}${f.module === "permissions" && f.flags[0] ? ` (${f.flags[0]})` : ""}${f.path ? ` — ${f.path}` : ""}`).join("\n")}`).join("\n\n");
-        if (!await confirm({ title: `Review ${items.length} selected item${items.length === 1 ? "" : "s"}`, message: `${message}${bytes ? `\n\nSelected files: ${formatSize(bytes)}` : ""}`, confirmLabel: "Apply changes", danger: items.some((i) => i.action === "forceClean") })) return;
+        if (!await confirm({ title: `Review ${items.length} selected item${items.length === 1 ? "" : "s"}`, message: `${message}${bytes ? `\n\nSelected files: ${formatSize(bytes)}` : ""}${adminWarning}`, confirmLabel: "Apply changes", danger: items.some((i) => i.action === "forceClean") })) return;
       }
       attempted = true;
       for (const item of items) this.#attempts.set(item.id, item);
@@ -233,3 +252,4 @@ export class HealthState {
   }
 }
 export const health = new HealthState();
+void health.checkElevated();

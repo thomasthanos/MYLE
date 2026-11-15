@@ -18,6 +18,7 @@
   import DiskAnalyzer from "../disk-analyzer/DiskAnalyzer.svelte";
   import { cleanerState } from "./state.svelte";
   import { health } from "./health.svelte";
+  import { readJson, writeJson } from "../../../lib/storage";
 
   const tools = [
     { id: "cleanup", label: "Cleanup", icon: Sparkles, color: "#7dd3fc" },
@@ -25,13 +26,15 @@
     { id: "disk", label: "Disk Analyzer", icon: HardDrive, color: "#fbbf24" },
   ] as const;
   type Tool = (typeof tools)[number]["id"];
-  let tab = $state<Tool>("cleanup");
+  const TAB_KEY = "myle.system-cleaner.tab";
+  let tab = $state<Tool>(readJson(TAB_KEY, "cleanup", (v) => tools.some((t) => t.id === v)));
   let diskOpened = $state(false);
   let scanButton: HTMLButtonElement;
   let toolbar: HTMLElement;
 
   function selectTab(id: Tool) {
     tab = id;
+    writeJson(TAB_KEY, id);
     if (id === "disk") diskOpened = true;
   }
 

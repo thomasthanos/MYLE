@@ -128,6 +128,41 @@ pub fn cleaner_is_elevated() -> bool {
     crate::elevated_pipe::is_elevated(std::process::id())
 }
 
+/// Relaunches the application as Administrator through a UAC prompt,
+/// keeping navigation to the system cleaner.
+#[tauri::command]
+pub async fn cleaner_relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_str = current_exe
+        .to_str()
+        .ok_or_else(|| "The application path is not valid Unicode.".to_string())?;
+
+    let (done, released) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        tauri_plugin_single_instance::destroy(&handle);
+        let _ = done.send(());
+    })
+    .map_err(|e| e.to_string())?;
+    let _ = released.await;
+
+    let args = ["--open-system-cleaner".to_string()];
+    match crate::apps::process::start_elevated(exe_str, &args).await? {
+        0 => {
+            app.exit(0);
+            Ok(())
+        }
+        crate::apps::process::ERROR_CANCELLED => {
+            crate::hold_instance_lock();
+            Err(crate::elevated_pipe::DECLINED.into())
+        }
+        code => {
+            crate::hold_instance_lock();
+            Err(format!("Could not start as administrator (code {code})"))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn cleaner_admin_ready() -> bool {
     cleaner_is_elevated() || elevated::is_running().await
