@@ -343,6 +343,23 @@ class ProjectBackupsState {
   setFilter(filter: "all" | Group["key"]) {
     this.filter = filter;
   }
+  /* Signed out, or no longer the owner: what the page knew (the projects, their folders, backups and changes) is dropped, answers still on their way are ignored, and the next visit loads it again. */
+  forget() {
+    this.#pageSequence++;
+    this.loaded = false;
+    this.page = emptyPage;
+    this.loading = true;
+    this.error = null;
+    this.failures = [];
+    this.backups = {};
+    this.backupErrors = {};
+    this.changes = {};
+    this.checking = [];
+    this.editor = null;
+    this.compare = null;
+    this.picked = [];
+    this.expanded = null;
+  }
   async init() {
     if (this.loaded && !this.loading) {
       void this.refresh(false);

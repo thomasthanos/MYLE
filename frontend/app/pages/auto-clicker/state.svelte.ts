@@ -13,6 +13,10 @@ export class AutoClickerState {
   pickingId = $state<string | null>(null);
   error = $state<string | null>(null);
   saveError = $state<string | null>(null);
+  /* Worked out when what they read changes, not on every read: the page reads them on every redraw. */
+  readonly active = $derived(this.profiles?.items.find((p) => p.id === this.profiles?.activeId) ?? null);
+  readonly busy = $derived(isBusy(this.status) || this.pendingStart || this.pickingId !== null);
+  readonly validation = $derived(this.active ? validateConfig(this.active.config) : null);
   #api: typeof clickerApi;
   #load: Promise<void> | null = null;
   #subscribed = false;
@@ -24,9 +28,6 @@ export class AutoClickerState {
   #pickRequest: string | undefined;
   #startGeneration = 0;
   constructor(api = clickerApi) { this.#api = api; }
-  get active() { return this.profiles?.items.find(p => p.id === this.profiles?.activeId) ?? null; }
-  get busy() { return isBusy(this.status) || this.pendingStart || this.pickingId !== null; }
-  get validation() { return this.active ? validateConfig(this.active.config) : null; }
   accept(status: Status) {
     if (this.status && status.revision < this.status.revision) return;
     this.status = status;

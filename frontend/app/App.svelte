@@ -30,9 +30,13 @@
     if (!isTauri() || account.owner === projectBackupsStarted) return;
     projectBackupsStarted = account.owner;
     const start = projectBackupsStarted;
-    void import("./pages/project-backups/state.svelte").then(({ projectBackupsState }) =>
-      start ? projectBackupsState.startDetection() : projectBackupsState.stopDetection(),
-    );
+    void import("./pages/project-backups/state.svelte").then(({ projectBackupsState }) => {
+      if (start) return projectBackupsState.startDetection();
+      projectBackupsState.stopDetection();
+      projectBackupsState.forget();
+    });
+    // What the owner's pages knew does not stay in memory after they sign out.
+    if (!start) void import("./pages/github-releases/state.svelte").then(({ githubReleases }) => githubReleases.forget());
   });
 
   onMount(() => {

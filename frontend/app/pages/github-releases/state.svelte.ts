@@ -340,6 +340,26 @@ class GithubReleasesState {
       null
     );
   });
+  /* Signed out, or no longer the owner: what the page knew (the projects, their paths and state) is dropped, answers still on their way are ignored, and the next visit loads it again. */
+  forget() {
+    this.#started = false;
+    this.#readSequence++;
+    this.#projectsRevision++;
+    this.page = null;
+    this.loading = true;
+    this.error = null;
+    this.statuses = {};
+    this.remotes = {};
+    this.refreshing = {};
+    this.busy = {};
+    this.gitOutput = {};
+    this.found = null;
+    this.scanning = false;
+    this.settingsOpen = null;
+    this.drafts = {};
+    this.builds.clear();
+    this.releases.clear();
+  }
   async init() {
     if (this.#started) {
       void this.refreshSelected(false);
