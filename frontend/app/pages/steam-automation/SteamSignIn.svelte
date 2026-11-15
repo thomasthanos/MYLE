@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Modern, user-friendly Steam sign-in hero view shown when Steam is not connected.
+  // Compact, responsive Steam sign-in hero view that fits 720p, 1080p and 1440p with zero scrollbar,
+  // matching MYLE's exact surface and control design tokens.
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Award from "@lucide/svelte/icons/award";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
@@ -16,32 +17,6 @@
   const running = $derived(ready && (status?.steamRunning ?? false));
   const expired = $derived(status?.communitySignedIn ?? false);
 
-  const FEATURES = [
-    {
-      icon: Layers,
-      title: "Automated Card Farming",
-      detail: "Idles games with remaining trading card drops in the background without installing or playing them.",
-      color: "#60a5fa",
-    },
-    {
-      icon: Award,
-      title: "Achievement Manager",
-      detail: "Inspect achievement progress for your library and safely unlock achievements at natural intervals.",
-      color: "#f59e0b",
-    },
-    {
-      icon: Package,
-      title: "Smart Market & Inventory",
-      detail: "Automatically prices and lists duplicate cards on the Steam Market while always keeping one copy.",
-      color: "#34d399",
-    },
-    {
-      icon: Gamepad2,
-      title: "Library & Idle Booster",
-      detail: "Track full library stats, manage favorites, and add playtime safely with refund-window protection.",
-      color: "#a78bfa",
-    },
-  ];
   const TAB_DESCRIPTIONS: Record<string, string> = {
     games: "Sign in with your Steam account to browse and search your library, track playtime, and idle games.",
     cards: "Sign in with your Steam account to automatically idle games and collect all your trading card drops.",
@@ -50,26 +25,54 @@
   };
 
   const currentDesc = $derived(TAB_DESCRIPTIONS[page.view] ?? TAB_DESCRIPTIONS.games);
+
+  const FEATURES = [
+    {
+      icon: Layers,
+      title: "Automated Card Farming",
+      detail: "Idles games in the background to collect trading card drops.",
+      color: "var(--accent)",
+    },
+    {
+      icon: Award,
+      title: "Achievement Manager",
+      detail: "Inspect library achievements and safely unlock milestones.",
+      color: "#f59e0b",
+    },
+    {
+      icon: Package,
+      title: "Smart Market & Inventory",
+      detail: "Prices and lists duplicate cards while keeping one of each.",
+      color: "var(--ok)",
+    },
+    {
+      icon: Gamepad2,
+      title: "Library & Idle Booster",
+      detail: "Track playtime and add hours safely with refund protection.",
+      color: "#a78bfa",
+    },
+  ];
 </script>
 
 <div class="steam-connect">
-  <!-- Glowing Hero Card -->
-  <div class="hero-card">
+  <div class="hero-card surface">
+    <!-- Steam Logo with subtle ambient glow -->
     <div class="logo-wrap">
       <div class="logo-glow"></div>
-      <img src="/icons/installapps/Steam.svg" alt="Steam" class="steam-logo" width="72" height="72" />
+      <img src="/icons/installapps/Steam.svg" alt="Steam" class="steam-logo" width="52" height="52" />
     </div>
 
+    <!-- Status badge -->
     <div class="status-badge" class:online={running}>
       <span class="dot" class:on={running}></span>
       <span>{ready ? (running ? "Steam app is open on this PC" : "Steam app is closed") : "Checking Steam…"}</span>
     </div>
 
+    <!-- Title & dynamic subtitle -->
     <h2>{expired ? "Steam Session Expired" : "Connect Steam Automation"}</h2>
-
     <p class="subtitle">
       {#if expired}
-        Your Steam Community session has expired or ended. Sign in again to refresh your library, card drops, and market listings.
+        Your Steam Community session has ended. Sign in again to refresh your library, card drops, and market listings.
       {:else}
         {currentDesc}
       {/if}
@@ -78,49 +81,49 @@
     <!-- Main Call to Action -->
     <div class="action-wrap">
       <button
-        class="connect-btn"
+        class="btn primary connect-btn"
         type="button"
         disabled={page.signingIn}
         onclick={() => void page.signIn()}
       >
         {#if page.signingIn}
-          <LoaderCircle class="spinner" size={18} />
+          <LoaderCircle class="spinner" size={16} />
           <span>Finish in the Steam window…</span>
         {:else if expired}
-          <Sparkles size={18} />
+          <Sparkles size={15} />
           <span>Sign in again with Steam</span>
-          <ArrowRight size={17} />
+          <ArrowRight size={15} />
         {:else}
-          <Sparkles size={18} />
+          <Sparkles size={15} />
           <span>Sign in with Steam</span>
-          <ArrowRight size={17} />
+          <ArrowRight size={15} />
         {/if}
       </button>
 
       {#if page.signingIn}
         <div class="signing-banner" role="status">
-          <LoaderCircle class="spinner" size={17} />
+          <LoaderCircle class="spinner" size={15} />
           <div class="signing-text">
             <strong>A secure Steam login window is open</strong>
-            <p>Enter your Steam credentials and Steam Guard code there. MYLE will automatically detect your login once complete.</p>
+            <p>Log in with your Steam account and Steam Guard there. MYLE will detect your session automatically.</p>
           </div>
         </div>
       {/if}
 
       {#if page.actionError}
         <div class="error-banner" role="alert">
-          <CircleAlert size={17} />
+          <CircleAlert size={15} />
           <span>{page.actionError}</span>
         </div>
       {/if}
     </div>
 
-    <!-- Feature Highlights Grid -->
+    <!-- Features Grid (Compact 2x2) -->
     <div class="features-grid">
       {#each FEATURES as feat (feat.title)}
         <div class="feature-card">
-          <div class="feat-icon" style="color: {feat.color}; background: color-mix(in srgb, {feat.color} 12%, transparent);">
-            <feat.icon size={20} />
+          <div class="feat-icon" style="color: {feat.color}; background: color-mix(in srgb, {feat.color} 14%, transparent);">
+            <feat.icon size={17} />
           </div>
           <div class="feat-content">
             <h4>{feat.title}</h4>
@@ -130,15 +133,14 @@
       {/each}
     </div>
 
-    <!-- Security & Privacy Guarantee -->
+    <!-- Security & Privacy Guarantee (Compact single row) -->
     <div class="security-card">
-      <ShieldCheck size={22} class="shield-icon" />
+      <ShieldCheck size={18} class="shield-icon" />
       <div class="security-text">
-        <strong>Direct & Safe Steam Authentication</strong>
-        <p>
-          Sign-in takes place directly on Valve's official authentication page (<code>steamcommunity.com</code>) inside an isolated window.
-          MYLE never sees or stores your password or Steam Guard codes. Only the encrypted session cookie is kept on this PC.
-        </p>
+        <strong>Direct & Safe Steam Authentication:</strong>
+        <span>
+          Sign-in occurs on Valve's official page (<code>steamcommunity.com</code>). MYLE never sees or stores your password or Steam Guard codes.
+        </span>
       </div>
     </div>
   </div>
@@ -147,10 +149,12 @@
 <style>
   .steam-connect {
     display: flex;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
-    align-items: flex-start;
-    padding: 12px 6px 36px;
     width: 100%;
+    min-height: 100%;
+    padding: clamp(10px, 2vh, 24px) 16px;
   }
 
   .hero-card {
@@ -159,13 +163,9 @@
     align-items: center;
     text-align: center;
     width: 100%;
-    max-width: 680px;
-    padding: 36px 32px;
-    border-radius: var(--radius-xl, 20px);
-    background: color-mix(in srgb, var(--panel-solid, #141724) 86%, transparent);
-    border: 1px solid var(--panel-rim, rgba(255, 255, 255, 0.08));
-    box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(20px);
+    max-width: min(740px, 94vw);
+    padding: clamp(20px, 3vh, 32px) clamp(20px, 3vw, 36px);
+    border-radius: var(--radius-xl);
   }
 
   /* Logo */
@@ -173,24 +173,24 @@
     position: relative;
     display: grid;
     place-items: center;
-    margin-bottom: 16px;
+    margin-bottom: clamp(10px, 1.4vh, 16px);
   }
 
   .logo-glow {
     position: absolute;
-    inset: -14px;
+    inset: -12px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(102, 192, 244, 0.35) 0%, rgba(27, 72, 107, 0.15) 55%, transparent 70%);
-    filter: blur(14px);
+    background: radial-gradient(circle, rgba(107, 133, 255, 0.28) 0%, rgba(30, 40, 70, 0.08) 60%, transparent 70%);
+    filter: blur(12px);
     pointer-events: none;
   }
 
   .steam-logo {
     position: relative;
-    width: 72px;
-    height: 72px;
-    border-radius: 18px;
-    filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.4));
+    width: clamp(50px, 6vh, 64px);
+    height: clamp(50px, 6vh, 64px);
+    border-radius: 16px;
+    filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
   }
 
   /* Status badge */
@@ -199,48 +199,49 @@
     align-items: center;
     gap: 7px;
     padding: 4px 12px;
-    margin-bottom: 14px;
+    margin-bottom: clamp(10px, 1.4vh, 14px);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--control-face), var(--hover);
+    border: 1px solid var(--panel-rim);
     color: var(--text-3);
-    font-size: 12px;
+    font-size: clamp(11.5px, 0.9vw, 12.5px);
     font-weight: 500;
   }
 
   .status-badge.online {
-    background: rgba(62, 207, 142, 0.08);
-    border-color: rgba(62, 207, 142, 0.22);
-    color: #a7f3d0;
+    background: color-mix(in srgb, var(--ok) 8%, var(--hover));
+    border-color: color-mix(in srgb, var(--ok) 24%, var(--panel-rim));
+    color: var(--text-2);
   }
 
   .dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--idle, #64748b);
+    background: var(--idle);
   }
 
   .dot.on {
-    background: #34d399;
-    box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+    background: var(--ok);
+    box-shadow: 0 0 6px var(--ok-glow, rgba(16, 185, 129, 0.6));
   }
 
   /* Typography */
   h2 {
-    margin: 0 0 10px;
-    font-size: 23px;
+    margin: 0 0 6px;
+    font-size: clamp(18px, 2.4vh, 23px);
     font-weight: 700;
     color: var(--text-1);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
   }
 
   .subtitle {
-    margin: 0 0 24px;
+    margin: 0 0 clamp(14px, 2vh, 20px);
     max-width: 540px;
-    font-size: 13.5px;
-    line-height: 1.55;
-    color: var(--text-3);
+    font-size: clamp(12.5px, 1.5vh, 13.8px);
+    line-height: 1.45;
+    color: var(--text-2);
   }
 
   /* Action button */
@@ -249,42 +250,16 @@
     flex-direction: column;
     align-items: center;
     width: 100%;
-    gap: 14px;
-    margin-bottom: 28px;
+    gap: 10px;
+    margin-bottom: clamp(14px, 2.2vh, 22px);
   }
 
   .connect-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    height: 44px;
-    padding: 0 26px;
-    border-radius: 12px;
-    font-size: 14.5px;
-    font-weight: 700;
-    color: #ffffff;
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 6px 20px -3px rgba(37, 99, 235, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    cursor: pointer;
-    transition: all 160ms var(--ease-out, ease-out);
-  }
-
-  .connect-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 26px -3px rgba(37, 99, 235, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-    filter: brightness(1.08);
-  }
-
-  .connect-btn:active:not(:disabled) {
-    transform: translateY(1px);
-    box-shadow: 0 3px 12px -2px rgba(37, 99, 235, 0.4);
-  }
-
-  .connect-btn:disabled {
-    opacity: 0.75;
-    cursor: wait;
+    height: clamp(38px, 4.6vh, 44px);
+    padding: 0 clamp(22px, 2.8vw, 30px);
+    border-radius: var(--radius-md);
+    font-size: clamp(13.2px, 1.6vh, 14.5px);
+    font-weight: 600;
   }
 
   :global(.spinner) {
@@ -299,54 +274,54 @@
   .signing-banner {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
-    max-width: 520px;
-    padding: 12px 16px;
+    gap: 10px;
+    max-width: 460px;
+    padding: 8px 12px;
     text-align: left;
-    border-radius: 12px;
-    background: rgba(37, 99, 235, 0.12);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    color: #bfdbfe;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-fill));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--glass-border));
+    color: var(--text-2);
   }
 
   .signing-text strong {
     display: block;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    color: #eff6ff;
-    margin-bottom: 2px;
+    color: var(--text-1);
+    margin-bottom: 1px;
   }
 
   .signing-text p {
     margin: 0;
-    font-size: 12px;
-    line-height: 1.45;
-    color: #93c5fd;
+    font-size: 11.2px;
+    line-height: 1.35;
+    color: var(--text-3);
   }
 
   /* Error banner */
   .error-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 36%, transparent);
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--danger) 14%, var(--surface-fill));
+    border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--glass-border));
     color: #fca5a5;
-    font-size: 12.5px;
+    font-size: 12px;
   }
 
   /* Features Grid */
   .features-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    gap: clamp(8px, 1.2vh, 12px);
     width: 100%;
-    margin-bottom: 22px;
+    margin-bottom: clamp(12px, 1.8vh, 18px);
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 520px) {
     .features-grid {
       grid-template-columns: 1fr;
     }
@@ -354,84 +329,80 @@
 
   .feature-card {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 15px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    align-items: center;
+    gap: 11px;
+    padding: clamp(8px, 1.2vh, 12px) 13px;
+    border-radius: var(--radius-sm);
+    background: var(--control-face), var(--hover);
+    border: 1px solid var(--panel-rim);
     text-align: left;
-    transition: background 140ms ease, border-color 140ms ease;
-  }
-
-  .feature-card:hover {
-    background: rgba(255, 255, 255, 0.045);
-    border-color: rgba(255, 255, 255, 0.1);
+    transition: background var(--dur-fast);
   }
 
   .feat-icon {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: clamp(32px, 3.8vw, 36px);
+    height: clamp(32px, 3.8vw, 36px);
     flex: none;
-    border-radius: 10px;
+    border-radius: 8px;
   }
 
   .feat-content h4 {
-    margin: 0 0 3px;
-    font-size: 13px;
+    margin: 0 0 2px;
+    font-size: clamp(12.6px, 1.4vh, 13.6px);
     font-weight: 600;
     color: var(--text-1);
   }
 
   .feat-content p {
     margin: 0;
-    font-size: 11.8px;
-    line-height: 1.45;
+    font-size: clamp(11.4px, 1.25vh, 12.2px);
+    line-height: 1.35;
     color: var(--text-3);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   /* Security banner */
   .security-card {
     display: flex;
-    align-items: flex-start;
-    gap: 13px;
+    align-items: center;
+    gap: 11px;
     width: 100%;
-    padding: 13px 16px;
-    border-radius: 12px;
-    background: rgba(16, 185, 129, 0.06);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+    padding: clamp(8px, 1.1vh, 11px) 14px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--ok) 7%, var(--hover));
+    border: 1px solid color-mix(in srgb, var(--ok) 22%, var(--panel-rim));
     text-align: left;
   }
 
   :global(.shield-icon) {
-    color: #10b981;
+    color: var(--ok);
     flex-shrink: 0;
-    margin-top: 2px;
+  }
+
+  .security-text {
+    font-size: clamp(11.4px, 1.25vh, 12.2px);
+    line-height: 1.38;
+    color: var(--text-3);
   }
 
   .security-text strong {
-    display: block;
-    font-size: 12.5px;
+    color: var(--text-2);
     font-weight: 600;
-    color: #a7f3d0;
-    margin-bottom: 2px;
-  }
-
-  .security-text p {
-    margin: 0;
-    font-size: 11.6px;
-    line-height: 1.5;
-    color: #6ee7b7;
-    opacity: 0.88;
+    margin-right: 4px;
   }
 
   .security-text code {
     padding: 1px 4px;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.25);
-    font-family: var(--font-mono, monospace);
-    font-size: 10.8px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.3);
+    font-family: var(--font-mono);
+    font-size: clamp(10.5px, 1.15vh, 11.2px);
+    color: var(--text-2);
   }
 </style>
