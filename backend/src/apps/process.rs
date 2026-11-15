@@ -7,6 +7,26 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub const ERROR_ELEVATION_REQUIRED: i32 = 740;
 /// Windows ERROR_CANCELLED: returned by `run_elevated` when UAC is declined.
 pub const ERROR_CANCELLED: i32 = 1223;
+/// What the elevation scripts exit with when Windows could not start the
+/// program for any other reason than a declined prompt ("MYLE" in ASCII):
+/// turned into an error, never taken for the program's own exit code.
+const START_FAILED: i32 = 0x4D59_4C45;
+/// The `catch` of the elevation scripts: a declined prompt (Win32 error
+/// 1223, inside Start-Process's exception) is `ERROR_CANCELLED`, anything
+/// else `START_FAILED`, so a missing file is never reported as "declined".
+fn start_failure() -> String {
+    format!(
+        "catch {{ $e = $_.Exception; while ($e -and $e -isnot [ComponentModel.Win32Exception]) {{ $e = $e.InnerException }}; if ($e -and $e.NativeErrorCode -eq {ERROR_CANCELLED}) {{ exit {ERROR_CANCELLED} }}; exit {START_FAILED} }}"
+    )
+}
+/// `Err` for `START_FAILED`; the exit code otherwise.
+fn started(code: i32) -> Result<i32, String> {
+    if code == START_FAILED {
+        Err("Windows could not start it with administrator rights.".into())
+    } else {
+        Ok(code)
+    }
+}
 /// `%SystemRoot%\System32\<relative>`. Windows' own tools are started by
 /// their full path: a bare name is looked for in the app's own folder first,
 /// which is per user and writable, so a planted `powershell.exe` there would
@@ -70,8 +90,8 @@ pub async fn run_elevated(
     if hide_window {
         script.push_str(" -WindowStyle Hidden");
     }
-    let script = format!("try {{ {script}; exit $p.ExitCode }} catch {{ exit {ERROR_CANCELLED} }}");
-    powershell_via_stdin(&script).await
+    let script = format!("try {{ {script}; exit $p.ExitCode }} {}", start_failure());
+    started(powershell_via_stdin(&script).await?)
 }
 /// Starts `program args` through a UAC prompt and returns once it is running
 /// (0), or `ERROR_CANCELLED` if the user declined the prompt. Does not wait
@@ -85,8 +105,8 @@ pub async fn start_elevated(program: &str, args: &[String]) -> Result<i32, Strin
     if !list.is_empty() {
         script.push_str(&format!(" -ArgumentList {}", list.join(",")));
     }
-    let script = format!("try {{ {script}; exit 0 }} catch {{ exit {ERROR_CANCELLED} }}");
-    powershell_via_stdin(&script).await
+    let script = format!("try {{ {script}; exit 0 }} {}", start_failure());
+    started(powershell_via_stdin(&script).await?)
 }
 /// The line `powershell_via_stdin` sends: ASCII only (base64 of the UTF-16
 /// script), so no console code page can mangle a non-English path.
@@ -259,6 +279,14 @@ impl Drop for JobObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_program_windows_cannot_start_is_an_error_not_a_declined_prompt() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        // No prompt is shown for a file that is not there: Start-Process fails at once.
+        let missing = std::env::temp_dir().join(format!("myle-no-such-program-{}.exe", std::process::id()));
+        let answer = runtime.block_on(start_elevated(&missing.to_string_lossy(), &[]));
+        assert_eq!(answer, Err("Windows could not start it with administrator rights.".to_string()));
+    }
     #[test]
     fn quotes_are_escaped_for_powershell() {
         assert_eq!(ps_quote("it's"), "'it''s'");

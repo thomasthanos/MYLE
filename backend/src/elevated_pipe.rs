@@ -43,6 +43,10 @@ impl Session {
         options.first_pipe_instance(true).reject_remote_clients(true);
         let server = create_private(&options, &name).map_err(err)?;
         let executable = std::env::current_exe().map_err(err)?;
+        // After a live update the file here is the new MYLE while this one is the old: the two may not speak the same requests, so none is sent (and no approval asked) until MYLE restarts.
+        if exe_version(&executable).is_some_and(|on_disk| Some(on_disk) != running_version()) {
+            return Err("MYLE was updated. Close it and open it again to use this.".into());
+        }
         let executable = executable
             .to_str()
             .ok_or_else(|| "The application path is not valid Unicode.".to_string())?;
@@ -103,6 +107,40 @@ impl Session {
         self.pipe.read_exact(&mut payload).await?;
         Ok((answer, payload))
     }
+}
+/// Major, minor and patch of the program file at `path` (its version
+/// resource); `None` when it has none.
+pub fn exe_version(path: &Path) -> Option<(u16, u16, u16)> {
+    use windows_sys::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW};
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `wide` is NUL-terminated; the buffer is as large as Windows asks; VerQueryValueW points into it, and its length is checked before reading.
+    unsafe {
+        let size = GetFileVersionInfoSizeW(wide.as_ptr(), std::ptr::null_mut());
+        if size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        if GetFileVersionInfoW(wide.as_ptr(), 0, size, data.as_mut_ptr().cast()) == 0 {
+            return None;
+        }
+        let root: [u16; 2] = [u16::from(b'\\'), 0];
+        let mut info: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut length = 0u32;
+        if VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut info, &mut length) == 0
+            || info.is_null()
+            || (length as usize) < size_of::<VS_FIXEDFILEINFO>()
+        {
+            return None;
+        }
+        let fixed = std::ptr::read_unaligned(info.cast::<VS_FIXEDFILEINFO>());
+        Some(((fixed.dwFileVersionMS >> 16) as u16, fixed.dwFileVersionMS as u16, (fixed.dwFileVersionLS >> 16) as u16))
+    }
+}
+/// This build's version, as its version resource has it.
+fn running_version() -> Option<(u16, u16, u16)> {
+    let mut parts = env!("CARGO_PKG_VERSION").split(['.', '-', '+']).map(|part| part.parse::<u16>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
 }
 /// The most bytes a helper may send after an answer.
 const MAX_PAYLOAD: u64 = 4 << 30;
@@ -370,6 +408,11 @@ where
             }
         });
     }
+    // An administrator typed their credentials for a standard user (the app
+    // runs as another account): that approval was for this one request, not
+    // half an hour of them. The app starts a new helper, and asks again,
+    // for the next.
+    let one_request = serves_once(process_account(app_pid), process_account(std::process::id()));
     let mut writer = file.try_clone().map_err(err)?;
     for line in BufReader::new(file).lines() {
         // A broken pipe: the app has closed it or exited.
@@ -389,15 +432,41 @@ where
             })
             .and_then(|()| writer.flush());
         *state.lock().unwrap_or_else(|p| p.into_inner()) = (Instant::now(), false);
-        if sent.is_err() {
+        if sent.is_err() || one_request {
             break;
         }
     }
     Ok(())
 }
+/// Whether the helper answers one request only: when the app runs as
+/// another account than the helper (an over-the-shoulder approval), or
+/// either account is unknown.
+fn serves_once(app: Option<String>, helper: Option<String>) -> bool {
+    match (app, helper) {
+        (Some(app), Some(helper)) => app != helper,
+        _ => true,
+    }
+}
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    #[test]
+    fn a_program_files_version_is_read() {
+        let explorer = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("explorer.exe");
+        // A program without a Windows 10 manifest (this test) is told 6.2 for Windows' own files; MYLE reads its own file, which Windows leaves alone.
+        assert!(exe_version(&explorer).is_some_and(|(major, _, _)| major >= 6));
+        assert_eq!(exe_version(&std::env::temp_dir().join("myle-no-such.exe")), None);
+        let (major, minor, patch) = running_version().unwrap();
+        assert_eq!(format!("{major}.{minor}.{patch}"), env!("CARGO_PKG_VERSION").split(['-', '+']).next().unwrap());
+    }
+    #[test]
+    fn an_approval_for_another_account_serves_one_request() {
+        let me = || Some("S-1-5-21-1-1001".to_string());
+        assert!(!serves_once(me(), me()), "the user's own approval keeps the helper for its half hour");
+        assert!(serves_once(me(), Some("S-1-5-21-1-500".to_string())));
+        assert!(serves_once(None, me()));
+        assert!(process_account(std::process::id()).is_some_and(|sid| sid.starts_with("S-1-")));
+    }
     pub const TEST_HELPER: Helper = Helper {
         flag: "--test-helper",
         pipe_prefix: r"\\.\pipe\myle-test-",
