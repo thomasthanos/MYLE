@@ -16,6 +16,11 @@ use super::crypto::{self, Key};
 /// The Windows Hello key's name for this app.
 const CREDENTIAL: &str = "MakeYourLifeEasier-PasswordVault";
 const HELLO_AAD: &str = "myle-vault|hello";
+/// The wrap's associated data: bound to the vault, so a wrapped key put
+/// beside another vault opens nothing.
+fn hello_aad(vault_id: &str) -> String {
+    format!("{HELLO_AAD}|{vault_id}")
+}
 const FILE: &str = "passwords-hello.bin";
 #[derive(Deserialize, Serialize)]
 struct Stored {
@@ -279,7 +284,7 @@ pub fn enable(vault_key: &Key, vault_id: &str) -> Result<(), String> {
     let stored = Stored {
         vault_id: vault_id.to_string(),
         challenge: B64.encode(challenge),
-        wrapped_key: crypto::wrap(&key, HELLO_AAD, vault_key)?,
+        wrapped_key: crypto::wrap(&key, &hello_aad(vault_id), vault_key)?,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&stored).map_err(|e| e.to_string())?);
     crate::account::vault::save(&path()?, &bytes)
@@ -305,10 +310,21 @@ pub fn unlock(vault_id: &str) -> Result<Key, String> {
         .map_err(|_| "The Windows Hello data on this PC is damaged.".to_string())?;
     let signature = sign(&credential, &challenge)?;
     let key = crypto::key_from_signature(&signature);
-    crypto::unwrap(&key, HELLO_AAD, &stored.wrapped_key).map_err(|_| {
+    if let Ok(vault_key) = crypto::unwrap(&key, &hello_aad(vault_id), &stored.wrapped_key) {
+        return Ok(vault_key);
+    }
+    // Wrapped before the vault was bound in (11.0.2 and older): opened the old way once, and wrapped again the new way.
+    let vault_key = crypto::unwrap(&key, HELLO_AAD, &stored.wrapped_key).map_err(|_| {
         "Windows Hello no longer matches this vault. Open it with your master password and turn Windows Hello on again."
             .to_string()
-    })
+    })?;
+    if let Ok(wrapped_key) = crypto::wrap(&key, &hello_aad(vault_id), &vault_key) {
+        let rewrapped = Stored { wrapped_key, ..stored };
+        if let (Ok(bytes), Ok(file)) = (serde_json::to_vec(&rewrapped), path()) {
+            let _ = crate::account::vault::save(&file, &Zeroizing::new(bytes));
+        }
+    }
+    Ok(vault_key)
 }
 /// Turns Windows Hello off: forgets the wrapped key and the Windows Hello key.
 pub fn disable() {
@@ -320,6 +336,16 @@ pub fn disable() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_wrapped_key_opens_only_beside_its_own_vault() {
+        let (key, vault) = (Key::random(), Key::random());
+        let wrapped = crypto::wrap(&key, &hello_aad("vault-a"), &vault).unwrap();
+        assert!(crypto::unwrap(&key, &hello_aad("vault-a"), &wrapped).is_ok());
+        assert!(crypto::unwrap(&key, &hello_aad("vault-b"), &wrapped).is_err());
+        // A key wrapped the old way still opens, for the one-time move.
+        let old = crypto::wrap(&key, HELLO_AAD, &vault).unwrap();
+        assert!(crypto::unwrap(&key, HELLO_AAD, &old).is_ok());
+    }
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use windows::Security::Credentials::UI::UserConsentVerificationResult as Answer;

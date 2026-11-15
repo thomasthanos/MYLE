@@ -47,13 +47,25 @@ pub struct Profile {
     pub provider: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub access_token: String,
     pub refresh_token: String,
     /// Unix seconds.
     pub expires_at: u64,
     pub profile: Profile,
+}
+
+/// Never the tokens: a session printed in a log or an error stays harmless.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("access_token", &"<hidden>")
+            .field("refresh_token", &"<hidden>")
+            .field("expires_at", &self.expires_at)
+            .field("profile", &self.profile)
+            .finish()
+    }
 }
 
 pub fn now() -> u64 {

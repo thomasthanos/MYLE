@@ -161,6 +161,8 @@ pub async fn passwords_create(
     state: State<'_, PasswordsState>,
     master: String,
 ) -> Result<String, String> {
+    // Wiped from memory once used, as every master password here.
+    let master = zeroize::Zeroizing::new(master);
     check_master(&master)?;
     let code = state
         .with_blocking(move |vault| {
@@ -176,6 +178,7 @@ pub async fn passwords_unlock(
     state: State<'_, PasswordsState>,
     master: String,
 ) -> Result<(), String> {
+    let master = zeroize::Zeroizing::new(master);
     state
         .with_blocking(move |vault| vault.unlock(&master))
         .await?;
@@ -188,6 +191,7 @@ pub async fn passwords_recover(
     code: String,
     master: String,
 ) -> Result<(), String> {
+    let (code, master) = (zeroize::Zeroizing::new(code), zeroize::Zeroizing::new(master));
     check_master(&master)?;
     state
         .with_blocking(move |vault| vault.recover(&code, &master, KdfParams::new()))
@@ -201,6 +205,7 @@ pub async fn passwords_change_master(
     current: String,
     master: String,
 ) -> Result<(), String> {
+    let (current, master) = (zeroize::Zeroizing::new(current), zeroize::Zeroizing::new(master));
     check_master(&master)?;
     state
         .with_blocking(move |vault| vault.change_master(&current, &master, KdfParams::new()))
@@ -851,6 +856,7 @@ pub async fn passwords_export(
     password: String,
     master: String,
 ) -> Result<Option<String>, String> {
+    let (password, master) = (zeroize::Zeroizing::new(password), zeroize::Zeroizing::new(master));
     check_master(&password)?;
     state
         .with_blocking(move |vault| vault.verify_master(&master))

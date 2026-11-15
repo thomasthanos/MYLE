@@ -26,6 +26,11 @@ use crate::passwords::PasswordsState;
 
 pub(crate) const FILE: &str = "passwords-biometry.json";
 const WRAP_AAD: &str = "myle-biometry-v1";
+/// The wrap's associated data: bound to the vault, so a wrapped key put
+/// beside another vault opens nothing.
+fn wrap_aad(vault_id: &str) -> String {
+    format!("{WRAP_AAD}|{vault_id}")
+}
 /// Quick unlock turned itself off; the payload says why.
 const OFF_EVENT: &str = "passwords-quick-unlock-off";
 
@@ -158,7 +163,7 @@ pub async fn passwords_hello_enable(app: AppHandle, state: State<'_, PasswordsSt
         let unlock_key = Key::random();
         let stored = Stored {
             vault_id: id.clone(),
-            wrapped_key: crypto::wrap(&unlock_key, WRAP_AAD, &vault_key)?,
+            wrapped_key: crypto::wrap(&unlock_key, &wrap_aad(&id), &vault_key)?,
         };
         key::put(&app, &id, &unlock_key.to_text())?;
         crate::account::write_private(&file, &serde_json::to_vec(&stored).map_err(|e| e.to_string())?)
@@ -193,11 +198,24 @@ pub async fn passwords_hello_unlock(app: AppHandle, state: State<'_, PasswordsSt
     })
     .await?;
     let unlock_key = Key::from_text(&text)?;
-    let vault_key = crypto::unwrap(&unlock_key, WRAP_AAD, &stored.wrapped_key).map_err(|_| {
-        // A key from another time: it can never open this vault again.
-        let _ = std::fs::remove_file(&file);
-        "Unlocking this way stopped working. Use the master password, then turn it on again.".to_string()
-    })?;
+    let vault_key = match crypto::unwrap(&unlock_key, &wrap_aad(&stored.vault_id), &stored.wrapped_key) {
+        Ok(vault_key) => vault_key,
+        // Wrapped before the vault was bound in (10.0.8 and older): opened the old way once, and wrapped again the new way.
+        Err(_) => {
+            let vault_key = crypto::unwrap(&unlock_key, WRAP_AAD, &stored.wrapped_key).map_err(|_| {
+                // A key from another time: it can never open this vault again.
+                let _ = std::fs::remove_file(&file);
+                "Unlocking this way stopped working. Use the master password, then turn it on again.".to_string()
+            })?;
+            if let Ok(wrapped_key) = crypto::wrap(&unlock_key, &wrap_aad(&stored.vault_id), &vault_key) {
+                let rewrapped = Stored { vault_id: stored.vault_id.clone(), wrapped_key };
+                if let Ok(bytes) = serde_json::to_vec(&rewrapped) {
+                    let _ = crate::account::write_private(&file, &bytes);
+                }
+            }
+            vault_key
+        }
+    };
     state.cell.with(|vault| vault.unlock_with_key(vault_key))
 }
 
@@ -343,6 +361,15 @@ mod key {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wrapped_key_opens_only_beside_its_own_vault() {
+        let (unlock, vault) = (Key::random(), Key::random());
+        let wrapped = crypto::wrap(&unlock, &wrap_aad("vault-a"), &vault).unwrap();
+        assert!(crypto::unwrap(&unlock, &wrap_aad("vault-a"), &wrapped).is_ok());
+        assert!(crypto::unwrap(&unlock, &wrap_aad("vault-b"), &wrapped).is_err());
+        assert!(crypto::unwrap(&unlock, WRAP_AAD, &wrapped).is_err(), "the old form is only for keys wrapped before");
+    }
 
     #[test]
     fn a_key_gone_for_good_says_why_and_what_to_do() {

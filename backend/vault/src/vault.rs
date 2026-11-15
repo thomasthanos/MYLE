@@ -1009,7 +1009,8 @@ impl Vault {
             .map(|e| (**e).clone())
             .ok_or("That entry no longer exists.")?;
         let before = entry.passkeys.len();
-        entry.passkeys.retain(|k| k.credential_id != credential_id);
+        // The same rule as finding one: an id in either base64 form.
+        entry.passkeys.retain(|k| !super::passkeys::same_credential(&k.credential_id, credential_id));
         if entry.passkeys.len() == before {
             return Err("That passkey is no longer in the vault.".into());
         }
@@ -1122,6 +1123,8 @@ impl Vault {
                         changed_at: now,
                     },
                 );
+                // The oldest go: wiped first, since truncating only drops them.
+                entry.history.iter_mut().skip(HISTORY).for_each(Zeroize::zeroize);
                 entry.history.truncate(HISTORY);
             }
             entry.password = password.clone();
@@ -1778,6 +1781,7 @@ fn resolve(ours: Option<Entry>, ours_at: u64, theirs: Option<Entry>, theirs_at: 
                         changed_at: now(),
                     },
                 );
+                win.history.iter_mut().skip(HISTORY).for_each(Zeroize::zeroize);
                 win.history.truncate(HISTORY);
             }
             Some(win)

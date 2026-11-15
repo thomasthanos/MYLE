@@ -171,9 +171,11 @@ async fn get_items(cloud: &Cloud) -> Result<Vec<RemoteItem>, String> {
             return Err(explain(status, &body));
         }
         let page: Vec<RemoteItem> = serde_json::from_str(&body).map_err(err)?;
-        let full = page.len() == PAGE;
+        // A project may answer fewer rows than asked (its own row limit):
+        // only an empty page means there is nothing more.
+        let done = page.is_empty();
         items.extend(page);
-        if !full {
+        if done {
             return Ok(items);
         }
     }

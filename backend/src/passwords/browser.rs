@@ -1090,7 +1090,8 @@ struct Login {
 fn page_host(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let host = parsed.host_str()?.trim_end_matches('.').to_lowercase();
-    let local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]");
+    // The hosts the extension's content scripts run on over http (its manifests): nothing else can ask.
+    let local = matches!(host.as_str(), "localhost" | "127.0.0.1");
     (parsed.scheme() == "https" || parsed.scheme() == "http" && local).then_some(host)
 }
 /// The part of a host that one owner controls (`accounts.google.com` →

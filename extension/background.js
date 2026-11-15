@@ -60,7 +60,8 @@ async function askOnce(message, limit) {
 
 function hostOf(value) {
   try {
-    return new URL(value).hostname.replace(/^www\./, "");
+    // Every leading "www.", as the app strips them.
+    return new URL(value).hostname.replace(/^(www\.)+/, "");
   } catch {
     return "";
   }
@@ -98,7 +99,7 @@ function allowedUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === "https:" ||
-      (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
+      (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname));
   } catch {
     return false;
   }

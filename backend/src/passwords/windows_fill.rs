@@ -395,6 +395,12 @@ pub fn passwords_windows_fill(
             typing(&username, focused_control(selected.thread).or(focus))?;
             press(VK_TAB)?;
             std::thread::sleep(Duration::from_millis(120));
+            // Tab may land on a 2FA or captcha box: the password is never typed into a field that shows it.
+            if focused_field_is_password() == Some(false) {
+                return Err(format!(
+                    "The next field shows what is typed in it. Click the password field and press {hotkey} again, or copy the password."
+                ));
+            }
             typing(&password, focused_control(selected.thread))?;
         }
     }

@@ -169,6 +169,8 @@ pub fn passwords_app_hidden(state: State<'_, PasswordsState>, hidden: bool) -> b
 /// A new vault. Returns the recovery code, shown to the user once.
 #[tauri::command]
 pub async fn passwords_create(state: State<'_, PasswordsState>, master: String) -> Result<String, String> {
+    // Wiped from memory once used, as every master password here.
+    let master = Zeroizing::new(master);
     check_master(&master)?;
     state
         .with_blocking(move |vault| Ok(vault.create(&master, KdfParams::new())?.to_string()))
@@ -177,6 +179,7 @@ pub async fn passwords_create(state: State<'_, PasswordsState>, master: String) 
 
 #[tauri::command]
 pub async fn passwords_unlock(state: State<'_, PasswordsState>, master: String) -> Result<(), String> {
+    let master = Zeroizing::new(master);
     state.with_blocking(move |vault| vault.unlock(&master)).await
 }
 
@@ -186,6 +189,7 @@ pub async fn passwords_recover(
     code: String,
     master: String,
 ) -> Result<(), String> {
+    let (code, master) = (Zeroizing::new(code), Zeroizing::new(master));
     check_master(&master)?;
     state
         .with_blocking(move |vault| vault.recover(&code, &master, KdfParams::new()))
@@ -198,6 +202,7 @@ pub async fn passwords_change_master(
     current: String,
     master: String,
 ) -> Result<(), String> {
+    let (current, master) = (Zeroizing::new(current), Zeroizing::new(master));
     check_master(&master)?;
     state
         .with_blocking(move |vault| vault.change_master(&current, &master, KdfParams::new()))

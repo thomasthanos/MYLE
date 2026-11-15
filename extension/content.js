@@ -74,7 +74,7 @@
   ext.storage.onChanged?.addListener((changes, area) => {
     if (area === "local" && changes.debug) debugging = changes.debug.newValue === true;
   });
-  const LOCAL = ["localhost", "127.0.0.1", "[::1]"];
+  const LOCAL = ["localhost", "127.0.0.1"];
   const siteName = location.hostname.replace(/^www\./, "");
 
   // A page can shadow a form's methods and properties with fields named after them (<input name="action">), so these come from the prototypes.
@@ -1339,7 +1339,9 @@
 
   /* Whether MYLE takes part for this site; else the browser's own passkeys. With MYLE closed or locked the user is asked to open it, and the request goes on by itself after: the vault may hold this site's passkey, and not asking at all is what makes it look like MYLE has none. */
   async function passkeysHere(id, options, retry) {
-    const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [], wake: true });
+    // Only a page the user just acted on (a click, a key) may start MYLE or bring it forward and ask for Windows Hello. A request made without one (on load, in the background) waits for the user's own click on the prompt, so no page can raise MYLE, or sign in through it, by itself.
+    const activated = globalThis.navigator?.userActivation?.isActive === true;
+    const listed = await send({ type: "passkeyList", rpId: options.rpId, allow: options.allow ?? [], wake: activated });
     debug("MYLE's list", listed?.ok ?
       { rpId: listed.rpId, found: listed.passkeys?.length ?? 0, notAskedFor: listed.unlisted ?? 0, mylesIds: listed.unlistedIds ?? [] } :
       { error: listed?.error ?? "none", known: listed?.known ?? false, detail: listed?.detail ?? "" });
@@ -1375,7 +1377,7 @@
         }],
       ]);
       // MYLE has this site's passkey (or is merely locked): it is started and brought forward at once, asks to be unlocked (Windows Hello when it is on), and the sign-in carries on by itself.
-      if (!closed || listed?.known) {
+      if (activated && (!closed || listed?.known)) {
         if (closed || locked) void send({ type: "open" });
         waiting = true;
         void carryOnWhenUnlocked(id, text, retry);

@@ -24,6 +24,36 @@ test("an RP mismatch leaves related-origin validation to the browser without ask
   assert.equal(calls[0].rpId, "related.example");
   assert.equal(scope.prompted, null);
 });
+/** `passkeysHere` with MYLE locked, on a page the user did (or did not) just act on: what it sends and whether it waits for the unlock by itself. */
+async function lockedPasskeysHere(activated) {
+  const start = source.indexOf("  async function passkeysHere(");
+  const end = source.indexOf("\n  }\n", start);
+  const calls = [];
+  let waited = 0;
+  const scope = vm.createContext({
+    prompted: "request", siteName: "example.com", debug() {},
+    navigator: { userActivation: { isActive: activated } },
+    send: async (message) => { calls.push(message); return { ok: false, error: "locked", known: true }; },
+    prompt: () => ({ textContent: "" }),
+    anotherDevice: () => [], answerPage() {}, refuse() {},
+    carryOnWhenUnlocked: () => { waited += 1; },
+  });
+  const passkeysHere = vm.runInContext(`(${source.slice(start, end + 4).trim()})`, scope);
+  await passkeysHere("request", { rpId: "example.com", allow: [] }, () => {});
+  return { calls, waited };
+}
+test("a page the user did not just act on cannot raise MYLE or start an unlock by itself", async () => {
+  const { calls, waited } = await lockedPasskeysHere(false);
+  assert.equal(calls[0].wake, false);
+  assert.ok(!calls.some((call) => call.type === "open"), "MYLE is not brought forward");
+  assert.equal(waited, 0, "the sign-in waits for the user's click on the prompt");
+});
+test("after the user's own click, MYLE is brought forward and the sign-in waits for the unlock", async () => {
+  const { calls, waited } = await lockedPasskeysHere(true);
+  assert.equal(calls[0].wake, true);
+  assert.ok(calls.some((call) => call.type === "open"));
+  assert.equal(waited, 1);
+});
 /** One function of content.js, by name, run on its own. */
 function pick(name) {
   const start = source.indexOf(`  function ${name}(`);

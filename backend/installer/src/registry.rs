@@ -183,6 +183,8 @@ pub fn unregister(forget_folder: bool) {
     for key in NATIVE_HOSTS {
         let _ = hkcu().delete_subkey_all(key);
     }
+    // The myle: links the app registers (`browser.rs`), which would open an exe that is gone.
+    let _ = hkcu().delete_subkey_all(r"Software\Classes\myle");
     if forget_folder {
         let _ = hkcu().delete_subkey_all(product::product_key());
         // The publisher key only if nothing else of ours lives under it.
