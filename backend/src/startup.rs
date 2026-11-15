@@ -66,10 +66,24 @@ fn set_value(name: &str, value: u32) -> Result<(), String> {
     key.set_value(name, &value)
         .map_err(|error| error.to_string())
 }
-/// `...\Start Menu\Programs\Startup`, the folder Windows runs at sign-in.
+/// `...\Start Menu\Programs\Startup`, the folder Windows runs at sign-in:
+/// where Windows says it is (FOLDERID_Startup, as the setup asks), so a
+/// moved folder is the same one for both; the usual place if it won't say.
 fn startup_folder() -> Option<PathBuf> {
-    let roaming = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(roaming).join(r"Microsoft\Windows\Start Menu\Programs\Startup"))
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Startup, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the returned string is copied, then freed with CoTaskMemFree as the call requires.
+    let known = unsafe {
+        SHGetKnownFolderPath(&FOLDERID_Startup, KF_FLAG_DEFAULT, None).ok().and_then(|path| {
+            let text = path.to_string().ok();
+            CoTaskMemFree(Some(path.0 as *const _));
+            text
+        })
+    };
+    match known {
+        Some(text) if !text.is_empty() => Some(PathBuf::from(text)),
+        _ => Some(PathBuf::from(std::env::var_os("APPDATA")?).join(r"Microsoft\Windows\Start Menu\Programs\Startup")),
+    }
 }
 fn startup_links() -> Vec<PathBuf> {
     let Some(folder) = startup_folder() else {

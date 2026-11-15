@@ -674,6 +674,8 @@ pub fn data_folders() -> Vec<PathBuf> {
         folders.push(local.join(product::LEGACY_NAME));
         folders.push(local.join(product::NAME));
         folders.push(local.join(product::IDENTIFIER));
+        // The app's download and Spotify Hub staging folders.
+        folders.push(local.join(product::LEGACY_BINARY));
     }
     folders.push(std::env::temp_dir().join(product::LEGACY_BINARY));
     folders.push(std::env::temp_dir().join(product::BINARY));
@@ -779,7 +781,10 @@ pub fn uninstall(
         report(Progress::Stage {
             stage: Stage::RemovingData,
         });
-        for folder in data_folders() {
+        // A data folder that holds the install folder (an old install made
+        // in one of them) is never removed whole: the install is removed on
+        // its own.
+        for folder in data_folders().into_iter().filter(|folder| !shell::is_within(dir, folder)) {
             if folder.exists() && std::fs::remove_dir_all(&folder).is_err() {
                 // Something still holds a file (the web view shutting down):
                 // finish once this program is gone.
@@ -854,6 +859,7 @@ mod tests {
             assert!(folders.contains(&default_dir().join("data")));
             assert!(folders.contains(&local.join(product::NAME)));
             assert!(folders.contains(&local.join(product::IDENTIFIER)));
+            assert!(folders.contains(&local.join("MakeYourLifeEasier")), "the app's download staging");
         }
         assert!(
             !folders.contains(&default_dir()),
