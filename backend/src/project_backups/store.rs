@@ -124,7 +124,7 @@ impl Settings {
     }
 }
 fn settings_path() -> Result<PathBuf, String> {
-    crate::storage::roaming_dir().map(|dir| dir.join(FILE_NAME))
+    crate::storage::roaming_item(FILE_NAME)
 }
 pub(crate) fn load() -> Result<Settings, String> {
     load_from(&settings_path()?)

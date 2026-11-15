@@ -496,6 +496,7 @@ fn now_ms() -> i64 {
 fn health_dir() -> Result<PathBuf, String> {
     let dir = crate::storage::roaming_dir()?.join("software-health");
     std::fs::create_dir_all(dir.join("backups")).map_err(|e| e.to_string())?;
+    crate::storage::hide(&dir);
     Ok(dir)
 }
 fn journal_path() -> Result<PathBuf, String> {

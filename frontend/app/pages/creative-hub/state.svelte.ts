@@ -28,6 +28,14 @@ export interface Job {
   /** Bytes per second, smoothed; only while downloading. */
   speed?: number;
 }
+
+export interface WandEnhancerStatus {
+  installed: boolean;
+  installedVersion: string | null;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+}
+
 /** Speed samples at most this often, averaged so the number does not jump. */
 const SPEED_SAMPLE_MS = 500;
 class CreativeState {
@@ -37,8 +45,15 @@ class CreativeState {
   jobs = $state<Record<string, Job>>({});
   /** True when the Clip Studio restore exe is present in Downloads. */
   clipStudioRestoreReady = $state(false);
-  /** True when WandEnhancer.exe is present in roaming directory. */
+  /** True when Wand Enhancer can be run again in this MYLE session. */
   wandEnhancerReady = $state(false);
+  /** Version status and update availability for Wand Enhancer. */
+  wandEnhancerStatus = $state<WandEnhancerStatus>({
+    installed: false,
+    installedVersion: null,
+    latestVersion: null,
+    updateAvailable: false,
+  });
   #loaded = false;
   async load() {
     if (!isTauri() || this.loading || this.#loaded) return;
@@ -51,9 +66,15 @@ class CreativeState {
       this.clipStudioRestoreReady = await invoke<boolean>(
         "creative_clip_studio_restore_available",
       );
-      this.wandEnhancerReady = await invoke<boolean>(
-        "creative_wand_enhancer_available",
-      );
+      this.wandEnhancerStatus = await invoke<WandEnhancerStatus>(
+        "creative_wand_enhancer_status",
+      ).catch(() => ({
+        installed: false,
+        installedVersion: null,
+        latestVersion: null,
+        updateAvailable: false,
+      }));
+      this.wandEnhancerReady = this.wandEnhancerStatus.installed;
     } catch (err) {
       this.error = message(err);
     } finally {
@@ -114,9 +135,15 @@ class CreativeState {
         ).catch(() => false);
       }
       if (app.id === WAND_ENHANCER_ID) {
-        this.wandEnhancerReady = await invoke<boolean>(
-          "creative_wand_enhancer_available",
-        ).catch(() => false);
+        this.wandEnhancerStatus = await invoke<WandEnhancerStatus>(
+          "creative_wand_enhancer_status",
+        ).catch(() => ({
+          installed: false,
+          installedVersion: null,
+          latestVersion: null,
+          updateAvailable: false,
+        }));
+        this.wandEnhancerReady = this.wandEnhancerStatus.installed;
       }
     }
   }

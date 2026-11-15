@@ -1,8 +1,10 @@
 // ! Creative Hub: self-hosted packages (a zip or an installer) that the app ! downloads with progress, unpacks, runs, and then cleans up after. ! ! The list lives in `catalog/creative-apps.json`, which is compiled into the ! binary: every user gets exactly what ships, and nothing on the machine can ! change it. The page only ever sends an id, so URLs, passwords and commands ! never come from the webview.
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use super::jobs::{JobHandle, Jobs};
 use super::process::hidden;
 use super::resolver::{self, Resolver};
@@ -52,7 +54,7 @@ enum Setup {
         to: Option<String>,
         password: Option<String>,
     },
-    /// Save the built executable to %APPDATA%\ThomasThanos\MakeYourLifeEasier and run it.
+    /// Run the executable and keep it available until MYLE exits.
     WandEnhancer,
 }
 impl Setup {
@@ -265,19 +267,23 @@ async fn run(
             let _ = on_event.send(JobEvent::Note {
                 text: "Configuring Wand Enhancer...".into(),
             });
-            // Close existing instances to prevent file lock when updating
-            let _ = super::process::hidden(super::process::system32("taskkill.exe"))
-                .args(["/IM", WAND_ENHANCER_EXE, "/F"])
-                .status()
-                .await;
-            let roaming = crate::storage::roaming_dir()?;
-            tokio::fs::create_dir_all(&roaming).await.map_err(err)?;
-            let dest_exe = roaming.join(WAND_ENHANCER_EXE);
-            tokio::fs::copy(&file, &dest_exe).await.map_err(err)?;
-            // Launch the built executable
-            let _ = std::process::Command::new(&dest_exe).spawn();
+            let path = wand_enhancer_exe_path()?;
+            let wand = app.state::<WandEnhancer>();
+            let mut session = wand.0.lock().unwrap_or_else(|p| p.into_inner());
+            if session.closing || job.is_cancelled() {
+                return Ok(JobOutcome::Cancelled);
+            }
+            if session.is_running()? {
+                return Err("Close Wand Enhancer before downloading it again.".into());
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(err)?;
+            }
+            std::fs::copy(&file, &path).map_err(err)?;
+            session.ready = true;
+            session.spawn(&path)?;
             return Ok(JobOutcome::Done {
-                note: Some(format!("Saved to {} and launched.", dest_exe.display())),
+                note: Some("Wand Enhancer launched.".into()),
             });
         }
         Setup::Installer { args } => (file.clone(), args.clone()),
@@ -573,31 +579,233 @@ pub async fn creative_clip_studio_swap_exe() -> Result<String, String> {
         c => Err(format!("PowerShell exited with code {c}.")),
     }
 }
-pub const WAND_ENHANCER_EXE: &str = "WandEnhancer.exe";
-/// Location where WandEnhancer.exe is saved: %APPDATA%\ThomasThanos\MakeYourLifeEasier\WandEnhancer.exe
-pub fn wand_enhancer_exe_path() -> Result<PathBuf, String> {
+const WAND_ENHANCER_EXE: &str = "WandEnhancer.exe";
+
+#[derive(Default)]
+pub struct WandEnhancer(Mutex<WandSession>);
+
+#[derive(Default)]
+struct WandSession {
+    child: Option<Child>,
+    ready: bool,
+    closing: bool,
+}
+
+impl WandSession {
+    fn installed_path(&self) -> Option<PathBuf> {
+        if !self.ready || self.closing {
+            return None;
+        }
+        wand_enhancer_exe_path().ok().filter(|path| path.is_file())
+    }
+
+    fn is_running(&mut self) -> Result<bool, String> {
+        if let Some(child) = &mut self.child {
+            return child.try_wait().map(|status| status.is_none()).map_err(err);
+        }
+        Ok(false)
+    }
+
+    fn spawn(&mut self, path: &Path) -> Result<(), String> {
+        let child = Command::new(path)
+            .spawn()
+            .map_err(|error| format!("Failed to launch Wand Enhancer: {error}"))?;
+        self.child = Some(child);
+        Ok(())
+    }
+
+    fn close(&mut self, path: &Path) {
+        self.closing = true;
+        // Only stop the process this MYLE instance launched.
+        if let Some(mut child) = self.child.take()
+            && child.kill().is_ok()
+        {
+            let _ = child.wait();
+        }
+        remove_wand_exe(path);
+    }
+}
+
+impl WandEnhancer {
+    pub fn shutdown(&self) {
+        if let Ok(path) = wand_enhancer_exe_path() {
+            self.0.lock().unwrap_or_else(|p| p.into_inner()).close(&path);
+        }
+    }
+}
+
+pub const WAND_ENHANCER_ID: &str = "creative.wandenhancer";
+
+fn wand_enhancer_exe_path() -> Result<PathBuf, String> {
     crate::storage::roaming_dir().map(|dir| dir.join(WAND_ENHANCER_EXE))
 }
-/// Returns true when WandEnhancer.exe is already present in roaming dir.
-#[tauri::command]
-pub fn creative_wand_enhancer_available() -> bool {
-    wand_enhancer_exe_path().map(|p| p.is_file()).unwrap_or(false)
-}
-/// Launches the installed WandEnhancer.exe.
-#[tauri::command]
-pub async fn creative_wand_enhancer_launch() -> Result<String, String> {
-    let path = wand_enhancer_exe_path()?;
-    if !path.is_file() {
-        return Err(format!("WandEnhancer.exe was not found at {}", path.display()));
+
+fn wand_enhancer_file_version_string(path: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
+    };
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        let size = GetFileVersionInfoSizeW(wide.as_ptr(), std::ptr::null_mut());
+        if size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        if GetFileVersionInfoW(wide.as_ptr(), 0, size, data.as_mut_ptr().cast()) == 0 {
+            return None;
+        }
+        let root: [u16; 2] = [u16::from(b'\\'), 0];
+        let mut info: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut length = 0u32;
+        if VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut info, &mut length) == 0
+            || info.is_null()
+            || (length as usize) < std::mem::size_of::<VS_FIXEDFILEINFO>()
+        {
+            return None;
+        }
+        let fixed = std::ptr::read_unaligned(info.cast::<VS_FIXEDFILEINFO>());
+        let major = (fixed.dwFileVersionMS >> 16) as u16;
+        let minor = (fixed.dwFileVersionMS & 0xFFFF) as u16;
+        let patch = (fixed.dwFileVersionLS >> 16) as u16;
+        let rev = (fixed.dwFileVersionLS & 0xFFFF) as u16;
+        Some(format!("{major}.{minor}.{patch}.{rev}"))
     }
-    std::process::Command::new(&path)
-        .spawn()
-        .map_err(|e| format!("Failed to launch WandEnhancer: {e}"))?;
+}
+
+fn parse_version_parts(v: &str) -> Vec<u16> {
+    v.trim_start_matches(['v', 'V'])
+        .split('.')
+        .filter_map(|s| s.parse::<u16>().ok())
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WandEnhancerStatus {
+    pub installed: bool,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+}
+
+#[tauri::command]
+pub async fn creative_wand_enhancer_status(app: AppHandle) -> WandEnhancerStatus {
+    let installed_path = app.state::<WandEnhancer>().0.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .installed_path();
+    let Some(path) = installed_path else {
+        return WandEnhancerStatus {
+            installed: false,
+            installed_version: None,
+            latest_version: None,
+            update_available: false,
+        };
+    };
+    let installed_version = wand_enhancer_file_version_string(&path);
+
+    let latest_version = match find(WAND_ENHANCER_ID) {
+        Ok(entry) => match &entry.source {
+            Some(source) => {
+                super::resolver::resolve(&app, &format!("creative:{}", WAND_ENHANCER_ID), source)
+                    .await
+                    .ok()
+                    .and_then(|r| r.version)
+            }
+            None => None,
+        },
+        Err(_) => None,
+    };
+
+    let update_available = match (&installed_version, &latest_version) {
+        (Some(inst), Some(latest)) => {
+            let inst_parts = parse_version_parts(inst);
+            let latest_parts = parse_version_parts(latest);
+            latest_parts > inst_parts
+        }
+        _ => false,
+    };
+
+    WandEnhancerStatus {
+        installed: true,
+        installed_version,
+        latest_version,
+        update_available,
+    }
+}
+
+/// Clears the old installed copy and any file left by a crash.
+pub fn clear_wand_enhancer() {
+    if let Ok(path) = wand_enhancer_exe_path() {
+        remove_wand_exe(&path);
+    }
+}
+
+fn remove_wand_exe(path: &Path) {
+    if std::fs::remove_file(path).is_ok() || !path.symlink_metadata().is_ok_and(|meta| meta.is_file())
+    {
+        return;
+    }
+
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: a NUL-terminated path and null destination request deletion after reboot.
+    // The next MYLE start also tries again if Windows cannot queue the deletion.
+    unsafe { MoveFileExW(wide.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) };
+}
+
+#[tauri::command]
+pub fn creative_wand_enhancer_available(wand: State<'_, WandEnhancer>) -> bool {
+    wand.0.lock().unwrap_or_else(|p| p.into_inner()).installed_path().is_some()
+}
+
+#[tauri::command]
+pub fn creative_wand_enhancer_launch(wand: State<'_, WandEnhancer>) -> Result<String, String> {
+    let mut session = wand.0.lock().unwrap_or_else(|p| p.into_inner());
+    let path = session.installed_path().ok_or("Download Wand Enhancer to run it.")?;
+    if session.is_running()? {
+        return Ok("Wand Enhancer is already running.".into());
+    }
+    session.spawn(&path)?;
     Ok("Wand Enhancer launched.".into())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn leaving_myle_releases_and_removes_the_wand_executable() {
+        use std::os::windows::process::CommandExt;
+        use std::process::Stdio;
+
+        let dir = crate::test_dirs::temp_dir("wand-cleanup");
+        let exe = dir.join(WAND_ENHANCER_EXE);
+        std::fs::copy(super::super::process::system32("cmd.exe"), &exe).unwrap();
+        let unrelated = dir.join("appsettings.json");
+        std::fs::write(&unrelated, b"settings").unwrap();
+        let child = Command::new(&exe)
+            .args(["/d", "/q"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(super::super::process::CREATE_NO_WINDOW)
+            .spawn()
+            .unwrap();
+        let mut session = WandSession {
+            child: Some(child),
+            ready: true,
+            ..WandSession::default()
+        };
+        let was_running = session.is_running();
+
+        session.close(&exe);
+
+        assert!(was_running.unwrap());
+        assert!(session.closing && session.child.is_none());
+        assert!(!exe.exists());
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"settings");
+        let _ = std::fs::remove_dir_all(dir);
+    }
     #[test]
     fn a_download_never_takes_the_name_of_a_file_already_in_downloads() {
         let dir = std::env::temp_dir().join(format!("myle-creative-names-{}", std::process::id()));

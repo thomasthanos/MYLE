@@ -359,6 +359,7 @@ pub fn run() {
         .manage(account_state)
         .manage(jobs.clone())
         .manage(cleanup.clone())
+        .manage(apps::creative::WandEnhancer::default())
         .manage(running.clone())
         .manage(game_saves_state.clone())
         .manage(project_backups::ProjectBackupsState::default())
@@ -387,8 +388,9 @@ pub fn run() {
                     std::thread::spawn(move || passwords::refresh_local_extension(&handle));
                 }
                 // Sweeps anything a previous run could not delete. Off the main thread: a locked file costs a retry delay.
-                if let Ok(dir) = storage::roaming_dir() {
-                    std::thread::spawn(move || cleanup.init(dir.join("pending-cleanup.json")));
+                apps::creative::clear_wand_enhancer();
+                if let Ok(file) = storage::roaming_item("pending-cleanup.json") {
+                    std::thread::spawn(move || cleanup.init(file));
                 }
                 // The installer of the last update, if any. This runs before the splash can start a new download into the same folder. An installer still exiting after relaunching us stays locked and goes on a later start.
                 let _ = std::fs::remove_dir_all(updater::update_dir());
@@ -546,6 +548,7 @@ pub fn run() {
             apps::creative::creative_install,
             apps::creative::creative_clip_studio_restore_available,
             apps::creative::creative_clip_studio_swap_exe,
+            apps::creative::creative_wand_enhancer_status,
             apps::creative::creative_wand_enhancer_available,
             apps::creative::creative_wand_enhancer_launch,
             cleaner::cleaner_categories,
@@ -730,7 +733,7 @@ pub fn run() {
         ]))
         .build(context())
         .expect("error while building the application");
-    app.run(move |_app, event| {
+    app.run(move |app, event| {
         // Downloaded packages are removed once the app is closed.
         if matches!(event, tauri::RunEvent::Exit) {
             // An elevated scan runs in its own process, so it has to be told to stop rather than dying with the window.
@@ -741,6 +744,7 @@ pub fn run() {
             disk_analyzer_state.cancel();
             autoclicker_state.shutdown();
             jobs.cancel_all();
+            app.state::<apps::creative::WandEnhancer>().shutdown();
             cleanup.run_once();
             // A password copied in the last half-minute is not left behind.
             passwords::clipboard::clear_pending();

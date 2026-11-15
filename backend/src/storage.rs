@@ -19,6 +19,12 @@ const TIDIED: [(&str, &str, &str); 9] = [
     ("steam-automation", STEAM, "automation"),
     ("steam-helper", STEAM, "helper"),
 ];
+const ROAMING_TIDIED: &[&str] = &[
+    "github-releases.json",
+    "pending-cleanup.json",
+    "project-backups.json",
+    "whats-new.json",
+];
 /// Folders nobody needs to open. Never single files: Windows refuses to overwrite a hidden file by
 /// name, so the next save of one would fail. The web view's profile and the browser manifests stay
 /// put because other programs hold their paths.
@@ -33,6 +39,33 @@ struct Dirs {
 static DIRS: OnceLock<Dirs> = OnceLock::new();
 pub fn roaming_dir() -> Result<PathBuf, String> {
     dirs().map(|dirs| dirs.roaming.clone())
+}
+/// Where an internal roaming item is, including one that could not be moved yet.
+pub fn roaming_item(name: &str) -> Result<PathBuf, String> {
+    let root = roaming_dir()?;
+    debug_assert!(ROAMING_TIDIED.contains(&name));
+    let old = root.join(name);
+    let internal = root.join(INTERNAL);
+    let new = internal.join(name);
+    Ok(if !internal.is_dir() || (old.exists() && !new.exists()) {
+        old
+    } else {
+        new
+    })
+}
+/// Whether there is stored data apart from the marker used to track release notes.
+pub fn has_roaming_data_except(marker: &str) -> bool {
+    roaming_dir().is_ok_and(|root| {
+        contains_data(&root, &[INTERNAL, marker])
+            || contains_data(&root.join(INTERNAL), &[marker])
+    })
+}
+fn contains_data(dir: &Path, excluded: &[&str]) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut entries| {
+        entries.any(|entry| {
+            entry.is_ok_and(|entry| !excluded.iter().any(|name| entry.file_name() == *name))
+        })
+    })
 }
 pub fn local_dir() -> Result<PathBuf, String> {
     dirs().map(|dirs| dirs.local.clone())
@@ -55,6 +88,7 @@ pub fn prepare() -> Result<(), String> {
     if local == local_target()? {
         hide(&local);
     }
+    tidy_roaming(&roaming);
     tidy(&local);
     clear_web_caches(&local);
     let _ = DIRS.set(Dirs { roaming, local });
@@ -113,13 +147,31 @@ fn tidy(root: &Path) {
         hide(&root.join(folder));
     }
 }
-fn hide(folder: &Path) {
+fn tidy_roaming(root: &Path) {
+    // Health restore entries store absolute paths to their backups.
+    hide(&root.join("software-health"));
+    let internal = root.join(INTERNAL);
+    if std::fs::create_dir_all(&internal).is_err() {
+        return;
+    }
+    hide(&internal);
+    for name in ROAMING_TIDIED {
+        let (old, new) = (root.join(name), internal.join(name));
+        if old.exists() && !new.exists() {
+            let _ = std::fs::rename(old, new);
+        }
+    }
+}
+pub(crate) fn hide(folder: &Path) {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
     let Ok(metadata) = std::fs::metadata(folder) else {
         return;
     };
+    if !metadata.is_dir() {
+        return;
+    }
     let wide: Vec<u16> = folder.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
     // SAFETY: `wide` is a NUL-terminated path that outlives the call.
     unsafe { SetFileAttributesW(wide.as_ptr(), metadata.file_attributes() | FILE_ATTRIBUTE_HIDDEN) };
@@ -296,6 +348,29 @@ mod tests {
         assert!(!is_hidden(&file), "only the folder is hidden");
         std::fs::write(&file, b"two").unwrap();
         assert_eq!(std::fs::read(&file).unwrap(), b"two");
+        let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn roaming_tidy_preserves_settings_and_only_moves_known_items() {
+        let root = temp();
+        let settings = root.join("project-backups.json");
+        let health = root.join("software-health");
+        std::fs::create_dir_all(&health).unwrap();
+        std::fs::write(health.join("history.json"), b"health").unwrap();
+        std::fs::write(&settings, b"projects").unwrap();
+        std::fs::write(root.join("passwords.vault"), b"vault").unwrap();
+        std::fs::write(root.join("appsettings.json"), b"other app").unwrap();
+
+        tidy_roaming(&root);
+
+        let internal = root.join(INTERNAL);
+        assert!(is_hidden(&internal));
+        assert!(!settings.exists());
+        assert!(is_hidden(&health));
+        assert_eq!(std::fs::read(internal.join("project-backups.json")).unwrap(), b"projects");
+        assert_eq!(std::fs::read(health.join("history.json")).unwrap(), b"health");
+        assert_eq!(std::fs::read(root.join("passwords.vault")).unwrap(), b"vault");
+        assert_eq!(std::fs::read(root.join("appsettings.json")).unwrap(), b"other app");
         let _ = std::fs::remove_dir_all(root);
     }
     #[test]

@@ -7,6 +7,7 @@
   import Package from "@lucide/svelte/icons/package";
   import Play from "@lucide/svelte/icons/play";
   import RefreshCcw from "@lucide/svelte/icons/refresh-ccw";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import Wrench from "@lucide/svelte/icons/wrench";
   import X from "@lucide/svelte/icons/x";
@@ -71,9 +72,13 @@
     app.id === CLIP_STUDIO_ID && creativeState.clipStudioRestoreReady,
   );
 
-  /* True only for Wand Enhancer once the exe is present in roaming directory. */
+  /* True once Wand Enhancer is ready to run again in this session. */
   const showWandLaunch = $derived(
     app.id === WAND_ENHANCER_ID && creativeState.wandEnhancerReady,
+  );
+  const wandStatus = $derived(creativeState.wandEnhancerStatus);
+  const wandUpdate = $derived(
+    app.id === WAND_ENHANCER_ID && wandStatus.installed && wandStatus.updateAvailable,
   );
 </script>
 
@@ -86,7 +91,14 @@
         <CategoryIcon size={22} strokeWidth={1.6} />
       {/if}
     </span>
-    <span class="chip">{app.category}</span>
+    <div class="chips">
+      {#if wandUpdate && wandStatus.latestVersion}
+        <span class="chip update" title="Update available: v{wandStatus.latestVersion}">
+          Update v{wandStatus.latestVersion}
+        </span>
+      {/if}
+      <span class="chip">{app.category}</span>
+    </div>
   </div>
 
   <h3>{app.name}</h3>
@@ -105,19 +117,42 @@
         <X size={16} />
       </button>
     {:else if showWandLaunch}
-      <!-- After install: launch directly, with an icon button to rebuild/re-download if desired -->
-      <button class="btn primary launch" onclick={() => creativeState.launchWandEnhancer()}>
-        <Play size={14} />
-        Run Wand Enhancer
-      </button>
-      <button
-        class="icon-btn"
-        title="Re-download & Build"
-        aria-label="Rebuild {app.name}"
-        onclick={() => creativeState.install(app)}
-      >
-        <RefreshCcw size={14} />
-      </button>
+      {#if wandUpdate}
+        <!-- Update available: primary action performs update, secondary runs installed version -->
+        <button
+          class="btn primary update-btn"
+          onclick={() => creativeState.install(app)}
+          title="Update Wand Enhancer to v{wandStatus.latestVersion}"
+        >
+          <Sparkles size={14} />
+          Update to v{wandStatus.latestVersion}
+        </button>
+        <button
+          class="icon-btn"
+          title="Run installed v{wandStatus.installedVersion}"
+          aria-label="Run installed v{wandStatus.installedVersion}"
+          onclick={() => creativeState.launchWandEnhancer()}
+        >
+          <Play size={14} />
+        </button>
+      {:else}
+        <!-- Up to date: launch directly, with installed version tag and rebuild icon -->
+        <button class="btn primary launch" onclick={() => creativeState.launchWandEnhancer()}>
+          <Play size={14} />
+          Run Wand Enhancer
+        </button>
+        {#if wandStatus.installedVersion}
+          <span class="meta" title="Installed version">v{wandStatus.installedVersion}</span>
+        {/if}
+        <button
+          class="icon-btn"
+          title="Re-download & Build"
+          aria-label="Rebuild {app.name}"
+          onclick={() => creativeState.install(app)}
+        >
+          <RefreshCcw size={14} />
+        </button>
+      {/if}
     {:else if showRevert}
       <!-- After install: replace the primary button with the revert action -->
       <button class="btn revert" onclick={() => creativeState.swapExe()}>
@@ -156,6 +191,14 @@
   img { border-radius: 8px; object-fit: contain; }
 
   .chip { padding: 3px 9px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 999px; background: rgb(255 255 255 / 0.04); color: var(--text-3); font-size: 11.5px; text-transform: capitalize; }
+
+  .chips { display: flex; align-items: center; gap: 6px; }
+  .chip.update {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--accent);
+    font-weight: 600;
+  }
 
   h3 { margin-top: 2px; font-size: 15.5px; }
 

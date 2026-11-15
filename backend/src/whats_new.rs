@@ -30,12 +30,7 @@ fn detect_previous_install() -> bool {
     if profile.is_ok_and(|dir| dir.exists()) {
         return true;
     }
-    crate::storage::roaming_dir()
-        .ok()
-        .and_then(|dir| std::fs::read_dir(dir).ok())
-        .is_some_and(|mut entries| {
-            entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() != STATE_FILE))
-        })
+    crate::storage::has_roaming_data_except(STATE_FILE)
 }
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,7 +79,7 @@ struct GhRelease {
     published_at: Option<String>,
 }
 fn state_path() -> Result<PathBuf, String> {
-    crate::storage::roaming_dir().map(|dir| dir.join(STATE_FILE))
+    crate::storage::roaming_item(STATE_FILE)
 }
 fn cache_path() -> Result<PathBuf, String> {
     crate::storage::local_item(CACHE_FILE)
