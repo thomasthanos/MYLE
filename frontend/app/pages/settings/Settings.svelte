@@ -19,6 +19,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Rocket from "@lucide/svelte/icons/rocket";
   import Search from "@lucide/svelte/icons/search";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import X from "@lucide/svelte/icons/x";
   import Logo from "../../../lib/components/Logo.svelte";
@@ -50,9 +51,32 @@
   /** Closing the window keeps the app running next to the clock. */
   let keepInTray = $state(false);
 
+  /** "Show ThomasT as the publisher": only offered by a copy signed with that certificate. */
+  let publisher = $state<{ name: string; trusted: boolean } | null>(null);
+  let trusting = $state(false);
+
+  /** Windows asks the user itself; this waits for their answer. */
+  async function trustPublisher() {
+    if (!publisher || trusting) return;
+    trusting = true;
+    try {
+      if (await invoke<boolean>("publisher_trust")) {
+        publisher = { ...publisher, trusted: true };
+        toast.success(`Windows now shows ${publisher.name} as MYLE's publisher.`);
+      } else {
+        toast.info("Not trusted: Windows was told no.");
+      }
+    } catch (error) {
+      toast.error(message(error));
+    } finally {
+      trusting = false;
+    }
+  }
+
   onMount(() => {
     if (!isTauri()) return;
     void getVersion().then((v) => (version = v)).catch(() => {});
+    void invoke<typeof publisher>("publisher_get").then((value) => (publisher = value)).catch(() => {});
     void invoke<typeof startup>("startup_get").then((value) => (startup = value)).catch(() => {});
     void invoke<boolean>("tray_get").then((value) => (keepInTray = value)).catch(() => {});
     void passwordsApi.browserGet().then(
@@ -291,6 +315,26 @@
               <ExternalLink size={12} /> GitHub
             </button>
           </div>
+          {#if publisher}
+            {#if publisher.trusted}
+              <p class="publisher-note"><ShieldCheck size={13} /> Windows shows {publisher.name} as MYLE's publisher.</p>
+            {:else}
+              <div class="publisher-offer">
+                <span class="text">
+                  <strong>Show {publisher.name} as the publisher</strong>
+                  <small>
+                    MYLE is signed with {publisher.name}'s own certificate, so Windows calls its publisher unknown.
+                    Trust it for your Windows account and Windows shows {publisher.name} instead. Windows asks you to
+                    confirm; no administrator rights are needed, and uninstalling MYLE takes it back.
+                  </small>
+                </span>
+                <button class="btn small" disabled={trusting} onclick={() => void trustPublisher()}>
+                  {#if trusting}<LoaderCircle size={12} class="spin" />{:else}<ShieldCheck size={12} />{/if}
+                  {trusting ? "Waiting for Windows…" : `Trust ${publisher.name}`}
+                </button>
+              </div>
+            {/if}
+          {/if}
         </div>
       </section>
     </div>
@@ -617,6 +661,13 @@
   .brand-mark { display: grid; place-items: center; flex: none; }
   .links { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; border-top: 1px solid rgb(255 255 255 / 0.05); }
   .links .btn { height: 25px; padding: 0 8px; font-size: 11px; }
+  /* "Show ThomasT as the publisher" */
+  .publisher-offer { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid rgb(255 255 255 / 0.05); }
+  .publisher-offer .text { display: grid; gap: 3px; flex: 1; min-width: 0; }
+  .publisher-offer strong { color: var(--text-1); font-size: 12px; }
+  .publisher-offer small { color: var(--text-3); font-size: 11px; line-height: 1.45; }
+  .publisher-offer .btn { flex: none; height: 25px; padding: 0 8px; font-size: 11px; }
+  .publisher-note { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding-top: 6px; color: var(--text-3); font-size: 11px; }
 
   /* --- Empty State --- */
   .empty { display: grid; justify-items: center; gap: 5px; padding: 30px 16px; border: 1px dashed rgb(255 255 255 / 0.12); border-radius: var(--radius-md); background: rgb(0 0 0 / 0.1); color: var(--text-3); text-align: center; }

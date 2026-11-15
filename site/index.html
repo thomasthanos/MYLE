@@ -17,8 +17,10 @@
     <title>Make Your Life Easier — Windows utility</title>
     <link rel="icon" href="assets/app-icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/site.css" />
+    <link rel="stylesheet" href="assets/motion.css" />
+    <script src="assets/site-motion.js" defer></script>
   </head>
-  <body>
+  <body class="landing">
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
@@ -66,45 +68,118 @@
           </ul>
         </div>
 
-        <div class="app-preview" aria-label="Stylized preview of the desktop application">
+        <section class="app-preview" aria-label="Interactive MYLE app preview">
           <div class="preview-inner">
             <div class="preview-bar">
               <img src="assets/app-icon.svg" width="22" height="22" alt="" />
-              <strong>Make Your Life Easier</strong>
-              <span aria-hidden="true">/</span>
-              <span>Install Apps</span>
+              <strong>MYLE</strong>
+              <span>App preview</span>
+              <span class="preview-window" aria-hidden="true"><i></i><i></i><i></i></span>
             </div>
-            <div class="preview-layout">
-              <div class="preview-side" aria-hidden="true">
-                <span></span><span></span><span></span><span></span><span></span>
-              </div>
-              <div class="preview-main">
-                <small>WINDOWS TOOLKIT</small>
-                <h2>Everything stays organized.</h2>
-                <div class="preview-card">
-                  <span class="fake-icon" aria-hidden="true">＋</span>
-                  <div><strong>Install Apps</strong><span>Curated apps and winget catalog</span></div>
-                  <i aria-hidden="true"></i>
-                </div>
-                <div class="preview-card">
-                  <span class="fake-icon" aria-hidden="true">♫</span>
-                  <div><strong>Spotify Hub</strong><span>Spicetify setup and clean restore</span></div>
-                  <i aria-hidden="true"></i>
-                </div>
-                <div class="preview-card">
-                  <span class="fake-icon" aria-hidden="true">◆</span>
-                  <div><strong>Game Saves</strong><span>Scan, back up and restore</span></div>
-                  <i aria-hidden="true"></i>
-                </div>
-                <div class="preview-card">
-                  <span class="fake-icon" aria-hidden="true">✓</span>
-                  <div><strong>System Health</strong><span>Cleanup and maintenance tools</span></div>
-                  <i aria-hidden="true"></i>
-                </div>
-              </div>
+            <div class="preview-tabs" role="tablist" aria-label="Preview a MYLE tool" hidden>
+            <button type="button" id="preview-tab-apps" role="tab" aria-selected="true" aria-controls="preview-apps" tabindex="0">
+              <span aria-hidden="true">+</span>Install Apps
+            </button>
+            <button type="button" id="preview-tab-spotify" role="tab" aria-selected="false" aria-controls="preview-spotify" tabindex="-1">
+              <span aria-hidden="true">♫</span>Spotify Hub
+            </button>
+            <button type="button" id="preview-tab-saves" role="tab" aria-selected="false" aria-controls="preview-saves" tabindex="-1">
+              <span aria-hidden="true">◆</span>Game Saves
+            </button>
+            <button type="button" id="preview-tab-cleaner" role="tab" aria-selected="false" aria-controls="preview-cleaner" tabindex="-1">
+              <span aria-hidden="true">✦</span>System Cleaner
+            </button>
             </div>
+          <section class="preview-main" id="preview-apps" role="tabpanel" aria-labelledby="preview-tab-apps" tabindex="0">
+            <h2>Queue popular apps</h2>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">7z</span>
+              <div><strong>7-Zip</strong><span>Installing</span></div>
+              <span class="preview-state active">In progress</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">VL</span>
+              <div><strong>VLC media player</strong><span>Installer verified</span></div>
+              <span class="preview-state">Ready</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">FF</span>
+              <div><strong>Mozilla Firefox</strong><span>Queued for installation</span></div>
+              <span class="preview-state">Queued</span>
+            </div>
+            <div class="preview-progress apps" role="progressbar" aria-label="Installing 7-Zip" aria-valuenow="68">
+              <div><span>Installing 7-Zip</span><strong>68%</strong></div>
+              <span class="preview-track" aria-hidden="true"><span class="preview-fill"></span></span>
+            </div>
+          </section>
+          <section class="preview-main" id="preview-spotify" role="tabpanel" aria-labelledby="preview-tab-spotify" tabindex="0" hidden>
+            <h2>Make Spotify yours</h2>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">SP</span>
+              <div><strong>Spotify</strong><span>Desktop app detected</span></div>
+              <span class="preview-state">Ready</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">ST</span>
+              <div><strong>Spicetify</strong><span>Theme applied</span></div>
+              <span class="preview-state">Done</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">RS</span>
+              <div><strong>Restore stock</strong><span>Return to default Spotify</span></div>
+              <span class="preview-state">Available</span>
+            </div>
+            <div class="preview-progress spotify" role="progressbar" aria-label="Theme applied" aria-valuenow="100">
+              <div><span>Theme applied</span><strong>100%</strong></div>
+              <span class="preview-track" aria-hidden="true"><span class="preview-fill"></span></span>
+            </div>
+          </section>
+          <section class="preview-main" id="preview-saves" role="tabpanel" aria-labelledby="preview-tab-saves" tabindex="0" hidden>
+            <h2>Keep a copy of your progress</h2>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">PC</span>
+              <div><strong>Local game saves</strong><span>Save folders discovered</span></div>
+              <span class="preview-state">Ready</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">BK</span>
+              <div><strong>Backup snapshot</strong><span>Copying selected saves</span></div>
+              <span class="preview-state active">In progress</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">RE</span>
+              <div><strong>Restore</strong><span>Choose a previous snapshot</span></div>
+              <span class="preview-state">Available</span>
+            </div>
+            <div class="preview-progress saves" role="progressbar" aria-label="Creating a snapshot" aria-valuenow="76">
+              <div><span>Creating a snapshot</span><strong>76%</strong></div>
+              <span class="preview-track" aria-hidden="true"><span class="preview-fill"></span></span>
+            </div>
+          </section>
+          <section class="preview-main" id="preview-cleaner" role="tabpanel" aria-labelledby="preview-tab-cleaner" tabindex="0" hidden>
+            <h2>See what can be cleaned</h2>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">TF</span>
+              <div><strong>Temporary files</strong><span>Windows and app caches</span></div>
+              <span class="preview-state">Review</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">BC</span>
+              <div><strong>Browser cache</strong><span>Files grouped by browser</span></div>
+              <span class="preview-state">Review</span>
+            </div>
+            <div class="preview-card">
+              <span class="fake-icon" aria-hidden="true">RB</span>
+              <div><strong>Recycle Bin</strong><span>Included in the scan</span></div>
+              <span class="preview-state">Review</span>
+            </div>
+            <div class="preview-progress cleaner" role="progressbar" aria-label="Scan complete" aria-valuenow="100">
+              <div><span>Scan complete</span><strong>100%</strong></div>
+              <span class="preview-track" aria-hidden="true"><span class="preview-fill"></span></span>
+            </div>
+          </section>
           </div>
-        </div>
+        </section>
       </section>
 
       <section id="features" class="section muted">

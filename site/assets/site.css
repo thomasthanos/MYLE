@@ -29,6 +29,7 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 82px;
 }
 
 body {
@@ -36,6 +37,7 @@ body {
   min-height: 100vh;
   margin: 0;
   overflow-x: hidden;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 12% 4%, rgb(85 105 232 / 0.17), transparent 28rem),
     radial-gradient(circle at 88% 7%, rgb(46 163 190 / 0.13), transparent 30rem),
@@ -170,6 +172,19 @@ a {
   align-items: center;
   min-height: 680px;
   padding-block: 92px 84px;
+}
+
+.landing .hero::before {
+  position: absolute;
+  inset: 4% -2% 8%;
+  z-index: -1;
+  background:
+    linear-gradient(rgb(124 156 224 / 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(124 156 224 / 0.09) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at 75% 50%, #000 8%, transparent 66%);
+  content: "";
+  pointer-events: none;
 }
 
 .eyebrow,
@@ -318,7 +333,7 @@ a {
 
 .preview-inner {
   overflow: hidden;
-  min-height: 470px;
+  min-height: 416px;
   border-radius: 23px;
   background: linear-gradient(145deg, rgb(24 29 45 / 0.98), rgb(10 13 21 / 0.99));
 }
@@ -340,95 +355,160 @@ a {
   border-radius: 7px;
 }
 
-.preview-layout {
+.preview-window {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.preview-window i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #667492;
+}
+
+.preview-window i:first-child { background: #6d82ee; }
+.preview-window i:last-child { background: #55d6a4; }
+
+.preview-tabs {
   display: grid;
-  grid-template-columns: 54px 1fr;
-  min-height: 426px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(8 13 24 / 0.45);
 }
 
-.preview-side {
-  display: grid;
-  align-content: start;
-  gap: 11px;
-  padding: 18px 12px;
-  border-right: 1px solid rgb(255 255 255 / 0.055);
-  background: rgb(255 255 255 / 0.018);
+.preview-tabs[hidden] { display: none; }
+
+.preview-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 680;
+  cursor: pointer;
 }
 
-.preview-side span {
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgb(255 255 255 / 0.065);
-  border-radius: 9px;
-  background: rgb(255 255 255 / 0.035);
+.preview-tabs button span {
+  color: #acb8ff;
+  font-size: 12px;
 }
 
-.preview-side span:first-child {
-  border-color: rgb(130 144 255 / 0.23);
-  background: rgb(120 135 255 / 0.12);
-  box-shadow: inset 2px 0 0 #7788ff;
+.preview-tabs button:hover,
+.preview-tabs button[aria-selected="true"] {
+  color: var(--text);
+  background: rgb(121 145 255 / 0.13);
 }
+
+.preview-tabs button[aria-selected="true"] {
+  border-color: rgb(151 170 255 / 0.34);
+}
+
+.preview-tabs button:focus-visible { outline-offset: -2px; }
 
 .preview-main {
-  padding: 23px 20px;
-}
-
-.preview-main small {
-  color: #aeb7d0;
-  font-size: 10px;
+  min-height: 318px;
+  padding: 18px 18px 21px;
+  outline-offset: -4px;
 }
 
 .preview-main h2 {
-  margin: 5px 0 18px;
-  font-size: 23px;
+  margin: 0 0 13px;
+  color: #f0f3ff;
+  font-size: clamp(18px, 2vw, 24px);
   letter-spacing: -0.035em;
+  line-height: 1.2;
 }
 
 .preview-card {
   display: grid;
-  grid-template-columns: 40px 1fr auto;
-  gap: 11px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 9px;
   align-items: center;
-  margin-top: 9px;
-  padding: 12px;
-  border: 1px solid rgb(255 255 255 / 0.075);
-  border-radius: 13px;
+  margin-top: 7px;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 0.085);
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.032);
 }
 
 .preview-card .fake-icon {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   place-items: center;
-  border-radius: 11px;
+  border-radius: 8px;
   background: rgb(119 134 255 / 0.13);
-  color: #b7c0ff;
-  font-size: 15px;
+  color: #c3cbff;
+  font-size: 10px;
+  font-weight: 760;
 }
 
 .preview-card strong,
-.preview-card span {
+.preview-card div > span {
   display: block;
 }
 
-.preview-card strong {
+.preview-card strong { font-size: 11px; }
+.preview-card div > span { color: var(--text-2); font-size: 10px; }
+
+.preview-card .preview-state {
+  color: #9de6cd;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.preview-card .preview-state.active { color: #b7c7ff; }
+
+.preview-progress {
+  --preview-value: 1;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.preview-progress.apps { --preview-value: 0.68; }
+.preview-progress.saves { --preview-value: 0.76; }
+
+.preview-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--text-2);
   font-size: 11px;
 }
 
-.preview-card span {
-  margin-top: 2px;
-  color: var(--text-3);
-  font-size: 8px;
+.preview-progress strong { color: #a7e8e5; font-variant-numeric: tabular-nums; }
+
+.preview-track,
+.preview-fill {
+  display: block;
+  height: 4px;
+  border-radius: 4px;
 }
 
-.preview-card i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 9px rgb(85 214 164 / 0.45);
+.preview-track {
+  overflow: hidden;
+  background: #202d46;
 }
+
+.preview-fill {
+  background: linear-gradient(90deg, #7b91ff, #77dfd6);
+  transform: scaleX(var(--preview-value));
+  transform-origin: left;
+}
+
 
 .section {
   padding-block: 88px;
@@ -832,15 +912,19 @@ a {
 
   .nav-shell {
     min-height: 62px;
+    gap: 12px;
   }
 
   .brand span {
     display: none;
   }
 
-  .site-nav a:not(.nav-download) {
+  .site-nav a:first-child:not(.nav-download) {
     display: none;
   }
+
+  .site-nav { gap: 3px; }
+  .site-nav a { padding-inline: 7px; }
 
   .hero {
     gap: 48px;
@@ -862,31 +946,15 @@ a {
     width: 100%;
   }
 
-  .preview-inner {
-    min-height: 390px;
-  }
+  .preview-inner { min-height: 0; }
 
-  .preview-layout {
-    grid-template-columns: 45px 1fr;
-    min-height: 346px;
-  }
+  .preview-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-  .preview-side {
-    padding-inline: 8px;
-  }
+  .preview-tabs button { min-height: 42px; font-size: 11px; }
 
-  .preview-side span {
-    width: 26px;
-    height: 26px;
-  }
+  .preview-main { min-height: 0; padding: 17px 12px 20px; }
 
-  .preview-main {
-    padding: 20px 13px;
-  }
-
-  .feature-grid {
-    grid-template-columns: 1fr;
-  }
+  .feature-grid { grid-template-columns: 1fr; }
 
   .section {
     padding-block: 66px;

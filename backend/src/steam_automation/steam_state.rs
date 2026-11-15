@@ -111,31 +111,32 @@ mod tests {
     fn no_active_user_matches_nobody() {
         assert!(!same_account(0, 76561197960265728));
     }
+    /// Made-up accounts (Steam's base id plus 1,000,001 and 2,000,002).
     const LOGINS: &str = r#""users"
 {
-	"76561199083028124"
+	"76561197961265729"
 	{
-		"AccountName"		"nikospepponis132"
-		"PersonaName"		"Souvlatzis"
+		"AccountName"		"example_account_one"
+		"PersonaName"		"Player One"
 		"RememberPassword"		"1"
 		"timestamp"		"1794672655"
 	}
-	"76561198998326527"
+	"76561197962265730"
 	{
-		"AccountName"		"serrialkiller102"
-		"PersonaName"		"Thomas28"
+		"AccountName"		"example_account_two"
+		"PersonaName"		"Player Two"
 		"RememberPassword"		"1"
 		"timestamp"		"1790969780"
 	}
 }"#;
     #[test]
     fn the_persona_comes_from_the_active_account() {
-        assert_eq!(persona_of(LOGINS, 1_122_762_396).as_deref(), Some("Souvlatzis"));
-        assert_eq!(persona_of(LOGINS, 1_038_060_799).as_deref(), Some("Thomas28"));
+        assert_eq!(persona_of(LOGINS, 1_000_001).as_deref(), Some("Player One"));
+        assert_eq!(persona_of(LOGINS, 2_000_002).as_deref(), Some("Player Two"));
     }
     #[test]
     fn an_account_missing_from_the_list_has_no_persona() {
         assert_eq!(persona_of(LOGINS, 7), None);
-        assert_eq!(persona_of("", 1_122_762_396), None);
+        assert_eq!(persona_of("", 1_000_001), None);
     }
 }

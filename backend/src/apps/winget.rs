@@ -382,10 +382,15 @@ pub fn parse_upgrades(out: &str) -> Vec<UpgradePackage> {
     ) else {
         return Vec::new();
     };
+    // winget prints its count ("3 upgrades available.") or, older builds, a long
+    // "cannot be determined" note right under the rows; split by the columns
+    // they could pass for a package. Real rows name the source they came from.
+    let source = table.column("Source", 4);
     let mut seen = std::collections::HashSet::new();
     table
         .rows
         .iter()
+        .filter(|row| source.is_none_or(|source| row[source].eq_ignore_ascii_case("winget")))
         .filter(|row| validate_id(&row[id]).is_ok())
         .filter(|row| !row[available].is_empty() && seen.insert(row[id].to_ascii_lowercase()))
         .map(|row| UpgradePackage {
@@ -876,6 +881,19 @@ DistroAV       DistroAV.DistroAV         6.2.1                   Tag: obs\r\n\
     fn no_upgrade_table_means_no_updates() {
         assert!(parse_upgrades("No installed package found matching input criteria.").is_empty());
         assert!(parse_upgrades("").is_empty());
+    }
+    /// winget writes its count, and (without `--include-unknown`) a long note,
+    /// right under the rows; neither becomes an update.
+    #[test]
+    fn the_lines_under_the_upgrade_table_are_not_packages() {
+        let row = |cells: [&str; 5]| format!("{:<12}{:<12}{:<10}{:<10}{}\r\n", cells[0], cells[1], cells[2], cells[3], cells[4]);
+        let mut out = row(["Name", "Id", "Version", "Available", "Source"]);
+        out += &format!("{}\r\n", "-".repeat(50));
+        out += &row(["Git", "Git.Git", "2.50.0", "2.51.0", "winget"]);
+        out += "1 upgrades available.\r\n";
+        out += "2 package(s) have version numbers that cannot be determined. Use --include-unknown to see all results.\r\n";
+        let upgrades = parse_upgrades(&out);
+        assert_eq!(upgrades.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["Git.Git"]);
     }
     #[test]
     fn links_prefer_the_homepage() {

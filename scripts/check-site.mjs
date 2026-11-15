@@ -13,6 +13,8 @@ const required = [
   "_headers",
   "_redirects",
   "assets/site.css",
+  "assets/motion.css",
+  "assets/site-motion.js",
   "assets/sign-in.css",
   "assets/releases.js",
   "assets/app-icon.svg",
@@ -21,6 +23,8 @@ const htmlFiles = required.filter((file) => file.endsWith(".html"));
 const checkedTextFiles = [
   ...htmlFiles,
   "assets/site.css",
+  "assets/motion.css",
+  "assets/site-motion.js",
   "assets/sign-in.css",
   "assets/releases.js",
 ];

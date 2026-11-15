@@ -14,6 +14,7 @@ pub mod crash_log;
 pub mod project_backups;
 mod maintenance;
 mod passwords;
+mod publisher_offer;
 mod shown_window;
 mod shell_identity;
 mod shortcut_preferences;
@@ -513,6 +514,8 @@ pub fn run() {
             startup::startup_get,
             startup::startup_set_enabled,
             startup::startup_set_minimized,
+            publisher_offer::publisher_get,
+            publisher_offer::publisher_trust,
             updater::check_for_update,
             whats_new::whats_new_pending,
             whats_new::whats_new_seen,

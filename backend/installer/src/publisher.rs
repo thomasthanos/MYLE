@@ -6,6 +6,10 @@
 //! a root certificate, and again before the uninstaller takes it away. The
 //! certificate is not a certificate authority and signs programs only, so
 //! trusting it vouches for nothing else.
+//!
+//! The app includes this same file (`backend/src/publisher_offer.rs`), so a
+//! copy that came by update, which never shows the setup's last page, offers
+//! it in Settings; it therefore uses nothing else of the setup.
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CRYPT_E_EXISTS, ERROR_CANCELLED, GetLastError};
@@ -15,7 +19,11 @@ use windows_sys::Win32::Security::Cryptography::{
     CertFreeCertificateContext, CertOpenSystemStoreW, HCERTSTORE, X509_ASN_ENCODING,
 };
 
-use crate::shell;
+/// `text` NUL-terminated, as Windows takes it.
+fn wide(text: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    text.as_ref().encode_wide().chain(Some(0)).collect()
+}
 
 /// The name Windows shows as MYLE's publisher once the user trusts it.
 pub const NAME: &str = "ThomasT";
@@ -29,7 +37,7 @@ struct Roots(HCERTSTORE);
 
 impl Roots {
     fn open() -> Option<Self> {
-        let name = shell::wide("ROOT");
+        let name = wide("ROOT");
         // SAFETY: `name` is NUL-terminated; the store is closed on drop.
         let store = unsafe { CertOpenSystemStoreW(0, name.as_ptr()) };
         (!store.is_null()).then_some(Self(store))
@@ -88,7 +96,7 @@ fn signer(path: &std::path::Path) -> Option<Vec<u8>> {
         WTD_UI_NONE, WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
     };
     const CERT_E_UNTRUSTEDROOT: i32 = 0x800B_0109_u32 as i32;
-    let wide = shell::wide(path.as_os_str());
+    let wide = wide(path.as_os_str());
     let mut file = WINTRUST_FILE_INFO {
         cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
         pcwszFilePath: wide.as_ptr(),
@@ -187,7 +195,8 @@ mod tests {
     #[test]
     fn only_a_program_signed_with_it_counts() {
         assert!(!signs(&std::env::current_exe().unwrap()));
-        assert!(!signs(&shell::system32("cmd.exe")));
+        let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        assert!(!signs(&std::path::Path::new(&windows).join(r"System32\cmd.exe")));
         assert!(!signs(std::path::Path::new(r"C:\no\such\file.exe")));
     }
 

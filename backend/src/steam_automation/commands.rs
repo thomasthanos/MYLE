@@ -61,6 +61,9 @@ pub struct SteamAutomationState {
     job: OnceLock<Arc<JobObject>>,
     /// Achievement lists the page read (or made old), for the engine's next tick.
     fresh_lists: Mutex<Vec<(u32, Option<AchievementList>)>>,
+    /// One hidden renewal at a time (`refresh_session`): the page's requests and the engine
+    /// may all hear "signed out" at once.
+    refreshing: tokio::sync::Mutex<()>,
 }
 impl SteamAutomationState {
     pub(crate) fn session(&self) -> Option<Session> {
@@ -267,60 +270,78 @@ pub fn steam_automation_stop_all(state: State<'_, SteamAutomationState>) {
 }
 /// The games with card drops left, kept for a few minutes because each page takes seconds to read.
 #[tauri::command]
-pub async fn steam_automation_drops(state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<BadgeGame>, String> {
+pub async fn steam_automation_drops(app: AppHandle, state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<BadgeGame>, String> {
     let kept = state.drops.lock().unwrap_or_else(|p| p.into_inner()).clone();
     if !force && let Some((_, games)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
         return Ok(games);
     }
-    let (community, session) = state.signed_in()?;
-    let games = read_badges(&community, session.steam_id).await.map_err(|error| state.refused(error))?;
+    let games = renewing(&state, || refresh_session(&app), |community, session| async move {
+        read_badges(&community, session.steam_id).await
+    })
+    .await?;
     *state.drops.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), games.clone()));
     Ok(games)
 }
 /// Everything in the Steam inventory, kept for a few minutes.
 #[tauri::command]
-pub async fn steam_automation_inventory(state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<InventoryItem>, String> {
+pub async fn steam_automation_inventory(app: AppHandle, state: State<'_, SteamAutomationState>, force: bool) -> Result<Vec<InventoryItem>, String> {
     let kept = state.inventory.lock().unwrap_or_else(|p| p.into_inner()).clone();
     if !force && let Some((_, items)) = kept.filter(|(read_at, _)| now().saturating_sub(*read_at) < DROPS_FRESH_SECS) {
         return Ok(items);
     }
-    let (community, session) = state.signed_in()?;
-    let items = inventory::read_items(&community, session.steam_id).await.map_err(|error| state.refused(error))?;
+    let items = renewing(&state, || refresh_session(&app), |community, session| async move {
+        inventory::read_items(&community, session.steam_id).await
+    })
+    .await?;
     *state.inventory.lock().unwrap_or_else(|p| p.into_inner()) = Some((now(), items.clone()));
     Ok(items)
 }
 /// The cheapest price on the Market right now, in cents.
 #[tauri::command]
-pub async fn steam_automation_price(state: State<'_, SteamAutomationState>, hash_name: String) -> Result<Option<u32>, String> {
-    let (community, _) = state.signed_in()?;
-    inventory::lowest_price(&community, &hash_name).await.map_err(|error| state.refused(error))
+pub async fn steam_automation_price(app: AppHandle, state: State<'_, SteamAutomationState>, hash_name: String) -> Result<Option<u32>, String> {
+    let hash_name = &hash_name;
+    renewing(&state, || refresh_session(&app), |community, _| async move {
+        inventory::lowest_price(&community, hash_name).await
+    })
+    .await
 }
 /// Lists one item. The page sends them one at a time so it can show how far it has got.
 #[tauri::command]
-pub async fn steam_automation_list_item(state: State<'_, SteamAutomationState>, item: ListRequest) -> Result<ListOutcome, String> {
-    let (community, session) = state.signed_in()?;
+pub async fn steam_automation_list_item(app: AppHandle, state: State<'_, SteamAutomationState>, item: ListRequest) -> Result<ListOutcome, String> {
     let settings = state.settings();
     let locked: HashSet<String> = settings.locked_assets.iter().cloned().collect();
-    let mut listed = state.listed.lock().await;
-    inventory::list_item(&community, &session, &item, settings.minimum_cents, &locked, &mut listed).await.map_err(|error| state.refused(error))
+    let (item, locked, minimum, listed) = (&item, &locked, settings.minimum_cents, &state.listed);
+    // A refused listing was never made, so trying it again after a renewal lists it once.
+    renewing(&state, || refresh_session(&app), |community, session| async move {
+        let mut listed = listed.lock().await;
+        inventory::list_item(&community, &session, item, minimum, locked, &mut listed).await
+    })
+    .await
 }
 #[tauri::command]
-pub async fn steam_automation_listings(state: State<'_, SteamAutomationState>) -> Result<Vec<Listing>, String> {
-    let (community, _) = state.signed_in()?;
-    inventory::read_listings(&community).await.map_err(|error| state.refused(error))
+pub async fn steam_automation_listings(app: AppHandle, state: State<'_, SteamAutomationState>) -> Result<Vec<Listing>, String> {
+    renewing(&state, || refresh_session(&app), |community, _| async move { inventory::read_listings(&community).await }).await
 }
 #[tauri::command]
-pub async fn steam_automation_remove_listing(state: State<'_, SteamAutomationState>, listing_id: String, asset_id: String) -> Result<(), String> {
-    let (community, session) = state.signed_in()?;
-    let mut listed = state.listed.lock().await;
-    inventory::remove_listing(&community, &session, &listing_id, &asset_id, &mut listed).await.map_err(|error| state.refused(error))
+pub async fn steam_automation_remove_listing(app: AppHandle, state: State<'_, SteamAutomationState>, listing_id: String, asset_id: String) -> Result<(), String> {
+    let (listing_id, asset_id, listed) = (&listing_id, &asset_id, &state.listed);
+    renewing(&state, || refresh_session(&app), |community, session| async move {
+        let mut listed = listed.lock().await;
+        inventory::remove_listing(&community, &session, listing_id, asset_id, &mut listed).await
+    })
+    .await
 }
 /// Adds a game that is free to keep to the owner's account.
 #[tauri::command]
 pub async fn steam_automation_claim(app: AppHandle, state: State<'_, SteamAutomationState>, appid: u32) -> Result<Claimed, String> {
-    let (community, session) = state.signed_in()?;
     let store = app.state::<SteamHelperState>().store()?;
-    let claimed = claim::claim(&community, &*store, &session, appid).await;
+    let (community, session) = state.signed_in()?;
+    let mut claimed = claim::claim(&community, &*store, &session, appid).await;
+    // A refused claim added nothing: renewed out of sight, it is asked once more.
+    if claimed.as_ref().is_err_and(|reason| reason == library::SIGNED_OUT) && refresh_session(&app).await {
+        let (community, session) = state.signed_in()?;
+        claimed = claim::claim(&community, &*store, &session, appid).await;
+    }
     match &claimed {
         Ok(_) => state.mark_library_old(),
         Err(reason) if reason == library::SIGNED_OUT => state.note_refused(&CommunityError::SignedOut),
@@ -366,13 +387,16 @@ pub async fn steam_automation_library(app: AppHandle, state: State<'_, SteamAuto
     if !force && let Some(saved) = saved.as_ref().filter(|saved| saved.is_fresh(now())) {
         return Ok(LibraryAnswer { games: saved.games.clone(), saved_at: saved.saved_at, problem: None });
     }
-    let fetched = match state.signed_in() {
-        Ok((community, session)) => {
-            let store = app.state::<SteamHelperState>().store()?;
-            library::fetch(&community, &*store, session.steam_id).await
-        }
-        Err(reason) => Err(reason),
+    let store = app.state::<SteamHelperState>().store()?;
+    let fetch = || async {
+        let (community, session) = state.signed_in()?;
+        library::fetch(&community, &*store, session.steam_id).await
     };
+    let mut fetched = fetch().await;
+    // Renewed out of sight, the library is asked for once more before "sign in again".
+    if fetched.as_ref().is_err_and(|reason| reason == library::SIGNED_OUT) && refresh_session(&app).await {
+        fetched = fetch().await;
+    }
     if fetched.as_ref().is_err_and(|reason| reason == library::SIGNED_OUT) {
         state.note_refused(&CommunityError::SignedOut);
     }
@@ -453,18 +477,33 @@ pub async fn steam_automation_sign_in(app: AppHandle, state: State<'_, SteamAuto
     let _ = window.close();
     Err("Signing in took too long.".to_string())
 }
-/// Loads Steam Community once, hidden, in the signed-in profile, which renews an expired session
-/// if Steam still remembers the owner. `true` when a new session was saved.
+/// The owner's own profile: where `/my/` ends only for someone Steam accepts as signed in.
+fn shows_own_profile(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| host == "steamcommunity.com" || host.ends_with(".steamcommunity.com"))
+        && (url.path().starts_with("/profiles/") || url.path().starts_with("/id/"))
+}
+/// Loads the owner's Steam Community page once, hidden, in the signed-in profile, which renews an
+/// expired session if Steam still remembers the owner, as signing in again would. `true` when the
+/// session works now: renewed and saved, or taken by Steam as it was (a refusal that was only
+/// Steam's moment, not an ended session).
 pub(crate) async fn refresh_session(app: &AppHandle) -> bool {
-    let (Ok(community), Ok(store), Ok(folder)) = (COMMUNITY.parse::<Url>(), STORE.parse::<Url>(), folder()) else {
+    let (Ok(community), Ok(own_page), Ok(store), Ok(folder)) =
+        (COMMUNITY.parse::<Url>(), format!("{COMMUNITY}/my/").parse::<Url>(), STORE.parse::<Url>(), folder())
+    else {
         return false;
     };
+    let state = app.state::<SteamAutomationState>();
+    let seen = state.session_generation();
+    let _one_at_a_time = state.refreshing.lock().await;
+    // Renewed while this one waited its turn.
+    if state.session_generation() != seen {
+        return true;
+    }
     if app.get_webview_window(LOGIN_LABEL).is_some() || app.get_webview_window(REFRESH_LABEL).is_some() {
         return false;
     }
-    let state = app.state::<SteamAutomationState>();
     let before = state.session();
-    let Ok(window) = WebviewWindowBuilder::new(app, REFRESH_LABEL, WebviewUrl::External(community.clone()))
+    let Ok(window) = WebviewWindowBuilder::new(app, REFRESH_LABEL, WebviewUrl::External(own_page))
         .visible(false)
         .data_directory(folder.join("webview-steam"))
         .on_navigation(is_steam_site)
@@ -473,14 +512,16 @@ pub(crate) async fn refresh_session(app: &AppHandle) -> bool {
         return false;
     };
     let mut found = None;
+    let mut accepted = false;
     for _ in 0..REFRESH_SECONDS {
         tokio::time::sleep(Duration::from_secs(1)).await;
+        accepted = window.url().is_ok_and(|url| shows_own_profile(&url));
         let Some(cookies) = session::from_cookies(&cookies(&window, &community)) else {
             continue;
         };
         let renewed = before.as_ref().is_none_or(|before| before.steam_login_secure != cookies.steam_login_secure);
         found = Some(cookies);
-        if renewed {
+        if renewed || accepted {
             break;
         }
     }
@@ -504,7 +545,31 @@ pub(crate) async fn refresh_session(app: &AppHandle) -> bool {
     }
     let _ = window.close();
     let renewed = renewed.keeping_store_cookie_of(before.as_ref());
-    Some(&renewed) != before.as_ref() && state.set_session(renewed).is_ok()
+    if Some(&renewed) != before.as_ref() {
+        return state.set_session(renewed).is_ok();
+    }
+    accepted
+}
+/// Runs one of the page's requests on the signed-in line to Steam. When Steam says the session is
+/// over, it is renewed once out of sight (`renew`: `refresh_session`) and the request tried again;
+/// only a session that cannot be renewed asks the owner to sign in.
+async fn renewing<T, Renewed, Answer>(
+    state: &SteamAutomationState,
+    renew: impl FnOnce() -> Renewed,
+    request: impl Fn(Arc<HttpCommunity>, Session) -> Answer,
+) -> Result<T, String>
+where
+    Renewed: std::future::Future<Output = bool>,
+    Answer: std::future::Future<Output = Result<T, CommunityError>>,
+{
+    let (community, session) = state.signed_in()?;
+    match request(community, session).await {
+        Err(CommunityError::SignedOut) if renew().await => {
+            let (community, session) = state.signed_in()?;
+            request(community, session).await.map_err(|error| state.refused(error))
+        }
+        result => result.map_err(|error| state.refused(error)),
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -550,5 +615,54 @@ mod tests {
         state.note_new_session();
         state.note_new_session();
         assert_eq!(state.session_generation(), 2);
+    }
+    #[test]
+    fn only_the_owners_profile_means_steam_took_the_session() {
+        let accepted = |url: &str| shows_own_profile(&url.parse().unwrap());
+        assert!(accepted("https://steamcommunity.com/profiles/76561198000000001/"));
+        assert!(accepted("https://steamcommunity.com/id/someone/"));
+        assert!(!accepted("https://steamcommunity.com/my/"), "not there yet");
+        assert!(!accepted("https://steamcommunity.com/login/home/?goto=my"));
+        assert!(!accepted("https://evil.example/profiles/1/"));
+    }
+    /// A state already signed in, so nothing is read from this PC's saved session.
+    fn signed_in_state() -> SteamAutomationState {
+        let state = SteamAutomationState::default();
+        *state.session.lock().unwrap() = Some(session("t"));
+        state
+    }
+    #[tokio::test]
+    async fn a_refused_request_is_renewed_out_of_sight_and_asked_again() {
+        use std::sync::atomic::AtomicU32;
+        let state = signed_in_state();
+        let (asked, renewed) = (AtomicU32::new(0), AtomicU32::new(0));
+        let answer = renewing(
+            &state,
+            || async { renewed.fetch_add(1, Ordering::SeqCst); true },
+            |_, _| async { if asked.fetch_add(1, Ordering::SeqCst) == 0 { Err(CommunityError::SignedOut) } else { Ok(7) } },
+        )
+        .await;
+        assert_eq!(answer, Ok(7));
+        assert_eq!((asked.into_inner(), renewed.into_inner()), (2, 1));
+        assert!(!state.take_rejected(), "nothing to tell the engine");
+    }
+    #[tokio::test]
+    async fn only_a_session_that_cannot_be_renewed_asks_to_sign_in() {
+        let state = signed_in_state();
+        let answer: Result<(), String> = renewing(&state, || async { false }, |_, _| async { Err(CommunityError::SignedOut) }).await;
+        assert_eq!(answer, Err("Your Steam sign-in has expired. Sign in again.".to_string()));
+        assert!(state.take_rejected());
+    }
+    #[tokio::test]
+    async fn other_answers_never_renew() {
+        use std::sync::atomic::AtomicU32;
+        let state = signed_in_state();
+        let renewed = AtomicU32::new(0);
+        let renew = || async { renewed.fetch_add(1, Ordering::SeqCst); true };
+        let limited: Result<(), String> = renewing(&state, renew, |_, _| async { Err(CommunityError::Limited) }).await;
+        assert!(limited.unwrap_err().contains("limiting"));
+        let fine = renewing(&state, || async { renewed.fetch_add(1, Ordering::SeqCst); true }, |_, _| async { Ok(1) }).await;
+        assert_eq!(fine, Ok(1));
+        assert_eq!(renewed.into_inner(), 0);
     }
 }
