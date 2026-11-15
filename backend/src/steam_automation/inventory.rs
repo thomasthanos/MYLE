@@ -333,10 +333,13 @@ pub(crate) async fn sell_duplicates<C: Community>(
 ) -> (SellReport, Option<CommunityError>) {
     // A copy waiting for Steam Guard is still in the inventory, so without knowing what is on sale
     // the one kept could be one on its way out.
-    let on_sale: HashSet<String> = match read_listings(api).await {
-        Ok(listings) => listings.into_iter().map(|listing| listing.asset_id).collect(),
+    let listings = match read_listings(api).await {
+        Ok(listings) => listings,
         Err(error) => return (SellReport::default(), Some(error)),
     };
+    // What Steam Guard waits for now, earlier runs' listings included: the number goes down once the user confirms them.
+    let waiting_before = listings.iter().filter(|listing| listing.waiting_confirmation).count() as u32;
+    let on_sale: HashSet<String> = listings.into_iter().map(|listing| listing.asset_id).collect();
     let cards = match read_pages(api, session.steam_id, parse_inventory).await {
         Ok(cards) => cards,
         Err(error) => return (SellReport::default(), Some(error)),
@@ -344,7 +347,7 @@ pub(crate) async fn sell_duplicates<C: Community>(
     let staying: Vec<Card> = cards.into_iter().filter(|card| !on_sale.contains(&card.asset_id) && !already_listed.contains(&card.asset_id)).collect();
     let to_sell: Vec<Card> = duplicates(&staying).into_iter().filter(|card| !locked.contains(&card.asset_id)).take(MAX_TRIES).collect();
     let mut prices: HashMap<String, Option<u32>> = HashMap::new();
-    let mut report = SellReport::default();
+    let mut report = SellReport { waiting_confirmation: waiting_before, ..SellReport::default() };
     for card in to_sell {
         if report.listed >= MAX_LISTINGS || !keep_going() {
             break;
@@ -882,6 +885,17 @@ mod tests {
         let value = |key: &str| form.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap();
         assert_eq!((value("price"), value("sessionid"), value("appid"), value("contextid"), value("amount"), value("assetid")), ("27".to_string(), "sid".to_string(), "753".to_string(), "6".to_string(), "1".to_string(), "2".to_string()));
         assert_eq!(referer, "https://steamcommunity.com/profiles/76561198000000001/inventory/");
+    }
+    #[tokio::test]
+    async fn listings_still_waiting_for_steam_guard_are_counted_on_each_run() {
+        let api = FakeCommunity::answering(|url| {
+            if url.contains("mylistings") {
+                return Ok(on_sale("77"));
+            }
+            Ok(r#"{"assets":[],"descriptions":[],"success":1}"#.to_string())
+        });
+        let report = sold(&api, &mut HashSet::new()).await;
+        assert_eq!((report.listed, report.waiting_confirmation), (0, 1));
     }
     #[tokio::test]
     async fn waiting_listings_are_counted() {

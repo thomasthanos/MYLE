@@ -101,7 +101,8 @@ fn unlock_achievement(appid: u32, name: &str) -> Result<(), String> {
 }
 /// Runs a helper if this process was started as one. `None` means a normal app launch.
 pub fn run_helper_from_args() -> Option<i32> {
-    let args: Vec<String> = std::env::args().collect();
+    // `args()` would panic on an argument that is not valid Unicode.
+    let args: Vec<String> = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()).collect();
     let result = match mode_from_args(&args)? {
         HelperMode::Run(appid) => run_game(appid),
         HelperMode::Achievements(appid) => list_achievements(appid),

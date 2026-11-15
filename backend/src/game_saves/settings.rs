@@ -15,6 +15,8 @@ pub(crate) fn safety_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_root(app)?.join("safety"))
 }
 pub(crate) fn headless_config_root() -> Result<PathBuf, String> {
+    // Development only, as the engine's override.
+    #[cfg(debug_assertions)]
     if let Ok(path) = std::env::var("MYLE_GAME_SAVES_CONFIG")
         && !path.trim().is_empty()
     {

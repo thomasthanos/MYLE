@@ -15,6 +15,8 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let temp = temporary_path(path, "tmp");
     let backup = temporary_path(path, "old");
+    // Set once the old file is being replaced: from then on the new file may be the only copy.
+    let mut replacing = false;
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
@@ -27,6 +29,7 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         if !present(path) {
             return fs::rename(&temp, path).map_err(|error| error.to_string());
         }
+        replacing = true;
         let replaced = wide(path);
         let replacement = wide(&temp);
         let old = wide(&backup);
@@ -48,8 +51,8 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(&backup);
         Ok(())
     })();
-    // The new file is dropped only while the destination is there: after a failed replace it may be the only copy left.
-    if result.is_err() && present(path) {
+    // The new file is dropped on a failure, except after a failed replace that left the destination missing: then it may be the only copy left.
+    if result.is_err() && (!replacing || present(path)) {
         let _ = fs::remove_file(&temp);
     }
     result

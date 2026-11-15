@@ -95,7 +95,8 @@ pub fn show(notice: &Notice) {
 }
 /// The notice this run was started to show, if any.
 pub fn from_args() -> Option<Notice> {
-    std::env::args().find_map(|arg| arg.strip_prefix(FLAG).and_then(Notice::decode))
+    // `args()` would panic on an argument that is not valid Unicode.
+    std::env::args_os().find_map(|arg| arg.to_str()?.strip_prefix(FLAG).and_then(Notice::decode))
 }
 /// The notice's window: bottom right of the main screen's work area, on
 /// top, out of the taskbar, and without taking the focus from what the user

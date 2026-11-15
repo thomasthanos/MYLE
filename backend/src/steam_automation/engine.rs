@@ -355,7 +355,9 @@ impl<C: Community, A: AchievementTool> Engine<C, A> {
             };
             self.activity.push(now, format!("Listed {} duplicate {cards}.{confirm}", report.listed));
         }
-        self.report = SellReport { waiting_confirmation: self.report.waiting_confirmation + report.waiting_confirmation, ..report };
+        // The run counts what waits for Steam Guard now; a run that could not read the listings keeps the last count.
+        let waiting = if error.is_some() && report.listed == 0 { self.report.waiting_confirmation } else { report.waiting_confirmation };
+        self.report = SellReport { waiting_confirmation: waiting, ..report };
         self.next_inventory_at = now + if error.is_some() { RETRY_SECS } else { INVENTORY_SECS };
         if let Some(error) = error {
             self.note_community_error(&error, now);

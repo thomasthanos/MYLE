@@ -266,6 +266,8 @@ pub(crate) fn failure_detail<'a>(stderr: &'a str, stdout: &'a str) -> &'a str {
         .unwrap_or("The backup engine stopped unexpectedly.")
 }
 fn resolve_executable(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+    // Development only: in a release, no variable of the user's chooses which program runs.
+    #[cfg(debug_assertions)]
     if let Ok(path) = std::env::var("MYLE_LUDUSAVI") {
         let path = PathBuf::from(path);
         if path.is_file() {

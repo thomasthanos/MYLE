@@ -6,8 +6,19 @@ use std::path::{Path, PathBuf};
 /// can't be read).
 pub(crate) fn tracked_paths(root: &Path) -> Option<Vec<String>> {
     let git_dir = git_dir(root)?;
+    let size = hash_size(&git_dir);
     let bytes = fs::read(git_dir.join("index")).ok()?;
-    parse_index(&bytes, hash_size(&git_dir))
+    let (mut paths, shared) = parse_entries(&bytes, size)?;
+    if let Some(shared) = shared {
+        // core.splitIndex: this file holds only the changes, and the rest is
+        // in the shared index it names. Read alone, a tracked build folder
+        // would look untracked and be left out of the backup.
+        let shared_bytes = fs::read(git_dir.join(format!("sharedindex.{shared}"))).ok()?;
+        paths.extend(parse_index(&shared_bytes, size)?);
+        paths.sort();
+        paths.dedup();
+    }
+    Some(paths)
 }
 /// `.git` is a folder, or (worktrees, submodules) a file naming one.
 fn git_dir(root: &Path) -> Option<PathBuf> {
@@ -39,6 +50,11 @@ fn hash_size(git_dir: &Path) -> usize {
     if sha256 { 32 } else { 20 }
 }
 pub(crate) fn parse_index(bytes: &[u8], hash_size: usize) -> Option<Vec<String>> {
+    parse_entries(bytes, hash_size).map(|(paths, _)| paths)
+}
+/// The index's paths, and the shared index a split index names (its hash,
+/// as hex), from the `link` extension after the entries.
+fn parse_entries(bytes: &[u8], hash_size: usize) -> Option<(Vec<String>, Option<String>)> {
     if bytes.len() < 12 || &bytes[..4] != b"DIRC" {
         return None;
     }
@@ -79,7 +95,19 @@ pub(crate) fn parse_index(bytes: &[u8], hash_size: usize) -> Option<Vec<String>>
         paths.push(String::from_utf8_lossy(&path).into_owned());
         previous = path;
     }
-    Some(paths)
+    // Extensions follow the entries, before the closing checksum: a name of four bytes, a size, the data.
+    let end = bytes.len().saturating_sub(hash_size);
+    let mut extension = at;
+    while extension.checked_add(8).is_some_and(|header| header <= end) {
+        let size = u32::from_be_bytes(bytes[extension + 4..extension + 8].try_into().ok()?) as usize;
+        let data = extension + 8;
+        if &bytes[extension..extension + 4] == b"link" {
+            let hash = bytes.get(data..data.checked_add(hash_size)?)?;
+            return Some((paths, Some(hash.iter().map(|byte| format!("{byte:02x}")).collect())));
+        }
+        extension = data.checked_add(size)?;
+    }
+    Some((paths, None))
 }
 /// Git's variable-length offset (`varint.c`).
 fn read_offset(bytes: &[u8]) -> Option<(usize, usize)> {
@@ -152,6 +180,26 @@ pub(crate) mod tests {
         // A truncated index is refused rather than half read.
         let full = index_v2(&paths);
         assert_eq!(parse_index(&full[..40], 20), None);
+    }
+    #[test]
+    fn a_split_index_is_read_with_the_shared_index_it_names() {
+        let root = std::env::temp_dir().join(format!("myle-split-index-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        // The split index: one changed entry, then the link extension naming the shared index, then the checksum.
+        let mut split = index_v2(&["src/new.rs"]);
+        split.truncate(split.len() - 20);
+        let shared_hash = [0x5au8; 20];
+        split.extend_from_slice(b"link");
+        split.extend_from_slice(&(20u32 + 8).to_be_bytes());
+        split.extend_from_slice(&shared_hash);
+        split.extend_from_slice(&[0u8; 8]); // the delete and replace bitmaps
+        split.extend_from_slice(&[0u8; 20]);
+        fs::write(root.join(".git").join("index"), split).unwrap();
+        let name = format!("sharedindex.{}", "5a".repeat(20));
+        fs::write(root.join(".git").join(name), index_v2(&["build/installer.nsh", "src/main.rs"])).unwrap();
+        assert_eq!(tracked_paths(&root).unwrap(), ["build/installer.nsh", "src/main.rs", "src/new.rs"]);
+        let _ = fs::remove_dir_all(root);
     }
     #[test]
     fn a_git_file_pointing_elsewhere_is_followed() {
