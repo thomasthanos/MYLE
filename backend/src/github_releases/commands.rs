@@ -924,7 +924,9 @@ pub async fn github_releases_ai_commit_message(
         .collect();
     let settings = blocking(store::load).await??;
     let prompt = ai::commit_prompt(&stat, &diff, &recent);
-    ai::complete(&settings.ai, provider, ai::COMMIT_SYSTEM, &prompt, 1500).await
+    let mut answer = ai::complete(&settings.ai, provider, ai::COMMIT_SYSTEM, &prompt, 1500).await?;
+    answer.text = ai::format_commit_message(&answer.text);
+    Ok(answer)
 }
 // ─── Building ──────────────────────────────────────────────────────────────
 #[derive(Clone, Debug, Serialize)]

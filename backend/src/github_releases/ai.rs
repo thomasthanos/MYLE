@@ -543,12 +543,38 @@ pub(crate) fn trim_diff(diff: &str, max: usize) -> String {
     }
     out
 }
-pub(crate) const COMMIT_SYSTEM: &str = "You write git commit messages. Reply with the message only: a subject line of at most 72 characters in the imperative mood, then, only if it helps, a blank line and a few short bullet points. Follow the style of the project's recent commit subjects when they are given. No Markdown headings, no code fences, no quotes around the message.";
+pub(crate) const COMMIT_SYSTEM: &str = "\
+You are an expert software engineer writing concise, high-quality git commit messages.
+
+Reply strictly in this format:
+<subject line>
+
+<bullet points>
+
+Rules for the subject line:
+- Summarize the overarching intent/purpose of the change in the imperative mood (e.g. \"Add...\", \"Fix...\", \"Improve...\", \"Refine...\", \"Update...\").
+- Be concise and punchy: aim for 40 to 55 characters, and NEVER exceed 65 characters so it never truncates in Git or GitHub Desktop.
+- Do NOT string multiple separate clauses together with \"and\". Focus on the main goal.
+- Never end the subject with a period.
+- Do NOT prefix with \"Commit:\", \"Subject:\", or \"Title:\".
+
+Rules for the body (bullet points):
+- Include 2 to 4 concise, high-level bullet points summarizing the most important functional or UX changes.
+- Do NOT list every single file or trivial detail (skip minor imports, typo fixes, test tweaks, and linting).
+- Group related file changes into one meaningful bullet.
+- Start each bullet with \"- \" and an active verb. Keep each bullet to a single concise line.
+- No markdown headings (###), no code blocks (```), and no surrounding quotes.";
+
 pub(crate) fn commit_prompt(stat: &str, diff: &str, recent: &[String]) -> String {
     let mut prompt = String::new();
-    if !recent.is_empty() {
-        prompt.push_str("Recent commit subjects of this project:\n");
-        for subject in recent.iter().take(10) {
+    let clean_recent: Vec<&String> = recent
+        .iter()
+        .filter(|s| !s.trim().is_empty())
+        .take(6)
+        .collect();
+    if !clean_recent.is_empty() {
+        prompt.push_str("Recent commit subjects (for vocabulary and tone only - keep yours strictly <= 65 chars):\n");
+        for subject in clean_recent {
             prompt.push_str(&format!("- {subject}\n"));
         }
         prompt.push('\n');
@@ -559,7 +585,156 @@ pub(crate) fn commit_prompt(stat: &str, diff: &str, recent: &[String]) -> String
     prompt.push_str(&trim_diff(diff, MAX_DIFF_CHARS));
     prompt
 }
-pub(crate) const NOTES_SYSTEM: &str = "You write release notes for a GitHub release, for the people who use the app. Reply in exactly this form:\nTITLE: <a short title for the release, without the version number>\n---\n<the notes in Markdown: short sections such as ### New, ### Improved, ### Fixed, with one bullet per user-visible change, plain words, no commit hashes>\nLeave out sections that would be empty and changes users can't notice (refactors, CI, tests, version bumps).";
+
+/// Formats and sanitizes a commit message to ensure Git / GitHub Desktop compatibility:
+/// - Strips code blocks, quotes, and common prefix tags
+/// - Ensures the subject line is strictly <= 65 chars (smart cut on word boundaries without breaking words)
+/// - Removes trailing period from subject line
+/// - Formats body bullets cleanly with at most 5 concise bullets
+pub(crate) fn format_commit_message(raw: &str) -> String {
+    let mut text = raw.trim();
+    if text.starts_with("```") {
+        if let Some(first_newline) = text.find('\n') {
+            text = &text[first_newline + 1..];
+        }
+        if let Some(last_fence) = text.rfind("```") {
+            text = text[..last_fence].trim();
+        }
+    }
+    if (text.starts_with('"') && text.ends_with('"'))
+        || (text.starts_with('\'') && text.ends_with('\''))
+    {
+        if text.len() >= 2 {
+            text = text[1..text.len() - 1].trim();
+        }
+    }
+
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut subject_idx = 0;
+    while subject_idx < lines.len() && lines[subject_idx].is_empty() {
+        subject_idx += 1;
+    }
+    if subject_idx >= lines.len() {
+        return String::new();
+    }
+
+    let mut subject = lines[subject_idx].to_string();
+    for prefix in &["commit:", "commit message:", "subject:", "title:"] {
+        if subject.to_lowercase().starts_with(prefix) {
+            subject = subject[prefix.len()..].trim().to_string();
+            break;
+        }
+    }
+    while subject.starts_with('-') || subject.starts_with('*') || subject.starts_with('#') {
+        subject = subject[1..].trim().to_string();
+    }
+    if subject.ends_with('.') {
+        subject.pop();
+        subject = subject.trim_end().to_string();
+    }
+
+    // Ensure subject is strictly within 65 characters so Git tools / GitHub Desktop never truncate
+    if subject.chars().count() > 65 {
+        let chars: Vec<char> = subject.chars().collect();
+        let target_len = 62.min(chars.len());
+        let slice: String = chars[..target_len].iter().collect();
+        if let Some(last_space) = slice.rfind(' ') {
+            if last_space > 25 {
+                subject = slice[..last_space].trim_end().to_string();
+            } else {
+                subject = slice.trim_end().to_string();
+            }
+        } else {
+            subject = slice.trim_end().to_string();
+        }
+
+        let dangling = [
+            " and", " or", " to", " for", " with", " in", " on", " of", " by", " via",
+            " from", " as", " but", " a", " an", " the", " &", " +",
+        ];
+        for _ in 0..3 {
+            let mut changed = false;
+            for &word in &dangling {
+                if subject.to_lowercase().ends_with(word) {
+                    subject = subject[..subject.len() - word.len()].trim_end().to_string();
+                    changed = true;
+                    break;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    let mut bullets: Vec<String> = Vec::new();
+    for &line in &lines[subject_idx + 1..] {
+        if line.is_empty() {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed == "```"
+            || trimmed.starts_with("```")
+            || trimmed.eq_ignore_ascii_case("description:")
+            || trimmed.eq_ignore_ascii_case("body:")
+        {
+            continue;
+        }
+        let clean = if trimmed.starts_with('-') || trimmed.starts_with('*') {
+            trimmed[1..].trim()
+        } else {
+            trimmed
+        };
+        if clean.is_empty()
+            || clean == "..."
+            || clean.starts_with("...")
+            || clean.starts_with("…")
+        {
+            continue;
+        }
+        bullets.push(format!("- {clean}"));
+        if bullets.len() >= 5 {
+            break;
+        }
+    }
+
+    if bullets.is_empty() {
+        subject
+    } else {
+        format!("{subject}\n\n{}", bullets.join("\n"))
+    }
+}
+
+pub(crate) const NOTES_SYSTEM: &str = "\
+You write clear, professional release notes for a GitHub release, crafted for end users of the app.
+
+Reply in exactly this form:
+TITLE: <a short, punchy 3 to 7 word headline summarizing the release theme, without version numbers or quotes>
+---
+<the notes in Markdown>
+
+Structure:
+Use these short Markdown sections where applicable:
+### New
+- Key new features and visible capabilities
+
+### Improved
+- Visual enhancements, UI polish, and performance boosts
+
+### Fixed
+- Bug fixes, stability improvements, and error handling
+
+Rules:
+- Keep the title descriptive, appealing, and concise (e.g. \"Cleaner UI & Faster Health Checks\"). Never include the version number in the title.
+- Write for users in plain, clear language. Do not use raw commit messages or git hashes.
+- One clear bullet per user-visible change.
+- Never mention internal developer refactors, CI/CD pipelines, or version bumps.
+- Omit any section that has no items.";
+
 pub(crate) fn notes_prompt(
     project: &str,
     version: &str,
@@ -585,22 +760,75 @@ pub(crate) fn notes_prompt(
     }
     prompt
 }
-pub(crate) const POLISH_SYSTEM: &str = "You tidy up release notes written by a developer: fix spelling and grammar, group the points under short Markdown sections (### New, ### Improved, ### Fixed) where that fits, and keep every fact. Reply in exactly this form:\nTITLE: <a short title without the version number>\n---\n<the notes in Markdown>";
-pub(crate) const COMBINE_SYSTEM: &str = "You merge the notes of several GitHub releases into the notes of one release that replaces them. Keep every user-visible change once (drop duplicates and changes later reverted), group them under short Markdown sections (### New, ### Improved, ### Fixed). Reply in exactly this form:\nTITLE: <a short title without the version number>\n---\n<the notes in Markdown>";
+pub(crate) const POLISH_SYSTEM: &str = "\
+You polish release notes written by a developer: improve grammar, clarify wording, and group points under short Markdown sections (### New, ### Improved, ### Fixed) while keeping every accurate fact.
+
+Reply in exactly this form:
+TITLE: <a short, punchy 3 to 7 word headline without version numbers or quotes>
+---
+<the notes in Markdown>";
+
+pub(crate) const COMBINE_SYSTEM: &str = "\
+You merge release notes from several releases into a single cohesive release replacing them. Keep every user-visible change once (drop duplicates and changes later reverted), group them under short Markdown sections (### New, ### Improved, ### Fixed), and provide a unified headline.
+
+Reply in exactly this form:
+TITLE: <a short, punchy 3 to 7 word headline without version numbers or quotes>
+---
+<the notes in Markdown>";
+
 /// Splits `TITLE: …\n---\n<notes>`; an answer without the form is all notes.
 pub(crate) fn split_title(answer: &str) -> (Option<String>, String) {
     let text = answer.trim();
-    let Some(rest) = text
-        .strip_prefix("TITLE:")
-        .or_else(|| text.strip_prefix("Title:"))
-        .or_else(|| text.strip_prefix("**TITLE:**"))
-    else {
+    let text = text
+        .strip_prefix("```markdown")
+        .or_else(|| text.strip_prefix("```"))
+        .unwrap_or(text)
+        .trim();
+    let text = text.strip_suffix("```").unwrap_or(text).trim();
+
+    let lower = text.to_lowercase();
+    let title_prefix_len = if lower.starts_with("title:") {
+        Some(6)
+    } else if lower.starts_with("**title:**") {
+        Some(10)
+    } else if lower.starts_with("# title:") {
+        Some(8)
+    } else if lower.starts_with("## title:") {
+        Some(9)
+    } else if lower.starts_with("### title:") {
+        Some(10)
+    } else {
+        None
+    };
+
+    let Some(prefix_len) = title_prefix_len else {
         return (None, text.to_string());
     };
-    let (title, notes) = rest.split_once('\n').unwrap_or((rest, ""));
-    let notes = notes.trim_start();
-    let notes = notes.strip_prefix("---").unwrap_or(notes);
-    let title = title.trim().trim_matches(['*', '"']).trim().to_string();
+
+    let rest = text[prefix_len..].trim_start();
+    let (raw_title, raw_notes) = rest.split_once('\n').unwrap_or((rest, ""));
+    let mut notes = raw_notes.trim_start();
+    if let Some(after_dash) = notes.strip_prefix("---") {
+        notes = after_dash.trim_start();
+    }
+
+    let mut title = raw_title
+        .trim()
+        .trim_matches(['*', '"', '\'', '`', '#'])
+        .trim()
+        .to_string();
+
+    if let Some(pos) = title.find(" - ").or_else(|| title.find(": ")) {
+        let prefix = &title[..pos];
+        if prefix.starts_with('v')
+            || prefix
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == 'v')
+        {
+            title = title[pos + 2..].trim().to_string();
+        }
+    }
+
     (
         (!title.is_empty()).then_some(title),
         notes.trim().to_string(),
@@ -871,5 +1099,34 @@ mod tests {
         assert_eq!(title.as_deref(), Some("Faster backups"));
         assert_eq!(notes, "### Fixed\n- A crash");
         assert_eq!(split_title("Just notes").0, None);
+
+        let (title, notes) = split_title("### Title: v1.0.0 - Better Sync\n---\n- Added sync");
+        assert_eq!(title.as_deref(), Some("Better Sync"));
+        assert_eq!(notes, "- Added sync");
+
+        let (title, _) = split_title("**Title:** \"Awesome Update\"\n---\nNotes");
+        assert_eq!(title.as_deref(), Some("Awesome Update"));
+    }
+    #[test]
+    fn commit_messages_are_formatted_cleanly() {
+        // A runaway long subject gets cut cleanly on a word boundary <= 65 chars
+        let long = "Add executable reference to redundant health rules and optimize UI updates\n\n- Extend Rule with optional exe field\n- Fix typo in disk analyzer\n- Pass monitor info\n- Expose SPLASH_SIZE\n- Introduce page modules\n- Update Install Apps\n- Extra trivial bullet";
+        let formatted = format_commit_message(long);
+        let first_line = formatted.lines().next().unwrap();
+        assert!(first_line.chars().count() <= 65);
+        assert!(!first_line.ends_with('.'));
+        assert_eq!(first_line, "Add executable reference to redundant health rules");
+        let bullets: Vec<&str> = formatted.lines().filter(|l| l.starts_with("- ")).collect();
+        assert_eq!(bullets.len(), 5, "at most 5 high-level bullets");
+
+        // Code fences and markdown prefix stripping
+        let fenced = "```git\nCommit: Fix login timeout.\n\n- Handle network drop\n```";
+        let cleaned = format_commit_message(fenced);
+        assert_eq!(cleaned, "Fix login timeout\n\n- Handle network drop");
+
+        // Removes continuation artifacts like "...es" or "..."
+        let artifacts = "Refine sidebar behavior\n\n- ...es\n- ...\n- First real bullet";
+        let cleaned = format_commit_message(artifacts);
+        assert_eq!(cleaned, "Refine sidebar behavior\n\n- First real bullet");
     }
 }

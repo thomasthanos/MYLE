@@ -99,7 +99,8 @@ fn our_programs(dir: &Path) -> Vec<PathBuf> {
 /// other programs too (an older setup let it be any folder, D:\Games say),
 /// and those are never closed or killed.
 pub fn running_in(dir: &Path) -> Vec<Running> {
-    // Windows reports long names; the folder may be spelled with short ones.
+    // The folder in its long form; a program's path is brought to the same
+    // form when it was started through a short name (`as_ours`).
     let dir = shell::real_path(dir);
     let ours = our_programs(&dir);
     let own = unsafe { GetCurrentProcessId() };
@@ -119,8 +120,7 @@ pub fn running_in(dir: &Path) -> Vec<Running> {
             && pid != 0
             && Some(pid) != spared
             && let Some(path) = image_path(pid)
-            && shell::is_within(&path, &dir)
-            && ours.iter().any(|program| shell::same_path(program, &path))
+            && let Some(path) = as_ours(path, &dir, &ours)
         {
             found.push(Running { pid, path });
         }
@@ -128,6 +128,22 @@ pub fn running_in(dir: &Path) -> Vec<Running> {
     }
     unsafe { CloseHandle(snapshot) };
     found
+}
+
+/// `path` (as long names) when it is one of `ours` in `dir`, itself in long
+/// names. Windows reports a program by the path it was started with, so one
+/// started through a short (8.3) name, `C:\Users\RUNNER~1\...` say, is
+/// compared again in its long form. Only such a path is looked up on disk.
+fn as_ours(path: PathBuf, dir: &Path, ours: &[PathBuf]) -> Option<PathBuf> {
+    let is_ours = |path: &Path| shell::is_within(path, dir) && ours.iter().any(|program| shell::same_path(program, path));
+    if is_ours(&path) {
+        return Some(path);
+    }
+    if !path.to_string_lossy().contains('~') {
+        return None;
+    }
+    let long = shell::real_path(&path);
+    is_ours(&long).then_some(long)
 }
 
 fn image_path(pid: u32) -> Option<PathBuf> {

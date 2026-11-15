@@ -136,6 +136,7 @@
     });
   }
   let aiNote = $state<string | null>(null);
+  const subjectLen = $derived(message.trim() ? (message.trim().split("\n")[0]?.length ?? 0) : 0);
   const providerName = (id: string) => gr.page?.ai.providers.find((p) => p.id === id)?.name ?? id;
   const firstAi = $derived(gr.page?.ai.order.map((id) => gr.page?.ai.providers.find((p) => p.id === id)).find((p) => p?.ready) ?? null);
   const letters: Record<ChangeKind, string> = {
@@ -282,6 +283,16 @@
             {generating ? "Writing…" : "Generate with AI"}
           </button>
           {#if aiNote && !generating}<span class="ai-note">{aiNote}</span>{/if}
+          <span class="grow"></span>
+          {#if subjectLen > 0}
+            <span
+              class="subject-len"
+              class:warn={subjectLen > 65}
+              title="Title / subject length: keeping it under 65 chars prevents truncation and overflow in Git tools"
+            >
+              Title: {subjectLen}/65
+            </span>
+          {/if}
         </div>
         {#if conflicted}<p class="error">Resolve the merge conflicts first.</p>{/if}
         <div class="commit-row">
@@ -391,6 +402,8 @@
   textarea { min-height: 78px; resize: vertical; font-size: 12.5px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; }
   .ai-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .ai-note { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .subject-len { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .subject-len.warn { color: #ff9d9d; font-weight: 600; }
   .commit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .commit-row .btn { height: 36px; font-weight: 550; border-radius: 8px; }
   .diff-head { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid rgb(255 255 255 / 0.07); background: rgb(0 0 0 / 0.1); border-radius: 12px 12px 0 0; }
