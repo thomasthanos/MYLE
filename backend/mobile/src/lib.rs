@@ -15,6 +15,13 @@ use tauri_plugin_myle_mobile::MobileExt;
 /// with it.
 #[tauri::command]
 fn mobile_leave(app: tauri::AppHandle) {
+    // Locked first: the vault's keys are wiped as it locks, which ending the process at once would skip.
+    if let Some(state) = app.try_state::<passwords::PasswordsState>() {
+        let _ = state.cell.with_quiet(|vault| {
+            vault.lock();
+            Ok(())
+        });
+    }
     app.exit(0);
 }
 
@@ -50,6 +57,10 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             keep_out_of_backups(app.handle(), &dir);
+            // The Apple Passwords export (plain text) of a share sheet the app was closed under does not stay behind.
+            if let Ok(cache) = app.path().app_cache_dir() {
+                let _ = std::fs::remove_dir_all(cache.join("export"));
+            }
             let passwords = passwords::PasswordsState::new(dir.clone());
             app.manage(account::AccountState::new(dir));
             app.manage(passwords.clone());

@@ -96,6 +96,14 @@ struct SignInArgs<'a> {
 }
 
 #[cfg(mobile)]
+#[derive(serde::Serialize)]
+struct CopyArgs<'a> {
+    text: &'a str,
+    /// iOS clears it itself after this long.
+    seconds: u32,
+}
+
+#[cfg(mobile)]
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SignInAnswer {
@@ -161,6 +169,26 @@ impl<R: Runtime> Mobile<R> {
         self.0
             .run_mobile_plugin::<SignInAnswer>("signIn", SignInArgs { url, callback_scheme, ephemeral })
             .map(|answer| answer.callback_url.filter(|url| !url.is_empty()))
+            .map_err(|e| e.to_string())
+    }
+
+    /// Puts a secret on the clipboard the phone's way: Android marks it
+    /// sensitive (no preview of it, and keyboards keep it out of their
+    /// history); iOS keeps it on this device (never on a Mac or iPad through
+    /// Universal Clipboard) and empties it itself after `seconds`, even while
+    /// the app is suspended. Blocks: call it off the main thread.
+    pub fn copy_secret(&self, text: &str, seconds: u32) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<serde::de::IgnoredAny>("copySecret", CopyArgs { text, seconds })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Empties the clipboard (not an empty text put on it). Blocks.
+    pub fn clear_clipboard(&self) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<serde::de::IgnoredAny>("clearClipboard", ())
+            .map(|_| ())
             .map_err(|e| e.to_string())
     }
 
@@ -297,6 +325,15 @@ impl std::fmt::Display for KeyError {
 impl<R: Runtime> Mobile<R> {
     pub fn sign_in(&self, _url: &str, _callback_scheme: &str, _ephemeral: bool) -> Result<Option<String>, String> {
         Err("Signing in inside the app is for phones.".into())
+    }
+
+    /// No phone clipboard here: the caller uses the plain one.
+    pub fn copy_secret(&self, _text: &str, _seconds: u32) -> Result<(), String> {
+        Err("The phone's clipboard is for phones.".into())
+    }
+
+    pub fn clear_clipboard(&self) -> Result<(), String> {
+        Err("The phone's clipboard is for phones.".into())
     }
 
     pub fn cancel_sign_in(&self) {}

@@ -148,6 +148,10 @@ pub async fn mobile_update_check(app: AppHandle) -> Result<Option<Update>, Strin
 pub async fn mobile_update_download(app: AppHandle, update: Update) -> Result<String, String> {
     let version = semver::Version::parse(&update.version).map_err(|e| e.to_string())?;
     let expected = update.sha256.as_deref().map(|hash| hash.trim().to_ascii_lowercase());
+    // The update comes back from the page: what the check offered (https and a checksum) is asked again.
+    if !update.url.starts_with("https://") || !expected.as_deref().is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err("This update has no address or checksum MYLE can trust. Check for updates again.".into());
+    }
     let dir = update_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let destination = dir.join(apk_name(&version.to_string()));
@@ -220,10 +224,13 @@ pub async fn mobile_update_download(app: AppHandle, update: Update) -> Result<St
 /// `"allow-installs"` when Android's setting for it opened instead.
 #[tauri::command]
 pub async fn mobile_update_install(app: AppHandle, path: String) -> Result<(), String> {
-    let inside = update_dir(&app)?;
-    if !Path::new(&path).starts_with(&inside) {
+    // Compared as real paths (no "..", no link out of the folder), and only an APK MYLE downloaded.
+    let real = std::fs::canonicalize(&path).map_err(|_| "That is not a downloaded update.".to_string())?;
+    let inside = std::fs::canonicalize(update_dir(&app)?).map_err(|_| "That is not a downloaded update.".to_string())?;
+    if !real.starts_with(&inside) || apk_version(&real).is_none() {
         return Err("That is not a downloaded update.".into());
     }
+    let path = real.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || app.myle_mobile().install(&path))
         .await
         .map_err(|e| e.to_string())?

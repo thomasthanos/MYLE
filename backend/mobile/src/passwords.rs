@@ -158,11 +158,12 @@ pub fn passwords_status(state: State<'_, PasswordsState>) -> Result<StatusInfo, 
 /// The page went out of sight (`hidden`) or came back. Back after a while
 /// away, the vault is locked first; returns whether it was.
 #[tauri::command(async)]
-pub fn passwords_app_hidden(state: State<'_, PasswordsState>, hidden: bool) -> bool {
+pub fn passwords_app_hidden(app: AppHandle, state: State<'_, PasswordsState>, hidden: bool) -> bool {
     if hidden {
         state.hidden_since().get_or_insert_with(|| (Instant::now(), SystemTime::now()));
         return false;
     }
+    crate::clipboard::resumed(&app);
     state.lock_now_if_away()
 }
 

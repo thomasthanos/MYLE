@@ -11,6 +11,11 @@ class SignInArgs: Decodable {
   let ephemeral: Bool?
 }
 
+class CopyArgs: Decodable {
+  let text: String
+  let seconds: Double?
+}
+
 class PathArgs: Decodable {
   let path: String
 }
@@ -118,6 +123,28 @@ class MyleMobilePlugin: Plugin {
 
   /// The share sheet over one file (the Apple Passwords export). Answers
   /// `completed` once it closes: true when the user saved or sent it.
+  /// A secret on the pasteboard: on this device only (never on a Mac or
+  /// iPad through Universal Clipboard), and emptied by iOS itself once it
+  /// expires, even while the app is suspended.
+  @objc public func copySecret(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(CopyArgs.self)
+    DispatchQueue.main.async {
+      UIPasteboard.general.setItems(
+        [["public.utf8-plain-text": args.text]],
+        options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(args.seconds ?? 30)]
+      )
+      invoke.resolve()
+    }
+  }
+
+  /// Empties the pasteboard.
+  @objc public func clearClipboard(_ invoke: Invoke) throws {
+    DispatchQueue.main.async {
+      UIPasteboard.general.items = []
+      invoke.resolve()
+    }
+  }
+
   @objc public func share(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(PathArgs.self)
     let url = URL(fileURLWithPath: args.path)

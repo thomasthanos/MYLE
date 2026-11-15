@@ -59,9 +59,10 @@ fn read(path: &Path) -> Option<Stored> {
 }
 
 fn vault_id(state: &PasswordsState) -> Result<String, String> {
+    // Asking which vault this is is not using it: the idle lock's clock goes on.
     state
         .cell
-        .with(|vault| Ok(vault.vault_id()))?
+        .with_quiet(|vault| Ok(vault.vault_id()))?
         .ok_or_else(|| "There is no vault yet.".to_string())
 }
 
@@ -129,7 +130,7 @@ fn turn_off(app: &AppHandle, file: &Path, name: &str, gone: KeyGone) -> String {
 
 #[tauri::command]
 pub async fn passwords_hello_status(app: AppHandle, state: State<'_, PasswordsState>) -> Result<HelloStatus, String> {
-    let id = state.cell.with(|vault| Ok(vault.vault_id()))?;
+    let id = state.cell.with_quiet(|vault| Ok(vault.vault_id()))?;
     let file = path(&app)?;
     let stored = read(&file).filter(|stored| id.as_deref() == Some(stored.vault_id.as_str()));
     blocking(move || {

@@ -1,6 +1,10 @@
 package uk.thomast.myle.mobile
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageInfo
@@ -8,6 +12,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
+import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
@@ -41,6 +46,12 @@ class SignInArgs {
 @InvokeArg
 class InstallArgs {
     var path: String = ""
+}
+
+@InvokeArg
+class CopyArgs {
+    var text: String = ""
+    var seconds: Int = 30
 }
 
 @TauriPlugin
@@ -158,6 +169,48 @@ class MyleMobilePlugin(private val activity: Activity) : Plugin(activity) {
      * (uk.thomast.myle.passwords://auth-callback), which the app takes; this
      * answers at once.
      */
+    /**
+     * A secret on the clipboard, marked sensitive: Android shows no preview
+     * of it and keyboards keep it out of their clipboard history.
+     */
+    @Command
+    fun copySecret(invoke: Invoke) {
+        val args = invoke.parseArgs(CopyArgs::class.java)
+        activity.runOnUiThread {
+            try {
+                val clip = ClipData.newPlainText("", args.text)
+                clip.description.extras = PersistableBundle().apply {
+                    putBoolean(
+                        if (Build.VERSION.SDK_INT >= 33) ClipDescription.EXTRA_IS_SENSITIVE else "android.content.extra.IS_SENSITIVE",
+                        true
+                    )
+                }
+                (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+                invoke.resolve()
+            } catch (e: Exception) {
+                invoke.reject("Could not copy to the clipboard.")
+            }
+        }
+    }
+
+    /** Empties the clipboard itself, rather than putting an empty text on it. */
+    @Command
+    fun clearClipboard(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                if (Build.VERSION.SDK_INT >= 28) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
+                invoke.resolve()
+            } catch (e: Exception) {
+                invoke.reject("Could not empty the clipboard.")
+            }
+        }
+    }
+
     @Command
     fun signIn(invoke: Invoke) {
         val args = invoke.parseArgs(SignInArgs::class.java)

@@ -154,7 +154,15 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
     let temp = path.with_extension("tmp");
-    std::fs::write(&temp, bytes).map_err(err)?;
+    // On the disk before it takes the old file's place: a phone that shuts down then keeps one whole copy.
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&temp).map_err(err)?;
+        file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| {
+            let _ = std::fs::remove_file(&temp);
+            e.to_string()
+        })?;
+    }
     std::fs::rename(&temp, path).map_err(|e| {
         let _ = std::fs::remove_file(&temp);
         e.to_string()
