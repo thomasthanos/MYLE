@@ -424,6 +424,7 @@
                       <button class="link" onclick={() => void openUrl(p.keyUrl)}>Get a {p.id === "deepseek" ? "" : "free "}key <ExternalLink size={11} /></button>
                       {#if p.ready}<button class="link danger" onclick={() => void removeKey(p)}>Remove the key</button>{/if}
                     </div>
+                    {#if p.keyNote}<p class="key-note">{p.keyNote}</p>{/if}
                   {:else}
                     <label class="row switch-row">
                       <input type="checkbox" class="switch" checked={ai.ollamaEnabled} onchange={(e) => void setOllama((e.currentTarget as HTMLInputElement).checked)} />
@@ -551,5 +552,6 @@
   .switch-row { color: var(--text-2); font-size: 12.3px; }
   .models { display: flex; flex-wrap: wrap; gap: 5px; }
   .hint { color: var(--text-3); font-size: 11.8px; }
+  .key-note { margin: 0; color: var(--text-3); font-size: 11.5px; line-height: 1.45; }
   code { font-family: var(--font-mono); font-size: 11px; }
 </style>

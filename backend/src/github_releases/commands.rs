@@ -65,6 +65,8 @@ pub struct ProviderView {
     pub model: String,
     pub ready: bool,
     pub key_hint: Option<String>,
+    /// Where the provider's keys come from and how they start.
+    pub key_note: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,6 +123,7 @@ fn ai_view(settings: &Settings) -> AiView {
                     settings.ai.ollama_enabled
                 },
                 key_hint: key.map(|k| secrets::hint(&k)),
+                key_note: ai::key_note(def.id),
             }
         })
         .collect();

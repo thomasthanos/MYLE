@@ -233,6 +233,46 @@ fn error_message(body: &str) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| body.chars().take(300).collect())
 }
+/// Whether the provider turned the key down: 401/403, or Gemini's 400
+/// "API key not valid".
+fn rejects_key(status: u16, body: &str) -> bool {
+    matches!(status, 401 | 403) || (status == 400 && error_message(body).to_lowercase().contains("api key"))
+}
+/// The start every key of `provider` has (Groq `gsk_`, Gemini `AIza`,
+/// OpenRouter `sk-or-`), when it is distinctive.
+fn key_prefix(provider: ProviderId) -> Option<&'static str> {
+    match provider {
+        ProviderId::Groq => Some("gsk_"),
+        ProviderId::Gemini => Some("AIza"),
+        ProviderId::OpenRouter => Some("sk-or-"),
+        ProviderId::DeepSeek | ProviderId::Ollama => None,
+    }
+}
+/// The line under a provider's key field: where its keys come from and how
+/// they start, so a key from a look-alike service (a Grok site for Groq) is
+/// never tried.
+pub(crate) fn key_note(provider: ProviderId) -> Option<String> {
+    let prefix = key_prefix(provider)?;
+    let site = provider.def().key_url.trim_start_matches("https://");
+    Some(match provider {
+        ProviderId::Groq => format!(
+            "Only keys from {site} work here; they start with {prefix}. Groq isn't Grok: keys from Grok (xAI) sites won't work."
+        ),
+        _ => format!("Only keys from {site} work here; they start with {prefix}."),
+    })
+}
+/// A rejected key that doesn't look like the provider's own: most likely one
+/// from another service pasted into the wrong field.
+pub(crate) fn rejected_key_message(provider: ProviderId, key: &str) -> String {
+    let name = provider.def().name;
+    match key_prefix(provider) {
+        Some(prefix) if !key.trim().starts_with(prefix) => format!(
+            "{name} didn't accept this key. {name} keys start with {prefix}; this one doesn't, so it is probably from another service ({}).",
+            provider.def().key_url
+        ),
+        _ => format!("{name} didn't accept this key."),
+    }
+}
 /// Drops a reasoning model's `<think>…</think>` and a Markdown fence around
 /// the whole answer.
 pub(crate) fn clean_answer(text: &str) -> String {
@@ -304,7 +344,7 @@ pub(crate) fn parse_response(
                 _ => format!("{name}'s free limit was reached for now."),
             },
         )),
-        401 | 403 => Err(fail(
+        _ if rejects_key(status, body) => Err(fail(
             "BAD_KEY",
             format!("{name} didn't accept the key: {}", error_message(body)),
         )),
@@ -493,7 +533,7 @@ pub(crate) async fn check_key(
     let body = response.text().await.unwrap_or_default();
     match status {
         200..=299 => Ok(()),
-        401 | 403 => Err(format!("{} didn't accept this key.", provider.def().name)),
+        _ if rejects_key(status, &body) => Err(rejected_key_message(provider, key.unwrap_or_default())),
         _ => Err(format!(
             "{} answered {status}: {}",
             provider.def().name,
@@ -927,7 +967,7 @@ mod tests {
                 ProviderId::Gemini,
                 400,
                 None,
-                r#"[{"error":{"message":"API key not valid"}}]"#
+                r#"[{"error":{"message":"Request contains an invalid argument"}}]"#
             )
             .unwrap_err()
             .code,
@@ -979,6 +1019,23 @@ mod tests {
                 .message
                 .contains("ran out of room")
         );
+    }
+    /// Gemini turns a bad key down with a 400, not a 401; a key that isn't
+    /// shaped like the provider's says where it probably belongs.
+    #[test]
+    fn a_turned_down_key_is_named_as_such() {
+        let gemini = r#"[{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}]"#;
+        assert_eq!(parse_response(ProviderId::Gemini, 400, None, gemini).unwrap_err().code, "BAD_KEY");
+        assert!(rejects_key(400, gemini) && rejects_key(401, "") && !rejects_key(400, "{}"));
+        let wrong = rejected_key_message(ProviderId::Groq, "sk-not-a-groq-key-0000");
+        assert!(wrong.contains("start with gsk_") && wrong.contains("console.groq.com"));
+        assert_eq!(rejected_key_message(ProviderId::Groq, "gsk_expired0000"), "Groq didn't accept this key.");
+        assert!(rejected_key_message(ProviderId::Gemini, "sk-x").contains("start with AIza"));
+        assert_eq!(rejected_key_message(ProviderId::DeepSeek, "sk-x"), "DeepSeek didn't accept this key.");
+        let groq = key_note(ProviderId::Groq).unwrap();
+        assert!(groq.contains("console.groq.com/keys") && groq.contains("gsk_") && groq.contains("isn't Grok"));
+        assert!(key_note(ProviderId::Gemini).unwrap().contains("aistudio.google.com/apikey"));
+        assert_eq!(key_note(ProviderId::Ollama), None);
     }
     #[test]
     fn the_next_provider_follows_the_users_order() {

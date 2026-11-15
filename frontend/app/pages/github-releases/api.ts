@@ -40,6 +40,8 @@ export interface ProviderView {
   model: string;
   ready: boolean;
   keyHint: string | null;
+  /** Where the provider's keys come from and how they start. */
+  keyNote: string | null;
 }
 export interface AiView {
   providers: ProviderView[];
