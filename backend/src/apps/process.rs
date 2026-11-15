@@ -1,8 +1,9 @@
 //! Child-process helpers: hidden console processes, UAC elevation, killing.
 use std::ffi::OsStr;
 use base64::Engine;
-/// Keeps console programs (winget, taskkill, powershell) from flashing a window.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Keeps console programs (winget, taskkill, powershell) from flashing a
+/// window: the one copy for the whole app.
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Windows ERROR_ELEVATION_REQUIRED: the program's manifest demands admin.
 pub const ERROR_ELEVATION_REQUIRED: i32 = 740;
 /// Windows ERROR_CANCELLED: returned by `run_elevated` when UAC is declined.

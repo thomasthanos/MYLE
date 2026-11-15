@@ -7,6 +7,7 @@ use super::tasks::{Step, system32};
 use crate::apps::process::{encode_command, hidden, run_elevated};
 use crate::console::{Line, LineSplitter};
 use crate::download::err;
+use crate::apps::process::ps_quote;
 const POLL: Duration = Duration::from_millis(180);
 /// How long to keep draining the log after the program exited, in case the
 /// last write lands just after the process does.
@@ -341,10 +342,6 @@ fn watched_script(exe: &Path, args: &str, log: &Path, stop: &Path) -> String {
     ));
     script.push_str("$p.WaitForExit()\nexit $p.ExitCode\n");
     script
-}
-/// A PowerShell single-quoted string literal.
-fn ps_quote(text: &str) -> String {
-    crate::apps::process::ps_quote(text)
 }
 #[cfg(test)]
 mod tests {

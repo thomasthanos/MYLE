@@ -160,6 +160,27 @@ fn base(variable: &str) -> Result<PathBuf, String> {
             format!("The Windows {variable} application-data folder could not be located.")
         })
 }
+/// Where Windows says a known folder is (a `FOLDERID_*`), wherever the user
+/// moved it. The one wrapper of `SHGetKnownFolderPath` for the whole app.
+pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
+    let status = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT as u32, std::ptr::null_mut(), &mut raw) };
+    if raw.is_null() {
+        return None;
+    }
+    let path = (status >= 0).then(|| {
+        // SAFETY: a successful call returns a NUL-terminated string.
+        let length = (0..).take_while(|&i| unsafe { *raw.add(i) } != 0).count();
+        PathBuf::from(std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(raw, length) }))
+    });
+    // SAFETY: allocated by SHGetKnownFolderPath, even when it failed.
+    unsafe { CoTaskMemFree(raw.cast()) };
+    path.filter(|path| !path.as_os_str().is_empty())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -95,7 +95,7 @@ pub struct Places {
 }
 impl Places {
     pub fn of_this_pc() -> Self {
-        use windows::Win32::UI::Shell::{
+        use windows_sys::Win32::UI::Shell::{
             FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_LocalAppData,
             FOLDERID_LocalAppDataLow, FOLDERID_Music, FOLDERID_Pictures, FOLDERID_Profile, FOLDERID_ProgramData,
             FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Public, FOLDERID_RoamingAppData,
@@ -158,17 +158,7 @@ impl Places {
         places
     }
 }
-fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
-    use windows::Win32::System::Com::CoTaskMemFree;
-    use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-    // SAFETY: the returned string is copied, then freed once.
-    unsafe {
-        let path = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
-        let text = path.to_string();
-        CoTaskMemFree(Some(path.0 as *const _));
-        text.ok().map(PathBuf::from)
-    }
-}
+use crate::storage::known_folder;
 /// The program files of the processes running now that can be asked (most
 /// of the user's own and many of the system's).
 fn running_programs() -> Vec<PathBuf> {

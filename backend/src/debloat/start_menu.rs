@@ -10,7 +10,7 @@ use winreg::enums::{
 use winreg::RegValue;
 use super::catalog::{Data, Hive};
 use super::system::{self, Root, Value};
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::apps::process::CREATE_NO_WINDOW;
 const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
 const START_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Start";
 const USER_EXPLORER_POLICY: &str = r"Software\Policies\Microsoft\Windows\Explorer";

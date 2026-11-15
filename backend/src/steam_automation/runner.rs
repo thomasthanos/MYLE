@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use crate::apps::process::JobObject;
 const MAX_GAMES: usize = 32;
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::apps::process::CREATE_NO_WINDOW;
 pub(crate) trait Child: Send {
     fn is_running(&mut self) -> bool;
     fn kill(&mut self);

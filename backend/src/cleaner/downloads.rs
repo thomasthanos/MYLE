@@ -52,16 +52,8 @@ pub struct Outcome {
 /// Windows' Downloads folder (FOLDERID_Downloads).
 #[cfg(windows)]
 pub(crate) fn downloads_folder() -> Result<PathBuf, String> {
-    use windows::Win32::System::Com::CoTaskMemFree;
-    use windows::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-    unsafe {
-        let path = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None)
-            .map_err(|e| format!("Windows did not say where Downloads is: {e}"))?;
-        let text = path.to_string();
-        CoTaskMemFree(Some(path.0 as *const _));
-        let text = text.map_err(|e| e.to_string())?;
-        Ok(PathBuf::from(text))
-    }
+    crate::storage::known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Downloads)
+        .ok_or_else(|| "Windows did not say where Downloads is.".to_string())
 }
 #[cfg(not(windows))]
 pub(crate) fn downloads_folder() -> Result<PathBuf, String> {

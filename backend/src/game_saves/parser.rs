@@ -366,8 +366,8 @@ impl Here {
         use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, FOLDERID_Public};
         Here {
             profile: std::env::var_os("USERPROFILE").map(PathBuf::from),
-            documents: crate::debloat::system::known_folder(&FOLDERID_Documents),
-            public: crate::debloat::system::known_folder(&FOLDERID_Public),
+            documents: crate::storage::known_folder(&FOLDERID_Documents),
+            public: crate::storage::known_folder(&FOLDERID_Public),
         }
     }
 }

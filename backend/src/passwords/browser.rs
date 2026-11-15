@@ -16,9 +16,6 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId};
-use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-};
 use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
 use zeroize::Zeroizing;
@@ -296,32 +293,7 @@ fn pipe_name() -> String {
     let id: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
     format!(r"\\.\pipe\myle-passwords-{id}")
 }
-pub(super) fn process_path(pid: u32) -> Option<PathBuf> {
-    unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return None;
-        }
-        let mut buffer = [0u16; 1024];
-        let mut length = buffer.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length);
-        CloseHandle(process);
-        (ok != 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
-    }
-}
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()),
-    }
-}
-/// Whether `pid` runs this very program.
-fn is_this_program(pid: u32) -> bool {
-    match (process_path(pid), std::env::current_exe()) {
-        (Some(other), Ok(mine)) => same_file(&other, &mine),
-        _ => false,
-    }
-}
+pub(super) use crate::elevated_pipe::{is_this_program, process_path};
 /// This process's parent, grandparent and so on (Chrome starts the host
 /// through `cmd.exe`), as program file names, lowercase.
 fn ancestors() -> Vec<String> {

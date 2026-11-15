@@ -1,8 +1,7 @@
 // ! The administrator half of the cleaner. ! ! The elevated helper opens each configured root without following reparse ! points and traverses its descendants by Windows file ID. Descendant paths ! are never used for deletion, so replacing a checked folder with a junction ! cannot redirect the cleaner elsewhere.
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::mem::{size_of, zeroed};
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use serde::{Deserialize, Serialize};
@@ -21,8 +20,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OPEN_EXISTING, OpenFileById,
     SetFileInformationByHandle,
 };
-use windows_sys::Win32::System::Com::CoTaskMemFree;
-use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows_sys::Win32::UI::Shell::FOLDERID_ProgramData;
 use super::targets::{self, Category, Target};
 use crate::elevated_pipe::{self, Helper, Session};
 /// `\\.\pipe\myle-cleaner-<32 hex digits>`, created by the app.
@@ -322,32 +320,7 @@ fn elevated_target_path(target: &Target) -> Result<PathBuf, String> {
     Ok(PathBuf::from(target.dir))
 }
 fn known_program_data() -> Result<PathBuf, String> {
-    let mut raw = null_mut();
-    let status = unsafe {
-        SHGetKnownFolderPath(
-            &FOLDERID_ProgramData,
-            KF_FLAG_DEFAULT as u32,
-            null_mut(),
-            &mut raw,
-        )
-    };
-    if status < 0 || raw.is_null() {
-        return Err(format!(
-            "Windows could not locate ProgramData (HRESULT 0x{:08x}).",
-            status as u32
-        ));
-    }
-    let mut length = 0usize;
-    unsafe {
-        while *raw.add(length) != 0 {
-            length += 1;
-        }
-    }
-    let path = PathBuf::from(OsString::from_wide(unsafe {
-        std::slice::from_raw_parts(raw, length)
-    }));
-    unsafe { CoTaskMemFree(raw.cast()) };
-    Ok(path)
+    crate::storage::known_folder(&FOLDERID_ProgramData).ok_or_else(|| "Windows could not locate ProgramData.".to_string())
 }
 fn visit_directory(
     directory: &OwnedHandle,

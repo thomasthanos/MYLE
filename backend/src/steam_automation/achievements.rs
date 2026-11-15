@@ -11,7 +11,7 @@ const MIN_DELAY_SECS: u64 = 5 * 60;
 const MAX_DELAY_SECS: u64 = 30 * 60;
 const CATEGORY_VAC: u32 = 8;
 const CATEGORY_ACHIEVEMENTS: u32 = 22;
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::apps::process::CREATE_NO_WINDOW;
 const HELPER_LIMIT: Duration = Duration::from_secs(45);
 /// The most characters of names one helper is given. Quoting can double them on the command line,
 /// which still stays well within what Windows takes.

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::apps::process::CREATE_NO_WINDOW;
 pub fn root(hive: &str) -> RegKey {
     match hive {
         "HKLM" => RegKey::predef(HKEY_LOCAL_MACHINE),
@@ -364,28 +364,11 @@ pub fn folder_stats(path: &Path, limit: usize, names: usize) -> (u64, usize, Vec
 /// A folder of a known Windows location (`{6D809377-…}` for Program Files)
 /// as UserAssist writes it, resolved to its path.
 pub fn known_folder(id: &str) -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::System::Com::CoTaskMemFree;
-    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     let hex: String = id.trim_matches(['{', '}']).chars().filter(|c| *c != '-').collect();
     if hex.len() != 32 {
         return None;
     }
-    let guid = windows_sys::core::GUID::from_u128(u128::from_str_radix(&hex, 16).ok()?);
-    let mut raw = std::ptr::null_mut();
-    // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
-    let result = unsafe { SHGetKnownFolderPath(&guid, 0, std::ptr::null_mut(), &mut raw) };
-    if raw.is_null() {
-        return None;
-    }
-    let path = (result >= 0).then(|| {
-        // SAFETY: a successful call returns a NUL-terminated string.
-        let length = (0..).take_while(|&i| unsafe { *raw.add(i) } != 0).count();
-        PathBuf::from(std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(raw, length) }))
-    });
-    // SAFETY: allocated by SHGetKnownFolderPath.
-    unsafe { CoTaskMemFree(raw as *const _) };
-    path
+    crate::storage::known_folder(&windows_sys::core::GUID::from_u128(u128::from_str_radix(&hex, 16).ok()?))
 }
 /// The newest modification inside a folder, two levels deep.
 pub fn newest_change(path: &Path) -> Option<SystemTime> {

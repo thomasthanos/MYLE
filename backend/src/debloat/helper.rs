@@ -14,7 +14,7 @@ pub const HELPER: Helper = Helper {
     pipe_prefix: r"\\.\pipe\myle-debloat-",
     what: "administrator debloater",
 };
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::apps::process::CREATE_NO_WINDOW;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "do", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Request {

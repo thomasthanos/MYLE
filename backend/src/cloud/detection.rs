@@ -275,26 +275,7 @@ fn detect_mega(out: &mut Vec<CloudFolder>) {
 }
 /// The user's Documents folder, wherever it was moved (often into OneDrive).
 fn documents_folder() -> Option<PathBuf> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::System::Com::CoTaskMemFree;
-    use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath};
-    let mut raw = std::ptr::null_mut();
-    // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
-    let result =
-        unsafe { SHGetKnownFolderPath(&FOLDERID_Documents, 0, std::ptr::null_mut(), &mut raw) };
-    if raw.is_null() {
-        return None;
-    }
-    let path = (result >= 0).then(|| {
-        // SAFETY: a successful call returns a NUL-terminated string.
-        let length = (0..).take_while(|&i| unsafe { *raw.add(i) } != 0).count();
-        let units = unsafe { std::slice::from_raw_parts(raw, length) };
-        PathBuf::from(OsString::from_wide(units))
-    });
-    // SAFETY: allocated by SHGetKnownFolderPath.
-    unsafe { CoTaskMemFree(raw as *const _) };
-    path
+    crate::storage::known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Documents)
 }
 fn push_cloud(out: &mut Vec<CloudFolder>, provider: CloudProvider, label: &str, path: &Path) {
     if path.parent().is_some() && path.is_dir() {

@@ -56,20 +56,7 @@ fn is_prompt_program(path: &str) -> bool {
 }
 /// The full path of process `pid`'s program.
 fn program_of(pid: u32) -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
-    // SAFETY: the handle is closed before returning, and the buffer outlives the call.
-    unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return None;
-        }
-        let mut buffer = [0u16; 1024];
-        let mut length = buffer.len() as u32;
-        let found = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut length) != 0;
-        CloseHandle(process);
-        found.then(|| String::from_utf16_lossy(&buffer[..length as usize]))
-    }
+    crate::elevated_pipe::process_path(pid).map(|path| path.to_string_lossy().into_owned())
 }
 /// The Windows Hello prompt on screen, if there is one: by its class, or else by the program
 /// that draws it (a newer Windows may name its window otherwise).

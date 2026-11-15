@@ -145,25 +145,8 @@ unsafe fn storage_page(automation: &IUIAutomation) -> windows::core::Result<Opti
 }
 /// Whether the process runs `GoogleDriveFS.exe`.
 fn is_google_drive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-    };
-    let mut path = [0u16; 1024];
-    let mut length = path.len() as u32;
-    // SAFETY: the handle is closed below; the buffer's length is passed with it.
-    let ok = unsafe {
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return false;
-        }
-        let ok = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length) != 0;
-        CloseHandle(process);
-        ok
-    };
-    ok && String::from_utf16_lossy(&path[..length as usize])
-        .to_lowercase()
-        .ends_with(r"\googledrivefs.exe")
+    crate::elevated_pipe::process_path(pid)
+        .is_some_and(|path| path.to_string_lossy().to_lowercase().ends_with(r"\googledrivefs.exe"))
 }
 /// Whether "Online only" is on for a folder of Google Drive.
 pub(super) fn is_online_only(path: &Path) -> Result<bool, String> {

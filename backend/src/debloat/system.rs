@@ -539,29 +539,7 @@ pub fn program_files_x86() -> PathBuf {
 pub fn windows_dir() -> PathBuf {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Windows).unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
 }
-pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::System::Com::CoTaskMemFree;
-    use windows_sys::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-    let mut raw = std::ptr::null_mut();
-    // SAFETY: `raw` receives a CoTaskMemAlloc'd string, freed below.
-    let status = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT as u32, std::ptr::null_mut(), &mut raw) };
-    if status < 0 || raw.is_null() {
-        return None;
-    }
-    let mut length = 0usize;
-    // SAFETY: the string is NUL-terminated.
-    unsafe {
-        while *raw.add(length) != 0 {
-            length += 1;
-        }
-    }
-    // SAFETY: `length` units were just counted.
-    let path = PathBuf::from(std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(raw, length) }));
-    // SAFETY: allocated by SHGetKnownFolderPath.
-    unsafe { CoTaskMemFree(raw.cast()) };
-    Some(path)
-}
+pub(crate) use crate::storage::known_folder;
 pub fn edge_installed() -> bool {
     program_files_x86()
         .join(r"Microsoft\Edge\Application\msedge.exe")
@@ -592,7 +570,7 @@ pub fn broadcast_setting_change(area: &str) {
 /// must never be started from the administrator helper.
 pub fn restart_explorer() -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    use crate::apps::process::CREATE_NO_WINDOW;
     let system32 = windows_dir().join("System32");
     let _ = std::process::Command::new(system32.join("taskkill.exe"))
         .args(["/f", "/im", "explorer.exe"])
