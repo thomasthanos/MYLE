@@ -59,7 +59,8 @@ where
 {
     let limit = if force { MIN_FORCE_SECS } else { FRESH_SECS };
     let saved = match cache.read::<T>(key) {
-        Some(entry) if now.saturating_sub(entry.saved_at) < limit => {
+        // Saved "in the future" (the clock was set back): not fresh, asked again.
+        Some(entry) if entry.saved_at <= now && now - entry.saved_at < limit => {
             return Section { items: entry.items, updated_at: Some(entry.saved_at), stale: false, error: None, fresh: true };
         }
         other => other,
@@ -78,7 +79,7 @@ where
 }
 /// What was saved for this section, without asking Steam, for the page to show at once.
 pub(crate) fn saved_section<T: Serialize + DeserializeOwned>(cache: &DiskCache, key: &str, now: u64) -> Section<T> {
-    match cache.read::<T>(key).filter(|entry| now.saturating_sub(entry.saved_at) < SHOWN_FOR_SECS) {
+    match cache.read::<T>(key).filter(|entry| entry.saved_at <= now && now - entry.saved_at < SHOWN_FOR_SECS) {
         Some(entry) => Section { fresh: now.saturating_sub(entry.saved_at) < FRESH_SECS, items: entry.items, updated_at: Some(entry.saved_at), stale: false, error: None },
         None => Section { items: Vec::new(), updated_at: None, stale: false, error: None, fresh: false },
     }

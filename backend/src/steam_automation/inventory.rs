@@ -133,13 +133,19 @@ pub(crate) fn duplicates(cards: &[Card]) -> Vec<Card> {
     let mut seen = HashSet::new();
     cards.iter().filter(|card| !seen.insert(card.hash_name.as_str())).cloned().collect()
 }
-/// A formatted price in cents: `0,31€`, `2,--€`, `1.234,56€`.
+/// A formatted price in cents: `0,31€`, `2,--€`, `1.234,56€`. Exactly two
+/// digits after the last separator: `1.234€` (a thousands separator, no
+/// cents) is not read as 12.34 or 3.34 and listed far below its worth.
 pub(crate) fn parse_price(text: &str) -> Option<u32> {
     let kept: String = text.chars().filter(|c| c.is_ascii_digit() || matches!(c, ',' | '.' | '-')).collect();
     let (whole, cents) = kept.rsplit_once([',', '.'])?;
     let whole: u32 = whole.replace([',', '.'], "").parse().ok()?;
-    let cents: u32 = if cents == "--" { 0 } else { cents.parse().ok()? };
-    Some(whole * 100 + cents)
+    let cents: u32 = match cents {
+        "--" => 0,
+        digits if digits.len() == 2 && digits.bytes().all(|b| b.is_ascii_digit()) => digits.parse().ok()?,
+        _ => return None,
+    };
+    whole.checked_mul(100)?.checked_add(cents)
 }
 /// A cent under the cheapest listing, and never below the owner's minimum.
 pub(crate) fn list_price(lowest: u32, minimum: u32) -> u32 {
@@ -147,10 +153,14 @@ pub(crate) fn list_price(lowest: u32, minimum: u32) -> u32 {
 }
 /// What the seller receives when the buyer pays this: Steam adds 5% and 10%, each at least a cent.
 pub(crate) fn seller_gets(buyer_cents: u32) -> u32 {
-    (1..=buyer_cents)
-        .rev()
-        .find(|seller| seller + (seller * 5 / 100).max(1) + (seller * 10 / 100).max(1) <= buyer_cents)
-        .unwrap_or(0)
+    let paid = |seller: u64| seller + (seller * 5 / 100).max(1) + (seller * 10 / 100).max(1);
+    let buyer = u64::from(buyer_cents);
+    // The fees take about 15%, less up to two cents of rounding: the answer is at most this, and a few steps down finds it.
+    let mut seller = ((buyer + 2) * 100 / 115 + 1).min(buyer);
+    while seller > 0 && paid(seller) > buyer {
+        seller -= 1;
+    }
+    u32::try_from(seller).unwrap_or(0)
 }
 type Page<T> = Result<(Vec<T>, Option<String>), String>;
 async fn read_pages<C: Community, T>(api: &C, steam_id: u64, parse: fn(&str) -> Page<T>) -> Result<Vec<T>, CommunityError> {
@@ -615,6 +625,10 @@ mod tests {
         assert_eq!(parse_price("2,--€"), Some(200));
         assert_eq!(parse_price("1.234,56€"), Some(123456));
         assert_eq!(parse_price(""), None);
+        // Not a price in cents: a thousands separator alone, or one cent digit.
+        assert_eq!(parse_price("1.234€"), None);
+        assert_eq!(parse_price("1,5€"), None);
+        assert_eq!(parse_price("99999999999,00€"), None);
     }
     #[test]
     fn the_price_is_a_cent_under_the_market() {
@@ -636,6 +650,15 @@ mod tests {
     #[test]
     fn too_cheap_for_the_fees_gets_nothing() {
         assert_eq!(seller_gets(2), 0);
+    }
+    #[test]
+    fn the_quick_fee_sum_matches_trying_every_price_and_never_overflows() {
+        let paid = |seller: u32| seller + (seller * 5 / 100).max(1) + (seller * 10 / 100).max(1);
+        for buyer in 0..=100_000u32 {
+            let slow = (1..=buyer).rev().find(|&seller| paid(seller) <= buyer).unwrap_or(0);
+            assert_eq!(seller_gets(buyer), slow, "{buyer}");
+        }
+        assert!(seller_gets(u32::MAX) > 3_700_000_000);
     }
     const NOTHING_LISTED: &str = r#"{"success":true,"total_count":0,"listings":[]}"#;
     fn on_sale(asset: &str) -> String {

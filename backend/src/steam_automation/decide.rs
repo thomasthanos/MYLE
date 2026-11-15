@@ -86,7 +86,8 @@ pub(crate) fn decide(world: &World) -> Decision {
     let mut games: BTreeSet<u32> = match farming {
         FarmStep::Accumulate(list) => list.iter().copied().collect(),
         FarmStep::Solo(game) => BTreeSet::from([*game]),
-        FarmStep::Done if world.idle_on => world.idle_games.iter().copied().collect(),
+        // Steam runs at most 32 at once: the rest would be counted as games that failed to start.
+        FarmStep::Done if world.idle_on => world.idle_games.iter().copied().take(MAX_GAMES).collect(),
         FarmStep::Done | FarmStep::Reading => BTreeSet::new(),
     };
     let room = MAX_GAMES.saturating_sub(games.len());

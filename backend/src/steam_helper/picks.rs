@@ -97,6 +97,7 @@ fn save(file: &Path, picks: &PicksFile) {
 async fn games_for<S: StoreApi>(api: &S, appids: &[u32]) -> Result<Vec<Game>, String> {
     Ok(details(api, appids).await?.into_iter().filter(|item| !item.adult).map(|item| item.game).collect())
 }
+static PICKS_FILE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// This week's picks for these filters, with today's prices.
 pub(crate) async fn weekly_picks<S: StoreApi>(
     api: &S,
@@ -104,6 +105,9 @@ pub(crate) async fn weekly_picks<S: StoreApi>(
     filters: Filters,
     week: i64,
 ) -> Result<Vec<Game>, String> {
+    // One at a time from reading the file to saving it: two filters asked
+    // together would otherwise each save over the other's week.
+    let _file = PICKS_FILE.lock().await;
     let mut saved = read(file);
     let key = filters.key();
     let last = saved.get(&key).cloned().unwrap_or_default();
