@@ -84,8 +84,7 @@ pub async fn run_elevated(
         ps_quote(program)
     );
     if !args.is_empty() {
-        let list: Vec<String> = args.iter().map(|a| ps_quote(a)).collect();
-        script.push_str(&format!(" -ArgumentList {}", list.join(",")));
+        script.push_str(&format!(" -ArgumentList {}", ps_quote(&command_line(args))));
     }
     if hide_window {
         script.push_str(" -WindowStyle Hidden");
@@ -97,16 +96,48 @@ pub async fn run_elevated(
 /// (0), or `ERROR_CANCELLED` if the user declined the prompt. Does not wait
 /// for the program: for a helper that keeps running and is talked to.
 pub async fn start_elevated(program: &str, args: &[String]) -> Result<i32, String> {
-    let list: Vec<String> = args.iter().map(|a| ps_quote(a)).collect();
     let mut script = format!(
         "Start-Process -FilePath {} -Verb RunAs -WindowStyle Hidden",
         ps_quote(program)
     );
-    if !list.is_empty() {
-        script.push_str(&format!(" -ArgumentList {}", list.join(",")));
+    if !args.is_empty() {
+        script.push_str(&format!(" -ArgumentList {}", ps_quote(&command_line(args))));
     }
     let script = format!("try {{ {script}; exit 0 }} {}", start_failure());
     started(powershell_via_stdin(&script).await?)
+}
+/// `args` as one command line that the program reads back as the same
+/// arguments (`CommandLineToArgvW`'s rules). Given as a list, Start-Process
+/// joins them with plain spaces, and a path with a space becomes two.
+pub fn command_line(args: &[String]) -> String {
+    args.iter().map(|arg| windows_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+fn windows_quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut backslashes = 0usize;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                // Each backslash before a quote is doubled, and the quote escaped.
+                out.push_str(&"\\".repeat(backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                out.push(c);
+            }
+        }
+    }
+    // Backslashes before the closing quote are doubled too.
+    out.push_str(&"\\".repeat(backslashes * 2));
+    out.push('"');
+    out
 }
 /// The line `powershell_via_stdin` sends: ASCII only (base64 of the UTF-16
 /// script), so no console code page can mangle a non-English path.
@@ -279,6 +310,32 @@ impl Drop for JobObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn arguments_reach_the_program_as_they_were_given() {
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
+        let args: Vec<String> = ["plain", r"C:\Users\John Doe\file.reg", "say \"hi\"", r"ends\", r"C:\with space\", "", "tab\there", r#"a\"b"#]
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect();
+        let line: Vec<u16> = format!("x.exe {}", command_line(&args)).encode_utf16().chain(Some(0)).collect();
+        let mut count = 0;
+        // SAFETY: `line` is NUL-terminated; the array Windows returns is read within `count` and freed with LocalFree.
+        let parsed: Vec<String> = unsafe {
+            let list = CommandLineToArgvW(line.as_ptr(), &mut count);
+            assert!(!list.is_null());
+            let parsed = (1..count as usize)
+                .map(|i| {
+                    let item = *list.add(i);
+                    let length = (0..).take_while(|&n| *item.add(n) != 0).count();
+                    String::from_utf16_lossy(std::slice::from_raw_parts(item, length))
+                })
+                .collect();
+            LocalFree(list.cast());
+            parsed
+        };
+        assert_eq!(parsed, args);
+    }
     #[test]
     fn a_program_windows_cannot_start_is_an_error_not_a_declined_prompt() {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
