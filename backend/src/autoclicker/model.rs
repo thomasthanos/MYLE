@@ -85,6 +85,13 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 impl Config {
+    /// The shortest wait between two clicks of this run.
+    pub fn shortest_interval_ms(&self) -> u64 {
+        match self.mode {
+            Mode::Simple => self.interval_ms,
+            Mode::Sequence => self.steps.iter().map(|step| step.interval_ms).min().unwrap_or(self.interval_ms),
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
         if !(10..=MAX_DELAY).contains(&self.interval_ms) {
             return Err("Set the click interval between 10 ms and 24 hours.".into());
@@ -183,6 +190,14 @@ impl Profiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_shortest_interval_is_the_runs_own() {
+        let mut config = Config { interval_ms: 40, ..Config::default() };
+        assert_eq!(config.shortest_interval_ms(), 40);
+        config.mode = Mode::Sequence;
+        config.steps = vec![Step { interval_ms: 250, ..Step::default() }, Step { interval_ms: 12, ..Step::default() }];
+        assert_eq!(config.shortest_interval_ms(), 12);
+    }
     #[test]
     fn rejects_zero_or_excessive_intervals_and_repeat_counts() {
         let mut config = Config::default();

@@ -2,6 +2,23 @@ mod engine;
 mod model;
 mod native;
 mod store;
+/// A 1 ms timer for this process while it is held (`timeBeginPeriod`), for
+/// intervals shorter than Windows' usual tick; back to the usual one after.
+struct FineTimer(bool);
+impl FineTimer {
+    fn when(wanted: bool) -> Self {
+        // SAFETY: no pointers; matched by `timeEndPeriod` in `Drop` when it succeeded.
+        Self(wanted && unsafe { windows_sys::Win32::Media::timeBeginPeriod(1) } == 0)
+    }
+}
+impl Drop for FineTimer {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: ends the period begun in `when`.
+            unsafe { windows_sys::Win32::Media::timeEndPeriod(1) };
+        }
+    }
+}
 #[cfg(test)]
 mod tests;
 use engine::{Cancel, Driver};
@@ -208,6 +225,8 @@ impl AutoClickerState {
                     }
                 });
                 let mut last = Instant::now() - Duration::from_secs(1);
+                // Windows' timer ticks every 15.6 ms: a 10 ms interval would click about 64 times a second, not 100.
+                let _fine = FineTimer::when(config.shortest_interval_ms() < 16);
                 let result = engine::execute(&config, &cancel, &mut driver, |progress| {
                     // Keep the stored counters exact; only UI notifications are throttled.
                     let status = state.record(|run| {
