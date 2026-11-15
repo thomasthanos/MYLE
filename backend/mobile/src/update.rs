@@ -101,7 +101,11 @@ fn remove_installed(dir: &Path, current: &semver::Version) {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write;
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
 }
 
 fn sha256_of(path: &Path) -> Option<String> {

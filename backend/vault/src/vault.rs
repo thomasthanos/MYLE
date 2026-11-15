@@ -1608,7 +1608,8 @@ impl Vault {
         let file = self.file.as_ref().ok_or("There is no vault yet.")?;
         write_atomic(
             &self.path,
-            &serde_json::to_vec_pretty(file).map_err(|e| e.to_string())?,
+            // Compact: the file is read by MYLE only, and a large vault is written on every save.
+            &serde_json::to_vec(file).map_err(|e| e.to_string())?,
         )
     }
 }

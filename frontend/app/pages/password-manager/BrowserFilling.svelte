@@ -700,11 +700,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 0 4px;
-    border: none;
-    background: transparent;
+    padding: 10px 14px;
+    border-radius: 11px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
     color: inherit;
     cursor: pointer;
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+
+  .steps-toggle:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.13);
   }
 
   .toggle-title {
@@ -809,14 +816,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .store-card-btn {
-    align-self: flex-start;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
   }
 
   .browser-icon {

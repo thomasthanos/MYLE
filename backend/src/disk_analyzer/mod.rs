@@ -724,15 +724,16 @@ async fn remove_items(
     blocking(move || {
         let _reservation = reservation;
         let (root, targets) = state.with(scan_id, |tree, _| {
+            // Each id once, in the order sent (up to 10,000 of them).
             let mut wanted: Vec<u32> = Vec::new();
+            let mut chosen = std::collections::HashSet::new();
             for &id in &node_ids {
                 tree.check(scan_id, id)?;
-                if !wanted.contains(&id) {
+                if chosen.insert(id) {
                     wanted.push(id);
                 }
             }
             // A folder takes what is inside it along: drop what is inside.
-            let chosen: std::collections::HashSet<u32> = wanted.iter().copied().collect();
             let targets = wanted
                 .into_iter()
                 .filter(|&id| {

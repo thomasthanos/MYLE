@@ -172,7 +172,8 @@ pub(crate) async fn fetch<C: Community, S: StoreApi>(community: &C, store: &S, s
     let own: HashSet<u32> = licensed.iter().copied().chain(played.iter().map(|game| game.appid)).collect();
     let shared: Vec<OwnedGame> = family.into_iter().filter(|game| !own.contains(&game.appid)).collect();
     let listed: HashSet<u32> = played.iter().chain(&shared).map(|game| game.appid).collect();
-    licensed.extend(listed.iter().filter(|appid| !licensed.contains(appid)).collect::<Vec<_>>());
+    let already: HashSet<u32> = licensed.iter().copied().collect();
+    licensed.extend(listed.iter().filter(|appid| !already.contains(appid)));
     let shared_ids: HashSet<u32> = shared.iter().map(|game| game.appid).collect();
     let minutes: HashMap<u32, u32> = played.iter().map(|game| (game.appid, game.minutes)).collect();
     let minutes_of = |appid: u32| minutes.get(&appid).copied().unwrap_or(0).max(times.get(&appid).copied().unwrap_or(0));

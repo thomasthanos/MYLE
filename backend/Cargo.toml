@@ -96,7 +96,7 @@ webview2-com = "0.38"
 # Project Backups: CRC-32 of every zipped file, Unicode file names compared
 # alike however they were written (NFC), and the side-by-side text diff.
 crc32fast = "1"
-notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "8", default-features = false }
 icu_normalizer = "2"
 similar = { version = "2", default-features = false, features = ["text"] }
 
@@ -127,6 +127,17 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.miniz_oxide]
+opt-level = 3
+
+# And the vault's key derivation and hashing: unlocking runs Argon2 over 64 MB or more, and
+# SHA-256 checks every download and backup copy.
+[profile.release.package.argon2]
+opt-level = 3
+
+[profile.release.package.blake2]
+opt-level = 3
+
+[profile.release.package.sha2]
 opt-level = 3
 
 [dev-dependencies]

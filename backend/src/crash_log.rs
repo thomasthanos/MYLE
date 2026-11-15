@@ -1,7 +1,8 @@
 //! A panic is written down before its thread unwinds: `internal\crash.log`
 //! in the local data folder keeps the latest ones (the one before is kept as
 //! `crash.old.log` once the log grows past 256 KB), so a feature that failed
-//! can be traced afterwards. Rust's own message still goes to stderr.
+//! can be traced afterwards. Rust's own message still goes to stderr. Only
+//! processes running as the user write it, never an elevated helper.
 //!
 //! The release build unwinds (`panic = "unwind"`): a panic ends the command
 //! or thread it happened in, and the cleanup guards on the way (rollbacks,
@@ -15,8 +16,14 @@ const OLD: &str = "crash.old.log";
 const LIMIT: u64 = 256 * 1024;
 /// How much of a panic's message is kept.
 const MESSAGE_CHARS: usize = 2000;
-/// Installs the hook, once, before anything else runs.
+/// Installs the hook, once, before anything else runs. An elevated helper
+/// writes nothing: the folder belongs to the user, and an administrator
+/// appending to (or renaming) files there would follow any link planted in
+/// it.
 pub fn install() {
+    if crate::elevated_pipe::is_elevated(std::process::id()) {
+        return;
+    }
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if let Some(folder) = folder() {
