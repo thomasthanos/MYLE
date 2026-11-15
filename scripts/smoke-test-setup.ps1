@@ -48,14 +48,14 @@ function Invoke-Silently([string]$Program, [string[]]$Arguments) {
   return $process.ExitCode
 }
 
-function Wait-UninstallControl($Parent, [string]$Name, $Scope) {
+function Wait-UninstallControl($Parent, [string]$Name, $Scope, [switch]$Enabled) {
   $condition = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::NameProperty, $Name
   )
   $deadline = (Get-Date).AddSeconds(30)
   do {
     $control = $Parent.FindFirst($Scope, $condition)
-    if ($control) { return $control }
+    if ($control -and (-not $Enabled -or $control.Current.IsEnabled)) { return $control }
     Start-Sleep -Milliseconds 200
   } while ((Get-Date) -lt $deadline)
   throw "Uninstall control '$Name' did not appear."
@@ -89,6 +89,7 @@ foreach ($entry in $registryEntries) {
   }
 }
 $publisherWasPresent = Test-Path -LiteralPath $publisherKey
+$uninstallProcesses = @()
 
 try {
   # The installer writes shortcuts into the current user's real known folders.
@@ -207,8 +208,10 @@ $select = [System.Windows.Automation.SelectionItemPattern]::Pattern
 $uninstaller = Join-Path $dir "uninstall.exe"
 
 $cancelled = Start-Process -FilePath $uninstaller -ArgumentList @("/S", "/P", "/PURGE") -PassThru
+$uninstallProcesses += $cancelled
 $window = Wait-UninstallControl $rootElement "Uninstall MYLE" $children
 $copy = [Diagnostics.Process]::GetProcessById($window.Current.ProcessId)
+$uninstallProcesses += $copy
 $confirm = Wait-UninstallControl $window "Uninstall" $descendants
 Assert (-not $confirm.Current.IsEnabled) "legacy flags still require a data choice"
 (Wait-UninstallControl $window "Cancel" $descendants).GetCurrentPattern($invoke).Invoke()
@@ -217,10 +220,12 @@ Assert (Test-Path -LiteralPath $expectedExe) "cancelling leaves the application 
 Assert (Test-Path -LiteralPath $uninstallKey) "cancelling leaves the Installed apps entry"
 
 $confirmed = Start-Process -FilePath $uninstaller -PassThru
+$uninstallProcesses += $confirmed
 $window = Wait-UninstallControl $rootElement "Uninstall MYLE" $children
 $copy = [Diagnostics.Process]::GetProcessById($window.Current.ProcessId)
+$uninstallProcesses += $copy
 (Wait-UninstallControl $window "Keep my settings and data" $descendants).GetCurrentPattern($select).Select()
-(Wait-UninstallControl $window "Uninstall" $descendants).GetCurrentPattern($invoke).Invoke()
+(Wait-UninstallControl $window "Uninstall" $descendants -Enabled).GetCurrentPattern($invoke).Invoke()
 (Wait-UninstallControl $window "Finish" $descendants).GetCurrentPattern($invoke).Invoke()
 Wait-UninstallExit $confirmed $copy 0
 Assert (-not (Test-Path $uninstallKey)) "Installed apps entry removed"
@@ -242,6 +247,16 @@ Write-Host "Setup smoke test passed."
 }
 finally {
   # Restore the caller's shortcuts and registry entries if any assertion fails.
+  foreach ($process in $uninstallProcesses) {
+    try {
+      if (-not $process.HasExited) {
+        $process.Kill()
+        $process.WaitForExit()
+      }
+    } catch {
+      Write-Warning "Could not stop the test uninstaller: $_"
+    }
+  }
   $restoreErrors = [System.Collections.Generic.List[string]]::new()
   if (Test-Path -LiteralPath $dir) {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

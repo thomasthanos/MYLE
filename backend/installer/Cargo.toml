@@ -39,7 +39,11 @@ lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "e
 winreg = "0.56"
 uuid = { version = "1", features = ["v4"] }
 # COM (IShellLinkW) writes shortcuts that work for any user name, Greek included.
+# Security_Credentials: the uninstaller removes the Password Manager's
+# Windows Hello key with the app's data.
 windows = { version = "0.61", features = [
+    "Foundation",
+    "Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",

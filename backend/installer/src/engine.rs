@@ -799,11 +799,23 @@ pub fn uninstall(
                 after_exit.remove_if_empty.push(parent.to_path_buf());
             }
         }
+        forget_hello_key();
     }
     report(Progress::Stage {
         stage: Stage::Finishing,
     });
     Ok(after_exit)
+}
+
+/// The Password Manager's Windows Hello key (`CREDENTIAL` in the app's
+/// `passwords/hello.rs`). It lives in the user's Windows Hello store, not in a
+/// data folder, so it goes here with the data; nothing happens without one.
+const HELLO_CREDENTIAL: &str = "MakeYourLifeEasier-PasswordVault";
+
+fn forget_hello_key() {
+    use windows::Security::Credentials::KeyCredentialManager;
+    use windows::core::HSTRING;
+    let _ = KeyCredentialManager::DeleteAsync(&HSTRING::from(HELLO_CREDENTIAL)).and_then(|operation| operation.get());
 }
 
 fn remove_patiently(path: &Path) {
@@ -845,6 +857,13 @@ mod tests {
             .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
             .unwrap();
         assert_eq!(default_dir(), local.join("ThomasThanos").join("MakeYourLifeEasier"));
+    }
+
+    #[test]
+    fn the_hello_key_removed_is_the_one_the_app_makes() {
+        let app = include_str!("../../src/passwords/hello.rs");
+        assert!(app.contains(&format!("const CREDENTIAL: &str = \"{HELLO_CREDENTIAL}\";")));
+        // Never called here: it would remove this PC's real key.
     }
 
     #[test]
