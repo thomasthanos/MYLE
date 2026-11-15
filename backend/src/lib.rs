@@ -170,6 +170,25 @@ fn owner_gate(
         handler(invoke)
     }
 }
+/// The app's identifier (`tauri.conf.json`), which names the single-instance
+/// plugin's mutex.
+const IDENTIFIER: &str = "com.thomasthanos.makeyourlifeeasier";
+/// Whether MYLE is running already: the mutex the single-instance plugin
+/// holds while it runs (`<identifier>-sim`) exists.
+fn already_running() -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
+    let name: Vec<u16> = format!("{IDENTIFIER}-sim").encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `name` is NUL-terminated and outlives the call; the handle is closed at once.
+    unsafe {
+        let mutex = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr());
+        if mutex.is_null() {
+            return false;
+        }
+        CloseHandle(mutex);
+    }
+    true
+}
 /// Everything the app is built from, for its normal run and for a notice.
 fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
@@ -246,11 +265,16 @@ pub fn run() {
     if startup::respect_choice() {
         return;
     }
-    if let Err(error) = storage::prepare() {
-        eprintln!("Application-data migration failed: {error}");
+    // A second launch only hands its arguments to the running copy (the
+    // single-instance plugin, below): it must not move, tidy or clear the
+    // data and web caches that copy is using.
+    if !already_running() {
+        if let Err(error) = storage::prepare() {
+            eprintln!("Application-data migration failed: {error}");
+        }
+        // Before any window creates the web view profile.
+        whats_new::note_previous_install();
     }
-    // Before any window creates the web view profile.
-    whats_new::note_previous_install();
     let account_state = account::AccountState::default();
     let cleanup = apps::Cleanup::default();
     let jobs = apps::Jobs::default();
@@ -689,5 +713,25 @@ mod start_page_tests {
     fn the_other_flags_still_open_theirs() {
         assert_eq!(page_asked(&["x".into(), "--open-game-saves".into()]), Some("game-saves"));
         assert_eq!(page_asked(&["x".into()]), None);
+    }
+}
+#[cfg(test)]
+mod single_instance_tests {
+    #[test]
+    fn the_mutex_is_named_after_the_apps_identifier() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["identifier"], super::IDENTIFIER);
+    }
+    #[test]
+    fn a_held_mutex_is_seen() {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+        let name: Vec<u16> = format!("{}-sim", super::IDENTIFIER).encode_utf16().chain(Some(0)).collect();
+        // SAFETY: `name` is NUL-terminated; the handle is closed below.
+        let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        assert!(!mutex.is_null());
+        assert!(super::already_running());
+        // SAFETY: the handle created above.
+        unsafe { CloseHandle(mutex) };
     }
 }
