@@ -5,9 +5,13 @@ on:
     - cron: '0 3,15 * * *'
   workflow_dispatch:
 
+# Nothing of the repository is needed: the job only talks to Supabase.
+permissions: {}
+
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Generate Supabase database activity
         env:
@@ -41,9 +45,9 @@ jobs:
             sleep 30
           done
 
+          # Only the keep-alive's own row: never a user's.
           for path in \
-            "keepalive?select=id,pinged_at&limit=1" \
-            "user_settings?select=user_id&limit=1"; do
+            "keepalive?select=id,pinged_at&limit=1"; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
               "$SUPABASE_URL/rest/v1/$path" \
               -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \

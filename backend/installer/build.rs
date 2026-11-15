@@ -112,19 +112,22 @@ fn payload() {
 /// The window's page comes from `npm run web:setup`. A release build
 /// without it is a mistake; a check or a test only needs something to embed.
 fn frontend(crate_dir: &Path) {
+    const PLACEHOLDER: &str = "<!doctype html><title>Setup</title><p>Run npm run web:setup.</p>";
     let dist = crate_dir.join("../target/web-setup");
-    if dist.join("installer.html").is_file() {
+    let page = dist.join("installer.html");
+    println!("cargo:rerun-if-changed={}", page.display());
+    // The stand-in a debug build left is no page either: a release never ships it.
+    let real = std::fs::read_to_string(&page).is_ok_and(|text| text != PLACEHOLDER);
+    if real {
         return;
     }
     if std::env::var("PROFILE").as_deref() == Ok("release") {
         panic!("target/web-setup is missing: run `npm run web:setup` first");
     }
-    std::fs::create_dir_all(&dist).unwrap();
-    std::fs::write(
-        dist.join("installer.html"),
-        "<!doctype html><title>Setup</title><p>Run npm run web:setup.</p>",
-    )
-    .unwrap();
+    if !page.is_file() {
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(&page, PLACEHOLDER).unwrap();
+    }
 }
 
 fn read_json(path: &Path) -> serde_json::Value {

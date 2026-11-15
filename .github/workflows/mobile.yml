@@ -98,6 +98,10 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
           checks=true
+          # The checkout may hold the tag without its message.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            git fetch --force --depth=1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || true
+          fi
           if [ "${{ github.ref_type }}" = "tag" ] && git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qx 'Checks: skip'; then
             checks=false
           fi

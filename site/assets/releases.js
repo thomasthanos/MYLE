@@ -55,7 +55,8 @@ async function loadReleases() {
 
     const data = await response.json();
     const stable = Array.isArray(data)
-      ? data.filter((release) => !release.draft && !release.prerelease && release.published_at).slice(0, 8)
+      // The Windows app's releases (v1.2.3): a MYLE Passwords one (mobile-v…) is never "the current release".
+      ? data.filter((release) => /^v\d/.test(release.tag_name) && !release.draft && !release.prerelease && release.published_at).slice(0, 8)
       : [];
     if (!stable.length) throw new Error("No stable releases were returned");
 

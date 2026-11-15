@@ -100,7 +100,8 @@ function packedManifest(zip) {
   return JSON.parse(inflateRawSync(zip.subarray(at, at + zip.readUInt32LE(local + 18))).toString("utf8"));
 }
 // What is uploaded must not carry the unpacked `key` (the stores answer "the key field does not match the current item"); checked, so it fails at build time.
-for (const [label, expected, zip] of [["chrome", chromeManifest, chromeZip], ["firefox", JSON.parse(firefoxManifestBuf.toString("utf8")), firefoxZip]]) {
+// Compared with the source manifests, read on their own: not with the copy the package was made from.
+for (const [label, expected, zip] of [["chrome", chromeSource, chromeZip], ["firefox", firefoxSource, firefoxZip]]) {
   const packed = packedManifest(zip);
   if ("key" in packed) throw new Error(`the ${label} package still has a "key": the stores refuse that on upload`);
   if (packed.version !== expected.version) throw new Error(`the ${label} package names version ${packed.version}, not ${expected.version}`);

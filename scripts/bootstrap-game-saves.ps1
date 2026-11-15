@@ -93,23 +93,24 @@ function Copy-ZipEntry([string]$ArchivePath, [string]$EntryName, [string]$Destin
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $archive = [System.IO.Compression.ZipFile]::OpenRead($ArchivePath)
   try {
-    $matches = @($archive.Entries | Where-Object { $_.FullName -ceq $EntryName })
-    if ($matches.Count -ne 1) {
-      throw "Expected exactly one '$EntryName' entry in '$ArchivePath'; found $($matches.Count)."
+    # Not $matches or $input: those are PowerShell's own automatic variables.
+    $entries = @($archive.Entries | Where-Object { $_.FullName -ceq $EntryName })
+    if ($entries.Count -ne 1) {
+      throw "Expected exactly one '$EntryName' entry in '$ArchivePath'; found $($entries.Count)."
     }
 
-    $input = $matches[0].Open()
+    $source = $entries[0].Open()
     try {
       $output = [System.IO.File]::Create($Destination)
       try {
-        $input.CopyTo($output)
+        $source.CopyTo($output)
       }
       finally {
         $output.Dispose()
       }
     }
     finally {
-      $input.Dispose()
+      $source.Dispose()
     }
   }
   finally {

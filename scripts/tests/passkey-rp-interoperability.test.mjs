@@ -7,6 +7,8 @@ const result = spawnSync("cargo", ["run", "--quiet", "--locked", "--manifest-pat
 });
 assert.equal(result.status, 0, result.error?.message ?? result.stderr);
 const vectors = JSON.parse(result.stdout);
+// An empty list would pass every test below without checking anything.
+assert.ok(Array.isArray(vectors) && vectors.length >= 1, "the Rust example produced no vectors");
 async function rejectsVerification(run) {
   try { assert.equal((await run()).verified, false); }
   catch (error) { if (error.code === "ERR_ASSERTION") throw error; }
