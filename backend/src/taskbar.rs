@@ -2,6 +2,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use windows::UI::Shell::{ITaskbarManagerDesktopAppSupportStatics, TaskbarManager};
+use windows::Win32::Foundation::E_ACCESSDENIED;
 use crate::shortcut_preferences::{TASKBAR_CHOICE, TASKBAR_PENDING, taskbar_preference};
 const LAF_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel\LimitedAccessFeatures\com.microsoft.windows.taskbar.pin";
 const LAF_SEED: &str = "4096B239A7295B635C090E647E867B5707DA6AB6CB78340B01FE4E0C8F4953D4";
@@ -22,6 +23,7 @@ pub enum PinResult {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PinBlockReason {
+    FeatureUnavailable,
     PinConsentNotificationsDisabled,
     Unknown,
 }
@@ -55,19 +57,43 @@ fn supported() -> bool {
         .is_ok_and(|value| value != 0);
     !restricted && windows::core::factory::<TaskbarManager, ITaskbarManagerDesktopAppSupportStatics>().is_ok()
 }
+
+fn request_windows_pin() -> windows::core::Result<PinRequest> {
+    let manager = TaskbarManager::GetDefault()?;
+    if !manager.IsPinningAllowed()? {
+        return Ok(PinRequest::NotAllowed(pin_block_reason()));
+    }
+    manager.RequestPinCurrentAppAsync().map(PinRequest::Pending)
+}
+
+fn pin_result(result: windows::core::Result<bool>) -> Result<PinResult, String> {
+    match result {
+        Ok(true) => Ok(PinResult::Pinned),
+        Ok(false) => Ok(PinResult::NotPinned),
+        Err(error) if error.code() == E_ACCESSDENIED => Ok(PinResult::NotAllowed {
+            reason: PinBlockReason::FeatureUnavailable,
+        }),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[tauri::command]
 pub async fn taskbar_pin_offer() -> PinOffer {
     if crate::updater::installed_exe().is_none() || !preference().pending {
         return PinOffer { pending: false, supported: false, request_after_setup: false };
     }
-    let supported = supported();
+    let mut supported = supported();
     if supported {
         let pinned = async {
             TaskbarManager::GetDefault()?.IsCurrentAppPinnedAsync()?.await
         }.await;
-        if matches!(pinned, Ok(true)) {
-            let _ = crate::startup::set_flag(TASKBAR_PENDING, false);
-            return PinOffer { pending: false, supported, request_after_setup: false };
+        match pinned {
+            Ok(true) => {
+                let _ = crate::startup::set_flag(TASKBAR_PENDING, false);
+                return PinOffer { pending: false, supported, request_after_setup: false };
+            }
+            Err(error) if error.code() == E_ACCESSDENIED => supported = false,
+            _ => {}
         }
     }
     PinOffer { pending: true, supported, request_after_setup: std::env::args().any(|arg| arg == "--pin-taskbar") }
@@ -87,7 +113,7 @@ pub async fn taskbar_pin(app: AppHandle) -> Result<PinResult, String> {
         return Err("Taskbar pinning is switched off in the setup choices.".into());
     }
     if crate::updater::installed_exe().is_none() || !supported() {
-        return Err("Pin MYLE from the Windows Start menu on this version of Windows.".into());
+        return Ok(PinResult::NotAllowed { reason: PinBlockReason::FeatureUnavailable });
     }
     let (send, receive) = tokio::sync::oneshot::channel();
     app.clone().run_on_main_thread(move || {
@@ -96,25 +122,37 @@ pub async fn taskbar_pin(app: AppHandle) -> Result<PinResult, String> {
             if !main.is_focused().map_err(|error| error.to_string())? {
                 return Err("Bring MYLE to the foreground and try again.".into());
             }
-            let manager = TaskbarManager::GetDefault().map_err(|error| error.to_string())?;
-            if !manager.IsPinningAllowed().map_err(|error| error.to_string())? {
-                return Ok(PinRequest::NotAllowed(pin_block_reason()));
+            match request_windows_pin() {
+                Ok(request) => Ok(request),
+                Err(error) if error.code() == E_ACCESSDENIED => {
+                    Ok(PinRequest::NotAllowed(PinBlockReason::FeatureUnavailable))
+                }
+                Err(error) => Err(error.to_string()),
             }
-            manager.RequestPinCurrentAppAsync()
-                .map(PinRequest::Pending)
-                .map_err(|error| error.to_string())
         })();
         let _ = send.send(request);
     }).map_err(|error| error.to_string())?;
     let request = receive.await.map_err(|error| error.to_string())??;
-    let pinned = match request {
+    let result = match request {
         PinRequest::NotAllowed(reason) => return Ok(PinResult::NotAllowed { reason }),
-        PinRequest::Pending(operation) => operation.await.map_err(|error| error.to_string())?,
+        PinRequest::Pending(operation) => pin_result(operation.await)?,
     };
-    if pinned {
+    if matches!(result, PinResult::Pinned) {
         crate::startup::set_flag(TASKBAR_PENDING, false)?;
-        Ok(PinResult::Pinned)
-    } else {
-        Ok(PinResult::NotPinned)
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn access_denied_from_windows_requests_manual_pinning() {
+        let error = windows::core::Error::from_hresult(E_ACCESSDENIED);
+        assert!(matches!(
+            pin_result(Err(error)),
+            Ok(PinResult::NotAllowed { reason: PinBlockReason::FeatureUnavailable })
+        ));
     }
 }

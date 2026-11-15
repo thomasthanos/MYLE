@@ -91,6 +91,16 @@ test("Windows denying confirmation keeps the choice pending and shows the manual
   assert.equal(h.notices.some((notice) => notice.kind === "success"), false);
   assert.equal(h.calls.includes("taskbar_pin_dismiss"), false);
 });
+test("an unavailable pin feature switches to manual instructions without a toast or retry button", async () => {
+  const h = await harness({ requestAfterSetup: true, pinResults: [{ status: "notAllowed", reason: "featureUnavailable" }] });
+  assert.equal(h.pin.offer?.pending, true);
+  assert.equal(h.pin.offer?.supported, false);
+  assert.equal(h.pin.manual, true);
+  assert.equal(h.pin.notificationsDisabled, false);
+  assert.deepEqual(h.notices, []);
+  h.focus(false); h.focus(true); await tick();
+  assert.deepEqual(h.calls, ["taskbar_pin_offer", "taskbar_pin"]);
+});
 test("a blocked setup request waits for an explicit retry after Windows settings change", async () => {
   const h = await harness({ requestAfterSetup: true, pinResults: [{ status: "notAllowed", reason: "unknown" }, { status: "pinned" }] });
   h.focus(false); h.focus(true); await tick();

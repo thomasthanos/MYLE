@@ -7,7 +7,7 @@
   import { toast } from "../toast.svelte";
 
   type Offer = { pending: boolean; supported: boolean; requestAfterSetup: boolean };
-  type PinResult = { status: "pinned" | "notPinned" } | { status: "notAllowed"; reason: "pinConsentNotificationsDisabled" | "unknown" };
+  type PinResult = { status: "pinned" | "notPinned" } | { status: "notAllowed"; reason: "featureUnavailable" | "pinConsentNotificationsDisabled" | "unknown" };
   let offer = $state<Offer | null>(null);
   let busy = $state(false);
   let manual = $state(false);
@@ -49,6 +49,9 @@
       } else if (result.status === "notAllowed") {
         manual = true;
         notificationsDisabled = result.reason === "pinConsentNotificationsDisabled";
+        if (result.reason === "featureUnavailable" && offer) {
+          offer = { ...offer, supported: false };
+        }
       } else {
         manual = false;
         notificationsDisabled = false;
@@ -86,7 +89,7 @@
           {#if notificationsDisabled}
             <p>Windows app pinning notifications are switched off. In System → Notifications, turn on “Apps” and try again.</p>
             <button class="btn small" disabled={busy} onclick={openNotificationSettings}>Open notification settings</button>
-          {:else}
+          {:else if offer.supported}
             <p>Windows is not allowing its pin confirmation right now.</p>
           {/if}
         {/if}
