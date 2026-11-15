@@ -592,22 +592,6 @@ pub async fn cleaner_health_scan(
 }
 /// Does `action` to the findings `ids` of the last scan.
 #[tauri::command]
-pub async fn cleaner_health_apply(
-    ids: Vec<String>,
-    action: String,
-) -> Result<Vec<ApplyResult>, String> {
-    apply_batch(
-        ids.into_iter()
-            .map(|id| BatchItem {
-                id,
-                action: action.clone(),
-            })
-            .collect(),
-        None,
-    )
-    .await
-}
-#[tauri::command]
 pub async fn cleaner_health_apply_batch(
     items: Vec<BatchItem>,
     on_event: Channel<BatchProgress>,
