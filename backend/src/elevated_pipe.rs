@@ -540,7 +540,9 @@ pub mod tests {
             // nobody else: not Everyone (WD) or Anonymous (AN) as by default.
             let dacl = pipe_dacl(&server);
             let user = process_account(std::process::id()).unwrap();
-            assert!(dacl.contains(&format!(";;;{user})")), "{dacl}");
+            // The built-in Administrator (a CI runner's account) is written with its short form.
+            let named = dacl.contains(&format!(";;;{user})")) || (user.ends_with("-500") && dacl.contains(";;;LA)"));
+            assert!(named, "{user}: {dacl}");
             assert!(dacl.contains(";;;BA)") && dacl.contains(";;;SY)"), "{dacl}");
             assert!(!dacl.contains(";;;WD)") && !dacl.contains(";;;AN)"), "{dacl}");
             assert!(dacl.starts_with("D:P"), "protected: nothing inherited: {dacl}");
