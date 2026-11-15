@@ -7,7 +7,7 @@ mod detect;
 mod engine;
 mod gitindex;
 pub(crate) mod incremental;
-mod naming;
+pub(crate) mod naming;
 mod rules;
 mod state;
 mod store;

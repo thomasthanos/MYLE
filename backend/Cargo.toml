@@ -110,7 +110,9 @@ opt-level = 2
 codegen-units = 1
 lto = true
 opt-level = "s"
-panic = "abort"
+# A panic ends only the command or thread it happened in, and the cleanup guards on the way
+# (rollbacks, zeroized keys) still run; `crash_log` writes it down first.
+panic = "unwind"
 strip = true
 
 # Except the inner loops of compression and checksums, which Project Backups runs over whole

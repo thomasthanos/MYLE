@@ -1,6 +1,8 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 fn main() {
+    // A panic anywhere, in the app or a helper, is written down first.
+    myle_lib::crash_log::install();
     // Before anything else: a browser starting us as the password extension's host talks on stdin/stdout and never shows a window.
     if let Some(exit_code) = myle_lib::run_passwords_native_host() {
         std::process::exit(exit_code);

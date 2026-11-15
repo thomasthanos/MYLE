@@ -10,6 +10,7 @@ mod download;
 mod elevated_pipe;
 pub mod game_saves;
 pub mod github_releases;
+pub mod crash_log;
 pub mod project_backups;
 mod maintenance;
 mod passwords;
