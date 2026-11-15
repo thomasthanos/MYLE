@@ -1,5 +1,9 @@
 // ! Opens the main window at a size that matches the user's screen: ! 4K -> ~1440p, 2K -> ~1080p, 1080p -> ~720p (physical pixels), centered.
-use tauri::{Monitor, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
+use tauri::{
+    AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow,
+};
+
+pub const SPLASH_SIZE: LogicalSize<f64> = LogicalSize::new(300.0, 380.0);
 /// Never cover more than this share of the work area (taskbar excluded).
 const MAX_WORK_AREA_PERCENT: u32 = 95;
 /// Screens below 1080p get this share of their work area.
@@ -36,45 +40,120 @@ pub fn target_size(monitor: (u32, u32), work_area: (u32, u32)) -> (u32, u32) {
 fn percent(value: u32, pct: u32) -> u32 {
     value * pct / 100
 }
-/// Resizes the window for the monitor under the cursor (falling back to the
-/// primary one) and centers it in that monitor's work area.
-pub fn fit_to_screen<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
-    let Some(monitor) = pick_monitor(window) else {
+/// Places the hidden splash on the display under the pointer before it opens.
+pub fn center_splash<R: Runtime>(
+    window: &WebviewWindow<R>,
+    monitor: Option<Monitor>,
+) -> tauri::Result<()> {
+    let Some(monitor) = monitor else {
+        return window.center();
+    };
+    place_on_monitor(window, &monitor, SPLASH_SIZE.to_physical(monitor.scale_factor()))
+}
+
+/// Fits the main window to the splash's display, or to the cursor's display
+/// when the splash is unavailable.
+pub fn fit_to_screen<R: Runtime>(
+    window: &WebviewWindow<R>,
+    splash_monitor: Option<Monitor>,
+) -> tauri::Result<()> {
+    let Some(monitor) = splash_monitor.or_else(|| cursor_monitor(window.app_handle())) else {
         return window.center();
     };
     let screen = monitor.size();
     let work = monitor.work_area();
     let scale = monitor.scale_factor();
     let minimum = ((MIN_WIDTH * scale).round() as u32, (MIN_HEIGHT * scale).round() as u32);
-    let (width, height) = fitted_size(target_size((screen.width, screen.height), (work.size.width, work.size.height)), minimum);
-    // Centered by the size it really takes; at the work area's corner when even the minimum is larger.
-    let x = work.position.x + (work.size.width.saturating_sub(width) / 2) as i32;
-    let y = work.position.y + (work.size.height.saturating_sub(height) / 2) as i32;
-    // Move onto the target monitor first: crossing to a monitor with another DPI makes Windows rescale the window, so the size is set after that.
-    window.set_position(PhysicalPosition::new(x, y))?;
-    window.set_size(PhysicalSize::new(width, height))?;
-    window.set_position(PhysicalPosition::new(x, y))?;
+    let (width, height) = fitted_size(
+        target_size((screen.width, screen.height), (work.size.width, work.size.height)),
+        minimum,
+    );
+    place_on_monitor(window, &monitor, PhysicalSize::new(width, height))
+}
+
+fn place_on_monitor<R: Runtime>(
+    window: &WebviewWindow<R>,
+    monitor: &Monitor,
+    size: PhysicalSize<u32>,
+) -> tauri::Result<()> {
+    let work = monitor.work_area();
+    let position = centered_position(work.position, work.size, size);
+    // Move first so Windows applies the target display's DPI before we set the size.
+    window.set_position(position)?;
+    window.set_size(size)?;
+    // Windows includes an invisible frame around the splash when its shadow is enabled.
+    // Center the actual content using the frame inset at the target DPI.
+    let size = window.inner_size()?;
+    let outer = window.outer_position()?;
+    let inner = window.inner_position()?;
+    let position = centered_position(work.position, work.size, size);
+    window.set_position(PhysicalPosition::new(
+        position.x + (outer.x - inner.x),
+        position.y + (outer.y - inner.y),
+    ))?;
     #[cfg(debug_assertions)]
     println!(
-        "[window] monitor {}x{} (work area {}x{}, scale {}) -> window {width}x{height} at {x},{y}",
-        screen.width,
-        screen.height,
+        "[window] {} on {}x{} (work area {}x{}, scale {}) -> {}x{} at {},{}",
+        window.label(),
+        monitor.size().width,
+        monitor.size().height,
         work.size.width,
         work.size.height,
-        monitor.scale_factor()
+        monitor.scale_factor(),
+        size.width,
+        size.height,
+        position.x,
+        position.y,
     );
     Ok(())
 }
-fn pick_monitor<R: Runtime>(window: &WebviewWindow<R>) -> Option<Monitor> {
-    window
+
+fn centered_position(
+    origin: PhysicalPosition<i32>,
+    work_area: PhysicalSize<u32>,
+    window: PhysicalSize<u32>,
+) -> PhysicalPosition<i32> {
+    // For a window bigger than the work area, keep its top or left edge reachable.
+    PhysicalPosition::new(
+        origin.x + (work_area.width.saturating_sub(window.width) / 2) as i32,
+        origin.y + (work_area.height.saturating_sub(window.height) / 2) as i32,
+    )
+}
+pub fn cursor_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<Monitor> {
+    app
         .cursor_position()
         .ok()
-        .and_then(|p| window.monitor_from_point(p.x, p.y).ok().flatten())
-        .or_else(|| window.primary_monitor().ok().flatten())
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten())
 }
 #[cfg(test)]
 mod tests {
-    use super::{fitted_size, target_size};
+    use super::{SPLASH_SIZE, centered_position, fitted_size, target_size};
+    use tauri::{PhysicalPosition, PhysicalSize};
+
+    #[test]
+    fn splash_centers_on_a_secondary_display_at_its_dpi() {
+        let splash = SPLASH_SIZE.to_physical(1.5);
+        assert_eq!(splash, PhysicalSize::new(450, 570));
+        let position = centered_position(
+            PhysicalPosition::new(-1920, -300),
+            PhysicalSize::new(1920, 1032),
+            splash,
+        );
+        assert_eq!(position, PhysicalPosition::new(-1185, -69));
+    }
+
+    #[test]
+    fn an_oversized_window_keeps_its_edges_on_the_selected_display() {
+        let origin = PhysicalPosition::new(3840, 260);
+        let position = centered_position(
+            origin,
+            PhysicalSize::new(1024, 552),
+            PhysicalSize::new(1200, 750),
+        );
+        assert_eq!(position, origin);
+    }
+
     #[test]
     fn the_minimum_size_counts_at_high_scaling() {
         // 1080p at 200%: the 800x500 minimum is 1600x1000 physical pixels.

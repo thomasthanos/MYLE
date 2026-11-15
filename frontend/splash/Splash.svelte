@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { cubicOut } from "svelte/easing";
-  import { fly } from "svelte/transition";
   import { getVersion } from "@tauri-apps/api/app";
   import { isTauri } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -14,7 +12,7 @@
     type DownloadEvent,
     type UpdateAsset,
   } from "../lib/updater";
-  import SplashLogo from "./SplashLogo.svelte";
+  import SplashLogo, { type SplashPhase } from "./SplashLogo.svelte";
 
   /* After an update the previous version was on screen until now: long enough to read "Updated to …". Otherwise the app opens as soon as it can. */
   const JUST_UPDATED_MS = 700;
@@ -25,9 +23,10 @@
   /** Window over which the download speed is measured. */
   const SPEED_WINDOW_MS = 500;
 
-  type Phase = "checking" | "downloading" | "verifying" | "installing" | "starting" | "error";
+  const steps = ["Check", "Update", "Open"] as const;
+  type Step = (typeof steps)[number];
 
-  let phase = $state<Phase>("checking");
+  let phase = $state<SplashPhase>("checking");
   let title = $state("Checking for updates…");
   let detail = $state("");
   let progress = $state<number | null>(null); // null = indeterminate
@@ -36,13 +35,14 @@
   let rate = $state(""); // "2.1 MB/s · 4s left"
   let version = $state("");
 
-  const countdown = $derived(phase === "error");
-  /** Where the start is: checking, updating (only with one), opening. */
-  const steps = ["Check", "Update", "Open"];
-  const stepAt = $derived(
-    phase === "checking" || phase === "error" ? 0 : phase === "starting" ? 2 : 1,
+  let updateAttempted = $state(false);
+  let failedStep = $state<Step | null>(null);
+
+  const opening = $derived(phase === "restarting" || phase === "starting");
+  const currentStep: Step = $derived(
+    phase === "error" ? failedStep ?? "Check" : phase === "checking" ? "Check" : opening ? "Open" : "Update",
   );
-  const tone = $derived(phase === "error" ? "error" : phase === "starting" ? "done" : "busy");
+  const stepIndex = $derived(steps.indexOf(currentStep));
 
   let updater = { checkForUpdate, installUpdate, finishStartup };
 
@@ -113,6 +113,7 @@
 
   // In a real update the app exits once the installer launches, so this only returns in demo mode.
   async function applyUpdate(current: string, latest: string, asset: UpdateAsset) {
+    updateAttempted = true;
     phase = "downloading";
     title = "Downloading update";
     detail = `v${current} → v${latest}`;
@@ -134,6 +135,7 @@
         lastMeta = 0;
         progress = e.data.total ? 0 : null;
         percent = e.data.total ? 0 : null;
+        transfer = e.data.total ? "0 B of " + formatBytes(e.data.total) : "";
         break;
       case "progress":
         onProgress(e.data.downloaded, e.data.total);
@@ -151,7 +153,8 @@
         clearTransfer();
         break;
       case "restarting":
-        phase = "installing";
+        phase = "restarting";
+        clearTransfer();
         title = "Restarting…";
         detail = e.data.version ? `Opening v${e.data.version}` : "Opening the new version";
         progress = 1;
@@ -172,7 +175,7 @@
     progress = size ? Math.min(downloaded / size, 1) : null;
     total = size;
 
-    // The ring and the percentage follow every event; speed and bytes settle at a readable pace.
+    // The bar and percentage follow every event; speed and bytes settle at a readable pace.
     percent = progress === null ? null : Math.floor(progress * 100);
     const finished = total !== null && downloaded >= total;
     if (now - lastMeta < META_EVERY_MS && !finished) return;
@@ -199,6 +202,7 @@
   }
 
   function showError(heading: string, err: unknown) {
+    failedStep = currentStep;
     phase = "error";
     title = heading;
     detail = err instanceof Error ? err.message : String(err);
@@ -207,220 +211,295 @@
   }
 </script>
 
-<div class="app-backdrop" aria-hidden="true"></div>
+<main class="splash" data-phase={phase} data-tauri-drag-region>
+  <header class="brand">
+    <span class="wordmark">MYLE</span>
+    {#if version}<span class="version">v{version}</span>{/if}
+  </header>
 
-<div class="splash" data-tauri-drag-region>
-  <div class="center">
-    <SplashLogo {tone} progress={countdown ? 1 : progress} hold={ERROR_HOLD_MS} />
+  <SplashLogo {phase} />
 
-    <ol class="steps" aria-label="Starting MYLE">
-      {#each steps as step, index (step)}
-        <li class:current={index === stepAt} class:past={index < stepAt}><i></i>{step}</li>
-      {/each}
-    </ol>
-
-    <div class="text" aria-live="polite">
-      {#key title}
-        <p class="title" class:error={phase === "error"} in:fly={{ y: 6, duration: 260, easing: cubicOut }}>
-          {title}{#if percent !== null}<span class="pct">{percent}%</span>{/if}
-        </p>
-      {/key}
-      <p class="detail" class:error={phase === "error"} title={detail}>{detail || " "}</p>
+  <section class="status" aria-label="Startup status">
+    <div class="summary">
+      <div class="message" role="status" aria-atomic="true">
+        {#key title}
+          <h1>{title}</h1>
+          {#if detail}<p class="detail">{detail}</p>{/if}
+        {/key}
+        {#if phase === "error" && transfer}
+          <p class="recovery">{transfer}</p>
+        {/if}
+      </div>
+      {#if percent !== null}<span class="percent" aria-hidden="true">{percent}%</span>{/if}
     </div>
 
+    {#if phase !== "error"}
+      <div
+        class="track"
+        class:indeterminate={progress === null}
+        role="progressbar"
+        aria-label={title}
+        aria-valuenow={opening ? 100 : (percent ?? undefined)}
+        style:--progress={progress ?? 0}
+      >
+        <div class="fill"></div>
+      </div>
+    {/if}
 
-    <div class="meta">
-      <span>{transfer}</span>
-      <span>{rate}</span>
-    </div>
-  </div>
+    {#if phase === "downloading"}
+      <div class="transfer">
+        <span>{transfer}</span>
+        <span>{rate}</span>
+      </div>
+    {/if}
+  </section>
 
-  <p class="version">{version ? `v${version}` : " "}</p>
-</div>
+  <ol class="steps" aria-label="Startup stages">
+    {#each steps as step, index (step)}
+      {@const state = step === failedStep ? "failed"
+        : index === stepIndex ? "current"
+        : index > stepIndex ? "pending"
+        : step === "Update" && !updateAttempted ? "skipped" : "complete"}
+      <li data-step={state} aria-current={index === stepIndex ? "step" : undefined}>
+        <span class="node" aria-hidden="true"></span>
+        {step}
+        {#if state === "skipped"}<span class="sr-only"> skipped</span>{/if}
+        {#if state === "failed" && index !== stepIndex}<span class="sr-only"> failed</span>{/if}
+      </li>
+    {/each}
+  </ol>
+</main>
 
 <style>
   .splash {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100vh;
-    padding: 0 24px 14px;
-  }
-
-  /* Everything inside passes clicks through, so the whole window drags. */
-  .splash > * {
-    pointer-events: none;
-  }
-
-  .center {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding-top: 10px;
-  }
-
-  .text {
+    --base: #0a0c12;
+    --ink: #edf5ff;
+    --muted: #a4b3c8;
+    --signal: #aab9ff;
+    --line: #243047;
+    --error: #ffb493;
     display: grid;
-    gap: 3px;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
     width: 100%;
-    margin: 10px 0 16px;
-    text-align: center;
+    height: 100dvh;
+    min-height: 300px;
+    padding: 18px clamp(15px, 8vw, 28px) 18px;
+    border: 1px solid var(--line);
+    background: radial-gradient(ellipse at 50% 30%, #152242, transparent 73%), var(--base);
+    color: var(--ink);
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
   }
 
-  .title {
+  .splash[data-phase="downloading"] { --signal: #82ecff; }
+  .splash[data-phase="verifying"] { --signal: #c9b3ff; }
+  .splash:is([data-phase="installing"], [data-phase="restarting"], [data-phase="starting"]) { --signal: #95efca; }
+  .splash[data-phase="error"] { --signal: var(--error); }
+
+  /* Tauri starts dragging when the pointer targets the drag region itself. */
+  .splash > * { pointer-events: none; }
+
+  .brand {
     display: flex;
     align-items: baseline;
-    justify-content: center;
+    justify-content: space-between;
+    min-height: 30px;
     gap: 8px;
-    font-family: var(--font-display);
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--line);
   }
 
-  .title.error {
-    color: #ffb4b0;
+  .wordmark { font: 19px/1 var(--font-titlebar); }
+
+  .version {
+    color: var(--muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
 
-  .pct {
-    min-width: 3.2ch;
-    padding: 1px 7px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #cfd6ff;
-    background: rgb(var(--accent-rgb) / 0.16);
-    box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.28);
+  .status {
+    display: grid;
+    grid-template-rows: minmax(49px, auto) 4px 16px;
+    gap: 5px;
+    align-content: start;
+    min-width: 0;
   }
 
-  .detail {
-    overflow: hidden;
-    font-size: 12px;
-    color: var(--text-3);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-variant-numeric: tabular-nums;
+  .summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
   }
 
-  /* Error messages can be long: give them two lines. */
-  .detail.error {
+  .message { min-width: 0; }
+
+  h1 {
+    display: block;
+    margin: 0;
+    background: none;
+    color: var(--ink);
+    -webkit-text-fill-color: currentColor;
+    filter: none;
+    font: 640 clamp(16px, 6.5vw, 21px)/1.22 "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    letter-spacing: -0.035em;
+  }
+
+  .detail,
+  .recovery {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  [data-phase="error"] .status { grid-template-rows: minmax(79px, auto); }
+  [data-phase="error"] h1 { color: var(--error); }
+
+  [data-phase="error"] .detail {
     display: -webkit-box;
+    overflow: hidden;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;
-    white-space: normal;
-    color: rgb(255 200 196 / 0.6);
   }
 
+  .recovery { color: var(--ink); }
 
+  .percent {
+    color: var(--signal);
+    font-size: 14px;
+    font-weight: 650;
+  }
 
-  /* A glint running along the filled part; it is scaled with the fill, so it never shows past it. */
+  .track {
+    overflow: hidden;
+    border-radius: 4px;
+    background: #26364d;
+  }
 
+  .fill {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: inherit;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--signal) 65%, #556ed9), var(--signal));
+    transform: scaleX(var(--progress));
+    transform-origin: left;
+  }
 
+  .indeterminate .fill {
+    width: 34%;
+    transform: translateX(97%);
+  }
 
-
-  .meta {
+  .transfer {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
-    width: 200px;
-    height: 16px;
-    margin-top: 8px;
-    font-size: 11px;
-    color: var(--text-3);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 16px;
   }
 
-  /* A lone message (no speed readout) sits centered under the bar. */
-  .meta:has(span:last-child:empty) {
-    justify-content: center;
-  }
-
-  .version {
-    font-size: 11px;
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .text,
-    .meta,
-    .version {
-      animation: enter 520ms var(--ease-out) both;
-    }
-
-    .text {
-      animation-delay: 120ms;
-    }
-
-    .meta {
-      animation-delay: 200ms;
-    }
-
-    .version {
-      animation-delay: 280ms;
-    }
-
-
-
-  }
-
-  @keyframes enter {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-  }
-
-
-
+  .transfer span:last-child { text-align: right; }
 
   .steps {
-    display: flex;
-    gap: 14px;
-    margin: 14px 0 0;
-    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    align-items: center;
     list-style: none;
-    font-size: 10.5px;
-    letter-spacing: 0.02em;
-    color: var(--text-3);
+    margin: 9px 0 0;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--line);
   }
 
   .steps li {
-    display: flex;
-    align-items: center;
+    position: relative;
+    display: grid;
+    justify-items: center;
     gap: 5px;
-    transition: color var(--dur-base, 200ms) var(--ease-out);
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.2;
   }
 
-  .steps i {
-    width: 6px;
-    height: 6px;
+  .steps li + li::before {
+    position: absolute;
+    top: 4px;
+    right: calc(50% + 10px);
+    left: calc(-50% + 10px);
+    border-top: 1px solid #34445e;
+    content: "";
+  }
+
+  .steps [data-step="skipped"]::before,
+  .steps [data-step="skipped"] + li::before { border-top-style: dashed; }
+
+  .node {
+    width: 9px;
+    height: 9px;
+    border: 1px solid #7589a6;
     border-radius: 50%;
-    background: rgb(255 255 255 / 0.16);
-    transition: background var(--dur-base, 200ms) var(--ease-out), transform var(--dur-base, 200ms) var(--ease-out);
   }
 
-  .steps .past {
-    color: var(--text-2);
+  [data-step="complete"] .node { background: #7589a6; }
+  [data-step="skipped"] .node { border-style: dashed; }
+  [data-step="failed"] .node { border-color: var(--error); }
+  .steps [aria-current="step"] { color: var(--signal); }
+
+  [aria-current="step"] .node {
+    background: var(--signal);
+    border-color: var(--signal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 22%, transparent);
   }
 
-  .steps .past i {
-    background: #34d399;
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
-  .steps .current {
-    color: var(--text-1);
+  @media (prefers-reduced-motion: no-preference) {
+    .message h1,
+    .detail,
+    .recovery { animation: reveal 280ms var(--ease-out) both; }
+
+    .fill { transition: transform 190ms linear; }
+
+    [data-phase="downloading"] .fill::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 30%, rgb(255 255 255 / 0.6), transparent 70%);
+      animation: glint 2s ease-in-out infinite;
+      content: "";
+    }
+
+    .indeterminate .fill { animation: sweep 1.5s var(--ease-in-out) infinite; }
+    [aria-current="step"] .node { animation: step-in 380ms var(--ease-out) both; }
   }
 
-  .steps .current i {
-    background: rgb(var(--accent-rgb));
-    box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.8);
-    transform: scale(1.25);
+  @keyframes reveal {
+    from { opacity: 0; transform: translateY(5px); }
+  }
+
+  @keyframes glint {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+
+  @keyframes sweep {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(295%); }
+  }
+
+  @keyframes step-in {
+    from { transform: scale(0.65); }
+    55% { transform: scale(1.27); }
   }
 </style>

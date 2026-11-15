@@ -2,6 +2,7 @@
   import ArrowDownUp from "@lucide/svelte/icons/arrow-down-up";
   import Boxes from "@lucide/svelte/icons/boxes";
   import Check from "@lucide/svelte/icons/check";
+  import CheckCheck from "@lucide/svelte/icons/check-check";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -143,6 +144,17 @@
       {#if appsState.checking}
         <span class="checking"><LoaderCircle size={14} class="spin" /> Checking installed apps…</span>
       {/if}
+      {#if appsState.filter === "updates" && appsState.selectableVisible.length > 0}
+        <button
+          class="btn ghost small check-all-btn"
+          disabled={appsState.allVisibleChecked || appsState.externallyLocked}
+          onclick={() => appsState.checkAll()}
+          title={appsState.allVisibleChecked ? "All available updates are checked" : "Check all available updates"}
+        >
+          <CheckCheck size={13} />
+          {appsState.allVisibleChecked ? "All checked" : "Check all"}
+        </button>
+      {/if}
       <span class="badge">{total} {total === 1 ? "app" : "apps"}</span>
     </div>
   </div>
@@ -168,6 +180,8 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
   .meta { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+
+  .check-all-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; font-size: 12px; font-weight: 500; }
 
   .checking { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; }
 

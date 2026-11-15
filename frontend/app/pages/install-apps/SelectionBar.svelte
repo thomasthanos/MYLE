@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CheckCheck from "@lucide/svelte/icons/check-check";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import Download from "@lucide/svelte/icons/download";
   import FileDown from "@lucide/svelte/icons/file-down";
@@ -10,12 +11,24 @@
   const n = $derived(appsState.selected.size);
   // On the Updates view the batch can only ever upgrade, never install.
   const updating = $derived(appsState.filter === "updates");
+  const canCheckAll = $derived(appsState.selectableVisible.length > 0 && !appsState.allVisibleChecked);
 </script>
 
 <div class="selection-bar">
   <div class="summary">
     <span class="selection-dot" class:active={n > 0}></span>
     <span class="count" aria-live="polite">Selected <strong>{n}</strong></span>
+    {#if updating}
+      <span class="summary-divider"></span>
+      <button
+        class="btn ghost small check-all"
+        disabled={!canCheckAll || appsState.externallyLocked}
+        onclick={() => appsState.checkAll()}
+      >
+        <CheckCheck size={13} />
+        Check all updates
+      </button>
+    {/if}
     <span class="summary-divider"></span>
     <button class="btn ghost small clear" disabled={!n} onclick={() => appsState.uncheckAll()}>Uncheck all</button>
   </div>
@@ -58,11 +71,13 @@
   .count { color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .count strong { margin-left: 3px; color: var(--text-1); }
   .summary-divider { width: 1px; height: 16px; background: rgb(255 255 255 / 0.075); }
+  .check-all { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-weight: 500; }
+  .check-all:not(:disabled):hover { color: var(--text-1); }
   .clear { color: var(--text-2); }
   .spacer { flex: 1; }
   .actions { display: flex; align-items: center; gap: 8px; }
   .more { min-width: 82px; }
   .more.open { border-color: rgb(var(--accent-rgb) / 0.28); background: var(--selected); }
   .install { min-width: 126px; }
-  @media (max-width: 720px) { .summary-divider, .clear { display: none; } }
+  @media (max-width: 720px) { .summary-divider, .clear, .check-all { display: none; } }
 </style>

@@ -24,7 +24,7 @@
   </div>
 {/snippet}
 
-<PageHeader title="Install Apps" subtitle="Install, update and keep track of your apps in one place." />
+<PageHeader title="Install & Update Apps" subtitle="Install, update and keep track of your apps in one place." />
 
 <Toolbar />
 

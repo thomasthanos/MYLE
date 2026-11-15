@@ -100,6 +100,7 @@ class InstallAppsState {
   filter = $state<Filter>(readJson(KEY.filter, "all", oneOf("all", "installed", "updates", "missing")));
   sort = $state<Sort>(readJson(KEY.sort, "category", oneOf("category", "az", "za", "status")));
   readonly selected = new SvelteSet<string>(readJson<string[]>(KEY.selected, [], isStringArray));
+  #selectionVersion = $state(0);
   /** Checked catalog search results: kept visible whatever the search. */
   pinned = $state<AppEntry[]>(readJson(KEY.pinned, [], isEntryArray));
   activePack = $state<string | null>(null);
@@ -208,6 +209,26 @@ class InstallAppsState {
     this.visible.length + this.visiblePinned.length + (this.showCatalog ? this.catalogResults.length : 0),
   );
   readonly busy = $derived(Object.keys(this.jobs).length > 0);
+  /** Update cards in the current view that can be selected for batch upgrading. */
+  readonly selectableVisible = $derived.by(() => {
+    if (this.filter !== "updates") return [];
+    const seen = new Set<string>();
+    const list: AppEntry[] = [];
+    for (const app of [...this.visible, ...this.visiblePinned]) {
+      const k = key(app.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (this.statusOf(app) !== "update") continue;
+      list.push(app);
+    }
+    return list;
+  });
+  readonly allVisibleChecked = $derived.by(() => {
+    void this.#selectionVersion;
+    if (this.filter !== "updates") return false;
+    const list = this.selectableVisible;
+    return list.length > 0 && list.every((a) => this.selected.has(a.id));
+  });
   /** A Spotify Hub workflow owns the shared installer slot. */
   readonly externallyLocked = $derived(operationGate.lockedFor("install-apps"));
   // ---------------------------------------------------------------- status
@@ -407,6 +428,15 @@ class InstallAppsState {
     }
     this.persistSelection();
   }
+  checkAll() {
+    if (this.filter !== "updates") return;
+    for (const app of this.selectableVisible) {
+      this.selected.add(app.id);
+      this.#updatePicked.add(key(app.id));
+      if (app.source === "catalog" && !this.pinned.some((p) => p.id === app.id)) this.pinned.push(app);
+    }
+    this.persistSelection();
+  }
   uncheckAll() {
     this.selected.clear();
     this.#updatePicked.clear();
@@ -414,6 +444,7 @@ class InstallAppsState {
     this.persistSelection();
   }
   private persistSelection() {
+    this.#selectionVersion++;
     writeJson(KEY.selected, [...this.selected]);
     writeJson(KEY.pinned, $state.snapshot(this.pinned));
   }

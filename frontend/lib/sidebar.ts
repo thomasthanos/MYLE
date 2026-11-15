@@ -9,12 +9,25 @@ export interface NavSection<T extends NavEntry> { group: NavGroup; pages: T[] }
 export function sections<T extends NavEntry>(pages: readonly T[]): NavSection<T>[] {
   return TOP_GROUPS.map((group) => ({ group, pages: pages.filter((page) => page.group === group) })).filter((section) => section.pages.length > 0);
 }
-/* Ctrl+1 … Ctrl+9, then Ctrl+0, follow the upper list's order. Ctrl+. opens Settings; Ctrl+, remains an alias. */
+/* Ctrl+1 … Ctrl+9, then Ctrl+0, follow the general tools' order (apps, data, system). Owner tools use Ctrl+Shift+1..3. Ctrl+. opens Settings; Ctrl+, remains an alias. */
 export const SETTINGS_SHORTCUT = "Ctrl+.";
 export const SIDEBAR_SHORTCUT = "Ctrl+B";
 export function shortcutOf<T extends NavEntry>(pages: readonly T[], id: string): string | null {
-  if (pages.find((page) => page.id === id)?.group === "bottom") return id === "settings" ? SETTINGS_SHORTCUT : null;
-  const index = sections(pages).flatMap((section) => section.pages).filter((page) => page.numbered !== false).findIndex((page) => page.id === id);
+  const page = pages.find((p) => p.id === id);
+  if (!page) return null;
+  if (page.group === "bottom") return id === "settings" ? SETTINGS_SHORTCUT : null;
+
+  if (page.group === "owner") {
+    const ownerPages = pages.filter((p) => p.group === "owner" && p.numbered !== false);
+    const index = ownerPages.findIndex((p) => p.id === id);
+    return index >= 0 && index < 9 ? `Ctrl+Shift+${index + 1}` : null;
+  }
+
+  const generalPages = sections(pages)
+    .filter((section) => section.group !== "owner")
+    .flatMap((section) => section.pages)
+    .filter((p) => p.numbered !== false);
+  const index = generalPages.findIndex((p) => p.id === id);
   return index >= 0 && index < 10 ? `Ctrl+${(index + 1) % 10}` : null;
 }
 interface Keys { key: string; code?: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
@@ -27,11 +40,30 @@ export function isSidebarToggle(event: Keys): boolean {
 }
 /** The page a navigation shortcut asks for, if the keys are one. */
 export function pageForShortcut<T extends NavEntry>(pages: readonly T[], event: Keys): T | undefined {
-  if (!ctrlOnly(event)) return undefined;
-  if (event.code === "Period" || event.code === "Comma" || event.key === "." || event.key === ",") return pages.find((page) => page.id === "settings");
-  const digit = event.code?.match(/^Digit([0-9])$/)?.[1] ?? event.key;
-  if (!/^[0-9]$/.test(digit)) return undefined;
-  return sections(pages).flatMap((section) => section.pages).filter((page) => page.numbered !== false)[digit === "0" ? 9 : Number(digit) - 1];
+  if (event.altKey || event.metaKey || !event.ctrlKey) return undefined;
+  if (!event.shiftKey && (event.code === "Period" || event.code === "Comma" || event.key === "." || event.key === ",")) {
+    return pages.find((page) => page.id === "settings");
+  }
+
+  const codeDigit = event.code?.match(/^Digit([0-9])$/)?.[1];
+  const keyDigit = /^[0-9]$/.test(event.key) ? event.key : undefined;
+
+  if (event.shiftKey) {
+    const shiftKeyMap: Record<string, string> = { "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9" };
+    const digit = codeDigit ?? keyDigit ?? shiftKeyMap[event.key];
+    if (!digit || digit === "0") return undefined;
+    const num = Number(digit);
+    const ownerPages = pages.filter((page) => page.group === "owner" && page.numbered !== false);
+    return ownerPages[num - 1];
+  }
+
+  const digit = codeDigit ?? keyDigit;
+  if (!digit) return undefined;
+  const generalPages = sections(pages)
+    .filter((section) => section.group !== "owner")
+    .flatMap((section) => section.pages)
+    .filter((page) => page.numbered !== false);
+  return generalPages[digit === "0" ? 9 : Number(digit) - 1];
 }
 /* Leave room for the floating panel's shadow while keeping its arrow on the button. The arrow stays clear of the rounded panel corners. */
 export function tooltipPosition(anchorY: number, height: number, viewportHeight: number) {

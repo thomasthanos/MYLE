@@ -36,7 +36,7 @@ export interface PageDef {
 }
 // The sidebar shows them in this order, group by group: what you install, what you keep, the PC itself, then the owner's tools. Install Apps comes first: it is the page the app opens on.
 const defs = [
-  { id: "install-apps", label: "Install Apps", group: "apps", icon: IconInstallApps, component: InstallApps,
+  { id: "install-apps", label: "Install & Update Apps", group: "apps", icon: IconInstallApps, component: InstallApps,
     description: "Install, update and keep track of your apps." },
   { id: "creative-hub", label: "Creative Suite", group: "apps", icon: IconCreativeHub,
     load: () => import("./creative-hub/CreativeHub.svelte"),
@@ -44,10 +44,10 @@ const defs = [
   { id: "spotify-hub", label: "Spotify Hub", group: "apps", icon: IconSpotifyHub,
     load: () => import("./spotify-hub/SpotifyHub.svelte"),
     description: "Customize Spotify with Spicetify, or return it to stock." },
-  { id: "auto-clicker", label: "Auto Clicker & Macros", group: "apps", icon: IconAutoClicker, numbered: false,
+  { id: "auto-clicker", label: "Auto Clicker & Macros", group: "apps", icon: IconAutoClicker,
     load: () => import("./auto-clicker/AutoClicker.svelte"),
     description: "Repeat clicks or run a sequence of points, with F6 to start and stop." },
-  { id: "steam-helper", label: "Steam Game Helper", group: "apps", icon: IconSteamHelper, numbered: false,
+  { id: "steam-helper", label: "Steam Game Helper", group: "apps", icon: IconSteamHelper,
     load: () => import("./steam-helper/SteamHelper.svelte"),
     description: "Free games, this week's picks and the best deals on Steam." },
   { id: "password-manager", label: "Password Manager", group: "data", icon: IconPasswords, fill: true,
@@ -71,7 +71,7 @@ const defs = [
   { id: "github-releases", label: "GitHub Releases", group: "owner", icon: IconGithubReleases, ownerOnly: true, fill: true,
     load: () => import("./github-releases/GithubReleases.svelte"),
     description: "Commit, build and release your projects to GitHub." },
-  { id: "steam-automation", label: "Steam Automation", group: "owner", icon: IconSteamAutomation, ownerOnly: true, numbered: false, fill: true,
+  { id: "steam-automation", label: "Steam Automation", group: "owner", icon: IconSteamAutomation, ownerOnly: true, fill: true,
     load: () => import("./steam-automation/SteamAutomation.svelte"),
     description: "Your Steam library, card farming, idling, achievements and inventory, in one place." },
   { id: "settings", label: "Settings", group: "bottom", icon: IconSettings,

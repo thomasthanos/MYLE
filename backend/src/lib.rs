@@ -61,6 +61,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Windo
 /// (`splash_shown`), so the two web views don't compete for the first paint.
 fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     use tauri::window::Color;
+    let monitor = window_sizing::cursor_monitor(app.handle());
     let data_dir = storage::webview_dir().map_err(std::io::Error::other)?;
     let splash = WebviewWindowBuilder::new(
         app,
@@ -68,8 +69,10 @@ fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
         WebviewUrl::App("splash.html".into()),
     )
     .title("MYLE")
-    .inner_size(300.0, 380.0)
-    .center()
+    .inner_size(
+        window_sizing::SPLASH_SIZE.width,
+        window_sizing::SPLASH_SIZE.height,
+    )
     .resizable(false)
     .maximizable(false)
     .decorations(false)
@@ -79,6 +82,7 @@ fn create_splash(app: &mut tauri::App) -> tauri::Result<()> {
     .background_color(Color(10, 12, 18, 255))
     .data_directory(data_dir)
     .build()?;
+    window_sizing::center_splash(&splash, monitor)?;
     webview_policy::harden(&splash)
 }
 /// The main window, hidden until the hand-over. Once only.
@@ -250,8 +254,13 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
     let Some(main) = app.get_webview_window("main") else {
         return Ok(());
     };
+    let splash = app.get_webview_window("splash");
     if !main.is_visible()? {
-        window_sizing::fit_to_screen(&main)?;
+        // Keep the handover on the splash's monitor even if the pointer moved during startup.
+        let monitor = splash
+            .as_ref()
+            .and_then(|window| window.current_monitor().ok().flatten());
+        window_sizing::fit_to_screen(&main, monitor)?;
         // Launched by the Startup shortcut: stay out of the way, unless the user chose to have it open at sign-in. With the tray icon, out of the way means there; otherwise minimized in the taskbar.
         let quietly = startup::launched_at_sign_in() && startup::start_minimized();
         if quietly && tray::keep_running() {
@@ -266,7 +275,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
             }
         }
     }
-    if let Some(splash) = app.get_webview_window("splash") {
+    if let Some(splash) = splash {
         // destroy() skips CloseRequested, which would otherwise quit the app.
         splash.destroy()?;
     }

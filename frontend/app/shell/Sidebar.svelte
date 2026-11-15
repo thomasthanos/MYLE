@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import PanelLeftClose from "@lucide/svelte/icons/panel-left-close";
   import PanelLeftOpen from "@lucide/svelte/icons/panel-left-open";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
@@ -7,6 +8,9 @@
   import { GROUP_LABELS, SIDEBAR_SHORTCUT, nextFocus, sections, shortcutOf, tooltipPosition } from "../../lib/sidebar";
   import { account } from "../account/account.svelte";
   import { canOpen, pages, type PageDef } from "../pages/registry";
+  import type { PageModules } from "./page-modules.svelte";
+
+  let { modules }: { modules: PageModules } = $props();
 
   const shown = $derived(pages.filter((p) => canOpen(p, account.owner)));
   const topSections = $derived(sections(shown));
@@ -14,6 +18,7 @@
 
   /* Shown after a pause while the labels are visible; at once when collapsed (the tooltip is then the only place the name is) or on keyboard focus. */
   const TIP_DELAY_MS = 550;
+  const PRELOAD_DELAY_MS = 120;
   const OWNER_NOTE = "Only visible to the owner account.";
   const COLLAPSE = "collapse";
 
@@ -22,6 +27,7 @@
   // Rendered outside the sidebar panel, so nothing in it can clip the tooltip.
   let tip = $state<Tip | null>(null);
   let tipTimer: ReturnType<typeof setTimeout> | undefined;
+  let preloadTimer: ReturnType<typeof setTimeout> | undefined;
   let tipTarget: HTMLElement | undefined;
   let sidebar = $state<HTMLElement>();
   let list = $state<HTMLElement>();
@@ -77,6 +83,7 @@
 
   function hideTip() {
     clearTimeout(tipTimer);
+    clearTimeout(preloadTimer);
     tipTarget = undefined;
     tip = null;
   }
@@ -94,10 +101,17 @@
     return { title: page.label, description: page.description, shortcut: shortcutFor(page), owner: page.ownerOnly ?? false };
   }
 
-  function toggle() {
-    hideTip();
-    nav.toggleSidebar();
+  function previewPage(target: HTMLElement, page: PageDef, immediate: boolean) {
+    showTip(target, pageTip(page), immediate);
+    clearTimeout(preloadTimer);
+    const { id, load } = page;
+    if (!load || id === nav.current || modules.loaded[id]) return;
+    preloadTimer = setTimeout(() => {
+      if (canOpen(page, account.owner)) void modules.load(id, load);
+    }, PRELOAD_DELAY_MS);
   }
+
+  onDestroy(hideTip);
 
   /** Up and Down (and Home, End) move between the sidebar's buttons. */
   function onKeydown(event: KeyboardEvent) {
@@ -132,11 +146,14 @@
     aria-label={badge ? `${page.label} (${badge})` : page.label}
     aria-describedby="nav-about-{page.id}"
     aria-keyshortcuts={shortcut ? shortcut.replace("Ctrl", "Control") : undefined}
-    {onclick}
-    onpointerenter={(e) => showTip(e.currentTarget, pageTip(page), nav.collapsed)}
+    onclick={() => {
+      hideTip();
+      onclick();
+    }}
+    onpointerenter={(e) => e.pointerType !== "touch" && previewPage(e.currentTarget, page, nav.collapsed)}
     onpointerleave={hideTip}
     onpointerdown={hideTip}
-    onfocus={(e) => focusedByKeyboard(e) && showTip(e.currentTarget, pageTip(page), true)}
+    onfocus={(e) => focusedByKeyboard(e) && previewPage(e.currentTarget, page, true)}
     onblur={hideTip}
   >
     <span class="icon">
@@ -184,7 +201,7 @@
     {@render item(
       { id: COLLAPSE, label: nav.collapsed ? "Expand sidebar" : "Collapse sidebar", description: nav.collapsed ? "Show the page names." : "Show only the icons.", icon: nav.collapsed ? PanelLeftOpen : PanelLeftClose, group: "bottom" },
       false,
-      toggle,
+      nav.toggleSidebar,
     )}
   </div>
 </nav>

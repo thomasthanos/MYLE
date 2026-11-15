@@ -18,10 +18,12 @@
   import { mainReady } from "../lib/startup";
   import { preloadApp } from "./preload";
   import ContentArea from "./shell/ContentArea.svelte";
+  import { PageModules } from "./shell/page-modules.svelte";
   import Sidebar from "./shell/Sidebar.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
 
   let maximized = $state(false);
+  const modules = new PageModules();
 
   // Notices changed project folders for the owner, whichever page is open. Only the page's state is loaded here; the page itself stays lazy.
   // It stops again when the owner signs out.
@@ -101,8 +103,8 @@
 <div class="shell" class:collapsed={nav.collapsed} class:maximized>
   <div class="app-backdrop" aria-hidden="true"></div>
   <Titlebar bind:maximized />
-  <Sidebar />
-  <ContentArea />
+  <Sidebar {modules} />
+  <ContentArea {modules} />
 </div>
 
 <Toaster />

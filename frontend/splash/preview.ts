@@ -31,6 +31,8 @@ export function previewUpdater(mode: string) {
       await sleep(700);
       onEvent({ event: "installing" });
       await sleep(1400);
+      onEvent({ event: "restarting", data: { version: asset.version ?? "" } });
+      await sleep(700);
     },
     async finishStartup(): Promise<void> {},
   };

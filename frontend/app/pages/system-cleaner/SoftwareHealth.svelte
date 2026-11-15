@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { cubicOut } from "svelte/easing";
+  import type { TransitionConfig } from "svelte/transition";
   import Radar from "@lucide/svelte/icons/radar";
   import History from "@lucide/svelte/icons/history";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -34,7 +36,7 @@
   import { toast } from "../../../lib/toast.svelte";
   import { formatSize } from "./api";
   import { cleanerState } from "./state.svelte";
-  import { ACTION_LABELS, MODULES, health, healthApi, type HealthAction } from "./health.svelte";
+  import { ACTION_LABELS, MODULES, health, healthApi, type HealthAction, type Finding } from "./health.svelte";
   import { CLEANUP_MODULES, cleanupPlan, compatibleActions, filterFindings, selectResults, type ListFilter } from "./health-model";
 
   let category = $state("cleanup");
@@ -61,7 +63,7 @@
   let showRestore = $state(false);
   let page = $state(1);
   let copiedId = $state<string | null>(null);
-  let resultsSummary: HTMLSpanElement | undefined;
+  let resultsSummary = $state<HTMLSpanElement | undefined>();
   const pageSize = 50;
   const disabled = $derived(health.scanning || health.busy || cleanerState.busy);
   const rows = $derived(filterFindings(health.findings, { category, query, filter, sort, failures: health.failures }));
@@ -73,6 +75,30 @@
   const controlActions = $derived(compatibleActions(controls));
   const selectedBytes = $derived(health.picked.reduce((n, f) => n + (f.size ?? 0), 0));
   const failedCount = $derived(Object.keys(health.failures).filter((id) => health.findings.some((f) => f.id === id)).length);
+
+  function isSharingViolation(msg: string): boolean {
+    const m = msg.toLowerCase();
+    return m.includes("0x80270028") || m.includes("open in another program") || m.includes("sharing violation") || m.includes("in use");
+  }
+
+  function humanizeDetail(detail: string, _f: Finding): string {
+    const prefix = "Nothing on this PC uses this name: no installed program, running or recently run app, service, Store app, shortcut, command-line tool or game.";
+    if (detail.startsWith(prefix)) {
+      const remainder = detail.slice(prefix.length).trim();
+      const empty = isEmptyFolder(detail);
+      if (empty) {
+        return `Orphaned empty folder left behind by an uninstalled program. ${remainder} 100% safe to remove.`.replace(/\s+/g, " ").trim();
+      }
+      return `Residual folder from an uninstalled program. ${remainder}`.replace(/\s+/g, " ").trim();
+    }
+    if (detail.includes("Rebuilt by the app when needed")) {
+      return "Temporary app logs & diagnostic cache. Settings and account sign-ins remain untouched.";
+    }
+    if (detail.includes("The registered uninstaller") && detail.includes("is missing")) {
+      return detail.replace("The registered uninstaller for ", "Broken entry: uninstaller for ").replace("is missing.", "is missing from disk.");
+    }
+    return detail;
+  }
   const moduleTitle = (id: string) => MODULES.find((m) => m.id === id)?.title ?? id;
   const count = (id: string) => health.findings.filter((f) => id === "cleanup" ? CLEANUP_MODULES.has(f.module) : id === "controls" ? !CLEANUP_MODULES.has(f.module) : f.module === id).length;
   const filters: { id: ListFilter; label: string }[] = [{ id: "all", label: "All results" }, { id: "recommended", label: "Recommended" }, { id: "review", label: "Needs review" }, { id: "failed", label: "Failed" }];
@@ -148,6 +174,34 @@
   onMount(() => {
     void health.checkElevated();
   });
+
+  function dockSlide(node: HTMLElement, { duration = 220, easing = cubicOut } = {}): TransitionConfig {
+    const style = getComputedStyle(node);
+    const opacity = +style.opacity || 1;
+    const height = parseFloat(style.height) || 0;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingBottom = parseFloat(style.paddingBottom) || 0;
+    const marginTop = parseFloat(style.marginTop) || 0;
+    const marginBottom = parseFloat(style.marginBottom) || 0;
+    const borderTopWidth = parseFloat(style.borderTopWidth) || 0;
+    const borderBottomWidth = parseFloat(style.borderBottomWidth) || 0;
+
+    return {
+      duration,
+      easing,
+      css: (t: number) =>
+        `overflow: hidden; ` +
+        `opacity: ${t * opacity}; ` +
+        `height: ${t * height}px; ` +
+        `padding-top: ${t * paddingTop}px; ` +
+        `padding-bottom: ${t * paddingBottom}px; ` +
+        `margin-top: ${t * marginTop}px; ` +
+        `margin-bottom: ${t * marginBottom}px; ` +
+        `border-top-width: ${t * borderTopWidth}px; ` +
+        `border-bottom-width: ${t * borderBottomWidth}px; ` +
+        `min-height: 0;`
+    };
+  }
 </script>
 
 <section class="health" aria-label="Software Health">
@@ -204,14 +258,6 @@
     <div class="outcome" role="status">
       <CheckCheck size={16} />
       <span>{lastSucceeded} completed{lastFailed ? ` · ${lastFailed} need attention` : " · Changes applied"}</span>
-      {#if failedCount}
-        <button class="btn small" onclick={() => health.retryFailed()}>Retry failed ({failedCount})</button>
-        {#if health.appElevated === false}
-          <button class="btn small primary admin-retry-btn" onclick={() => health.relaunchElevated()}>
-            <ShieldCheck size={13} /> Restart as Administrator
-          </button>
-        {/if}
-      {/if}
     </div>
   {/if}
 
@@ -254,33 +300,35 @@
         {#each filters as f}<button class="chip" class:active={filter === f.id} aria-pressed={filter === f.id} onclick={() => filter = f.id}>{f.label}</button>{/each}
       </div>
 
-      <div class="list-tools">
-        <div class="tools-left">
-          <span class="results-badge" tabindex="-1" bind:this={resultsSummary} aria-label={pageCount > 1 ? `${rows.length} results, page ${currentPage} of ${pageCount}` : undefined}>
-            <strong>{rows.length}</strong> {rows.length === 1 ? "result" : "results"}
-          </span>
-          {#if health.selected.size}
-            <span class="selection-pill">
-              <Check size={12} /> {health.selected.size} selected
+      {#if rows.length > 0}
+        <div class="list-tools">
+          <div class="tools-left">
+            <span class="results-badge" tabindex="-1" bind:this={resultsSummary} aria-label={pageCount > 1 ? `${rows.length} results, page ${currentPage} of ${pageCount}` : undefined}>
+              <strong>{rows.length}</strong> {rows.length === 1 ? "result" : "results"}
             </span>
-          {/if}
-        </div>
-        <div class="tools-actions">
-          {#if rows.some((f) => f.recommended)}
-            <button class="tool-btn recommend-btn" disabled={disabled} onclick={chooseRecommended}>
-              <Sparkles size={13} /> Select recommended
+            {#if health.selected.size}
+              <span class="selection-pill">
+                <Check size={12} /> {health.selected.size} selected
+              </span>
+            {/if}
+          </div>
+          <div class="tools-actions">
+            {#if rows.some((f) => f.recommended)}
+              <button class="tool-btn recommend-btn" disabled={disabled} onclick={chooseRecommended}>
+                <Sparkles size={13} /> Select recommended
+              </button>
+            {/if}
+            <button class="tool-btn" disabled={disabled || !rows.some((f) => f.actions.length)} onclick={() => health.selected = selectResults(health.selected, rows)}>
+              <CheckCheck size={13} /> Select all results
             </button>
-          {/if}
-          <button class="tool-btn" disabled={disabled || !rows.some((f) => f.actions.length)} onclick={() => health.selected = selectResults(health.selected, rows)}>
-            <CheckCheck size={13} /> Select all results
-          </button>
-          {#if health.selected.size}
-            <button class="tool-btn clear-btn" disabled={disabled} onclick={() => health.selected = new Set()}>
-              <X size={13} /> Clear selection
-            </button>
-          {/if}
+            {#if health.selected.size}
+              <button class="tool-btn clear-btn" disabled={disabled} onclick={() => health.selected = new Set()}>
+                <X size={13} /> Clear selection
+              </button>
+            {/if}
+          </div>
         </div>
-      </div>
+      {/if}
       {#if categoryError}<p class="error" role="alert">{categoryError}</p>{/if}
       {#if category === "cleanup" || category === "controls"}
         {#each MODULES.filter((m) => CLEANUP_MODULES.has(m.id) === (category === "cleanup") && health.reports[m.id]?.error) as m}<p class="error" role="alert">{m.title}: {health.reports[m.id].error}</p>{/each}
@@ -303,7 +351,7 @@
 
       {#if !rows.length}
         <div class="empty">
-          <Radar size={28} />
+          <Radar size={32} />
           <h3>{!Object.keys(health.reports).length ? "Start with a software scan" : query || filter !== "all" ? "No matching results" : "Nothing to review here"}</h3>
           <p>{!Object.keys(health.reports).length ? "Find leftovers and app settings, then review your selections together." : "Choose another category or change your filters."}</p>
         </div>
@@ -339,7 +387,9 @@
                         <span class="tag capability">{f.flags[0]}</span>
                       {/if}
                       {#if f.recommended}
-                        <span class="tag recommended"><Sparkles size={11} /> Recommended</span>
+                        <span class="tag recommended" title="Verified safe leftover to remove">
+                          <ShieldCheck size={11} /> 100% Safe
+                        </span>
                       {:else if f.actions.length && f.cleanupAction}
                         <span class="tag review">Needs review</span>
                       {/if}
@@ -349,7 +399,7 @@
                         </span>
                       {/if}
                       {#if isEmptyFolder(f.detail)}
-                        <span class="tag subtle">Empty</span>
+                        <span class="tag subtle"><FolderMinus size={11} /> Empty</span>
                       {/if}
                       {#if extractIdleDays(f.detail)}
                         <span class="tag subtle"><Clock size={11} /> {extractIdleDays(f.detail)}</span>
@@ -375,20 +425,28 @@
                     </div>
                   </div>
 
-                  <p class="detail-text">{f.detail}</p>
+                  <p class="detail-text">{humanizeDetail(f.detail, f)}</p>
 
                   {#if hasFailure}
                     <div class="failure-callout" role="status">
                       <CircleAlert size={15} class="failure-icon" />
                       <div class="failure-body">
-                        <strong class="failure-title">{health.failures[f.id]}</strong>
-                        {#if health.failures[f.id].includes("code 120") || health.failures[f.id].toLowerCase().includes("in use") || health.failures[f.id].toLowerCase().includes("administrator")}
+                        {#if isSharingViolation(health.failures[f.id])}
+                          {@const appName = f.title.includes(":") ? f.title.split(":")[0].trim() : f.title}
+                          <strong class="failure-title">In use: {appName} is currently open</strong>
                           <p class="failure-sub">
-                            This folder may require Administrator privileges.
+                            Windows cannot clean these files while {appName} is running. Please close {appName} completely (from system tray/taskbar), then click Retry.
+                          </p>
+                        {:else if health.failures[f.id].includes("code 120") || health.failures[f.id].toLowerCase().includes("administrator") || health.failures[f.id].toLowerCase().includes("access denied")}
+                          <strong class="failure-title">{health.failures[f.id]}</strong>
+                          <p class="failure-sub">
+                            This item requires Administrator privileges.
                             {#if health.appElevated === false}
                               <button type="button" class="link-btn" onclick={() => health.relaunchElevated()}>Restart MYLE as Administrator</button> to clean it.
                             {/if}
                           </p>
+                        {:else}
+                          <strong class="failure-title">{health.failures[f.id]}</strong>
                         {/if}
                       </div>
                     </div>
@@ -474,37 +532,61 @@
     </div>
   </div>
 
-  <footer class="selection surface" aria-label="Selected software actions">
-    <div><strong>{health.selected.size} selected</strong><span>{selectedBytes ? formatSize(selectedBytes) : "Across all categories and filters"}</span>{#if health.selected.size > health.picked.length}<span>{health.selected.size - health.picked.length} unavailable after a scan error · scan again to review</span>{/if}</div>
-    <div class="actions">
-      {#each controlActions as choice}<button class="btn" disabled={disabled} onclick={() => controlAction(choice.action)}>{ACTION_LABELS[choice.action]} ({choice.count})</button>{/each}
-      {#if failedCount}<button class="btn" disabled={disabled} onclick={() => health.retryFailed()}>Retry failed ({failedCount})</button>{/if}
-      <button class="btn primary" disabled={disabled || !plan.length} onclick={() => health.applyBatch(plan)}><CheckCheck size={15} /> Review cleanup ({plan.length})</button>
-    </div>
-  </footer>
+  {#if health.selected.size > 0 || failedCount > 0}
+    <footer transition:dockSlide={{ duration: 220, easing: cubicOut }} class="selection surface has-items" aria-label="Selected software actions">
+      <div class="selection-summary">
+        <span class="selection-count-badge">
+          <Check size={14} /> <strong>{health.selected.size}</strong> selected
+        </span>
+        {#if selectedBytes > 0}
+          <span class="selection-size-badge">{formatSize(selectedBytes)}</span>
+        {:else}
+          <span class="selection-desc">Across all categories</span>
+        {/if}
+        {#if health.selected.size > health.picked.length}
+          <span class="selection-warn">{health.selected.size - health.picked.length} unavailable after scan error</span>
+        {/if}
+      </div>
+      <div class="actions">
+        {#each controlActions as choice}
+          <button class="btn" disabled={disabled} onclick={() => controlAction(choice.action)}>
+            {ACTION_LABELS[choice.action]} ({choice.count})
+          </button>
+        {/each}
+        {#if failedCount}
+          <button class="btn" disabled={disabled} onclick={() => health.retryFailed()}>
+            <RotateCcw size={14} /> Retry failed ({failedCount})
+          </button>
+        {/if}
+        <button class="btn primary review-clean-btn" disabled={disabled || !plan.length} onclick={() => health.applyBatch(plan)}>
+          <CheckCheck size={16} /> Review cleanup ({plan.length})
+        </button>
+      </div>
+    </footer>
+  {/if}
 </section>
 
 <style>
-  .health { display: grid; gap: 16px; min-width: 0; }
+  .health { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 0; }
   .overview, .actions, .search-row, .filters, .list-tools, .history-row, .outcome, .pagination { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .overview { justify-content: space-between; gap: 16px; }
+  .overview { justify-content: space-between; gap: 16px; flex: none; margin-bottom: 14px; }
   h2 { font-size: var(--fluid-lg); font-weight: 600; }
   .overview p, .muted, .empty p { color: var(--text-2); font-size: var(--fluid-sm); }
   .overview p { margin-top: 4px; max-width: 70ch; }
-  .work { display: grid; gap: 8px; padding: 14px 18px; }
+  .work { display: grid; gap: 8px; padding: 14px 18px; flex: none; margin-bottom: 14px; }
   .work span { display: flex; gap: 16px; font-size: var(--fluid-sm); }
   .work b { margin-left: auto; font-variant-numeric: tabular-nums; }
   .work-label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-1); }
-  .outcome { color: var(--ok); padding: 0 4px; font-size: var(--fluid-sm); }
-  .history { padding: 18px; }
+  .outcome { color: var(--ok); padding: 0 4px; font-size: var(--fluid-sm); flex: none; margin-bottom: 14px; }
+  .history { padding: 18px; flex: none; margin-bottom: 14px; }
   .history-row { justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--divider); }
   .history-row div { min-width: 0; flex: 1; }
   .history-row strong, .history-row small { display: block; overflow-wrap: anywhere; }
   .history-row small { color: var(--text-3); margin-top: 4px; }
-  .workspace { display: grid; grid-template-columns: 225px minmax(0, 1fr); overflow: hidden; border-radius: 14px; }
-  .categories { padding: 14px 10px; background: rgb(0 0 0 / .08); border-right: 1px solid var(--divider); }
-  .group, .category { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
-  .group { color: var(--text-1); margin: 4px 0; }
+  .workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; overflow: hidden; border-radius: 14px; }
+  .categories { padding: 14px 10px; background: rgb(0 0 0 / .08); border-right: 1px solid var(--divider); overflow-y: auto; }
+  .group, .category { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 38px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+  .group { color: var(--text-1); font-size: var(--fluid-sm); margin: 4px 0; }
   .group:nth-of-type(6) { margin-top: 24px; }
   .group :global(svg) { color: #7dd3fc; flex: none; }
   .group:nth-of-type(6) :global(svg) { color: #c4b5fd; }
@@ -513,15 +595,15 @@
   .category span { flex: 1; }
   .category:hover, .group:hover { background: var(--hover); }
   .category.active, .group.active { background: var(--selected); color: var(--text-1); }
-  .results { min-width: 0; padding: 18px; }
-  .search-row { flex-wrap: nowrap; }
+  .results { min-width: 0; padding: 18px 20px; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .search-row { flex-wrap: nowrap; flex: none; }
   .search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
   .search :global(svg) { color: var(--text-3); flex: none; }
   .search input { width: 100%; min-width: 0; }
-  .filters { margin-top: 14px; gap: 6px; }
+  .filters { margin-top: 14px; gap: 6px; flex: none; }
 
   /* Toolbar */
-  .list-tools { margin: 16px 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .list-tools { margin: 14px 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; }
   .tools-left { display: flex; align-items: center; gap: 8px; }
   .results-badge { font-size: var(--fluid-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
   .results-badge strong { color: var(--text-1); }
@@ -535,10 +617,10 @@
   .clear-btn:hover:not(:disabled) { color: #fca5a5; border-color: rgb(239 68 68 / .3); background: rgb(239 68 68 / .08); }
 
   /* Cards List */
-  .list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
-  .card-item { display: flex; flex-direction: column; padding: 11px 14px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--surface-fill); box-shadow: var(--surface-depth); transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast); }
+  .list { display: flex; flex-direction: column; gap: 8px; list-style: none; padding: 0; margin: 0; flex: 1 1 auto; overflow-y: auto; }
+  .card-item { display: flex; flex-direction: column; padding: 12px 14px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--surface-fill); box-shadow: var(--surface-depth); transition: border-color 220ms var(--ease-out), background 220ms var(--ease-out), box-shadow 220ms var(--ease-out), transform 220ms var(--ease-out); }
   .card-item:hover { border-color: rgb(255 255 255 / .15); background: rgb(255 255 255 / .03); }
-  .card-item.selected { border-color: rgb(var(--accent-rgb) / .45); background: rgb(var(--accent-rgb) / .07); box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / .2), var(--surface-depth); }
+  .card-item.selected { border-color: rgb(var(--accent-rgb) / .45); background: rgb(var(--accent-rgb) / .07); box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / .2), 0 4px 14px rgb(var(--accent-rgb) / .1), var(--surface-depth); }
   .card-item.failed { border-color: rgb(229 72 77 / .42); background: rgb(229 72 77 / .035); }
 
   /* Card Head */
@@ -622,13 +704,65 @@
   .cleanup-hint { color: var(--text-3); font-size: 11px; margin: 0; }
 
   .error { color: #ffb4b0; font-size: var(--fluid-xs); }
-  .empty { display: grid; justify-items: center; text-align: center; gap: 10px; padding: 55px 20px; }
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; padding: 40px 20px; flex: 1 1 auto; min-height: 200px; }
+  .empty h3 { margin: 0; font-size: var(--fluid-md); font-weight: 600; color: var(--text-1); }
+  .empty p { margin: 0; font-size: var(--fluid-sm); color: var(--text-2); max-width: 48ch; }
   .empty :global(svg) { color: var(--accent); }
-  .pagination { justify-content: flex-end; margin-top: 12px; font-size: var(--fluid-xs); color: var(--text-2); }
-  .selection { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; background: var(--bg-1); z-index: 2; border-top: 1px solid var(--glass-border); box-shadow: 0 -4px 20px rgb(0 0 0 / .35); }
-  .selection > div:first-child { display: grid; gap: 3px; }
-  .selection strong { font-size: var(--fluid-sm); }
-  .selection span { font-size: var(--fluid-xs); color: var(--text-3); }
+
+  .pagination { justify-content: flex-end; margin-top: 12px; font-size: var(--fluid-xs); color: var(--text-2); flex: none; }
+  .selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; background: var(--surface-fill); z-index: 2; border: 1px solid var(--glass-border); border-radius: 12px; margin-top: 14px; box-shadow: 0 -4px 20px rgb(0 0 0 / .35); flex: none; box-sizing: border-box; }
+  .selection.has-items {
+    border-color: rgb(var(--accent-rgb) / .35);
+    background: var(--surface-fill);
+    box-shadow: 0 -8px 25px rgb(0 0 0 / .4), 0 0 16px rgb(var(--accent-rgb) / .12);
+  }
+  .selection-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .selection-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fluid-xs);
+    font-weight: 600;
+    color: var(--text-1);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 4px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .selection-count-badge strong {
+    color: #38bdf8;
+    font-weight: 700;
+  }
+  .selection-size-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--fluid-xs);
+    font-weight: 700;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .selection-desc {
+    font-size: var(--fluid-xs);
+    color: var(--text-3);
+  }
+  .selection-warn {
+    font-size: var(--fluid-xs);
+    color: #f87171;
+  }
+  .review-clean-btn {
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 9px;
+  }
   .selection .actions { justify-content: flex-end; }
   .mobile-category { display: none; }
   @media (max-width: 1000px) {

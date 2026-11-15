@@ -1,183 +1,166 @@
-<script lang="ts">
-  import Logo from "../lib/components/Logo.svelte";
-
-  let {
-    tone = "busy",
-    progress = null,
-    hold = 0,
-  }: {
-    tone?: "busy" | "done" | "error";
-    /** 0..1 fills the ring; null spins an arc (no measure yet). */
-    progress?: number | null;
-    /** On an error: ms the ring takes to drain before the app opens. */
-    hold?: number;
-  } = $props();
-
-  const R = 74;
-  const LENGTH = 2 * Math.PI * R;
-  const offset = $derived(tone === "done" ? 0 : progress === null ? LENGTH * 0.72 : LENGTH * (1 - progress));
+<script module lang="ts">
+  export type SplashPhase = "checking" | "downloading" | "verifying" | "installing" | "restarting" | "starting" | "error";
 </script>
 
-<!-- The app's own icon in a progress ring. Every animated layer moves only by
-     transform, opacity or stroke offset, so it never repaints the icon. -->
-<div class="splash-logo {tone}" class:spinning={progress === null && tone === "busy"} style:--hold="{hold}ms">
-  <div class="halo"></div>
-  <svg class="ring" viewBox="0 0 168 168" aria-hidden="true">
-    <defs>
-      <linearGradient id="splash-ring" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#67e8f9" />
-        <stop offset=".5" stop-color="#848ede" />
-        <stop offset="1" stop-color="#34d399" />
-      </linearGradient>
-    </defs>
-    <circle class="track" cx="84" cy="84" r={R} />
-    <circle
-      class="arc"
-      cx="84"
-      cy="84"
-      r={R}
-      stroke-dasharray={LENGTH}
-      stroke-dashoffset={offset}
-    />
-  </svg>
-  <div class="mark"><Logo size={112} /></div>
+<script lang="ts">
+  import CoderScene from "./CoderScene.svelte";
+
+  let { phase }: { phase: SplashPhase } = $props();
+  const opening = $derived(phase === "restarting" || phase === "starting");
+</script>
+
+<div class="visual" data-phase={phase} class:opening aria-hidden="true">
+  <div class="grid"></div>
+  <div class="orbital">
+    <div class="halo"></div>
+    <div class="rim"></div>
+    <div class="orbit"></div>
+    <div class="mark">
+      <CoderScene size={130} paused={opening || phase === "error"} />
+    </div>
+    {#if phase === "verifying"}<div class="scan"></div>{/if}
+    {#if phase === "installing" || opening}<div class="pulse"></div>{/if}
+  </div>
 </div>
 
 <style>
-  .splash-logo {
+  .visual {
     position: relative;
     display: grid;
     place-items: center;
-    width: 168px;
-    height: 168px;
+    min-height: 0;
+    isolation: isolate;
+  }
+
+  .grid {
+    position: absolute;
+    inset: 0 -6px;
+    background:
+      linear-gradient(rgb(148 177 236 / 0.12) 1px, transparent 1px) center / 16px 16px,
+      linear-gradient(90deg, rgb(148 177 236 / 0.12) 1px, transparent 1px) center / 16px 16px;
+    mask-image: radial-gradient(ellipse at center, black 20%, transparent 74%);
+  }
+
+  .orbital {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 164px;
+    height: 164px;
+  }
+
+  .halo,
+  .rim,
+  .orbit,
+  .pulse {
+    position: absolute;
+    border-radius: 50%;
   }
 
   .halo {
-    position: absolute;
-    inset: 10px;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(var(--accent-rgb) / 0.5), rgb(79 209 232 / 0.12) 62%, transparent);
-    transition: opacity var(--dur-slow) var(--ease-out);
+    inset: -24px;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--signal) 24%, transparent), transparent);
+    opacity: 0.75;
   }
 
-  .error .halo {
-    background: radial-gradient(closest-side, rgb(229 72 77 / 0.42), transparent);
+  .rim {
+    inset: -8px;
+    border: 1px dashed color-mix(in srgb, var(--signal) 26%, transparent);
   }
 
-  .ring {
-    position: absolute;
+  .orbit {
     inset: 0;
-    width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
+    border: 1px solid color-mix(in srgb, var(--signal) 24%, transparent);
+    transform: rotate(-32deg);
   }
 
-  .track {
-    fill: none;
-    stroke: rgb(255 255 255 / 0.07);
-    stroke-width: 3;
+  .orbit::before {
+    position: absolute;
+    inset: -1px;
+    border: 1px solid transparent;
+    border-top-color: var(--signal);
+    border-radius: inherit;
+    content: "";
   }
 
-  .arc {
-    fill: none;
-    stroke: url(#splash-ring);
-    stroke-width: 3.5;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 220ms linear;
-    transform-origin: 84px 84px;
-  }
-
-  .done .arc {
-    transition: stroke-dashoffset 360ms var(--ease-out);
-  }
-
-  .error .arc {
-    stroke: #e5484d;
-    stroke-dashoffset: 0;
+  .orbit::after {
+    position: absolute;
+    top: 11.5%;
+    right: 11.5%;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--signal);
+    box-shadow: 0 0 10px var(--signal);
+    content: "";
   }
 
   .mark {
     position: relative;
-    filter: drop-shadow(0 14px 22px rgb(0 0 0 / 0.6));
+    filter: drop-shadow(0 12px 20px rgb(0 0 0 / 0.48));
+  }
+
+  .scan {
+    position: absolute;
+    top: 50%;
+    width: 88%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--signal), transparent);
+    box-shadow: 0 0 15px color-mix(in srgb, var(--signal) 75%, transparent);
+  }
+
+  .pulse {
+    inset: 0;
+    border: 1px solid var(--signal);
+    opacity: 0.25;
+  }
+
+  .opening .orbit { border-color: color-mix(in srgb, var(--signal) 56%, transparent); }
+  .opening .orbit::before,
+  .opening .orbit::after,
+  [data-phase="error"] .orbit::before,
+  [data-phase="error"] .orbit::after { opacity: 0; }
+
+  @media (max-height: 340px) {
+    .orbital { scale: 0.76; }
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .halo {
-      animation: pulse 2.2s var(--ease-in-out) infinite alternate;
-    }
+    .orbital { animation: enter 540ms var(--ease-out) both; }
+    .halo { animation: illuminate 560ms var(--ease-out) both; }
 
-    .mark {
-      animation:
-        draw-in 700ms var(--ease-out) both,
-        breathe 3.2s var(--ease-in-out) 700ms infinite alternate;
-    }
-
-    .ring {
-      animation: ring-in 800ms var(--ease-out) 120ms both;
-    }
-
-    .spinning .arc {
-      animation: spin 1.3s linear infinite;
-    }
-
-    .error .arc {
-      animation: drain var(--hold) linear forwards;
-    }
-
-    .done .mark {
-      animation: pop 420ms var(--ease-out) both;
-    }
+    [data-phase="checking"] .orbit { animation: orbit 4s linear infinite; }
+    [data-phase="downloading"] .orbit { animation: orbit 2.2s linear infinite; }
+    [data-phase="verifying"] .scan { animation: scan 840ms var(--ease-in-out) infinite; }
+    [data-phase="installing"] .pulse { animation: ripple 1.65s var(--ease-out) infinite; }
+    .opening .pulse { animation: ripple 680ms var(--ease-out) both; }
+    .opening .mark { animation: ready 440ms var(--ease-out) both; }
   }
 
-  @keyframes draw-in {
-    from {
-      opacity: 0;
-      transform: scale(0.82) rotate(-6deg);
-    }
+  @keyframes enter {
+    from { opacity: 0.58; transform: scale(0.9) rotate(-7deg); }
   }
 
-  @keyframes breathe {
-    to {
-      transform: translateY(-3px) scale(1.015);
-    }
+  @keyframes illuminate {
+    from { opacity: 0.25; transform: scale(0.75); }
   }
 
-  @keyframes pulse {
-    from {
-      opacity: 0.55;
-      transform: scale(0.9);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1.06);
-    }
+  @keyframes orbit {
+    to { transform: rotate(328deg); }
   }
 
-  @keyframes ring-in {
-    from {
-      opacity: 0;
-      transform: rotate(-150deg) scale(0.92);
-    }
+  @keyframes scan {
+    0% { opacity: 0; transform: translateY(-58px); }
+    24%, 76% { opacity: 0.9; }
+    100% { opacity: 0; transform: translateY(58px); }
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+  @keyframes ripple {
+    from { opacity: 0.75; transform: scale(0.9); }
+    to { opacity: 0; transform: scale(1.24); }
   }
 
-  @keyframes drain {
-    from {
-      stroke-dashoffset: 0;
-    }
-    to {
-      stroke-dashoffset: 465;
-    }
-  }
-
-  @keyframes pop {
-    50% {
-      transform: scale(1.06);
-    }
+  @keyframes ready {
+    50% { transform: translateY(-4px) scale(1.05); }
   }
 </style>

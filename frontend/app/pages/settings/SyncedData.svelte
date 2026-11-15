@@ -15,7 +15,7 @@
     },
     {
       icon: PackagePlus,
-      title: "Install Apps",
+      title: "Install & Update Apps",
       detail: "The apps you checked and the catalog picks you pinned",
     },
     {

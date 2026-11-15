@@ -28,10 +28,11 @@ test("the registry lists every page once, grouped", () => {
   );
   assert.deepEqual(all.filter((page) => page.group === "bottom").map((page) => page.id), ["settings"]);
 });
-test("Auto Clicker is available to everyone without changing existing numbered shortcuts", () => {
-  assert.ok(everyone.some(page => page.id === "auto-clicker"));
-  assert.equal(shortcutOf(everyone, "auto-clicker"), null);
-  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+9");
+test("Auto Clicker and Steam Game Helper are available to everyone with sequential shortcuts", () => {
+  assert.ok(everyone.some((page) => page.id === "auto-clicker"));
+  assert.equal(shortcutOf(everyone, "auto-clicker"), "Ctrl+4");
+  assert.ok(everyone.some((page) => page.id === "steam-helper"));
+  assert.equal(shortcutOf(everyone, "steam-helper"), "Ctrl+5");
 });
 test("the owner-only pages are their own group, loaded only when opened", () => {
   const owner = all.filter((page) => page.ownerOnly);
@@ -54,14 +55,14 @@ test("numbered shortcuts follow the sidebar order and Ctrl+comma stays available
   for (const page of everyone) {
     if (page.group !== "bottom") assert.equal(shortcutOf(all, page.id), shortcutOf(everyone, page.id));
   }
-  // Disk Analyzer lives in System Cleaner; Maintenance is the eighth page.
-  assert.equal(pageForShortcut(everyone, keys("8")).id, "system-maintenance");
+  // Disk Analyzer lives in System Cleaner; Maintenance is the tenth page (Ctrl+0).
+  assert.equal(pageForShortcut(everyone, keys("8")).id, "windows-optimization");
+  assert.equal(pageForShortcut(everyone, keys("9")).id, "system-cleaner");
+  assert.equal(pageForShortcut(everyone, keys("0")).id, "system-maintenance");
   assert.equal(shortcutOf(everyone, "disk-analyzer"), null);
-  assert.equal(pageForShortcut(everyone, keys("9")), undefined, "only eight pages for everyone");
-  assert.equal(pageForShortcut(everyone, keys("0")), undefined);
-  assert.equal(pageForShortcut(all, keys("8")).id, "system-maintenance");
+  assert.equal(pageForShortcut(all, keys("0")).id, "system-maintenance");
   // Not a shortcut.
-  assert.equal(pageForShortcut(all, keys("1", { shiftKey: true })), undefined);
+  assert.equal(pageForShortcut(everyone, keys("1", { shiftKey: true })), undefined);
   assert.equal(pageForShortcut(all, keys("1", { ctrlKey: false })), undefined);
   assert.equal(pageForShortcut(all, keys("b")), undefined);
 });
@@ -71,25 +72,20 @@ test("Ctrl+period opens Settings, including when matching its physical key", () 
   assert.equal(pageForShortcut(everyone, keys(",", { code: "Comma" }))?.id, "settings");
   assert.equal(shortcutOf(everyone, "settings"), "Ctrl+.");
 });
-test("Ctrl+9 and Ctrl+0 open the owner pages only when available", () => {
-  assert.equal(pageForShortcut(all, keys("9", { code: "Digit9" }))?.id, "project-backups");
-  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+9");
-  assert.equal(pageForShortcut(everyone, keys("9", { code: "Digit9" })), undefined);
-  assert.equal(pageForShortcut(everyone, keys("0", { code: "Digit0" })), undefined);
+test("Ctrl+Shift+1..3 open the owner pages only when available", () => {
+  assert.equal(pageForShortcut(all, keys("1", { code: "Digit1", shiftKey: true }))?.id, "project-backups");
+  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+Shift+1");
+  assert.equal(pageForShortcut(all, keys("2", { code: "Digit2", shiftKey: true }))?.id, "github-releases");
+  assert.equal(shortcutOf(all, "github-releases"), "Ctrl+Shift+2");
+  assert.equal(pageForShortcut(all, keys("3", { code: "Digit3", shiftKey: true }))?.id, "steam-automation");
+  assert.equal(shortcutOf(all, "steam-automation"), "Ctrl+Shift+3");
+
+  assert.equal(pageForShortcut(everyone, keys("1", { code: "Digit1", shiftKey: true })), undefined);
+  assert.equal(pageForShortcut(everyone, keys("2", { code: "Digit2", shiftKey: true })), undefined);
+  assert.equal(pageForShortcut(everyone, keys("3", { code: "Digit3", shiftKey: true })), undefined);
   assert.equal(shortcutOf(everyone, "project-backups"), null);
-  assert.equal(pageForShortcut(all, keys("0", { code: "Digit0" }))?.id, "github-releases");
-  assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
-});
-test("Steam Game Helper is for everyone and takes no number, so the shortcuts stay", () => {
-  assert.ok(everyone.some((page) => page.id === "steam-helper"));
-  assert.equal(shortcutOf(everyone, "steam-helper"), null);
-  assert.equal(shortcutOf(all, "steam-helper"), null);
-  assert.equal(shortcutOf(all, "project-backups"), "Ctrl+9");
-  assert.equal(shortcutOf(all, "github-releases"), "Ctrl+0");
-});
-test("Steam Automation is the owner's and takes no number", () => {
-  assert.equal(shortcutOf(all, "steam-automation"), null);
-  assert.ok(!everyone.some((page) => page.id === "steam-automation"));
+  assert.equal(shortcutOf(everyone, "github-releases"), null);
+  assert.equal(shortcutOf(everyone, "steam-automation"), null);
 });
 test("sidebar toggle accepts the B key in Latin and Greek keyboard layouts", () => {
   for (const [key, code] of [["b", "KeyB"], ["B", "KeyB"], ["β", "KeyB"], ["Β", "KeyB"]]) {

@@ -143,7 +143,7 @@
 </div>
 
 </div>
-<div id="health-panel" class="tool-panel" role="tabpanel" aria-labelledby="health-tab" hidden={tab !== "health"}><SoftwareHealth /></div>
+<div id="health-panel" class="tool-panel health-panel" role="tabpanel" aria-labelledby="health-tab" hidden={tab !== "health"}><SoftwareHealth /></div>
 <div id="disk-panel" class="tool-panel disk-panel" role="tabpanel" aria-labelledby="disk-tab" hidden={tab !== "disk"}>
   {#if diskOpened}<DiskAnalyzer active={tab === "disk"} />{/if}
 </div>
@@ -165,6 +165,7 @@
   .tabs button:active { background-image: var(--control-face-press); box-shadow: var(--btn-sheen-press); }
   .tabs button :global(svg) { flex: none; color: var(--tool-color); }
   .tool-panel { flex: 0 0 auto; min-width: 0; }
+  .health-panel:not([hidden]),
   .disk-panel:not([hidden]) { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; }
   .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px var(--fluid-gap-4); margin-bottom: var(--fluid-gap-3); padding: var(--fluid-gap-3) var(--fluid-gap-4) 6px; }
   .hero:focus { outline: none; }

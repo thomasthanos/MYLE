@@ -4,8 +4,12 @@
   import { account } from "../account/account.svelte";
   import { canOpen, pages } from "../pages/registry";
   import { whenShown } from "../../lib/startup";
-  import { PageModules } from "./page-modules.svelte";
+  import type { PageModules } from "./page-modules.svelte";
   import PageBoundary from "../../lib/components/PageBoundary.svelte";
+  import PageHeader from "../../lib/components/PageHeader.svelte";
+  import PageLoading from "./PageLoading.svelte";
+
+  let { modules }: { modules: PageModules } = $props();
 
   // An owner-only page someone else lands on (a link, a sign-out while it is open) gives way to the first page. Before the first answer about the account is in, the first page shows without forgetting where to go.
   const asked = $derived(pages.find((p) => p.id === nav.current));
@@ -14,7 +18,6 @@
   $effect(() => {
     if (!allowed && account.accessKnown) nav.go(pages[0].id);
   });
-  const modules = new PageModules();
   const loadError = $derived(modules.errors[def.id]);
   $effect(() => {
     const { id, load } = def;
@@ -44,33 +47,38 @@
   // Ignore the scroll events caused by swapping pages.
   let restoring = false;
 
-  // Runs after the new page is in the DOM: put it back where it was left.
+  // Show the loading state from the top, then restore the page's own position.
   $effect(() => {
-    const page = nav.current;
-    if (!scroller || !Page) return;
+    const page = def.id;
+    if (!scroller) return;
     restoring = true;
-    scroller.scrollTop = nav.scrollOf(page);
-    requestAnimationFrame(() => (restoring = false));
+    scroller.scrollTop = Page ? nav.scrollOf(page) : 0;
+    const frame = requestAnimationFrame(() => (restoring = false));
+    return () => cancelAnimationFrame(frame);
   });
 
   function onScroll() {
-    if (!restoring && scroller && Page) nav.rememberScroll(nav.current, scroller.scrollTop);
+    if (!restoring && scroller && Page) nav.rememberScroll(def.id, scroller.scrollTop);
   }
 </script>
 
 <main class="content glass">
   <div class="scroller" class:fill={def.fill} bind:this={scroller} onscroll={onScroll}>
-    {#key nav.current}
-      <div class="page" class:fill={def.fill}>
+    {#key def.id}
+      <div class="page" class:fill={def.fill} class:ready={!!Page}>
         {#if Page}
           <PageBoundary><Page /></PageBoundary>
         {:else if loadError}
-          <div class="page-state" role="alert">
-            <p>This page could not be loaded: {loadError}</p>
+          <PageHeader title={def.label} />
+          <div class="page-state surface">
+            <div role="alert">
+              <p>This page could not be loaded.</p>
+              <p class="error-detail">{loadError}</p>
+            </div>
             {#if def.load}<button class="btn small" onclick={() => modules.load(def.id, def.load!)}>Try again</button>{/if}
           </div>
         {:else}
-          <p class="page-state" aria-busy="true">Loading {def.label}…</p>
+          <PageLoading page={def} />
         {/if}
       </div>
     {/key}
@@ -79,9 +87,29 @@
 
 <style>
   .page-state {
-    margin: 48px auto;
-    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    color: var(--text-1);
     font-size: 13px;
+  }
+
+  .error-detail {
+    margin-top: 3px;
+    color: var(--text-3);
+    overflow-wrap: anywhere;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .page.ready { animation: page-in 160ms var(--ease-out); }
+  }
+
+  @keyframes page-in {
+    from { opacity: 0.7; }
   }
 
   .content {

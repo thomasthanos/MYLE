@@ -205,3 +205,19 @@ test("pinned cards are not carded twice in Updates", async () => {
   assert.equal(ids.filter((id) => id === "Vendor.App5").length, 1);
   assert.equal(state.counts.updates, 20);
 });
+test("checkAll on the updates filter selects all visible updates, and is restricted from other filters", async () => {
+  const { state } = harness();
+  await state.checkInstalled();
+  state.filter = "all";
+  assert.equal(state.selectableVisible.length, 0);
+  assert.equal(state.allVisibleChecked, false);
+  state.checkAll();
+  assert.equal(state.selected.size, 0, "checkAll does not select apps on the 'all' filter");
+
+  state.filter = "updates";
+  assert.equal(state.selectableVisible.length, 20);
+  assert.equal(state.allVisibleChecked, false);
+  state.checkAll();
+  assert.equal(state.selected.size, 20);
+  assert.equal(state.allVisibleChecked, true);
+});

@@ -866,77 +866,92 @@ struct Rule {
     /// Relative to %LOCALAPPDATA% (`L:`) or %APPDATA% (`R:`).
     rel: &'static str,
     what: &'static str,
+    exe: Option<&'static str>,
 }
 const REDUNDANT: &[Rule] = &[
     Rule {
         app: "Google Chrome",
         rel: r"L:Google\Chrome\User Data\Crashpad\reports",
         what: "crash reports",
+        exe: Some("chrome.exe"),
     },
     Rule {
         app: "Google Chrome",
         rel: r"L:Google\Chrome\User Data\GrShaderCache",
         what: "shader cache",
+        exe: Some("chrome.exe"),
     },
     Rule {
         app: "Brave",
         rel: r"L:BraveSoftware\Brave-Browser\User Data\Crashpad\reports",
         what: "crash reports",
+        exe: Some("brave.exe"),
     },
     Rule {
         app: "Discord",
         rel: r"R:discord\Crashpads",
         what: "crash dumps",
+        exe: Some("Discord.exe"),
     },
     Rule {
         app: "Discord",
         rel: r"R:discord\logs",
         what: "logs",
+        exe: Some("Discord.exe"),
     },
     Rule {
         app: "Slack",
         rel: r"R:Slack\logs",
         what: "logs",
+        exe: Some("slack.exe"),
     },
     Rule {
         app: "Spotify",
         rel: r"L:Spotify\Storage",
         what: "media cache",
+        exe: Some("Spotify.exe"),
     },
     Rule {
         app: "Spotify",
         rel: r"L:Spotify\Browser\Crashpad",
         what: "crash dumps",
+        exe: Some("Spotify.exe"),
     },
     Rule {
         app: "Steam",
         rel: r"L:Steam\htmlcache",
         what: "web cache",
+        exe: Some("steam.exe"),
     },
     Rule {
         app: "Zoom",
         rel: r"R:Zoom\logs",
         what: "logs",
+        exe: Some("Zoom.exe"),
     },
     Rule {
         app: "Adobe",
         rel: r"L:Adobe\CameraRaw\Cache",
         what: "cache",
+        exe: None,
     },
     Rule {
         app: "Unity",
         rel: r"L:Unity\cache",
         what: "package cache",
+        exe: None,
     },
     Rule {
         app: "pip",
         rel: r"L:pip\cache",
         what: "download cache",
+        exe: None,
     },
     Rule {
         app: "npm",
         rel: r"L:npm-cache\_cacache",
         what: "download cache",
+        exe: None,
     },
 ];
 fn redundant() -> Vec<(Finding, Target)> {
@@ -959,11 +974,24 @@ fn redundant() -> Vec<(Finding, Target)> {
             continue;
         }
         let mut f = finding("redundant", format!("{}: {}", rule.app, rule.what));
-        f.detail = "Rebuilt by the app when needed; settings and sign-ins are left alone.".into();
+        let running = rule.exe.map(sys::running).unwrap_or(false);
+        if running {
+            f.detail = format!(
+                "{} is currently open and using this cache. Close {} to clean it.",
+                rule.app, rule.app
+            );
+            f.review_reason = Some(format!(
+                "{} is running. Moving files while in use will be blocked by Windows.",
+                rule.app
+            ));
+            f.recommended = false;
+        } else {
+            f.detail = "Rebuilt by the app when needed; settings and sign-ins are left alone.".into();
+            f.recommended = true;
+        }
         f.path = Some(path.to_string_lossy().into_owned());
         f.size = Some(size);
         f.confidence = Some(90);
-        f.recommended = true;
         f.actions = vec!["recycle"];
         out.push((f, Target::Paths(vec![path])));
     }

@@ -155,7 +155,7 @@ impl IFileOperationProgressSink_Impl for RemovalSink_Impl {
 fn describe(hr: HRESULT) -> String {
     match hr {
         h if h == E_ACCESSDENIED || h == COPYENGINE_E_ACCESS_DENIED_SRC || h == COPYENGINE_E_REQUIRES_ELEVATION => ADMIN.into(),
-        h if h == COPYENGINE_E_SHARING_VIOLATION_SRC || h.0 as u32 == 0x8007_0020 || h.0 as u32 == 0x8007_0021 => IN_USE.into(),
+        h if h == COPYENGINE_E_SHARING_VIOLATION_SRC || h.0 as u32 == 0x8027_0028 || h.0 as u32 == 0x8007_0020 || h.0 as u32 == 0x8007_0021 => IN_USE.into(),
         h if h == COPYENGINE_E_RECYCLE_BIN_NOT_FOUND
             || h == COPYENGINE_E_RECYCLE_SIZE_TOO_BIG
             || h == COPYENGINE_E_RECYCLE_FORCE_NUKE

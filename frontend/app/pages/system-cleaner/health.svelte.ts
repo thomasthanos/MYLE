@@ -216,6 +216,17 @@ export class HealthState {
       }
       this.failures = failures;
       this.selected = selected;
+
+      // Optimistically remove succeeded findings immediately so the UI updates without delay
+      const succeededIds = new Set(this.lastResults.filter((r) => r.ok).map((r) => r.id));
+      if (succeededIds.size > 0) {
+        const nextReports: Record<string, ModuleReport> = {};
+        for (const [k, v] of Object.entries(this.reports)) {
+          nextReports[k] = { ...v, findings: v.findings.filter((f) => !succeededIds.has(f.id)) };
+        }
+        this.reports = nextReports;
+      }
+
       const okCount = this.lastResults.length - failed.length;
       if (okCount) toast.success(`${okCount} selected item${okCount === 1 ? "" : "s"} completed.`);
       if (failed.length) toast.error(`${failed.length} could not be changed: ${failed[0].message ?? ""}`);
@@ -227,9 +238,11 @@ export class HealthState {
       this.selected = new Set([...this.selected, ...items.map(item => item.id)]);
       toast.error(String(e));
     } finally {
-      if (attempted && modules.length) await this.#scan(modules, false);
       this.busy = false;
       this.operation = null;
+      if (attempted && modules.length) {
+        void this.#scan(modules, false);
+      }
     }
   }
   async retryFailed() { await this.applyBatch([...this.#attempts.values()].filter((i) => !!this.failures[i.id])); }
